@@ -16,7 +16,6 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.ParticipantSynchronizerLimits
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
@@ -54,6 +53,7 @@ trait LedgerApiParticipantPruningTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasCycleUtils {
+  import scala.language.reflectiveCalls
 
   private val transactionTolerance = NonNegativeFiniteDuration.ofSeconds(2)
   private val largeTransactionBatchSize: Int = 100
@@ -174,7 +174,8 @@ trait LedgerApiParticipantPruningTest
       participant1.pruning.get_offset_by_time(tsOfLastPrunedEvent.toInstant)
 
     // Simulate concurrent pruning from another replica by issuing the pruning lock
-    val releasePruningLock = participant1.testing.state_inspection.lockPruning()
+    val lockedPruning =
+      participant1.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore.lockPruning
 
     // Prune and remember offsets.
     val pruneF = Future(participant1.pruning.prune(offsetAtTheBeginning))
@@ -190,7 +191,7 @@ trait LedgerApiParticipantPruningTest
 
     // As unlocking, pruning finishes
     pruneF.value shouldBe None
-    releasePruningLock()
+    lockedPruning.commitAndClose()
     pruneF.futureValue
     participant1.testing.state_inspection.internalContractIdOf(cidBeginningContractId) shouldBe None
     participant1.testing.state_inspection.internalContractIdOf(
@@ -198,10 +199,11 @@ trait LedgerApiParticipantPruningTest
     ) should not be empty
 
     // Simulate blocking pruning by read locking one of the to-be-pruned contracts
-    val releaseContractLock =
-      participant1.testing.state_inspection.readLockContract(
-        participant1.testing.state_inspection.internalContractIdOf(cidMiddleContractId).value
-      )
+    val contractLock =
+      participant1.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore
+        .readLockContract(
+          participant1.testing.state_inspection.internalContractIdOf(cidMiddleContractId).value
+        )
 
     // Pruning fails if contract pruning cannot resolve the optimistic lock after retries
     loggerFactory.assertThrowsAndLogs[CommandFailure](
@@ -218,7 +220,7 @@ trait LedgerApiParticipantPruningTest
 
     // As unlocking contract, repeated pruning finishes successfully: this time the event pruning is a noop,
     // but the contract candidates will be pruned after.
-    releaseContractLock()
+    contractLock.commitAndClose()
     participant1.pruning.prune(offsetToPruneUpTo)
 
     // And contract is indeed pruned from the contract store
@@ -482,8 +484,9 @@ trait LedgerApiParticipantPruningTest
       val pruningOffset = participant1.ledger_api.state.end()
 
       // issue write lock on participant1 for C1, this will block the Indexer at ingestion of the following assignation on the first contract
-      val releaseC1Lock =
-        participant1.testing.state_inspection.writeLockContract(c1InternalContractId)
+      val c1Lock =
+        participant1.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore
+          .writeLockContract(c1InternalContractId)
       logger.info("C1 locked")
 
       // reassign C1 and C2 to acme, this should be blocked on Indexing the assignment because of the lock above
@@ -512,7 +515,7 @@ trait LedgerApiParticipantPruningTest
       )(
         within = {
           // releasing the lock (indexing of the assign continues)
-          releaseC1Lock()
+          c1Lock.commitAndClose()
           logger.info("C1 unlocked")
 
           // reassignment successfully completes
@@ -688,7 +691,6 @@ trait LedgerApiParticipantPruningTest
   }
 }
 
-@UnstableTest // TODO(#32366)
 class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

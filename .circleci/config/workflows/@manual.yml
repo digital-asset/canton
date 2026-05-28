@@ -57,6 +57,32 @@ manual_stability_sequential_test:
         requires:
           - print_tests
 
+manual_sequential_test:
+  when:
+    and:
+      - equal: [ sequential-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - print_tests:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - sequential_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - print_tests
+
 manual_stability_crash_recovery_test:
   when:
     and:

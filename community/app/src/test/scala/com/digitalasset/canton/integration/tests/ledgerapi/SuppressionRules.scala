@@ -31,7 +31,8 @@ object SuppressionRules {
   val AuthServiceJWTSuppressionRule: SuppressionRule =
     (SuppressionRule.forLogger[AuthServiceJWT]
       || SuppressionRule.forLogger[AuthServicePrivilegedJWT]
-      || SuppressionRule.forLogger[UserConfigAuthService])
+      || SuppressionRule.forLogger[UserConfigAuthService]
+      || SuppressionRule.LoggerNameContains("AuthServiceJWTCodec"))
       && SuppressionRule.LevelAndAbove(Level.WARN)
 
   val ApiUserManagementServiceSuppressionRule: SuppressionRule =
@@ -46,4 +47,7 @@ object SuppressionRules {
     SuppressionRule.LoggerNameContains("DbActiveContractStore") &&
       SuppressionRule.Level(Level.WARN)
 
+  val AuthStartupConfigSuppressionRule: SuppressionRule =
+    SuppressionRule.LoggerNameContains("AuthServiceJWT$") &&
+      SuppressionRule.Level(Level.WARN)
 }

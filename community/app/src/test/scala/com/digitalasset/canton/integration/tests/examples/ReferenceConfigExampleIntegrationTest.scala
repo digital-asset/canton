@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.ExampleIntegrationTest.referenceConfiguration
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.metrics.MetricsFactoryType
 import com.digitalasset.canton.util.ResourceUtil
 import monocle.macros.syntax.lens.*
@@ -30,16 +31,15 @@ class ReferenceConfigSandboxExampleIntegrationTest
     )
   )
 
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition
-      .fromFiles(
-        "community" / "app" / "src" / "test" / "resources" / "advancedConfDef.env",
-        referenceConfiguration / "sandbox.conf",
-      )
-      .clearConfigTransforms()
-      // Disable the cache to avoid spurious compile errors.
-      .addConfigTransform(_.focus(_.parameters.console.cacheDir).replace(None))
-      .addConfigTransforms(ConfigTransforms.setProtocolVersion(testedProtocolVersion)*)
+  override def environmentDefinition: EnvironmentDefinition = EnvironmentDefinition
+    .fromFiles(
+      "community" / "app" / "src" / "test" / "resources" / "advancedConfDef.env",
+      referenceConfiguration / "sandbox.conf",
+    )
+    .clearConfigTransforms()
+    // Disable the cache to avoid spurious compile errors.
+    .addConfigTransform(_.focus(_.parameters.console.cacheDir).replace(None))
+    .addConfigTransforms(ConfigTransforms.setProtocolVersion(testedProtocolVersion)*)
 
   "sandbox" should {
     "successfully connect" in { implicit env =>
@@ -75,6 +75,13 @@ class ReferenceConfigExampleIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasExecutionContext {
+
+  // TODO (i#32650): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

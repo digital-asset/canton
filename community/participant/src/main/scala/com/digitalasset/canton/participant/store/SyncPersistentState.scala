@@ -110,6 +110,8 @@ trait PhysicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def submissionTrackerStore: SubmissionTrackerStore
   def isMemory: Boolean
 
+  def purgeableStores: Seq[ChunkPurgeable] = Seq(topologyStore, submissionTrackerStore)
+
   def topologyStore: TopologyStore[SynchronizerStore]
 
   lazy val psid: PhysicalSynchronizerId = physicalSynchronizerIdx.psid

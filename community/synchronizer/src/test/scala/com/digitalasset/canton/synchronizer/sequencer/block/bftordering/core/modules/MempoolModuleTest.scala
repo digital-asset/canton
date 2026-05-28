@@ -44,16 +44,24 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
     Traced(OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.copyFromUtf8("b")))
   )
 
-  private val requestRefusedHandler = Some(new ModuleRef[SequencerNode.Message] {
-    override def asyncSend(msg: SequencerNode.Message)(implicit
-        traceContext: TraceContext,
-        metricsContext: MetricsContext,
-    ): Unit =
-      msg match {
-        case SequencerNode.RequestAccepted => fail("the request should fail")
-        case _ => ()
-      }
-  })
+  private def requestRejectedHandler(rejectionMessageSubstring: String) = Some(
+    new ModuleRef[SequencerNode.Message] {
+      override def asyncSend(msg: SequencerNode.Message)(implicit
+          traceContext: TraceContext,
+          metricsContext: MetricsContext,
+      ): Unit =
+        msg match {
+          case SequencerNode.RequestAccepted => fail("the request should fail")
+          case SequencerNode.RequestRejected(msg) if msg.contains(rejectionMessageSubstring) => ()
+          case SequencerNode.RequestRejected(msg) =>
+            fail(
+              s"the request should fail with a message containing '$rejectionMessageSubstring' " +
+                s"but it failed with '$msg'"
+            )
+          case other => fail(s"unexpected message received: $other")
+        }
+    }
+  )
 
   private implicit val unitTestContext: UnitTestEnv#ActorContextT[Mempool.Message] =
     new UnitTestContextWithTraceContext()
@@ -61,21 +69,21 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
   "the mempool module" when {
 
     "the queue is full" should {
-      "refuse the request" in {
+      "reject the request" in {
         val mempool =
           createMempool[UnitTestEnv](fakeModuleExpectingSilence, maxMempoolQueueSize = 0)
         mempool.receiveInternal(
           Mempool.OrderRequest(
             Traced(OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.EMPTY)),
-            requestRefusedHandler,
+            requestRejectedHandler("the queue is full"),
           )
         )
         succeed
       }
     }
 
-    "the request payload size is too big" should {
-      "refuse the request" in {
+    "the request payload size exceeds the maximum" should {
+      "reject the request" in {
         val mempool =
           createMempool[UnitTestEnv](fakeModuleExpectingSilence, maxRequestPayloadBytes = 0)
         suppressProblemLogs(
@@ -84,7 +92,7 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
               Traced(
                 OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.copyFromUtf8("c"))
               ),
-              requestRefusedHandler,
+              requestRejectedHandler("it exceeds the maximum"),
             )
           )
         )
@@ -92,15 +100,15 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
-    "the request tag it invalid" should {
-      "refuse the request" in {
+    "the request tag is invalid" should {
+      "reject the request" in {
         val mempool =
           createMempool[UnitTestEnv](fakeModuleExpectingSilence, maxRequestPayloadBytes = 0)
         suppressProblemLogs(
           mempool.receiveInternal(
             Mempool.OrderRequest(
               Traced(OrderingRequest("invalidTag", messageId = "", ByteString.copyFromUtf8("c"))),
-              requestRefusedHandler,
+              requestRejectedHandler("invalid tag"),
             )
           )
         )
@@ -109,7 +117,7 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
     }
 
     "there is no P2P-connected dissemination quorum" should {
-      "refuse the request" in {
+      "reject the request" in {
         val mempoolState = createMempoolState()
 
         val mempool =
@@ -121,7 +129,35 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             Traced(
               OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.copyFromUtf8("c"))
             ),
-            requestRefusedHandler,
+            requestRejectedHandler("P2P connectivity is not ready"),
+          )
+        )
+        succeed
+      }
+    }
+
+    "the node is blacklisted" should {
+      "reject the request" in {
+        val mempoolState = createMempoolState()
+
+        val mempool =
+          createMempool[UnitTestEnv](fakeModuleExpectingSilence, mempoolState = mempoolState)
+        mempool.receiveInternal(
+          AnotherP2PConnectivityUpdate.copy(membership =
+            AnotherP2PConnectivityUpdate.membership.copy(blacklistedNodes =
+              Seq(BftNodeId("myself"))
+            )
+          )
+        )
+
+        mempool.receiveInternal(
+          Mempool.OrderRequest(
+            Traced(
+              OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.copyFromUtf8("c"))
+            ),
+            requestRejectedHandler(
+              "this node is currently blacklisted"
+            ),
           )
         )
         succeed
@@ -404,7 +440,7 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
   }
 
   private def createMempoolState(): MempoolState =
-    new MempoolState(weakQuorumSize = 1)
+    new MempoolState(weakQuorum = 1)
 
   private def sendRequest(mempool: MempoolModule[UnitTestEnv]): Unit =
     mempool.receiveInternal(AnOrderRequest)

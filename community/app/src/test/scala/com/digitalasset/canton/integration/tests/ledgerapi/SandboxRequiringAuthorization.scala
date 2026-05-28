@@ -43,6 +43,7 @@ trait SandboxRequiringAuthorizationFuns {
 
   val defaultScope: String = AuthServiceJWTCodec.scopeLedgerApiFull
 
+  // TODO (i#32650): Switch to audience-based tokens in a future Canton release and update tests accordingly
   protected def emptyToken: StandardJWTPayload = StandardJWTPayload(
     issuer = None,
     userId = "",
@@ -54,6 +55,7 @@ trait SandboxRequiringAuthorizationFuns {
   )
 
   def defaultExpiresIn = Duration.ofMinutes(5)
+  // TODO (i#32650): Switch to audience-based tokens in a future Canton release and update tests accordingly
   protected def standardToken(
       userId: String,
       expiresIn: Option[Duration] = Some(defaultExpiresIn),

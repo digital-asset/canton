@@ -4,11 +4,14 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.store.PrunableByTimeTest
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.HasTestCloseContext
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -20,11 +23,11 @@ trait SubmissionTrackerStoreTest extends AsyncWordSpec with BaseTest with Prunab
     .addWithoutLengthPrefix(data)
     .finish()
 
-  lazy val rootHashes =
+  private lazy val rootHashes =
     Seq("falafel", "hummus", "tahini", "fattoush", "tabbouleh").map(seed => RootHash(mkHash(seed)))
-  lazy val requestIds =
+  private lazy val requestIds =
     (1 to rootHashes.size).map(i => RequestId(CantonTimestamp.Epoch.plusSeconds(i.toLong)))
-  lazy val maxSeqTimes =
+  private lazy val maxSeqTimes =
     (1 to rootHashes.size).map(i => CantonTimestamp.Epoch.plusSeconds(i.toLong + 10))
 
   def submissionTrackerStore(mkStore: () => SubmissionTrackerStore): Unit = {
@@ -100,19 +103,57 @@ trait SubmissionTrackerStoreTest extends AsyncWordSpec with BaseTest with Prunab
       val expectedCountAfterDelete = requestIds.count(_.unwrap < cleanupTs)
 
       for {
-        initialCount <- store.size.unwrap
+        initialCount <- store.size.failOnShutdown
 
-        _ <- Future.sequence(rootHashes.indices.map { i =>
-          store.registerFreshRequest(rootHashes(i), requestIds(i), maxSeqTimes(i)).unwrap
-        })
-        finalCount <- store.size.unwrap
+        _ <- FutureUnlessShutdown
+          .sequence(rootHashes.indices.map { i =>
+            store.registerFreshRequest(rootHashes(i), requestIds(i), maxSeqTimes(i))
+          })
+          .failOnShutdown
+        finalCount <- store.size.failOnShutdown
 
         _ <- store.deleteSince(cleanupTs).failOnShutdown
-        countAfterDelete <- store.size.unwrap
+        countAfterDelete <- store.size.failOnShutdown
       } yield {
-        initialCount shouldBe Outcome(0)
-        finalCount shouldBe Outcome(rootHashes.size)
-        countAfterDelete shouldBe Outcome(expectedCountAfterDelete)
+        initialCount shouldBe 0
+        finalCount shouldBe rootHashes.size
+        countAfterDelete shouldBe expectedCountAfterDelete
+      }
+    }
+
+    "delete chunk of data" in {
+      val store = mkStore()
+
+      val indices = rootHashes.take(5).indices
+      indices should have size 5
+
+      for {
+        _ <- MonadUtil
+          .sequentialTraverse(rootHashes.indices) { i =>
+            store.registerFreshRequest(rootHashes(i), requestIds(i), maxSeqTimes(i))
+          }
+          .failOnShutdown
+
+        initialSize <- store.size.failOnShutdown
+        _ = initialSize shouldBe 5
+
+        data <- MonadUtil
+          .sequentialTraverse((1 to 4)) { _ =>
+            for {
+              deleted <- store.deleteDataChunk(PositiveInt.two)
+              newSize <- store.size
+            } yield (deleted, newSize)
+          }
+          .failOnShutdown
+
+      } yield {
+        /*
+          Purging is done 4 times
+          Size should decrease by 2 initially, then 1
+          The boolean indicates whether data was deleted
+         */
+
+        data shouldBe Seq((true, 3), (true, 1), (true, 0), (false, 0))
       }
     }
   }

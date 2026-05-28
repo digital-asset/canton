@@ -1059,6 +1059,7 @@ abstract class ProtocolProcessor[
     )
 
     val submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp
+
     for {
       submissionTopologySnapshotO <- EitherT.right(
         SubmissionTopologyHelper.getSubmissionTopologySnapshot(

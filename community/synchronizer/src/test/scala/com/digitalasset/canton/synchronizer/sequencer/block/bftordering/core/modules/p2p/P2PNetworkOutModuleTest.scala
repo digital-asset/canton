@@ -905,5 +905,6 @@ object P2PNetworkOutModuleTest {
       selfNode,
       OrderingTopology.forTesting(bftNodeIds.toSet),
       leaders = bftNodeIds,
+      blacklistedNodes = Seq.empty,
     )
 }

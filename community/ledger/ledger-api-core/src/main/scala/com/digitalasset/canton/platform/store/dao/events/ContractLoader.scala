@@ -24,14 +24,8 @@ import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.KeysPageQuery
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
-  KeyAssigned,
-  KeyState,
-  KeyUnassigned,
-}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.TryUtil
-import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value.ContractId
 import io.grpc.{Metadata, StatusRuntimeException}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
@@ -138,8 +132,7 @@ class PekkoStreamParallelBatchedLoader[Key, Value](
   */
 trait ContractLoader {
   def contracts: Loader[(ContractId, Long), ExistingContractStatus]
-  def keys: Loader[(GlobalKey, Long), KeyState]
-  def nonUniqueKeys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])]
+  def keys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])]
 }
 
 object ContractLoader {
@@ -242,64 +235,6 @@ object ContractLoader {
       materializer: Materializer,
       executionContext: ExecutionContext,
   ): ResourceOwner[PekkoStreamParallelBatchedLoader[
-    (GlobalKey, Long),
-    KeyState,
-  ]] =
-    ResourceOwner
-      .forReleasable(() =>
-        new PekkoStreamParallelBatchedLoader[
-          (GlobalKey, Long),
-          KeyState,
-        ](
-          batchLoad = { batch =>
-            // we can use the latest offset as the API only requires us to not return a state older than the given offset
-            val (latestValidAtEventSeqId, usedLoggingContext) =
-              ContractLoader.maxOffsetAndContextFromBatch(
-                batch,
-                metrics.index.db.activeContracts.batchSize,
-              )
-            val contractKeys = batch.map(_._1._1)
-            for {
-              contractKeys <- dbDispatcher
-                .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
-                  contractStorageBackend.keyStates(
-                    keys = contractKeys,
-                    validAtEventSeqId = latestValidAtEventSeqId,
-                  )
-                )(usedLoggingContext)
-              internalContractIdToContractId <- contractStore
-                .lookupBatchedContractIdsNonReadThrough(contractKeys.values)(
-                  usedLoggingContext.traceContext
-                )
-            } yield batch.view.map { case ((key, eventSeqId), _) =>
-              (key, eventSeqId) -> contractKeys
-                .get(key)
-                .flatMap(internalContractIdToContractId.get)
-                .map(KeyAssigned.apply)
-                .getOrElse(KeyUnassigned)
-            }.toMap
-          },
-          createQueue =
-            () => ContractLoader.createQueue(maxQueueSize, metrics.index.db.activeContracts),
-          maxBatchSize = maxBatchSize,
-          parallelism = parallelism,
-          loggerFactory = loggerFactory,
-        )
-      )(_.closeAsync())
-
-  private def createNonUniqueContractKeyBatchLoader(
-      contractStore: LedgerApiContractStore,
-      contractStorageBackend: ContractStorageBackend,
-      dbDispatcher: DbDispatcher,
-      metrics: LedgerApiServerMetrics,
-      maxQueueSize: Int,
-      maxBatchSize: Int,
-      parallelism: Int,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      materializer: Materializer,
-      executionContext: ExecutionContext,
-  ): ResourceOwner[PekkoStreamParallelBatchedLoader[
     KeysPageQuery,
     (Vector[ContractId], Option[Long]),
   ]] =
@@ -321,8 +256,8 @@ object ContractLoader {
             val queries = batch.map(_._1)
             for {
               pageResults <- dbDispatcher
-                .executeSql(metrics.index.db.lookupNonUniqueContractByKeyDbMetrics)(
-                  contractStorageBackend.nonUniqueContractKeysPlain(
+                .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
+                  contractStorageBackend.contractKeysPlain(
                     queries,
                     latestValidAtEventSeqId,
                   )
@@ -355,26 +290,25 @@ object ContractLoader {
       contractStore: LedgerApiContractStore,
       metrics: LedgerApiServerMetrics,
   )(
-      keyWithValidAtEventSeqId: (GlobalKey, Long)
-  )(implicit loggingContext: LoggingContextWithTrace, ec: ExecutionContext) = {
-    val (key, validAtEventSeqId) = keyWithValidAtEventSeqId
-    dbDispatcher
-      .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
-        contractStorageBackend.keyState(
-          key = key,
-          validAtEventSeqId = validAtEventSeqId,
+      query: KeysPageQuery
+  )(implicit
+      loggingContext: LoggingContextWithTrace,
+      ec: ExecutionContext,
+  ): Future[Option[(Vector[ContractId], Option[Long])]] =
+    for {
+      pageResult <- dbDispatcher
+        .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
+          contractStorageBackend.contractKey(query)
         )
-      )(loggingContext)
-      .flatMap {
-        case Some(internalContractId) =>
-          contractStore
-            .lookupBatchedContractIdsNonReadThrough(List(internalContractId))(
-              loggingContext.traceContext
-            )
-            .map(_.get(internalContractId).map(KeyAssigned.apply).getOrElse(KeyUnassigned))
-        case None => Future.successful(KeyUnassigned)
-      }
-  }
+      contractIdLookup <- contractStore
+        .lookupBatchedContractIdsNonReadThrough(pageResult.internalContractIds)(
+          loggingContext.traceContext
+        )
+    } yield {
+      val contractIds =
+        pageResult.internalContractIds.flatMap(contractIdLookup.get)
+      Some((contractIds, pageResult.nextPageToken))
+    }
 
   def create(
       participantContractStore: LedgerApiContractStore,
@@ -413,19 +347,6 @@ object ContractLoader {
             loggerFactory,
           ).map(Some(_))
         else ResourceOwner.successful(None)
-      nonUniqueContractKeysBatchLoader <-
-        if (contractStorageBackend.supportsBatchKeyStateLookups)
-          createNonUniqueContractKeyBatchLoader(
-            participantContractStore,
-            contractStorageBackend,
-            dbDispatcher,
-            metrics,
-            maxQueueSize,
-            maxBatchSize,
-            parallelism,
-            loggerFactory,
-          ).map(Some(_))
-        else ResourceOwner.successful(None)
     } yield {
       new ContractLoader {
         override final val contracts: Loader[(ContractId, Long), ExistingContractStatus] =
@@ -434,29 +355,8 @@ object ContractLoader {
                 loggingContext: LoggingContextWithTrace
             ): Future[Option[ExistingContractStatus]] = contractsBatchLoader.load(key)
           }
-        override final val keys: Loader[(GlobalKey, Long), KeyState] =
+        override final val keys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] =
           contractKeysBatchLoader match {
-            case Some(batchLoader) =>
-              new Loader[(GlobalKey, Long), KeyState] {
-                override def load(key: (GlobalKey, Long))(implicit
-                    loggingContext: LoggingContextWithTrace
-                ): Future[Option[KeyState]] = batchLoader.load(key)
-              }
-            case None =>
-              new Loader[(GlobalKey, Long), KeyState] {
-                override def load(key: (GlobalKey, Long))(implicit
-                    loggingContext: LoggingContextWithTrace
-                ): Future[Option[KeyState]] = fetchOneKey(
-                  contractStorageBackend,
-                  dbDispatcher,
-                  participantContractStore,
-                  metrics,
-                )(key).map(Some(_))
-              }
-          }
-        override final val nonUniqueKeys
-            : Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] =
-          nonUniqueContractKeysBatchLoader match {
             case Some(batchLoader) =>
               new Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] {
                 override def load(key: KeysPageQuery)(implicit
@@ -468,20 +368,12 @@ object ContractLoader {
                 override def load(key: KeysPageQuery)(implicit
                     loggingContext: LoggingContextWithTrace
                 ): Future[Option[(Vector[ContractId], Option[Long])]] =
-                  for {
-                    pageResult <- dbDispatcher
-                      .executeSql(metrics.index.db.lookupNonUniqueContractByKeyDbMetrics)(
-                        contractStorageBackend.nonUniqueContractKey(key)
-                      )
-                    contractIdLookup <- participantContractStore
-                      .lookupBatchedContractIdsNonReadThrough(pageResult.internalContractIds)(
-                        loggingContext.traceContext
-                      )
-                  } yield {
-                    val contractIds =
-                      pageResult.internalContractIds.flatMap(contractIdLookup.get)
-                    Some((contractIds, pageResult.nextPageToken))
-                  }
+                  fetchOneKey(
+                    contractStorageBackend,
+                    dbDispatcher,
+                    participantContractStore,
+                    metrics,
+                  )(key)
               }
           }
       }
@@ -494,13 +386,7 @@ object ContractLoader {
             loggingContext: LoggingContextWithTrace
         ): Future[Option[ExistingContractStatus]] = Future.successful(None)
       }
-    override final val keys: Loader[(GlobalKey, Long), KeyState] =
-      new Loader[(GlobalKey, Long), KeyState] {
-        override def load(key: (GlobalKey, Long))(implicit
-            loggingContext: LoggingContextWithTrace
-        ): Future[Option[KeyState]] = Future.successful(None)
-      }
-    override final val nonUniqueKeys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] =
+    override final val keys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] =
       new Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] {
         override def load(key: KeysPageQuery)(implicit
             loggingContext: LoggingContextWithTrace

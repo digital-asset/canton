@@ -217,6 +217,7 @@ class ConnectedSynchronizer(
       contractHasher,
       seedGenerator,
       parameters.loggingConfig,
+      testingConfig.useLegacyContractIdVersionV11,
       loggerFactory,
     )
 

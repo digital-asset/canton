@@ -145,12 +145,12 @@ private[canton] final class CantonOrderingTopologyProvider(
           s"queried successfully on snapshot at $snapshotTimestamp: $maxRequestSize"
       )
 
-      sequencingParameters <- getSequencingParameters(snapshot.ipsSnapshot)
+      sequencingParameters <- getSequencingParameters(config, snapshot.ipsSnapshot)
       _ = logger.debug(
         s"Sequencing parameters queried successfully on snapshot at $snapshotTimestamp: $sequencingParameters"
       )
     } yield maybeSequencers.map { sequencers =>
-      val nodesTopologyInfo = sequencers.view.map { case sequencerId =>
+      val nodesTopologyInfo = sequencers.view.map { sequencerId =>
         BftNodeId(SequencerNodeId.toBftNodeId(sequencerId)) -> NodeTopologyInfo(
           keyIds = maybeSequencerKeys
             .getOrElse(sequencerId, Seq.empty)
@@ -293,22 +293,42 @@ private[canton] final class CantonOrderingTopologyProvider(
   }
 
   private def getSequencingParameters(
-      snapshot: TopologySnapshot
+      config: BftBlockOrdererConfig,
+      snapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[SequencingParameters] =
     for {
-      parametersE <- snapshot.findDynamicSequencingParameters()
+      parametersE <-
+        snapshot.findDynamicSequencingParameters()
       parametersO = parametersE.toOption
       payloadO = parametersO.flatMap(_.parameters.payload)
       sequencingParametersO = payloadO.map(
         SequencingParameters.fromByteString(synchronizerProtocolVersion, _)
       )
-    } yield sequencingParametersO match {
-      case Some(Right(value)) => value
-      case Some(Left(error)) =>
-        logger.warn(s"Sequencing parameters couldn't be parsed ($error), using defaults")
-        SequencingParameters.Default
-      case None =>
-        logger.debug("Sequencing parameters not set, using defaults")
-        SequencingParameters.Default
+    } yield (
+      synchronizerProtocolVersion,
+      config.leaderSelectionPolicyConfigForPv34,
+      sequencingParametersO,
+    ) match {
+      case (pv, blacklistPolicyFromConfigForPv34O, _) if pv <= ProtocolVersion.v34 =>
+        logger.debug("PV <= 34: using leader selection policy from config, if set, or defaults")
+        blacklistPolicyFromConfigForPv34O
+          .map(p => SequencingParameters.Default.update(blacklistLeaderSelectionPolicyConfig = p))
+          .getOrElse(SequencingParameters.Default)
+      case (_, _, sequencingParametersO) =>
+        sequencingParametersO match {
+          case None =>
+            logger.debug("PV > 34: sequencing parameters not set in topology, using defaults")
+            SequencingParameters.Default
+          case Some(Right(sequencingParametersFromTopology)) =>
+            logger.debug(
+              s"PV > 34: using sequencing parameters from topology $sequencingParametersFromTopology"
+            )
+            sequencingParametersFromTopology
+          case Some(Left(error)) =>
+            logger.warn(
+              s"PV > 34: sequencing parameters from topology couldn't be parsed ($error), using defaults"
+            )
+            SequencingParameters.Default
+        }
     }
 }

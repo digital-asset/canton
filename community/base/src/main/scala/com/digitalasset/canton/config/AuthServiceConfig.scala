@@ -25,6 +25,7 @@ sealed trait AuthServiceConfig {
       jwksCacheConfig: JwksCacheConfig,
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       loggerFactory: NamedLoggerFactory,
+      warnOnJwtScopeUsage: Boolean,
       maxTokenLife: NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ): AuthService
   def privileged: Boolean = false
@@ -44,6 +45,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         maxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceWildcard
@@ -77,6 +79,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -90,6 +93,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -120,6 +124,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -133,6 +138,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -163,6 +169,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -176,6 +183,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -206,6 +214,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -219,6 +228,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -253,6 +263,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -267,6 +278,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
   }
 

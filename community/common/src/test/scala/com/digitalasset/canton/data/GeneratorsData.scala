@@ -186,7 +186,7 @@ final class GeneratorsData(
 
       actors <- boundedSetGen[LfPartyId]
       seed <- Arbitrary.arbitrary[LfHash]
-      byKey <- Gen.oneOf(true, false)
+      byKey <- byKeyArb.arbitrary
       failed <- Gen.oneOf(true, false)
 
     } yield ExerciseActionDescription.tryCreate(
@@ -207,7 +207,7 @@ final class GeneratorsData(
       // Input contract IDs in fetch action descriptions are always suffixed, but not necessarily absolute
       inputContractId <- suffixedLfContractIdArb.arbitrary
       actors <- boundedSetGen[LfPartyId]
-      byKey <- Gen.oneOf(true, false)
+      byKey <- byKeyArb.arbitrary
       templateId <- Arbitrary.arbitrary[LfTemplateId]
       interfaceId <- Gen.option(Arbitrary.arbitrary[LfInterfaceId])
     } yield FetchActionDescription(inputContractId, actors, byKey, templateId, interfaceId)
@@ -256,15 +256,15 @@ final class GeneratorsData(
               .zip(
                 generatorsProtocol
                   .contractInstanceArb(
-                    canHaveEmptyKey = false,
                     genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
+                    mustHaveKey = ex.byKey,
                     overrideContractId = Some(ex.inputContractId),
                   )
                   .arbitrary,
                 Gen.oneOf(true, false),
               )
               .map(InputContract.apply tupled)
-            metadataList <- boundedListGen(contractMetadataArb(canHaveEmptyKey = true))
+            metadataList <- boundedListGen(contractMetadataArb)
 
             legacyOthers <- for {
               metadata <- Gen.oneOf(metadataList)
@@ -297,7 +297,7 @@ final class GeneratorsData(
         case fetch: FetchActionDescription =>
           generatorsProtocol
             .contractInstanceArb(
-              canHaveEmptyKey = false,
+              mustHaveKey = fetch.byKey,
               genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
               overrideContractId = Some(fetch.inputContractId),
             )
@@ -315,7 +315,6 @@ final class GeneratorsData(
             .zip(
               generatorsProtocol
                 .contractInstanceArb(
-                  canHaveEmptyKey = false,
                   genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
                   overrideContractId = Some(created.contractId),
                 )
@@ -337,8 +336,7 @@ final class GeneratorsData(
             Gen.zip(
               generatorsProtocol
                 .contractInstanceArb(
-                  canHaveEmptyKey = false,
-                  genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
+                  genTime = Arbitrary.arbitrary[CreationTime.CreatedAt]
                 )
                 .arbitrary,
               Gen.oneOf(true, false),
@@ -384,15 +382,14 @@ final class GeneratorsData(
           }
 
         case ad: LookupByKeyActionDescription =>
-          // TODO(#31527): SPM populate with maintainers or contract ids
-          Gen.const(
+          nonEmptySetGen[LfPartyId].map { maintainers =>
             Map(
               ad.key.unversioned -> LfVersioned(
                 ad.key.version,
-                KeyResolutionWithMaintainers(Seq.empty, Set.empty),
+                KeyResolutionWithMaintainers(Seq.empty, maintainers),
               )
             )
-          )
+          }
 
         case _ =>
           Gen.const(Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]])
@@ -403,7 +400,7 @@ final class GeneratorsData(
       salt <- Arbitrary.arbitrary[Salt]
 
       hashOps = TestHash // Not used for serialization
-    } yield ViewParticipantData.tryCreate(hashOps)(
+    } yield ViewParticipantData.tryCreate(
       coreInputs.map(contract => (contract.contractId, contract)).toMap,
       createdCore.toSeq,
       createdInSubviewArchivedInCore,
@@ -411,8 +408,7 @@ final class GeneratorsData(
       actionDescription,
       rollbackContext,
       salt,
-      protocolVersion,
-    )
+    )(hashOps, protocolVersion, None)
   )
 
   // If this pattern match is not exhaustive anymore, update the generator below

@@ -8,7 +8,7 @@ import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
 import com.digitalasset.canton.protocol.{LfHash, LfSerializationVersion, hash}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.transaction.SerializationVersion.V1
-import com.digitalasset.daml.lf.transaction.{Node, NodeId, SerializationVersion}
+import com.digitalasset.daml.lf.transaction.{Node, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value
 
 /** Implementation of HashingSchemeVersion.V2 on Daml transaction nodes
@@ -77,18 +77,9 @@ private[hash] abstract class NodeHashBuilderCommon(
         .withContext("Acting Parties")(_.addStringSet(actingParties))
   }
 
-  private final def addExerciseNode(
-      nodes: Map[NodeId, Node],
-      nodeSeed: LfHash,
-      nodeSeeds: Map[NodeId, LfHash],
-  ): Node.Exercise => this.type = node => {
-    addExerciseNodeNoChildren(nodeSeed)(node)
-      .withContext("Children")(_.addNodesFromNodeIds(node.children, nodes, nodeSeeds))
-  }
-
-  /** Encodes an exercise node WITHOUT the children. DO NOT use this directly, use addExerciseNode
-    * instead. It only exists so it can be overridden in newer versions which may add new fields to
-    * the hash while keeping the children at the end
+  /** Encodes an exercise node WITHOUT the children. DO NOT use this directly. It only exists so it
+    * can be overridden in newer versions which may add new fields to the hash while keeping the
+    * children at the end.
     */
   protected def addExerciseNodeNoChildren(
       nodeSeed: LfHash
@@ -139,20 +130,13 @@ private[hash] abstract class NodeHashBuilderCommon(
         .withContext("Choice Observers")(_.addStringSet(choiceObservers))
   }
 
-  private def addRollbackNode(
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): Node.Rollback => this.type = { case Node.Rollback(children) =>
-    addContext("Rollback Node")
-      .addByte(hash.NodeHashBuilder.NodeTag.RollbackTag.tag, _ => "Rollback Node Tag")
-      .withContext("Children")(_.addNodesFromNodeIds(children, nodes, nodeSeeds))
-  }
-
-  protected def addNode(
+  /** Initializes this builder with the node's fields. For exercise and rollback nodes, writes all
+    * fields plus the children array length prefix but NOT the children hashes. The children hashes
+    * are added iteratively by [[NodeHashBuilder.hashNode]] via the foldLeft update step.
+    */
+  override protected def initNode(
       node: Node,
       nodeSeedO: Option[LfHash],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
   ): this.type =
     (node, nodeSeedO) match {
       // Create nodes in a transaction should have a node seed, but we also need to encode create nodes for disclosed contracts
@@ -160,13 +144,17 @@ private[hash] abstract class NodeHashBuilderCommon(
       // We could differentiate between the 2 cases but to keep the encoding simpler we encode create nodes with an optional seed
       case (create: Node.Create, nodeSeed) =>
         // We can still enforce that create nodes within a transaction have a seed, even if we then encode it as an optional
-        if (enforceNodeSeedForCreateNodes && nodeSeed.isEmpty) missingNodeSeed(node)
+        if (enforceNodeSeedForCreateNodes && nodeSeed.isEmpty) missingNodeSeed(create)
         addCreateNode(nodeSeed)(create)
       case (fetch: Node.Fetch, _) => addFetchNode(fetch)
       case (exercise: Node.Exercise, Some(nodeSeed)) =>
-        addExerciseNode(nodes, nodeSeed, nodeSeeds)(exercise)
+        addExerciseNodeNoChildren(nodeSeed)(exercise)
+          .withContext("Children")(_.addInt(exercise.children.length))
       case (_: Node.Exercise, None) => missingNodeSeed(node)
-      case (rollback: Node.Rollback, _) => addRollbackNode(nodes, nodeSeeds)(rollback)
+      case (rollback: Node.Rollback, _) =>
+        addContext("Rollback Node")
+          .addByte(hash.NodeHashBuilder.NodeTag.RollbackTag.tag, _ => "Rollback Node Tag")
+          .withContext("Children")(_.addInt(rollback.children.length))
       case (node: Node.LookupByKey, _) =>
         notSupported(s"LookupByKey node", node.version)
     }

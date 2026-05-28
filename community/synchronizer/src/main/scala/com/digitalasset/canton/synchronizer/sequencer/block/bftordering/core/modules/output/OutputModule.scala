@@ -889,7 +889,9 @@ class OutputModule[E <: Env[E]](
     val orderingTopology =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochOrderingTopology)(_._1)
     val newEpochLeaders = leaderSelectionPolicy.getLeaders(orderingTopology, newEpochNumber)
-    val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders)
+    val newEpochBlacklisted =
+      leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber)
+    val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders, newEpochBlacklisted)
     val cryptoProvider =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
 

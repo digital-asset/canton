@@ -14,6 +14,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.digitalasset.canton.integration.TestConsoleEnvironment
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import io.grpc.Status
 import org.scalatest.Assertion
@@ -29,6 +30,13 @@ trait ServiceCallAuthTests
   protected def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment
   ): Future[Any]
+
+  // TODO (i#32650): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   protected def expectSuccess(f: Future[Any])(implicit ec: ExecutionContext): Assertion =
     f.map((_: Any) => succeed).futureValue

@@ -129,6 +129,7 @@ class LedgerApiServer(
     ledgerApiIndexer: Eval[LedgerApiIndexer],
     pruningConfig: ParticipantStoreConfig,
     updateServiceConfig: UpdateServiceConfig,
+    warnOnJwtScopeUsage: Boolean,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
@@ -176,6 +177,7 @@ class LedgerApiServer(
               serverConfig.jwksCacheConfig,
               serverConfig.jwtTimestampLeeway,
               loggerFactory,
+              warnOnJwtScopeUsage,
               serverConfig.maxTokenLifetime,
             )
           )
@@ -585,6 +587,7 @@ object LedgerApiServer {
       pruningConfig: ParticipantStoreConfig,
       tracerProvider: TracerProvider,
       updateServiceConfig: UpdateServiceConfig,
+      warnOnJwtScopeUsage: Boolean,
   )(implicit
       actorSystem: ActorSystem,
       executionContext: ExecutionContextIdlenessExecutorService,
@@ -638,6 +641,7 @@ object LedgerApiServer {
       loggerFactory = loggerFactory,
       pruningConfig = pruningConfig,
       updateServiceConfig = updateServiceConfig,
+      warnOnJwtScopeUsage = warnOnJwtScopeUsage,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)
       .acquireFlagCloseable("Ledger API Server")

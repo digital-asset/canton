@@ -15,6 +15,7 @@ import com.digitalasset.daml.lf.transaction.{
 }
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 /** Wraps a [[com.digitalasset.daml.lf.transaction.FatContractInstance]] and ensures the following
   * invariants via smart constructors:
@@ -195,4 +196,26 @@ object ContractInstance {
       serialization = serialization,
     )
 
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  object Optics {
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    def instUnsafe: Lens[GenContractInstance, FatContractInstance] =
+      Lens[GenContractInstance, FatContractInstance](_.inst) { fatContractInst => genContractInst =>
+        val castedFatContractInst = fatContractInst.asInstanceOf[
+          FatContractInstance { type CreatedAtTime = genContractInst.InstCreatedAtTime }
+        ]
+        // Retrieve created at to trigger ClassCastException in case of incorrect type parameter
+        val _ = castedFatContractInst.createdAt
+
+        // As only `serialization` is transmitted / persisted, we must change it as well;
+        // otherwise, any changes would be lost.
+        // To achieve that we call create instead of copy.
+        create(castedFatContractInst).valueOr(err =>
+          throw new IllegalArgumentException(
+            s"Unable to create a GenContractInstance from the provided FatContractInstance: $err\n$fatContractInst"
+          )
+        )
+      }
+  }
 }

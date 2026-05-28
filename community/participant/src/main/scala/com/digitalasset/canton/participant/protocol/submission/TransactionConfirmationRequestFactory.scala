@@ -477,6 +477,7 @@ object TransactionConfirmationRequestFactory {
       hasher: ContractHasher,
       seedGenerator: SeedGenerator,
       loggingConfig: LoggingConfig,
+      useLegacyContractIdVersionV11: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): TransactionConfirmationRequestFactory = {
 
@@ -484,7 +485,8 @@ object TransactionConfirmationRequestFactory {
       submitterNode,
       synchronizerId,
       // TODO(#23971): Make this dependent on the protocol version when introducing V2 contract IDs
-      AuthenticatedContractIdVersionV12,
+      if (useLegacyContractIdVersionV11) AuthenticatedContractIdVersionV11
+      else AuthenticatedContractIdVersionV12,
       cryptoOps,
       hasher,
       loggerFactory,

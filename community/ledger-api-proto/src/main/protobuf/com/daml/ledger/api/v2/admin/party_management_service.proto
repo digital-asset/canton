@@ -69,10 +69,6 @@ service PartyManagementService {
   // colon, minus and underscore limited to 255 chars
   rpc AllocateParty(AllocatePartyRequest) returns (AllocatePartyResponse);
 
-  // Alpha 3.3: Endpoint to allocate a new external party on a synchronizer
-  //
-  // Expected to be stable in 3.5
-  //
   // The external party must be hosted (at least) on this node with either confirmation or observation permissions
   // It can optionally be hosted on other nodes (then called a multi-hosted party).
   // If hosted on additional nodes, explicit authorization of the hosting relationship must be performed on those nodes
@@ -91,10 +87,6 @@ service PartyManagementService {
   // Update the assignment of a party from one IDP to another.
   rpc UpdatePartyIdentityProviderId(UpdatePartyIdentityProviderIdRequest) returns (UpdatePartyIdentityProviderIdResponse);
 
-  // Alpha 3.3: Convenience endpoint to generate topology transactions for external signing
-  //
-  // Expected to be stable in 3.5
-  //
   // You may use this endpoint to generate the common external topology transactions
   // which can be signed externally and uploaded as part of the allocate party process
   //

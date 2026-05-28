@@ -431,6 +431,8 @@ Topology-Aware Package Selection (TAPS) refinement for handling inconsistent vet
 - The maximum number of TAPS passes can be set at the request-level via the optional `taps_max_passes` field in `Commands` or `PrepareSubmissionRequest` messages.
   If not specified, the default value is taken from the participant configuration via `participants.participant.ledger-api.topology-aware-package-selection.max-passes-default` (defaults to `3`).
   A hard limit is enforced by `participants.participant.ledger-api.topology-aware-package-selection.max-passes-limit` (defaults to `4`).
+- TAPS now ignores unvetted dependencies of packages that are not required for interpretation.
+  complying now with the support of unvetted dependencies in the Canton protocol.
 
 ### Ledger API Improvements
 
@@ -700,6 +702,13 @@ The tool used for health check probes changed from grpcurl to grpc-health-probe 
 
 ## Deprecations
 
+### Deprecate scope-based access tokens
+- "Scope-based" access tokens, i.e. JWTs without any audience specified, have been deprecated.
+- A configuration that does not specify a `target-audience` will log a warning on node startup.
+- Configurations that specify both a `target-audience` and a `target-scope` are not supported in this version and will also log a warning on node startup.
+- Starting Canton version 3.7, support for "scope-based" tokens will be removed entirely to enforce a valid `aud` field in every incoming JWT.
+- The `scope` field will, in a future version, be repurposed to serve exclusively as an additional, optional claim for fine-grained permissions.
+
 ### Removal of the old sequencer connection transports
 
 The old sequencer connections transports have been removed, and only the new sequencer connection pool remains.
@@ -762,6 +771,8 @@ The `protocolVersion` parameter in all `<node>.topology.<mapping>.list` console 
   Daml values for the choice argument and choice result of the `Archive` choice of the purge contract events in the Ledger API event store.
   This previously caused the Ledger API streams reading the generated `Archive` events to crash.
   The repair command now generates correct Daml values for the corresponding entries, that can be safely delivered by the Ledger API.
+- Fixed a bug in the repair service's `changeAssignation` where only a single repair counter was allocated when reassigning multiple contracts,
+  violating the monotonicity expected by the indexer.
 
 ### Ledger API Multi-Synchronizer Events Alpha Support
 
@@ -821,6 +832,7 @@ Offline root namespace key scripts:
 - When the AcsCommitmentProcessor is initializing, read stakeholder groups from the snapshot in batches of size
   `canton.parameters.general.batching.max-stakeholder-groups-batch-size` (default 1000), rather than all at once.
   This allows early termination of this initialization if the node is shutting down.
+- The release version is now exposed in `NodeStatus.NotInitialized`, so the node version can be retrieved even before the node is initialized.
 
 ## Compatibility
 

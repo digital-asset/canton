@@ -105,6 +105,8 @@ class TransactionProcessor(
           contractValidator,
           participantId,
           packageResolver,
+          ephemeral.contractStore,
+          participantNodeParameters,
           crypto.pureCrypto,
           loggerFactory,
         ),

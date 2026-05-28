@@ -9,7 +9,7 @@ import com.daml.ledger.javaapi.data.Command
 import com.daml.ledger.javaapi.data.codegen.{Created, Update}
 import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest.{getResourcePath, testedProtocolVersion}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
@@ -42,7 +42,7 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
   Result,
   ViewReconstructionError,
 }
-import com.digitalasset.canton.participant.store.ReplayContractLookup
+import com.digitalasset.canton.participant.store.{ContractLookup, ReplayContractLookup}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.DAMLe.HasReinterpret
 import com.digitalasset.canton.protocol.*
@@ -124,6 +124,7 @@ class ModelConformanceCheckerTest
       contractHasher,
       seedGenerator,
       LoggingConfig(),
+      useLegacyContractIdVersionV11 = false,
       loggerFactory,
     ).transactionTreeFactory
 
@@ -227,12 +228,15 @@ class ModelConformanceCheckerTest
       }
     } else damlE
 
-    ModelConformanceChecker(
+    new ModelConformanceChecker(
       participantId = participantId,
       reinterpreter = reinterpreter,
       transactionTreeFactory = transactionTreeFactory,
       contractValidator = contractValidator,
       packageResolver = testEngine.packageResolver,
+      contractLookup = mock[ContractLookup],
+      parallelism = PositiveInt.tryCreate(100),
+      validateLegacyContractsV11 = true,
       hashOps = symbolicCrypto.pureCrypto,
       loggerFactory = loggerFactory,
     )

@@ -99,19 +99,14 @@ private[pruning] object JournalGarbageCollector {
       * @param requested
       *   if true, then the acs commitment processor completed a commitment period and suggested to
       *   kick off pruning
-      * @param locks
-      *   number of locks that are currently active preventing pruning
       * @param running
       *   if set, then a prune is currently running and the promise will be completed once it is
       *   done
       */
-    private case class State(requested: Boolean, locks: Int, running: Option[Promise[Unit]]) {
-      def incrementLock: State = copy(locks = locks + 1)
-      def decrementLock: State = copy(locks = Math.max(0, locks - 1))
-    }
+    private case class State(requested: Boolean, running: Option[Promise[Unit]])
 
     private val state: AtomicReference[State] = new AtomicReference(
-      State(requested = false, locks = 0, running = None)
+      State(requested = false, running = None)
     )
 
     protected def run()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
@@ -129,11 +124,11 @@ private[pruning] object JournalGarbageCollector {
       if (!isClosing) {
         val currentState = state.getAndUpdate {
           // start new process if idle and not blocked
-          case State(true, 0, None) => State(requested = false, 0, Some(Promise()))
+          case State(true, None) => State(requested = false, Some(Promise()))
           // not enabled or already running, do nothing
           case x => x
         }
-        if (currentState.locks == 0 && currentState.running.isEmpty) {
+        if (currentState.running.isEmpty) {
           // we are enabled and not running, so start a new prune
           val runningF = run().onShutdown(()).thereafter { _ =>
             // once we've completed, see if we need to restart the next iteration immediately

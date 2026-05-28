@@ -37,6 +37,7 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerAliasResolution,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, Mutex}
@@ -318,10 +319,18 @@ class InMemorySynchronizerConnectionConfigStore(
           SynchronizerConnectionConfigStore.Status,
           Option[SynchronizerPredecessor],
       ),
-      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+      overrideSequencerConnections: Option[SequencerConnections],
+      overridePredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig] = {
+    val data = Map(
+      "insert data" -> insert.toString,
+      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
+      "overridePredecessor" -> overridePredecessor.toString,
+    )
+    logger.info(s"Upserting connection config for synchronizer $psid, with data $data")
+
     val res =
       lock.exclusive {
         getInternal(ConfigIdentifier.WithPsid(psid)) match {
@@ -338,7 +347,14 @@ class InMemorySynchronizerConnectionConfigStore(
             }
 
           case Right(storedConfig) =>
-            val updatedStoredConfig = storedConfig.copy(config = transform(storedConfig.config))
+            val updatedStoredConfig = storedConfig
+              .focus(_.config.sequencerConnections)
+              .modify(value => overrideSequencerConnections.getOrElse(value))
+              .focus(_.predecessor)
+              .modify(value => overridePredecessor.fold(value)(Some(_)))
+              .focus(_.config.synchronizerId)
+              .replace(Some(psid))
+
             configuredSynchronizerMap
               .put(
                 (storedConfig.config.synchronizerAlias, KnownPhysicalSynchronizerId(psid)),

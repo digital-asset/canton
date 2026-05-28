@@ -90,7 +90,7 @@ commands:
             - docker_log_into_gcr
             - setup_qemu_and_buildx
             - run:
-                command: ./docker/canton/build_canton_image.sh <<parameters.nightly_release>>
+                command: PUBLISH_IMAGES=true ./docker/canton/build_canton_image.sh <<parameters.nightly_release>>
                 name: Build and publish docker base image
     check_number_of_successes:
         description: |
@@ -2450,6 +2450,25 @@ jobs:
                 num_test_buckets: "8"
                 timeout: 1h
             - slack_red_main_with_volunteer
+    test_docker_images:
+        executor: canton-large-docker-on-cci
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: false
+                is_nightly_workflow: false
+            - setup_remote_docker
+            - run:
+                command: ./docker/canton/build_canton_image.sh false
+                name: Build and test docker images (without publishing)
+            - store_artifacts:
+                destination: docker-ping-test-logs
+                path: docker/canton/tests/ping/ci-artifacts/compose-logs
+                when: always
+            - slack_red_main_with_volunteer
     test_flake_fix_many_times:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         parallelism: << parameters.parallel_runners >>
@@ -2798,6 +2817,21 @@ workflows:
                 is_nightly_workflow: false
                 requires:
                     - compile
+            - test_docker_images:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        ignore:
+                            - /^gh-readonly-queue\/main\/.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
             - verify_circleci_config_and_compliance_label:
                 filters:
                     branches:
@@ -3726,6 +3760,35 @@ workflows:
             and:
                 - equal:
                     - release-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_sequential_test:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - sequential_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - print_tests
+        when:
+            and:
+                - equal:
+                    - sequential-test
                     - << pipeline.parameters.manual_job >>
                 - not:
                     equal:

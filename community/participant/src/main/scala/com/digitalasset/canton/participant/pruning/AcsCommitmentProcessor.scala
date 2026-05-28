@@ -2580,8 +2580,10 @@ class AcsCommitmentProcessor private (
       true
     } else false
 
-  override protected def onClosed(): Unit =
+  override protected def onClosed(): Unit = {
     LifeCycle.close(initializationFlagCloseable, dbQueue, publishQueue, checkpointQueue)(logger)
+    Option(runningCommitments).foreach(_.releaseMemory())
+  }
 
   @VisibleForTesting
   private[pruning] def flush(): FutureUnlessShutdown[Unit] =

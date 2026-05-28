@@ -4,17 +4,19 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
-import com.digitalasset.canton.store.{PrunableByTime, Purgeable}
+import com.digitalasset.canton.store.{ChunkPurgeable, PrunableByTime, Purgeable}
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 
 trait SubmissionTrackerStore
     extends PrunableByTime
     with Purgeable
-    with AutoCloseable
-    with NamedLogging {
+    with FlagCloseable
+    with NamedLogging
+    with ChunkPurgeable {
 
   override protected def kind: String = "tracked submissions"
 
@@ -33,6 +35,7 @@ trait SubmissionTrackerStore
   ): FutureUnlessShutdown[Boolean]
 
   /** Return the number of entries currently in the store. */
+  @VisibleForTesting
   def size(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int]

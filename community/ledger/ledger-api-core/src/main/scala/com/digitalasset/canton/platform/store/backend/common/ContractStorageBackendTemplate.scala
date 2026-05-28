@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import anorm.SqlParser.{bool, long}
 import anorm.~
-import com.digitalasset.canton.platform.Key
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.{ContractStorageBackend, PersistentEventType}
@@ -20,48 +19,6 @@ class ContractStorageBackendTemplate(
     stringInterning: StringInterning,
     ledgerEndCache: LedgerEndCache,
 ) extends ContractStorageBackend {
-
-  /** Batch lookup of key states
-    *
-    * If the backend does not support batch lookups, the implementation will fall back to sequential
-    * lookups
-    */
-  override def keyStates(keys: Seq[Key], validAtEventSeqId: Long)(
-      connection: Connection
-  ): Map[Key, Long] =
-    keys.iterator
-      .flatMap(key =>
-        keyState(key, validAtEventSeqId)(connection)
-          .map(key -> _)
-      )
-      .toMap
-
-  /** Sequential lookup of key states */
-  override def keyState(key: Key, validAtEventSeqId: Long)(
-      connection: Connection
-  ): Option[Long] = {
-    import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
-    SQL"""
-         WITH last_contract_key_create AS (
-                SELECT lapi_events_activate_contract.*
-                  FROM lapi_events_activate_contract
-                 WHERE create_key_hash = ${key.hash}
-                   AND event_sequential_id <= $validAtEventSeqId
-                 ORDER BY event_sequential_id DESC
-                 ${QueryStrategy.limitClause(Some(1))}
-              )
-         SELECT internal_contract_id
-           FROM last_contract_key_create
-         WHERE NOT EXISTS
-                (SELECT 1
-                   FROM lapi_events_deactivate_contract
-                  WHERE
-                    internal_contract_id = last_contract_key_create.internal_contract_id
-                    AND event_sequential_id <= $validAtEventSeqId
-                    AND event_type = ${PersistentEventType.ConsumingExercise.asInt}
-                )"""
-      .as(long("internal_contract_id").singleOpt)(connection)
-  }
 
   override def activeContracts(internalContractIds: Seq[Long], beforeEventSeqId: Long)(
       connection: Connection
@@ -122,7 +79,7 @@ class ContractStorageBackendTemplate(
 
   override def supportsBatchKeyStateLookups: Boolean = false
 
-  override def nonUniqueContractKey(
+  override def contractKey(
       keyPageQuery: ContractStorageBackend.KeysPageQuery
   )(connection: Connection): ContractStorageBackend.KeysPageResult = {
     import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
@@ -167,11 +124,11 @@ class ContractStorageBackendTemplate(
     )
   }
 
-  override def nonUniqueContractKeysPlain(
+  override def contractKeysPlain(
       keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
       validAtEventSeqId: Long,
   )(connection: Connection): Seq[ContractStorageBackend.KeysPageResult] =
     keyPageQueries.map(query =>
-      nonUniqueContractKey(query.copy(validAtEventSeqId = validAtEventSeqId))(connection)
+      contractKey(query.copy(validAtEventSeqId = validAtEventSeqId))(connection)
     )
 }

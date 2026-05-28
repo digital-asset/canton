@@ -26,18 +26,37 @@ private[dao] sealed class ContractsReader(
     extends LedgerDaoContractsReader
     with NamedLogging {
 
-  /** Batch lookup of contract keys
+  /** Batch lookup of contract keys directly from the database.
     *
-    * Used to unit test the SQL queries for key lookups. Does not use batching.
+    * Used to unit test the SQL queries for key lookups. Does not use the Pekko stream batch loader.
     */
   override def lookupKeyStatesFromDb(keys: Seq[Key], notEarlierThanEventSeqId: Long)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Map[Key, Long]] =
     Timed.future(
       metrics.index.db.lookupKey,
-      dispatcher.executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
-        storageBackend.keyStates(keys, notEarlierThanEventSeqId)
-      ),
+      dispatcher
+        .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
+          storageBackend.contractKeysPlain(
+            keys.map(key =>
+              KeysPageQuery(
+                key = key,
+                validAtEventSeqId = notEarlierThanEventSeqId,
+                limit = 1,
+                nextPageToken = None,
+              )
+            ),
+            notEarlierThanEventSeqId,
+          )
+        )
+        .map { results =>
+          keys
+            .zip(results)
+            .flatMap { case (key, result) =>
+              result.internalContractIds.headOption.map(key -> _)
+            }
+            .toMap
+        },
     )
 
   /** Lookup a contract key state at a specific ledger offset.
@@ -54,17 +73,27 @@ private[dao] sealed class ContractsReader(
   ): Future[KeyState] =
     Timed.future(
       metrics.index.db.lookupKey,
-      contractLoader.keys.load(key -> notEarlierThanEventSeqId).map {
-        case Some(value) => value
-        case None =>
-          logger
-            .error(
-              s"Key $key resulted in an invalid empty load at offset $notEarlierThanEventSeqId"
-            )(
-              loggingContext.traceContext
-            )
-          KeyUnassigned
-      },
+      contractLoader.keys
+        .load(
+          KeysPageQuery(
+            key = key,
+            validAtEventSeqId = notEarlierThanEventSeqId,
+            limit = 1,
+            nextPageToken = None,
+          )
+        )
+        .map {
+          case Some((contractIds, _)) =>
+            contractIds.headOption
+              .map(KeyAssigned.apply)
+              .getOrElse(KeyUnassigned)
+          case None =>
+            logger
+              .error(
+                s"Key $key resulted in an invalid empty load at offset $notEarlierThanEventSeqId"
+              )(loggingContext.traceContext)
+            KeyUnassigned
+        },
     )
 
   override def lookupContractState(contractId: ContractId, notEarlierThanEventSeqId: Long)(implicit
@@ -101,7 +130,7 @@ private[dao] sealed class ContractsReader(
   ): Future[(Vector[ContractId], Option[Long])] =
     Timed.future(
       metrics.index.db.lookupNonUniqueKey,
-      contractLoader.nonUniqueKeys
+      contractLoader.keys
         .load(
           KeysPageQuery(
             key = key,

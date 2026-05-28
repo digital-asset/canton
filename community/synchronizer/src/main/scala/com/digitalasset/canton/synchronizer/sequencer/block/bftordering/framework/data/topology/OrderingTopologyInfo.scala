@@ -17,12 +17,16 @@ final case class OrderingTopologyInfo[E <: Env[E]](
     currentTopology: OrderingTopology,
     currentCryptoProvider: CryptoProvider[E],
     currentLeaders: Seq[BftNodeId],
+    currentBlacklistedNodes: Seq[BftNodeId],
     previousTopology: OrderingTopology,
     previousCryptoProvider: CryptoProvider[E],
     previousLeaders: Seq[BftNodeId],
+    previousBlacklistedNodes: Seq[BftNodeId],
 ) {
-  lazy val currentMembership: Membership = Membership(thisNode, currentTopology, currentLeaders)
-  lazy val previousMembership: Membership = Membership(thisNode, previousTopology, previousLeaders)
+  lazy val currentMembership: Membership =
+    Membership(thisNode, currentTopology, currentLeaders, currentBlacklistedNodes)
+  lazy val previousMembership: Membership =
+    Membership(thisNode, previousTopology, previousLeaders, previousBlacklistedNodes)
 
   def updateMembership(
       newMembership: Membership,
@@ -32,8 +36,10 @@ final case class OrderingTopologyInfo[E <: Env[E]](
     newMembership.orderingTopology,
     newCryptoProvider,
     newMembership.leaders,
+    newMembership.blacklistedNodes,
     previousTopology = currentTopology,
     previousCryptoProvider = currentCryptoProvider,
     previousLeaders = currentLeaders,
+    previousBlacklistedNodes = currentBlacklistedNodes,
   )
 }

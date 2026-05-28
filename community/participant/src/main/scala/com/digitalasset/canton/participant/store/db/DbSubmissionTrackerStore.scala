@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -97,18 +99,54 @@ class DbSubmissionTrackerStore(
       "purge par_fresh_submitted_transaction",
     )
 
+  override def deleteDataChunk(chunkSize: PositiveInt)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] = for {
+    // We materialize the last chunk key rather than using a subquery within the delete statement, as the update must
+    // be idempotent.
+    lastKeyInChunk <- storage.query(
+      sql"""
+        select root_hash_hex from (
+          select root_hash_hex from par_fresh_submitted_transaction where physical_synchronizer_idx = $indexedSynchronizer
+          order by root_hash_hex ASC #${storage.limit(chunkSize.value)}
+        ) as chunk
+        order by root_hash_hex DESC #${storage.limit(1)}
+        """.as[RootHash].headOption,
+      functionFullName,
+    )
+    deleted <-
+      lastKeyInChunk match {
+        case Some(rootHash) =>
+          storage.update(
+            sql"""delete from par_fresh_submitted_transaction
+                    where physical_synchronizer_idx = $indexedSynchronizer
+                    and root_hash_hex <= $rootHash
+                    """.asUpdate,
+            functionFullName,
+          )
+        case None => FutureUnlessShutdown.pure(0)
+      }
+  } yield {
+    logger.info(
+      if (deleted > 0)
+        s"Deleted chunk of $deleted from submission tracker store for ${indexedSynchronizer.psid}."
+      else s"No chunk to delete from submission tracker store for ${indexedSynchronizer.psid}."
+    )
+    deleted > 0
+  }
+
   override def size(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int] = {
     val selectQuery =
       sql"""select count(*)
-          from par_fresh_submitted_transaction"""
+          from par_fresh_submitted_transaction
+          where physical_synchronizer_idx = $indexedSynchronizer
+          """
         .as[Int]
         .headOption
 
-    for {
-      count <- storage.query(selectQuery, "count number of entries")
-    } yield count.getOrElse(0)
+    storage.query(selectQuery, "count number of entries").map(_.getOrElse(0))
   }
 
   override def deleteSince(

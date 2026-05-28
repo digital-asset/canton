@@ -608,7 +608,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
               true,
               s"${instance.id.member} has already been initialized for synchronizer ${status.synchronizerId} instead of $synchronizerId",
             )
-          case NodeStatus.NotInitialized(true, _) =>
+          case NodeStatus.NotInitialized(true, _, _) =>
             // the node is not yet initialized for this synchronizer
             Right(false)
           case NodeStatus.Failure(msg) =>

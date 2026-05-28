@@ -19,6 +19,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.damltests.bar.v1.java.bar.Bar
 import com.digitalasset.canton.damltests.bar.v1.java.bar.Bar as BarV1
+import com.digitalasset.canton.damltests.bar.v1.java.ibar.IBar
 import com.digitalasset.canton.damltests.bar.v2.java.bar.Bar as BarV2
 import com.digitalasset.canton.damltests.baz.v1.java.baz.Baz
 import com.digitalasset.canton.damltests.baz.v1.java.baz.Baz as BazV1
@@ -596,6 +597,31 @@ class SystematicTopologyAwareUpgradingIntegrationTest
           bobSees = None,
           expectedExerciseVersion = FooV1.PACKAGE_ID,
         )
+      }
+    }
+
+    "Foo V3 is vetted but its dependency, IBar, is unvetted" should {
+      "succeed using Foo V3 if IBar does not appear in a transaction action node" in {
+        implicit env =>
+          SetupPackageVetting(
+            darPaths = AllDars,
+            targetTopology = Map(env.daId -> AllVettedUpToV3),
+            // IBar is a static dependency of Foo V3
+            // appearing in a choice return type that is not used in the resulting transaction
+            explicitDependencyUnvettingTopology = Map(
+              env.daId -> Map(bobParticipant -> Set(IBar.PACKAGE_ID.toPackageId))
+            ),
+          )
+          test(
+            bobSees = Some(BazV2.PACKAGE_ID),
+            expectedExerciseVersion = FooV3.PACKAGE_ID,
+            vettingRequirementsForPreferencesInjection = Some(
+              Map(
+                Foo.PACKAGE_NAME.toPackageName -> Set(alice),
+                Baz.PACKAGE_NAME.toPackageName -> Set(bob),
+              )
+            ),
+          )
       }
     }
 

@@ -126,7 +126,7 @@ import com.digitalasset.canton.util.{
   SimpleExecutionQueue,
   SingleUseCell,
 }
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion, ReleaseVersion}
 import com.digitalasset.canton.watchdog.WatchdogService
 import io.grpc.ServerServiceDefinition
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
@@ -285,7 +285,7 @@ abstract class CantonNodeBootstrapImpl[
     getNode
       .map(_.status)
       .map(NodeStatus.Success(_))
-      .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor))
+      .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor, ReleaseVersion.current))
 
   private def waitingFor: Option[WaitingForExternalInput] = {
     @tailrec
@@ -547,6 +547,7 @@ abstract class CantonNodeBootstrapImpl[
               adminApiConfig.jwtTimestampLeeway,
               adminApiConfig.adminTokenConfig,
               adminApiConfig.jwksCacheConfig,
+              arguments.testingConfig.warnOnJwtScopeUsage,
             )
           ),
         )

@@ -1,0 +1,19 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module MapTest where
+
+import DA.Map
+
+template UsesMap
+  with
+    party: Party
+    myMap1: Map Int Int
+    myMap2: Map Int Int
+  where
+    signatory party
+
+    nonconsuming choice Touch: ()
+      controller party
+      do
+        return ()

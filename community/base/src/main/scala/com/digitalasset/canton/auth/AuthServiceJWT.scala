@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.auth
 
+import com.daml.jwt.AuthServiceJWTCodec.AuthServiceJWTPayloadCodec
 import com.daml.jwt.{
   AuthServiceJWTCodec,
   AuthServiceJWTPayload,
@@ -37,6 +38,7 @@ abstract class AuthServiceJWTBase(
     verifier: JwtVerifierBase,
     targetAudience: Option[String],
     targetScope: Option[String],
+    generalImplicitDecoder: AuthServiceJWTPayloadCodec,
 ) extends AuthService
     with NamedLogging {
 
@@ -95,7 +97,7 @@ abstract class AuthServiceJWTBase(
     }
 
   private[this] def parseAuthServicePayload(jwtPayload: String): AuthServiceJWTPayload = {
-    import AuthServiceJWTCodec.JsonImplicits.*
+    import generalImplicitDecoder.*
     parser.decode(jwtPayload).fold(throw _, identity)
   }
 
@@ -131,7 +133,13 @@ class AuthServiceJWT(
     targetAudience: Option[String],
     targetScope: Option[String],
     val loggerFactory: NamedLoggerFactory,
-) extends AuthServiceJWTBase(verifier, targetAudience, targetScope) {
+    warnOnJwtScopeUsage: Boolean,
+) extends AuthServiceJWTBase(
+      verifier,
+      targetAudience,
+      targetScope,
+      AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
+    ) {
   protected[this] def payloadToClaims(serviceName: String): AuthServiceJWTPayload => ClaimSet = {
     case payload: StandardJWTPayload =>
       ClaimSet.AuthenticatedUser(
@@ -149,7 +157,13 @@ class UserConfigAuthService private[auth] (
     targetScope: Option[String],
     users: Seq[AuthorizedUser],
     val loggerFactory: NamedLoggerFactory,
-) extends AuthServiceJWTBase(verifier, targetAudience, targetScope) {
+    warnOnJwtScopeUsage: Boolean,
+) extends AuthServiceJWTBase(
+      verifier,
+      targetAudience,
+      targetScope,
+      AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
+    ) {
   protected[this] def payloadToClaims(serviceName: String): AuthServiceJWTPayload => ClaimSet = {
     case payload: StandardJWTPayload =>
       users
@@ -165,10 +179,12 @@ class AuthServicePrivilegedJWT private[auth] (
     targetScope: Option[String],
     accessLevel: AccessLevel,
     val loggerFactory: NamedLoggerFactory,
+    warnOnJwtScopeUsage: Boolean,
 ) extends AuthServiceJWTBase(
       verifier = verifier,
       targetAudience = targetAudience,
       targetScope = targetScope,
+      AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
     ) {
 
   private def claims = accessLevel match {
@@ -197,7 +213,31 @@ object AuthServiceJWT {
       accessLevel: AccessLevel,
       loggerFactory: NamedLoggerFactory,
       users: Seq[AuthorizedUser],
-  ): AuthServiceJWTBase =
+      warnOnJwtScopeUsage: Boolean,
+  ): AuthServiceJWTBase = {
+    val logger = loggerFactory.getTracedLogger(getClass)
+    import com.digitalasset.canton.tracing.TraceContext
+    implicit val traceContext: TraceContext = TraceContext.empty
+
+    // TODO (i32650):  Add Canton version to the method signature. For versions 3.5 and below keep the logic as-is.
+    //  Once audience-based tokens are enforced in version 3.7,
+    //  - At startup: enforce the safe default or an explicitly configured value.
+    //  - Do not allow scope-only configs.
+    //  - Remove warning for when both audience and scope are defined as scope will be an additional optional field.
+
+    if (targetScope.isDefined && targetAudience.isEmpty) {
+      logger.warn(
+        "Scope-based tokens have been configured (targetScope is set without a targetAudience). " +
+          "This feature is deprecated in Canton 3.5 and will be removed in version 3.7. " +
+          "Please migrate to audience-based tokens."
+      )
+    }
+    if (targetScope.isDefined && targetAudience.isDefined) {
+      logger.warn(
+        "Ambiguous configuration: both targetScope and targetAudience have been specified. Canton versions 3.5 and below support " +
+          "one of these, but not both. " + "Please configure exactly one."
+      )
+    }
     (privileged, targetScope, targetAudience, users) match {
       case (_, _, _, authorizedUsers) if authorizedUsers.nonEmpty =>
         new UserConfigAuthService(
@@ -206,16 +246,38 @@ object AuthServiceJWT {
           targetScope,
           authorizedUsers,
           loggerFactory,
+          warnOnJwtScopeUsage,
         )
       case (true, Some(scope), _, _) =>
-        new AuthServicePrivilegedJWT(verifier, None, Some(scope), accessLevel, loggerFactory)
+        new AuthServicePrivilegedJWT(
+          verifier,
+          None,
+          Some(scope),
+          accessLevel,
+          loggerFactory,
+          warnOnJwtScopeUsage,
+        )
       case (true, None, Some(audience), _) =>
-        new AuthServicePrivilegedJWT(verifier, Some(audience), None, accessLevel, loggerFactory)
+        new AuthServicePrivilegedJWT(
+          verifier,
+          Some(audience),
+          None,
+          accessLevel,
+          loggerFactory,
+          warnOnJwtScopeUsage,
+        )
       case (true, None, None, _) =>
         throw new IllegalArgumentException(
-          "Missing targetScope or targetAudience in the definition of a privileged JWT AuthService"
+          "Both targetScope and targetAudience are missing in the definition of a privileged JWT AuthService."
         )
       case (false, _, _, _) =>
-        new AuthServiceJWT(verifier, targetAudience, targetScope, loggerFactory)
+        new AuthServiceJWT(
+          verifier,
+          targetAudience,
+          targetScope,
+          loggerFactory,
+          warnOnJwtScopeUsage,
+        )
     }
+  }
 }

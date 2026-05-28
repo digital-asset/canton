@@ -7,6 +7,7 @@ import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
@@ -430,16 +431,47 @@ final class RepairService(
   )(implicit context: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     helpers.withRepairIndexer { repairIndexer =>
       (for {
-        sourceRepairRequest <- source.traverse(
+        // Initial init: looks up reassignmentData via target's persistent state. We don't yet know
+        // how many RepairCounters we'll need, so allocate the default (1) and rebuild below.
+        initialSourceRepairRequest <- source.traverse(
           helpers.initRepairRequestAndVerifyPreconditions(_, repairIndexer)
         )
-        targetRepairRequest <- target.traverse(
+        initialTargetRepairRequest <- target.traverse(
           helpers.initRepairRequestAndVerifyPreconditions(_, repairIndexer)
         )
         reassignmentData <-
-          targetRepairRequest.unwrap.synchronizer.persistentState.reassignmentStore
+          initialTargetRepairRequest.unwrap.synchronizer.persistentState.reassignmentStore
             .lookup(reassignmentId)
             .leftMap(_.message)
+
+        contractsCount <- EitherT.fromEither[FutureUnlessShutdown](
+          PositiveInt
+            .create(reassignmentData.contractsBatch.contractIds.size)
+            .leftMap(_.toString)
+        )
+
+        // Allocate one RepairCounter per emitted Update:
+        //  - source: one assign Update per batch in the back-swap (≤ contractsCount counters)
+        //  - target: one assign Update per batch in completeUnassigned plus one unassign Update
+        //    per batch in the back-swap (≤ 2 * contractsCount counters)
+        sourceCounters <- EitherT.fromEither[FutureUnlessShutdown](
+          helpers.repairCounterSequence(
+            initialSourceRepairRequest.unwrap.repairCounters.head1,
+            contractsCount,
+          )
+        )
+        targetCounters <- EitherT.fromEither[FutureUnlessShutdown](
+          helpers.repairCounterSequence(
+            initialTargetRepairRequest.unwrap.repairCounters.head1,
+            PositiveInt.tryCreate(contractsCount.value * 2),
+          )
+        )
+        sourceRepairRequest = initialSourceRepairRequest.map(
+          _.copy(repairCounters = sourceCounters)
+        )
+        targetRepairRequest = initialTargetRepairRequest.map(
+          _.copy(repairCounters = targetCounters)
+        )
 
         changeAssignation = new ChangeAssignation(
           sourceRepairRequest,
@@ -451,9 +483,18 @@ final class RepairService(
           loggerFactory,
         )
 
-        unassignmentData = ChangeAssignation.Data.from(reassignmentData, changeAssignation)
+        // completeUnassigned only emits assignments (target side), so it consumes the first
+        // contractsCount target times-of-repair.
+        unassignmentData = ChangeAssignation.Data(
+          reassignmentData,
+          ReassignmentTag.Source(Seq.empty[TimeOfRepair]),
+          targetRepairRequest.map(_.timesOfRepair.take(contractsCount.value)),
+        )
         _ <- changeAssignation.completeUnassigned(unassignmentData)
 
+        // For the back-swap, the original target becomes the source (emits unassign Updates), so
+        // it consumes the remaining contractsCount target times-of-repair. The original source
+        // becomes the target (emits assign Updates) and consumes its full counter sequence.
         changeAssignationBack = new ChangeAssignation(
           ReassignmentTag.Source(targetRepairRequest.unwrap),
           ReassignmentTag.Target(sourceRepairRequest.unwrap),
@@ -463,13 +504,12 @@ final class RepairService(
           contractStore.value,
           loggerFactory,
         )
-        contractIdsData <- EitherT.fromEither[FutureUnlessShutdown](
-          ChangeAssignation.Data
-            .from[Seq[(LfContractId, Option[ReassignmentCounter])]](
-              reassignmentData.contractsBatch.contractIds.map(_ -> None).toSeq,
-              changeAssignationBack,
-            )
-            .incrementRepairCounter
+        contractIdsData = ChangeAssignation.Data[Seq[(LfContractId, Option[ReassignmentCounter])]](
+          reassignmentData.contractsBatch.contractIds.map(_ -> None).toSeq,
+          ReassignmentTag.Source(
+            targetRepairRequest.unwrap.timesOfRepair.drop(contractsCount.value)
+          ),
+          ReassignmentTag.Target(sourceRepairRequest.unwrap.timesOfRepair),
         )
         _ <- changeAssignationBack.changeAssignation(
           contractIdsData,

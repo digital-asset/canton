@@ -93,8 +93,24 @@ Other scopes can be configured explicitly using the custom target scope configur
 
 .. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/ledger-api-target-scope.conf
 
+Scope Format
+------------
 Target scope can be any case-sensitive string containing alphanumeric characters, hyphens, slashes, colons and underscores.
-Either the ``target-scope`` or the ``target-audience`` parameter can be configured individually, but not both at the same time.
+
+Scope Validation Logic
+-----------------------
+Note that the scope claim will be handled differently in future versions of Canton compared to versions 3.5 and below.
+It is highly recommended to migrate to audience-based tokens to ensure a seamless transition to future Canton versions.
+
+Canton Versions 3.5 and Lower
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In Canton versions 3.5 and lower, either the ``target-scope`` or the ``target-audience`` parameters can be configured individually,
+but not both at the same time.
+
+.. warning::
+
+   "Scope-based" access tokens, i.e. JWTs without any audience specified,
+   are deprecated in Canton 3.5 and will be removed in a future Canton version.
 
 Configure authorization service with user list
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
