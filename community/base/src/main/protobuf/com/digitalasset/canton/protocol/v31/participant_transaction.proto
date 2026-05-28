@@ -7,6 +7,7 @@ package com.digitalasset.canton.protocol.v31;
 
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
 import "com/digitalasset/canton/protocol/v30/common.proto";
+import "com/digitalasset/canton/protocol/v30/merkle.proto";
 import "com/digitalasset/canton/protocol/v30/participant_transaction.proto";
 import "com/digitalasset/canton/protocol/v31/common_stable.proto";
 import "scalapb/scalapb.proto";
@@ -82,6 +83,30 @@ message ViewParticipantData {
   repeated KeyResolutionWithMaintainers resolved_keys = 5;
   ActionDescription action_description = 6;
   v30.ViewParticipantData.RollbackContext rollback_context = 7; // optional; defaults to the empty RollbackContext if omitted.
+}
+
+// Compared to v30:
+// - We no longer use v30.ViewHashAndKey (which contained view_hash + key fields).
+// - Instead, we introduce CiphertextIdAndKey, which pairs a ciphertext ID (hash), the relative position of the view
+//   inside the encrypted view array, and the corresponding session key.
+// - The view_hash is replaced by ciphertext_id + index.
+message LightTransactionViewTree {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  v30.GenTransactionTree tree = 1;
+  repeated CiphertextIdAndKey subview_keys_by_ciphertext_id = 2;
+}
+
+// A ciphertext ID (hash) + index that uniquely identifies a view, together with the
+// session key randomness used to encrypt the view.
+message CiphertextIdAndKey {
+  // Hash of the ciphertext that contains the view.
+  bytes ciphertext_id = 1;
+  // Position of the view within the encrypted views array (0-based index).
+  // Together with ciphertext_hash, this forms the ciphertext ID and uniquely identifies a view.
+  int32 index = 2;
+  // The randomness used to derive the encryption key for the view
+  bytes view_encryption_key_randomness = 3;
 }
 
 // Compared to v30: Added this class

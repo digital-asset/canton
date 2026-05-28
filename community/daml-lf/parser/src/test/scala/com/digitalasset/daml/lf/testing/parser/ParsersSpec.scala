@@ -493,8 +493,6 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
           UpdateExerciseByKey(T.tycon, n"Choice", e"key", e"arg"),
         "fetch_by_key @Mod:T" ->
           UpdateFetchByKey(T.tycon),
-        "lookup_by_key @Mod:T" ->
-          UpdateLookupByKey(T.tycon),
         "query_n_by_key @Mod:T" ->
           UpdateQueryNByKey(T.tycon),
         "uget_time" ->

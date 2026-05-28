@@ -22,6 +22,9 @@ class V2_3(override val testDars: TestDars) extends AvailableTests {
       new ContractKeysWronglyTypedContractIdIT,
       new PrefetchContractKeysIT,
       new RaceConditionIT,
+      new ExceptionsIT,
+      new ExceptionRaceConditionIT,
+      new EventsDescendantsIT,
     )
 
   override def optionalTests(tlsConfig: Option[TlsClientConfig]): Vector[LedgerTestSuite] =

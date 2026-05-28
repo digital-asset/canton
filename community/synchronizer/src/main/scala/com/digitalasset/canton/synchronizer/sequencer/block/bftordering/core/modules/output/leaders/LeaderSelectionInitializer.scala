@@ -22,13 +22,19 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
 trait LeaderSelectionInitializer[E <: Env[E]] {
+
   def stateForInitial(
       moduleSystem: ModuleSystem[E],
       value: Option[SequencerSnapshotAdditionalInfo],
       epochNumber: EpochNumber,
   )(implicit traceContext: TraceContext): BlacklistLeaderSelectionPolicyState
 
-  def leaderFromState(
+  def leadersFromState(
+      state: BlacklistLeaderSelectionPolicyState,
+      orderingTopology: OrderingTopology,
+  ): Seq[BftNodeId]
+
+  def blacklistedNodesFromState(
       state: BlacklistLeaderSelectionPolicyState,
       orderingTopology: OrderingTopology,
   ): Seq[BftNodeId]

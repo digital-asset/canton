@@ -6,6 +6,7 @@ package com.daml.testing.utils
 import io.grpc.*
 
 import java.net.SocketAddress
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 final class GrpcServerResource(
@@ -17,7 +18,11 @@ final class GrpcServerResource(
 
   override protected def construct(): ServerWithChannelProvider = {
     boundServices = services()
-    ServerWithChannelProvider.fromServices(boundServices, port, "server")
+    ServerWithChannelProvider.fromServices(
+      boundServices,
+      port,
+      s"server_${UUID.randomUUID().toString}",
+    )
   }
 
   override protected def destruct(resource: ServerWithChannelProvider): Unit = {

@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   EnvVarTestOverrides,
   TestInclusions,
 }
+import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTestsFor34
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -20,6 +21,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.time.{Seconds, Span}
 
@@ -65,11 +67,12 @@ sealed trait JsonApiConformanceBase
       concurrentTestRuns = 4, // these tests run together with all other tests
       connectedSynchronizers = env.environment.config.sequencers.size,
     )
-    val availableTests = AvailableTests.v2_2
+
+    val availableTests = AvailableTests.testsForProtocol(testedProtocolVersion)
 
     val envArgInclusion = envArgTestsInclusion.getOrElse(TestInclusions.AllIncluded)
     val testsToRun =
-      new ConfiguredTests(availableTests, config).defaultTests.view
+      ConfiguredTests(availableTests, config).defaultTests.view
         .flatMap(_.tests)
         .filter { testCase =>
           testCase.limitation match {
@@ -190,26 +193,29 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
       }
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
+  private val additionalExclusions =
+    if (testedProtocolVersion == ProtocolVersion.v34) excludedTestsFor34 else Set.empty
+
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
   override protected def exclusions: Set[String] = LedgerApiConformanceBase.excludedTests.toSet ++
-    ExcludedTests.jsonApiExcludedSuites.toSet
+    (ExcludedTests.jsonApiExcludedTests ++ additionalExclusions).toSet
 
   protected def testCaseName = "pass the Ledger API conformance tests"
 }
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_0
+final class JsonApiConformanceIntegrationShardedTest_Shard0
     extends JsonApiConformanceIntegrationShardedTest(shard = 0, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_1
+final class JsonApiConformanceIntegrationShardedTest_Shard1
     extends JsonApiConformanceIntegrationShardedTest(shard = 1, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_2
+final class JsonApiConformanceIntegrationShardedTest_Shard2
     extends JsonApiConformanceIntegrationShardedTest(shard = 2, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_3
+final class JsonApiConformanceIntegrationShardedTest_Shard3
     extends JsonApiConformanceIntegrationShardedTest(shard = 3, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_4
+final class JsonApiConformanceIntegrationShardedTest_Shard4
     extends JsonApiConformanceIntegrationShardedTest(shard = 4, numShards = 5)
 
 private[ledgerapi] trait NonSharded {

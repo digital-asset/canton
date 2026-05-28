@@ -16,7 +16,12 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
-import com.digitalasset.canton.crypto.{HashPurpose, SigningKeyUsage, SyncCryptoApi}
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SigningKeyUsage,
+  SyncCryptoApi,
+  SynchronizerCrypto,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -281,8 +286,7 @@ class ParticipantSimulator(
   private val syncCrypto = new FixedSyncCryptoApiForSigning(
     // the specific member doesn't actually matter, since all virtual participants share the same keys
     managingNode.id.member,
-    managingNode.crypto,
-    staticSynchronizerParameters,
+    SynchronizerCrypto(managingNode.crypto, staticSynchronizerParameters),
     signingKey,
     loggerFactory,
   )
@@ -555,7 +559,8 @@ class ParticipantSimulator(
       hasSynchronizeWithClosing = this,
       loggerFactory = loggerFactoryForParticipant,
     )
-    val sequencerAggregator = new SequencerAggregator(
+    val sequencerAggregator = SequencerAggregator.create(
+      nodeParameters.sequencerClient.useNewAggregator,
       aggregationHandler,
       crypto.pureCrypto,
       nodeParameters.sequencerClient.eventInboxSize,
@@ -649,8 +654,7 @@ class ParticipantSimulator(
                         // the specific member doesn't actually matter, since all virtual participants
                         // share the same keys
                         managingNode.id.member,
-                        managingNode.crypto,
-                        staticSynchronizerParameters,
+                        SynchronizerCrypto(managingNode.crypto, staticSynchronizerParameters),
                         signingKey,
                         loggerFactory,
                         timestampOverride = period.toInclusive.forgetRefinement,

@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory
 private[lf] object InternalError {
   private val logger = LoggerFactory.getLogger("com.digitalasset.daml.lf")
   def log(location: String, message: String, cause: Option[Throwable] = None): Unit = {
+    // Note that this cannot be intercepted by SuppressingLogger.
+    // Therefore, a rule has been added to rewrite-appender.xml to downgrade the log level to INFO in tests.
     logger.error(s"LF internal error in $location: $message")
     cause.foreach(err => logger.error(s"root cause: ${err.getMessage}", err))
   }

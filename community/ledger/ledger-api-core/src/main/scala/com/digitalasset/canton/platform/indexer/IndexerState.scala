@@ -5,22 +5,20 @@ package com.digitalasset.canton.platform.indexer
 
 import cats.arrow.FunctionK
 import cats.data.EitherT
-import com.daml.timer.RetryStrategy
-import com.daml.timer.RetryStrategy.UnhandledFailureException
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, SynchronizerUpdate, Update}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasSynchronizeWithClosing}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, RecoveringFutureQueue}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{Mutex, PekkoUtil, TryUtil}
+import com.digitalasset.canton.util.{Mutex, PekkoUtil, TryUtil, retry}
 import org.apache.pekko.Done
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
@@ -93,27 +91,41 @@ class IndexerState(
     }
   )
 
-  private def waitForEmptyIndexerQueue(queue: RecoveringFutureQueue[Update]): Future[Unit] =
-    RetryStrategy
-      .constant(Some(100), Duration.create(100, "millis")) { case t: Throwable =>
-        t.getMessage.contains("Still indexing")
-      }((_, _) =>
+  private def waitForEmptyIndexerQueue(queue: RecoveringFutureQueue[Update]): Future[Unit] = {
+    implicit val success = retry.Success.always
+    retry
+      .Pause(
+        logger = logger,
+        operationName = "Wait for empty indexer queue",
+        maxRetries = 100,
+        delay = 100.millis,
+        hasSynchronizeWithClosing = HasSynchronizeWithClosing.NeverClosing,
+      )
+      .applyFut(
         withStateUnlessShutdown(_ =>
           if (queue.uncommittedQueueSnapshot.nonEmpty)
             Future.failed(new Exception(s"Still indexing"))
           else
             Future.unit
-        )
+        ),
+        new retry.ExceptionRetryPolicy {
+          override protected def determineExceptionErrorKind(
+              exception: Throwable,
+              logger: TracedLogger,
+          )(implicit tc: TraceContext): retry.ErrorKind =
+            if (exception.getMessage.contains("Still indexing"))
+              retry.ErrorKind.NoSuccessErrorKind
+            else
+              retry.ErrorKind.FatalErrorKind
+        },
       )
-      .recoverWith { case UnhandledFailureException(_, _, ShutdownInProgress) =>
-        Future.failed(ShutdownInProgress)
-      }
       .recoverWith { err =>
         // shutting down indexer anyway, as the most probably cause here is that we are shutting down
         logger.info("Shutting down Indexer after waiting for empty indexer queue failed...")
         queue.shutdown()
         queue.done.transform(_ => Failure(err))
       }
+  }
 
   private def onRepairFinished(): Future[Unit] = withStateUnlessShutdown {
     case Normal(normalIndexer, _) =>
@@ -215,11 +227,17 @@ class IndexerState(
 
   def ensureNoProcessingForSynchronizer(synchronizerId: SynchronizerId): Future[Unit] =
     withStateUnlessShutdown {
-      case Normal(recoveringQueue, _) =>
-        RetryStrategy
-          .constant(None, Duration.create(200, "millis")) { case t: Throwable =>
-            t.getMessage.contains("Still uncommitted")
-          }((_, _) =>
+      case Normal(recoveringQueue, _) => {
+        implicit val success = retry.Success.always
+        retry
+          .Pause(
+            logger = logger,
+            operationName = s"Ensure no processing for synchronizer $synchronizerId",
+            maxRetries = Int.MaxValue,
+            delay = 200.millis,
+            hasSynchronizeWithClosing = HasSynchronizeWithClosing.NeverClosing,
+          )
+          .applyFut(
             withStateUnlessShutdown(_ =>
               if (
                 recoveringQueue.uncommittedQueueSnapshot.iterator.map(_._2).exists {
@@ -234,11 +252,19 @@ class IndexerState(
                 )
               else
                 Future.unit
-            )
+            ),
+            new retry.ExceptionRetryPolicy {
+              override protected def determineExceptionErrorKind(
+                  exception: Throwable,
+                  logger: TracedLogger,
+              )(implicit tc: TraceContext): retry.ErrorKind =
+                if (exception.getMessage.contains("Still uncommitted"))
+                  retry.ErrorKind.NoSuccessErrorKind
+                else
+                  retry.ErrorKind.FatalErrorKind
+            },
           )
-          .recoverWith { case UnhandledFailureException(_, _, ShutdownInProgress) =>
-            Future.failed(ShutdownInProgress)
-          }
+      }
 
       case Repair(_, repairDone, _) =>
         Future.failed(new RepairInProgress(repairDone))

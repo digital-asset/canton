@@ -290,7 +290,7 @@ class TransactionViewTest
         ).value
 
         ViewParticipantData
-          .fromByteString(testedProtocolVersion, hashOps)(
+          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))
@@ -322,7 +322,7 @@ class TransactionViewTest
         ).value
 
         ViewParticipantData
-          .fromByteString(testedProtocolVersion, hashOps)(
+          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))

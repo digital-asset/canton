@@ -18,7 +18,12 @@ import com.digitalasset.canton.crypto.{
   SynchronizerSnapshotSyncCryptoApi,
 }
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{LightTransactionViewTree, ViewHashAndKey}
+import com.digitalasset.canton.data.{
+  ByCiphertextId,
+  ByViewHash,
+  LightTransactionViewTree,
+  SubviewReferenceAndKey,
+}
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -59,9 +64,9 @@ import scala.util.Success
   * (2) Decrypt the `LightTransactionViewTrees` contained in `EncryptedViewMessages`. This step can
   * also be done in parallel for all messages in the batch. The decryption of
   * `LightTransactionViewTrees` can also yield the randomness for additional view hashes that are
-  * listed in `LightTransactionViewTree.subviewHashesAndKeys`, so we keep adding randomness to the
-  * randomness map whenever it becomes available and make it available for the decryption of other
-  * views that list the same hash.
+  * listed in `LightTransactionViewTree.subviewReferencesAndKeys`, so we keep adding randomness to
+  * the randomness map whenever it becomes available and make it available for the decryption of
+  * other views that list the same hash.
   *
   * This implementation assumes that view hashes are UNIQUE across the batch.
   */
@@ -206,19 +211,24 @@ class ViewMessageDecrypterV1(
       viewTrees = lightTransactionMultiViewTree.viewTrees
 
       _ = viewTrees.forgetNE.foreach { viewTree =>
-        viewTree.subviewHashesAndKeys
-          .foreach { case ViewHashAndKey(subviewHash, subviewKey) =>
-            randomnessMap.get(subviewHash) match {
-              case Some(promise) => storeRandomness(subviewHash, subviewKey, promise)
-              case None =>
-                // It is enough to alarm here.
-                // The view will be filtered out when attempting to construct a FullTransactionViewTree.
-                SyncServiceAlarm
-                  .Warn(
-                    s"View ${viewTree.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
-                  )
-                  .report()
-            }
+        viewTree.subviewReferencesAndKeys
+          .foreach {
+            case SubviewReferenceAndKey(ByViewHash(viewHash), subviewKey) =>
+              randomnessMap.get(viewHash) match {
+                case Some(promise) => storeRandomness(viewHash, subviewKey, promise)
+                case None =>
+                  // It is enough to alarm here.
+                  // The view will be filtered out when attempting to construct a FullTransactionViewTree.
+                  SyncServiceAlarm
+                    .Warn(
+                      s"View ${viewTree.viewHash} lists a subview with hash $viewHash, but I haven't received any views for this hash"
+                    )
+                    .report()
+              }
+            case SubviewReferenceAndKey(ByCiphertextId(_, _), _) =>
+              ErrorUtil.invalidState(
+                s"Invalid subview reference in view ${viewTree.viewHash}: expected a view hash, but got a ciphertext ID"
+              )
           }
       }
     } yield (viewTrees, viewMessage.submittingParticipantSignature)

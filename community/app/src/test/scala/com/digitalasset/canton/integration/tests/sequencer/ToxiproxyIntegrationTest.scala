@@ -42,6 +42,7 @@ abstract class ToxiproxyIntegrationTest
   private lazy val BongLevels: Int = 3
   private lazy val BongTimeout = 3.minutes
   private lazy val PingTimeout = config.NonNegativeDuration.ofMinutes(1)
+  private lazy val NetworkTimeout = config.NonNegativeDuration.ofSeconds(15)
   private lazy val SequencersCount = 3
   private lazy val MediatorsCount = 1
 
@@ -89,7 +90,10 @@ abstract class ToxiproxyIntegrationTest
         NetworkBootstrapper(Seq(description))
       }
       .addConfigTransforms(
-        _.focus(_.parameters.timeouts.console.ping).replace(PingTimeout)
+        _.focus(_.parameters.timeouts.console.ping)
+          .replace(PingTimeout)
+          .focus(_.parameters.timeouts.processing.network)
+          .replace(NetworkTimeout)
       )
       .withSetup { implicit env =>
         import env.*

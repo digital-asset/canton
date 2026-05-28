@@ -171,12 +171,14 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
     val leaders = Seq(myId, otherId)
     val orderingTopologyInfo = OrderingTopologyInfo[ProgrammableUnitTestEnv](
       myId,
-      orderingTopology,
-      failingCryptoProvider,
-      leaders,
-      orderingTopology,
-      failingCryptoProvider,
-      leaders,
+      currentTopology = orderingTopology,
+      currentCryptoProvider = failingCryptoProvider,
+      currentLeaders = leaders,
+      currentBlacklistedNodes = Seq.empty,
+      previousTopology = orderingTopology,
+      previousCryptoProvider = failingCryptoProvider,
+      previousLeaders = leaders,
+      previousBlacklistedNodes = Seq.empty,
     )
 
     val response = BlockTransferResponse.create(Some(commitCertificate), otherId)
@@ -216,7 +218,8 @@ object StateTransferMessageValidatorTest {
     Membership(
       myId,
       OrderingTopology.forTesting(Set(otherId), Option(SequencingParameters.Default)),
-      Seq(otherId),
+      leaders = Seq(otherId),
+      blacklistedNodes = Seq.empty,
     )
   private def aMembershipWith2Nodes(implicit pv: ProtocolVersion) =
     Membership.forTesting(myId, Set(otherId))

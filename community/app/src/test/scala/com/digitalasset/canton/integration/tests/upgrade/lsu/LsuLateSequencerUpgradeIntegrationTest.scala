@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,11 +12,19 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.DefaultNewPV
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.time.PositiveFiniteDuration
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{admin, config}
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.*
+import scala.jdk.DurationConverters.*
 
 /*
 Goal:
@@ -39,6 +46,16 @@ LSU:
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-late-sequencer"
 
+  private def createSequencingParametersShortViewChangeTimeoutNoBlacklisting(pv: ProtocolVersion) =
+    topology.SequencingParameters
+      .create(
+        // Speed up ordering when sequencer6 = succ(sequencer2) is late to the party
+        pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
+        // Avoid sequencer6 = succ(sequencer2) being blacklisted due to being late to the party
+        blacklistLeaderSelectionPolicyConfig =
+          topology.SequencingParameters.NoBlacklistingLeaderSelectionPolicyConfig,
+      )(pv)
+
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
@@ -46,6 +63,9 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
         Set("sequencer1", "sequencer2", "sequencer3", "sequencer4"),
         Set("sequencer5", "sequencer6", "sequencer7", "sequencer8"),
       ),
+      // Disable blacklisting via config if testing on PV34
+      sequencingParameters =
+        Some(createSequencingParametersShortViewChangeTimeoutNoBlacklisting(testedProtocolVersion)),
     )
   )
   registerPlugin(new UsePostgres(loggerFactory))
@@ -64,7 +84,10 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
       "mediator7" -> "mediator3",
       "mediator8" -> "mediator4",
     )
-  override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+
+  private val upgradeTimeRef = new AtomicReference[Option[CantonTimestamp]](None)
+  override protected lazy val upgradeTime: CantonTimestamp =
+    upgradeTimeRef.get().getOrElse(fail("Upgrade time not yet set"))
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S8M8_Config
@@ -115,6 +138,51 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
       }
 
   "Logical synchronizer upgrade" should {
+    "disable blacklisting for post-LSU" in { implicit env =>
+      import env.*
+
+      // Not using the fixture because it assumes the upgrade time has already been set
+      val sequencingParametersShortViewChangeTimeoutNoBlacklisting =
+        createSequencingParametersShortViewChangeTimeoutNoBlacklisting(DefaultNewPV)
+
+      // Prepare sequencing parameters with no blacklisting for post-LSU;
+      //  if testing with PV34, the blacklisting is disabled via config already,
+      //  and the topology settings will be ignored as unparseable do to an unexpected PV
+      val sequencingParametersShortViewChangeTimeoutNoBlacklistingByteString =
+        sequencingParametersShortViewChangeTimeoutNoBlacklisting.toByteString
+      synchronizerOwners1.foreach(
+        _.topology.sequencing_parameters.propose(
+          synchronizer1Id,
+          admin.api.client.data.SequencingParameters(
+            Option(sequencingParametersShortViewChangeTimeoutNoBlacklistingByteString)
+          ),
+        )
+      )
+
+      // Ensure the sequencing parameters are effective
+      eventually(maxPollInterval = 10.millis) {
+        environment.simClock.value.advance(10.millis.toJava)
+        // We need the sequencing parameters to be part of the Canton topology as well,
+        //  because with PV34 (predecessor synchronizer, if the test is run with PV34,
+        //  but never successor synchronizer that uses always PVdev) the ordering topology
+        //  ignores the sequencing parameters from the Canton topology,
+        //  so otherwise we may LSU to PV35 before we have the sequencing parameters
+        //  in the topology state.
+        oldSynchronizerNodes.sequencers.forall(s =>
+          s.topology.sequencing_parameters
+            .get_sequencing_parameters(synchronizer1Id)
+            .flatMap(_.payload)
+            .contains(sequencingParametersShortViewChangeTimeoutNoBlacklistingByteString) &&
+            s.bft
+              .get_ordering_topology()
+              .sequencingParameters == sequencingParametersShortViewChangeTimeoutNoBlacklisting
+        )
+      }
+
+      // Setup complete, set the upgrade time based on the current clock
+      upgradeTimeRef.set(Some(environment.clock.now.add(30.seconds)))
+    }
+
     "work when there is a late sequencer" in { implicit env =>
       import env.*
 

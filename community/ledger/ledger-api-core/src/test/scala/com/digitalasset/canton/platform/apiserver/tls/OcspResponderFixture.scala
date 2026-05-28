@@ -5,8 +5,11 @@ package com.digitalasset.canton.platform.apiserver.tls
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.testing.utils.{OwnedResource, PekkoBeforeAndAfterAll}
-import com.daml.timer.RetryStrategy
-import com.digitalasset.canton.util.ConcurrentBufferedLogger
+import com.digitalasset.canton.lifecycle.HasSynchronizeWithClosing
+import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.retry.Success
+import com.digitalasset.canton.util.{ConcurrentBufferedLogger, retry}
 import org.scalatest.Suite
 import org.slf4j.LoggerFactory
 
@@ -50,7 +53,7 @@ trait OcspResponderFixture extends PekkoBeforeAndAfterAll { this: Suite =>
 
   private val opensslExecutable: String = "openssl"
 
-  lazy val responderResource = {
+  lazy val responderResource: OwnedResource[ResourceContext, Process] = {
     implicit val resourceContext: ResourceContext = ResourceContext(ec)
     new OwnedResource[ResourceContext, Process](
       owner = responderResourceOwner,
@@ -81,10 +84,23 @@ trait OcspResponderFixture extends PekkoBeforeAndAfterAll { this: Suite =>
   private def startResponderProcess()(implicit ec: ExecutionContext): Future[Process] =
     Future(Process(ocspServerCommand).run(processLogger))
 
-  private def verifyResponderReady()(implicit ec: ExecutionContext): Future[String] =
-    RetryStrategy.constant(attempts = 3, waitTime = 5.seconds) { (_, _) =>
-      Future(Process(testOcspRequestCommand).!!(processLogger))
-    }
+  private def verifyResponderReady()(implicit ec: ExecutionContext): Future[String] = {
+    val tracedLogger = TracedLogger(logger)
+    implicit val success: Success[Any] = retry.Success.always
+    implicit val traceContext: TraceContext = TraceContext.empty
+    retry
+      .Pause(
+        logger = tracedLogger,
+        operationName = "verifyResponderReady",
+        maxRetries = 3,
+        delay = 5.seconds,
+        hasSynchronizeWithClosing = HasSynchronizeWithClosing.NeverClosing,
+      )
+      .applyFut(
+        Future(Process(testOcspRequestCommand).!!(processLogger)),
+        retry.AllExceptionRetryPolicy,
+      )
+  }
 
   private def ocspServerCommand = List(
     opensslExecutable,

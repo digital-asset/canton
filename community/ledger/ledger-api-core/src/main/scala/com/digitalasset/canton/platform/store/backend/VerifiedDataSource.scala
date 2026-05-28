@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.daml.timer.RetryStrategy
+import com.digitalasset.canton.lifecycle.HasSynchronizeWithClosing
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.platform.store.DbType
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.retry
+import com.digitalasset.canton.util.retry.Success
 
 import javax.sql.DataSource
 import scala.concurrent.duration.DurationInt
@@ -43,25 +45,30 @@ object VerifiedDataSource {
       traceContext: TraceContext,
   ): Future[DataSource] = {
     val logger = TracedLogger(loggerFactory.getLogger(getClass))
+    implicit val success: Success[Any] = retry.Success.always
     for {
-      dataSource <- RetryStrategy.constant(
-        attempts = MaxInitialConnectRetryAttempts,
-        waitTime = 1.second,
-      ) { (i, _) =>
-        Future {
-          val createdDatasource =
-            dataSourceStorageBackend.createDataSource(dataSourceConfig, loggerFactory)
-          logger.info(
-            s"Attempting to connect to the database (attempt $i/$MaxInitialConnectRetryAttempts)"
-          )
-          Using.resource(createdDatasource.getConnection)(
-            dataSourceStorageBackend.checkDatabaseAvailable
-          )
-          createdDatasource
-        }.thereafterP { case Failure(exception) =>
-          logger.warn(exception.getMessage)
-        }
-      }
+      dataSource <- retry
+        .Pause(
+          logger = logger,
+          operationName = "Connect to database",
+          maxRetries = MaxInitialConnectRetryAttempts,
+          delay = 1.second,
+          hasSynchronizeWithClosing = HasSynchronizeWithClosing.NeverClosing,
+        )
+        .applyFut(
+          Future {
+            val createdDatasource =
+              dataSourceStorageBackend.createDataSource(dataSourceConfig, loggerFactory)
+            logger.info("Attempting to connect to the database")
+            Using.resource(createdDatasource.getConnection)(
+              dataSourceStorageBackend.checkDatabaseAvailable
+            )
+            createdDatasource
+          }.thereafterP { case Failure(exception) =>
+            logger.warn(exception.getMessage)
+          },
+          retry.AllExceptionRetryPolicy,
+        )
       _ <- Future {
         Using.resource(dataSource.getConnection)(
           dataSourceStorageBackend.checkCompatibility

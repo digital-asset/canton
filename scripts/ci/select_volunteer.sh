@@ -19,7 +19,7 @@ members=(
   "UPED4TSGN"   # Simon
   # Protocol
   "U5LC1FB6D"   # Gerolf
-  "U046D8XGD7H" # Kirill
+  # "U046D8XGD7H" # Kirill
   "U03FH83LRNH" # Meriam
   "UF766DLN4"   # Oliver
   "U0ASDV1UV2S" # Ostap

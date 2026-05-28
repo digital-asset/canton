@@ -7,6 +7,7 @@ import cats.implicits.catsSyntaxSemigroup
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.participant.admin.AdminWorkflowServices
+import com.digitalasset.canton.topology.ForceFlag.AllowUnvettedDependencies
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchronizerId}
@@ -36,6 +37,10 @@ import java.io.File
 class SetupPackageVetting(
     darPaths: Set[String /* DAR path */ ],
     targetTopology: Map[PhysicalSynchronizerId, Map[ParticipantReference, Set[VettedPackage]]],
+    explicitDependencyUnvettingTopology: Map[
+      PhysicalSynchronizerId,
+      Map[ParticipantReference, Set[LfPackageId]],
+    ],
 ) {
   def run(): Unit = {
     val participants = targetTopology.view.values.flatMap(_.keys).toSet
@@ -77,6 +82,17 @@ class SetupPackageVetting(
         .filter(_._2.nonEmpty)
         .foreach { case (participant, vettedPackages) =>
           val packageIdsWithExplicitVetting = vettedPackages.map(_.packageId)
+          val explicitUnvettings = explicitDependencyUnvettingTopology
+            .get(synchronizerId)
+            .flatMap(_.get(participant))
+            .getOrElse(Set.empty)
+
+          if (packageIdsWithExplicitVetting.exists(explicitUnvettings))
+            throw new IllegalArgumentException(
+              s"Conflicting vetting and unvetting declarations for participant ${participant.id} in synchronizer $synchronizerId: " +
+                s"package-ids ${packageIdsWithExplicitVetting.intersect(explicitUnvettings)} are declared both as explicitly vetted and explicitly unvetted"
+            )
+
           val vettedPackagesAdditions = vettedPackages ++ {
             // Add the dependencies of all DAR main package-ids
             VettedPackage.unbounded(
@@ -90,10 +106,17 @@ class SetupPackageVetting(
                 .filterNot(packageIdsWithExplicitVetting)
             )
           }
+          val additions = vettedPackagesAdditions
+            // Remove explicit unvetting of dependencies
+            .filterNot(pkg => explicitUnvettings(pkg.packageId))
           participant.topology.vetted_packages.propose_delta(
             participant = participant.id,
             store = synchronizerId,
-            adds = vettedPackagesAdditions.toSeq,
+            adds = additions.toSeq,
+            // TODO(#29834): Remove the force flag once dependency unvetting is supported without it
+            force =
+              if (explicitUnvettings.nonEmpty) ForceFlags(AllowUnvettedDependencies)
+              else ForceFlags.none,
           )
 
           val allParticipants = participantsPerSynchronizer(synchronizerId)
@@ -110,7 +133,7 @@ class SetupPackageVetting(
                 .packages
                 .toSet
 
-              if (vettedPackagesAdditions.subsetOf(currentVettingState)) () else fail()
+              if (additions.subsetOf(currentVettingState)) () else fail()
             }
           }
         }
@@ -199,7 +222,15 @@ object SetupPackageVetting {
 
   def apply(
       darPaths: Set[String],
-      targetTopology: Map[PhysicalSynchronizerId, Map[ParticipantReference, Set[VettedPackage]]],
+      targetTopology: Map[PhysicalSynchronizerId, Map[ParticipantReference, Set[
+        VettedPackage
+      ]]],
+      // TODO(#29834): Remove this explicit unvetting option once this declarative
+      //               util does not need to vet dependencies explicitly anymore
+      explicitDependencyUnvettingTopology: Map[
+        PhysicalSynchronizerId,
+        Map[ParticipantReference, Set[LfPackageId]],
+      ] = Map.empty,
   ): Unit =
-    new SetupPackageVetting(darPaths, targetTopology).run()
+    new SetupPackageVetting(darPaths, targetTopology, explicitDependencyUnvettingTopology).run()
 }

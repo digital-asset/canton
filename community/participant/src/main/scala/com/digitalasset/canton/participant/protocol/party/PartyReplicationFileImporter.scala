@@ -36,8 +36,6 @@ import scala.concurrent.{ExecutionContext, blocking}
 /** The party replication file importer imports a party's active contracts on a specific
   * synchronizer and timestamp previously exported from a source participant.
   *
-  * @param partyId
-  *   The party that is being replicated.
   * @param requestId
   *   The "add party" request id that this replication is associated with.
   * @param psid
@@ -57,7 +55,6 @@ import scala.concurrent.{ExecutionContext, blocking}
   *   Test interceptor only alters behavior in integration tests.
   */
 class PartyReplicationFileImporter(
-    partyId: PartyId,
     requestId: AddPartyRequestId,
     protected val psid: PhysicalSynchronizerId,
     partyOnboardingAt: EffectiveTime,
@@ -70,7 +67,6 @@ class PartyReplicationFileImporter(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
     extends TargetParticipantAcsPersistence(
-      partyId,
       requestId,
       psid,
       partyOnboardingAt,
@@ -161,7 +157,6 @@ object PartyReplicationFileImporter {
       connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
         .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
     new PartyReplicationFileImporter(
-      partyId,
       requestId,
       connectedSynchronizer.psid,
       partyOnboardingAt,

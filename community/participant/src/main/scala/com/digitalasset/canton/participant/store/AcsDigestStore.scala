@@ -14,6 +14,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 import scala.collection.immutable
+import scala.math.Ordering.Implicits.*
 
 trait AcsDigestStore {
 
@@ -46,11 +47,11 @@ trait AcsDigestStore {
 
   /** Deletes all checkpoint record times that are lower than `toExclusive`. Then deletes all digest
     * entries in [[party]] and [[participant]] whose record time is lower than `toExclusive` and
-    * that satisfy one of the following conditions:
+    * that satisfies one of the following conditions:
     *
     *   - The entry has been replaced (see
     *     [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigestUpdate.replacesRecordTime]])
-    *     by an entry with a higher record time, but still lower than `toExclusive`.
+    *     by an entry with a higher record time, but still lower than or equal to `toExclusive`.
     *   - The entry's [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigest.digestO]]
     *     is [[scala.None$]].
     */
@@ -104,26 +105,6 @@ object AcsDigestStore {
         digests: immutable.Iterable[AcsDigestUpdate[K, V]]
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
-    /** Deletes all digest entries whose record time is higher than `fromExclusive`.
-      */
-    private[AcsDigestStore] def deleteAfter(fromExclusive: RecordTime)(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Unit]
-
-    /** Deletes all digest entries whose record time is lower than `toExclusive` and that satisfy
-      * one of the following conditions:
-      *
-      *   - The entry has been replaced (see
-      *     [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigestUpdate.replacesRecordTime]])
-      *     by an entry with a higher record time, but still lower than `toExclusive`.
-      *   - The entry's
-      *     [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigest.digestO]] is
-      *     [[scala.None$]].
-      */
-    private[AcsDigestStore] def deleteUpTo(toExclusive: RecordTime)(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Unit]
-
     /** Returns the latest entry for the given key up to the given record time (inclusive), if any.
       */
     def lookup(
@@ -143,19 +124,22 @@ object AcsDigestStore {
         traceContext: TraceContext
     ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K, V]]]
 
-    /** Returns a snapshot of all entries as of a `atInclusive`. The snapshot includes the latest
-      * entry for each key whose record time is lower than or equal to `atInclusive`.
+    /** Returns a snapshot of all entries as of a given
+      * [[com.digitalasset.canton.participant.event.RecordTime AtInclusive]] value. The snapshot
+      * includes the latest entry for each key whose record time is lower than or equal to the given
+      * [[com.digitalasset.canton.participant.event.RecordTime AtInclusive]] value.
       *
       * @param limit
       *   The maximum number of entries to return.
-      * @param token
-      *   A token to continue a previous [[snapshot]] call that returned a token. Use
-      *   [[scala.None$]] for the first call.
+      * @param tokenOrStart
+      *   Either a token to continue a previous [[snapshot]] call that returned a token or a
+      *   [[com.digitalasset.canton.participant.event.RecordTime]] for the inclusive first snapshot
+      *   call. Use [[scala.util.Right$]] for the first call.
       * @return
       *   Up to `limit` many entries for keys and possibly a continuation token.
       */
-    def snapshot(atInclusive: RecordTime, limit: Int, token: Option[SnapshotPaginationToken])(
-        implicit traceContext: TraceContext
+    def snapshot(tokenOrStart: Either[SnapshotPaginationToken, AtInclusive], limit: Int)(implicit
+        traceContext: TraceContext
     ): FutureUnlessShutdown[
       (
           immutable.Iterable[AcsDigest[K, V]],
@@ -163,24 +147,24 @@ object AcsDigestStore {
       )
     ]
     type SnapshotPaginationToken
+    type AtInclusive = RecordTime
 
-    /** For all the keys whose entries have been updated between `fromInclusive` and `toExclusive`,
-      * returns the latest such update.
+    /** For all the keys whose entries have been updated between the given
+      * [[AcsDigestStore.ChangesBetweenTimeRange]]'s `fromInclusive` and `toExclusive`, returns the
+      * latest such update.
       *
+      * @param tokenOrStart
+      *   The time range to query the data or a token to continue a previous [[changesBetween]] call
+      *   that returned a token. Use [[scala.util.Right]] for the first call.
       * @param limit
       *   The maximum number of entries to return.
-      * @param token
-      *   A token to continue a previous [[changesBetween]] call that returned a token. Use
-      *   [[scala.None$]] for the first call.
       * @return
       *   Up to `limit` many entries with updates in the given period and possibly a continuation
       *   token.
       */
     def changesBetween(
-        fromInclusive: RecordTime,
-        toExclusive: RecordTime,
+        tokenOrStart: Either[ChangesBetweenPaginationToken, ChangesBetweenTimeRange],
         limit: Int,
-        token: Option[ChangesBetweenPaginationToken],
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[
       (
           immutable.Iterable[AcsDigest[K, V]],
@@ -220,6 +204,13 @@ object AcsDigestStore {
     ): FutureUnlessShutdown[Unit]
   }
 
+  /** This range is specifically designed to give a time range constrain to
+    * [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal.changesBetween]].
+    */
+  final case class ChangesBetweenTimeRange(fromInclusive: RecordTime, toExclusive: RecordTime) {
+    require(fromInclusive < toExclusive, s"$fromInclusive should be less than $toExclusive.")
+  }
+
   /** Represents the running digest of the active contracts shared with a key at a given record
     * time. The digest is [[scala.None]] when the key's digest is deleted at the record time.
     */
@@ -232,7 +223,7 @@ object AcsDigestStore {
   }
 
   /** Represents an update to the running digest of the shared active contract for a key at a given
-    * record time, together with a by-record-time reference to the entry it is replaces, if any.
+    * record time, together with a by-record-time reference to the entry it replaces, if any.
     */
   final case class AcsDigestUpdate[+K, +V](
       digestUpdate: AcsDigest[K, V],

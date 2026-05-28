@@ -13,7 +13,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.*
-import com.digitalasset.canton.integration.plugins.UseExternalProcess.RunVersion
+import com.digitalasset.canton.integration.plugins.UseExternalProcess.ReleasePath
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   ApiUserManagementServiceSuppressionRule,
@@ -165,10 +165,18 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
       implicit env =>
         import env.*
 
-        val cantonReleaseVersion = RunVersion.Release(binDir)
+        val cantonReleaseVersion = ReleasePath(binDir)
 
-        externalSynchronizer.start(remoteMediator1.name, cantonReleaseVersion)
-        externalSynchronizer.start(remoteSequencer1.name, cantonReleaseVersion)
+        externalSynchronizer.start(
+          remoteMediator1.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
+        externalSynchronizer.start(
+          remoteSequencer1.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
         participants.local.start()
 
         clue(
@@ -249,7 +257,7 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
       implicit env =>
         import env.*
 
-        val cantonReleaseVersion = RunVersion.Release(binDir)
+        val cantonReleaseVersion = ReleasePath(binDir)
 
         sequencer1.start()
         mediator1.start()
@@ -264,9 +272,21 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
         ).bootstrap()
 
         // Run the participants from the release binary
-        external.start(remoteParticipant1.name, cantonReleaseVersion)
-        external.start(remoteParticipant2.name, cantonReleaseVersion)
-        external.start(remoteParticipant3.name, cantonReleaseVersion)
+        external.start(
+          remoteParticipant1.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
+        external.start(
+          remoteParticipant2.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
+        external.start(
+          remoteParticipant3.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
         remoteParticipant1.health.wait_for_initialized()
         remoteParticipant2.health.wait_for_initialized()
         remoteParticipant3.health.wait_for_initialized()
@@ -319,7 +339,7 @@ trait ProtocolContinuityConformanceTestPing extends ProtocolContinuityConformanc
       implicit env =>
         import env.*
 
-        val cantonReleaseVersion = RunVersion.Release(binDir)
+        val cantonReleaseVersion = ReleasePath(binDir)
 
         sequencer1.start()
         mediator1.start()
@@ -338,7 +358,11 @@ trait ProtocolContinuityConformanceTestPing extends ProtocolContinuityConformanc
         participant1.health.wait_for_initialized()
 
         // External participant on release R
-        external.start(remoteParticipant2.name, cantonReleaseVersion)
+        external.start(
+          remoteParticipant2.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
         remoteParticipant2.health.wait_for_initialized()
 
         // Connect both participants to the synchronizer
@@ -388,6 +412,11 @@ private[continuity] object ProtocolContinuityConformanceTest {
         val (stables, nonStables) = versions.partition(_.isStable)
         stables.maxOption.toList ++ nonStables.maxOption.toList
       }
+      /*
+        This version does not have the tooling that allows to filter out unknown config keys.
+        Since nobody is using it anymore, we rely on testing 3.4.12 snapshot instead.
+       */
+      .filterNot(_ == ReleaseVersion(3, 4, 11))
 
     val tested = for {
       release <- latestStableAndNonStablePerMinor
@@ -406,99 +435,19 @@ private[continuity] object ProtocolContinuityConformanceTest {
   }
 
   private[continuity] val removeConfigPaths: Set[(String, Option[(String, Any)])] = {
-    val topLevel = Seq(
-      "monitoring.logging.api.debug-in-process-requests",
-      "monitoring.logging.api.prefix-grpc-addresses",
-      "monitoring.sanitize-public-error-messages",
-      "parameters.threading",
-      "parameters.fail-on-unknown-config-keys",
-    )
-    val perParticipant = (1 to 3).flatMap { p =>
-      val base = s"participants.participant$p"
-      Seq(
-        s"$base.admin-api.max-concurrent-calls-per-connection",
-        s"$base.crypto.parallelism",
-        s"$base.crypto.session-signing-keys",
-        s"$base.ledger-api.index-service.contract-pruning-delay-before-retry",
-        s"$base.ledger-api.index-service.contract-pruning-max-retries",
-        s"$base.ledger-api.index-service.max-lookup-limit",
-        s"$base.ledger-api.interactive-submission-service.maximum-number-of-signatures-per-party",
-        s"$base.ledger-api.max-concurrent-calls-per-connection",
-        s"$base.ledger-api.postgres-data-source.client-connection-check-interval",
-        s"$base.ledger-api.postgres-data-source.network-timeout",
-        s"$base.ledger-api.state-service",
-        s"$base.ledger-api.topology-aware-package-selection.max-passes-default",
-        s"$base.ledger-api.topology-aware-package-selection.max-passes-limit",
-        s"$base.ledger-api.update-service",
-        s"$base.parameters.alpha-multi-synchronizer-support",
-        s"$base.parameters.caching.bft-ordering-batch-cache",
-        s"$base.parameters.caching.sequencer-catchup-payload-cache",
-        s"$base.parameters.commit-after-failed-activeness-check",
-        s"$base.parameters.commitment-use-db-snapshot-for-participant-lookup",
-        s"$base.parameters.ledger-api-server.indexer.achs-config",
-        s"$base.parameters.ledger-api-server.indexer.postgres-data-source",
-        s"$base.parameters.ledger-api-server.indexer.submission-batch-insertion-size",
-        s"$base.parameters.ledger-api-server.indexer.use-weighted-batching",
-        s"$base.parameters.lsu",
-        s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
-        s"$base.sequencer-client.channel-flow-control-window",
-        s"$base.sequencer-client.channel-max-inbound-message-size",
-        s"$base.sequencer-client.keep-alive-client.idle-timeout",
-        s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
-        s"$base.crypto.enable-experimental",
+    /*
+    For some unknown reason, the missing key is reported as
+      circuit-breaker.messages.lsu-sequencing-test
+    instead of the full
+      sequencers.sequencer1.sequencer.block.circuit-breaker.messages.lsu-sequencing-test
+
+    We will keep this exception.
+     */
+    val perSequencer =
+      Seq[String](
+        "sequencers.sequencer1.sequencer.block.circuit-breaker.messages.lsu-sequencing-test"
       )
-    }
-    val perMediator = {
-      val base = "mediators.mediator1"
-      Seq(
-        s"$base.admin-api.max-concurrent-calls-per-connection",
-        s"$base.caching.bft-ordering-batch-cache",
-        s"$base.caching.sequencer-catchup-payload-cache",
-        s"$base.crypto.parallelism",
-        s"$base.crypto.session-signing-keys",
-        s"$base.parameters.caching.bft-ordering-batch-cache",
-        s"$base.parameters.caching.sequencer-catchup-payload-cache",
-        s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
-        s"$base.sequencer-client.channel-flow-control-window",
-        s"$base.sequencer-client.channel-max-inbound-message-size",
-        s"$base.sequencer-client.keep-alive-client.idle-timeout",
-        s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
-        s"$base.crypto.enable-experimental",
-      )
-    }
-    val perSequencer = {
-      val base = "sequencers.sequencer1"
-      Seq(
-        s"$base.admin-api.max-concurrent-calls-per-connection",
-        s"$base.crypto.parallelism",
-        s"$base.crypto.session-signing-keys",
-        s"$base.declarative",
-        s"$base.parameters.caching.bft-ordering-batch-cache",
-        s"$base.parameters.caching.sequencer-catchup-payload-cache",
-        s"$base.parameters.delay-requests-before-lsu-traffic-init",
-        s"$base.parameters.lsu-repair",
-        s"$base.parameters.produce-post-ordering-topology-ticks",
-        s"$base.parameters.unsafe-sequencer-channel-support",
-        s"$base.parameters.disable-submission-checks-for-testing",
-        // Once we remove PV34, we can remove this exception
-        s"$base.parameters.disable-release-version-handshake-check",
-        s"$base.public-api.max-concurrent-calls-per-connection",
-        s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
-        s"$base.sequencer-client.channel-flow-control-window",
-        s"$base.sequencer-client.channel-max-inbound-message-size",
-        s"$base.sequencer-client.keep-alive-client.idle-timeout",
-        s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
-        s"$base.sequencer.block.circuit-breaker.messages.lsu-sequencing-test",
-        s"$base.sequencer.block.throughput-cap.strict",
-        s"$base.sequencer.block.throughput-cap.thresholds",
-        s"$base.sequencer.block.throughput-cap.update-every-ms",
-        s"$base.parameters.lsu",
-        s"$base.crypto.enable-experimental",
-      )
-    }
-    (topLevel ++ perParticipant ++ perMediator ++ perSequencer)
-      .map(_ -> Option.empty[(String, Any)])
-      .toSet
+    perSequencer.map(_ -> Option.empty[(String, Any)]).toSet
   }
 
 }

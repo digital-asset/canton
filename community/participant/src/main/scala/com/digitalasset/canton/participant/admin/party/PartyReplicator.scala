@@ -1110,7 +1110,7 @@ final class PartyReplicator(
           // activation changes have been indexed.
           _ <- EitherT.right[String](
             connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
-              .traverse(_.purgeContractActivationChanges(params.partyId))
+              .traverse(_.purgeContractActivationChanges())
           )
 
           status <-

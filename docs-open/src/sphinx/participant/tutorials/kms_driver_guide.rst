@@ -141,12 +141,10 @@ Develop and Test a KMS Driver
 Set Up API Dependency
 ~~~~~~~~~~~~~~~~~~~~~
 
-.. todo:: Publish KMS driver api to maven central <https://github.com/DACH-NY/canton/issues/29385>
 
-The Canton KMS Driver API is published as an artifact on Digital Asset's JFrog
-Artifactory:
+The Canton KMS Driver API is published as an artifact on Maven Central:
 
-https://digitalasset.jfrog.io/ui/repos/tree/General/canton-kms-driver-api
+https://repo1.maven.org/maven2/com/daml/kms-driver-api_2.13
 
 You must have a Canton enterprise license and account to access the artifact.
 You may need to configure your build system to authenticate with a personal
@@ -155,7 +153,7 @@ access token towards JFrog Artifactory.
 In your build system of choice, you need to depend on the API as a regular
 Maven-style artifact with:
 
--  organization: com.digitalasset.canton
+-  organization: com.daml
 -  artifact: kms-driver-api
 -  version: the Canton release version, e.g., 3.3.0
 
@@ -191,11 +189,9 @@ starting Canton with your KMS Driver.
 KMS Driver Testing
 ~~~~~~~~~~~~~~~~~~
 
-.. todo:: Publish KMS driver api to maven central <https://github.com/DACH-NY/canton/issues/29385>
-
-The reusable test suite for KMS Drivers is published at
-`canton-kms-driver-testing
-<https://digitalasset.jfrog.io/ui/repos/tree/General/canton-kms-driver-testing>`__.
+The reusable test suite for KMS Drivers is published to Maven Central at
+`kms-driver-testing
+<https://https://repo1.maven.org/maven2/com/daml/kms-driver-testing_2.13>`__.
 Configure your build system to depend on this maven artifact in the test scope
 of your project (e.g. for sbt append ``% Test`` to limit the dependency to the test
 scope).

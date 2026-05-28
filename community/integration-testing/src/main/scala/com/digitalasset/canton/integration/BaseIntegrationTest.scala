@@ -190,6 +190,9 @@ private[integration] trait BaseIntegrationTest
 
     def asScalaProtoCreated: Option[com.daml.ledger.api.v2.event.CreatedEvent] =
       com.daml.ledger.api.v2.event.Event.fromJavaProto(events.toProtoEvent).event.created
+
+    def asScalaProtoExercised: Option[com.daml.ledger.api.v2.event.ExercisedEvent] =
+      com.daml.ledger.api.v2.event.Event.fromJavaProto(events.toProtoEvent).event.exercised
   }
 
   implicit class EnrichedEvents(events: java.util.List[Event]) {

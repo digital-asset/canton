@@ -219,14 +219,15 @@ private[execution] class TapsCommandExecutionFactory(
             userSpecifiedPreference.view.mapValues(_.map(_.pkgId).toSet).toMap,
           restrictionDescription = "Commands.package_id_selection_preference",
         )
-        perSynchronizerCandidates = partyVettingMap.view.mapValues { partiesVettingState =>
+        perSynchronizerCandidates = partyVettingMap.view.map { case (syncId, partiesVettingState) =>
           val candidates = PackagePreferenceBackend.computePerSynchronizerPackageCandidates(
             partiesVettingState = partiesVettingState,
             packageMetadataSnapshot = packageMetadataSnapshot,
             packageFilter = packageFilter,
             requirements = partyPackageRequirements,
+            synchronizerProtocolVersion = syncId.protocolVersion,
           )
-          applyRootPackageNamesRestriction(candidates, rootLevelPackageNames)
+          syncId -> applyRootPackageNamesRestriction(candidates, rootLevelPackageNames)
         }
 
         (discardedSyncs, availableSyncs) = perSynchronizerCandidates

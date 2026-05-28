@@ -60,7 +60,8 @@ trait AcsCommitmentStore
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit]
 
   /** Marks a period as processed and thus its end as a safe point for crash-recovery.
@@ -70,7 +71,8 @@ trait AcsCommitmentStore
     * The period must be after the time point returned by [[lastComputedAndSent]].
     */
   def markComputedAndSent(period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit]
 
   /** Store a received ACS commitment. To be called by the ACS commitment processor only.
@@ -104,7 +106,7 @@ trait AcsCommitmentStore
   def markSafe(
       counterParticipant: ParticipantId,
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
       periods,
@@ -127,7 +129,7 @@ trait AcsCommitmentStore
   def markUnsafe(
       counterParticipant: ParticipantId,
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
       periods,
@@ -149,7 +151,7 @@ trait AcsCommitmentStore
       counterParticipant: ParticipantId,
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit]
 
   val runningCommitments: IncrementalCommitmentStore
 

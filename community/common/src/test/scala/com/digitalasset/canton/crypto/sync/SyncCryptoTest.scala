@@ -28,6 +28,7 @@ import com.digitalasset.canton.crypto.{
   TestHash,
 }
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
@@ -139,6 +140,7 @@ trait SyncCryptoTest
       testedReleaseProtocolVersion,
       futureSupervisor,
       wallClock,
+      CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
       BatchingConfig(),

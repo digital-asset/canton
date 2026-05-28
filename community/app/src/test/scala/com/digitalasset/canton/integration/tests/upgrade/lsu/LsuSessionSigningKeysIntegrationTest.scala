@@ -87,7 +87,10 @@ final class LsuSessionSigningKeysIntegrationTest
         // current number of times session signing keys are not used,
         // and we fall back to signing with the long-term key
         def fallbackSessionSigningKeyMetrics =
-          participant1.underlying.value.metrics.kmsMetrics.sessionSigningKeysFallback.valuesWithContext
+          participant1.underlying.value.metrics.cryptoMetrics.kmsMetricsO
+            .valueOrFail("no KMS metrics")
+            .sessionSigningKeysFallback
+            .valuesWithContext
 
         val initialFallbackMetric = fallbackSessionSigningKeyMetrics
 

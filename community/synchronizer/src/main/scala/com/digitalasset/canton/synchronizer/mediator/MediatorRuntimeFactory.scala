@@ -190,7 +190,6 @@ object MediatorRuntimeFactory {
       synchronizerOutbox,
       timeTracker,
       state,
-      asynchronousProcessing = config.asynchronousProcessing,
       sequencerCounterTrackerStore,
       sequencedEventStore,
       nodeParameters,

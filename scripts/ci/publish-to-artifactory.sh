@@ -95,7 +95,7 @@ if [[ "$nightly_release" == "false" || $(date +"%u") -eq 2 ]]; then
   echo "Done publishing internal jar lib artifacts"
 
   # publish external jar artifacts
-  list=("community/kms-driver-api kms-driver-api kms-driver-api" "kms-driver-testing-lib kms-driver-testing kms-driver-testing-lib" "community/mock-kms-driver mock-kms-driver mock-kms-driver")
+  list=("community/mock-kms-driver mock-kms-driver mock-kms-driver")
   for i in "${list[@]}"
   do
     set -- $i # convert the "tuple" into the param args $1 $2...

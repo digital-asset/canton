@@ -7,6 +7,8 @@ import com.digitalasset.canton.participant.store.PartyReplicationIndexingStoreTe
 
 class InMemoryPartyReplicationIndexingStoreTest extends PartyReplicationIndexingStoreTest {
   "InMemoryInFlightSubmissionStore" should {
-    behave like (partyReplicationIndexingStore(() => new InMemoryPartyReplicationIndexingStore()))
+    behave like (partyReplicationIndexingStore(() =>
+      new InMemoryPartyReplicationIndexingStore(pauseIndexingDuringOnPR = false, loggerFactory)
+    ))
   }
 }

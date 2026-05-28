@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
@@ -28,6 +29,9 @@ final class SynchronizerCryptoPureApi(
 
   override def signatureVerificationParallelism: PositiveInt =
     pureCrypto.signatureVerificationParallelism
+
+  override def encryptionParallelism: PositiveInt =
+    pureCrypto.encryptionParallelism
 
   override def verifySignature(
       hash: Hash,
@@ -111,6 +115,8 @@ final class SynchronizerCryptoPureApi(
       symmetricKey: SymmetricKey,
   ): Either[EncryptionError, ByteString] = pureCrypto.encryptSymmetricWith(data, symmetricKey)
 
+  override def decryptionMetrics: DecryptionMetrics = pureCrypto.decryptionMetrics
+
   override def decryptWith[M](
       encrypted: Encrypted[M],
       symmetricKey: SymmetricKey,
@@ -145,11 +151,14 @@ final class SynchronizerCryptoPureApi(
   override def signingAlgorithmSpecs: CryptoScheme[SigningAlgorithmSpec] =
     pureCrypto.signingAlgorithmSpecs
 
-  override protected[crypto] def signBytes(
+  override def signingMetrics: SigningMetrics = pureCrypto.signingMetrics
+
+  override private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = signingAlgorithmSpecs.default,
   )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
     pureCrypto.signBytes(bytes, signingKey, usage, signingAlgorithmSpec)
+
 }

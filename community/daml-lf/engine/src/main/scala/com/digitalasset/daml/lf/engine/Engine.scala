@@ -161,7 +161,7 @@ class Engine(
           packageResolution = pkgResolution,
           submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
           metricPlugins = config.snapshotDir.fold(Seq.empty[MetricPlugin]) { _ =>
-            Seq(new metrics.StepCount(config.iterationsBetweenInterruptions), new metrics.TxNodeCount)
+            Seq(new metrics.FetchNodeCount, new metrics.StepCount(config.iterationsBetweenInterruptions), new metrics.TxNodeCount)
           },
         )
       (tx, meta, _) = result
@@ -628,6 +628,13 @@ class Engine(
                               .setName("TxNodeCount")
                               .setTotal(txNodeCount)
                               .build()
+                          } ++
+                          machine.metrics.totalCount[metrics.FetchNodeCount].map { fetchNodeCount =>
+                            Snapshot.MetricPlugin
+                              .newBuilder()
+                              .setName("FetchNodeCount")
+                              .setTotal(fetchNodeCount)
+                              .build()
                           }
                       val txEntry = Snapshot.TransactionEntry
                         .newBuilder()
@@ -651,6 +658,8 @@ class Engine(
                           StandardOpenOption.APPEND,
                         )
                       )
+
+                      machine.metrics.reset()
 
                       None
                     },

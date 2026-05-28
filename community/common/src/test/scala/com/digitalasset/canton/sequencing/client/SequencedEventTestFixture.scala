@@ -118,7 +118,8 @@ class SequencedEventTestFixture(
   )
 
   def mkAggregator(
-      config: MessageAggregationConfig = MessageAggregationConfig(PositiveInt.tryCreate(1))
+      useNewAggregator: Boolean,
+      config: MessageAggregationConfig = MessageAggregationConfig(PositiveInt.tryCreate(1)),
   ) = {
     val postAggregationHandler = new PostAggregationHandler {
       override def handlerIsIdleF: Future[Unit] = Future.unit
@@ -127,7 +128,8 @@ class SequencedEventTestFixture(
       ): Unit = ()
     }
 
-    new SequencerAggregator(
+    SequencerAggregator.create(
+      useNewAggregator,
       postAggregationHandler = postAggregationHandler,
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
       eventInboxSize = PositiveInt.tryCreate(2),

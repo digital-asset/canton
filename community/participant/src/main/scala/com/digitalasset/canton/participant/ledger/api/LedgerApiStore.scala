@@ -16,6 +16,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.platform.config.ServerRole
+import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend.DataSourceConfig
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawParticipantAuthorization,
   SequentialIdBatch,
@@ -36,8 +37,7 @@ import com.digitalasset.canton.{LedgerParticipantId, config}
 import com.google.common.annotations.VisibleForTesting
 
 import java.sql.Connection
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 
 class LedgerApiStore(
     val ledgerApiDbSupport: DbSupport,
@@ -96,65 +96,43 @@ class LedgerApiStore(
     )
 
   @VisibleForTesting
-  def lockPruning(
-      releaseLock: Promise[Unit],
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
-    val locked = Promise[Unit]()
-    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingLockPruning")) {
-      QueryStrategy.withoutNetworkTimeout { connection =>
-        eventStorageBackend.lockExclusivelyPruningProcessingTable(connection)
-        locked.trySuccess(()).discard
-        Await.result(releaseLock.future, timeout)
-      }(_, noTracingLogger)
+  private def withConnectionForTest(testFunction: Connection => Unit) = {
+    val conn = ledgerApiDbSupport.storageBackendFactory.createDataSourceStorageBackend
+      .createDataSource(
+        dataSourceConfig = DataSourceConfig(ledgerApiStorage.jdbcUrl),
+        loggerFactory = loggerFactory,
+      )
+      .getConnection
+    conn.setAutoCommit(false)
+    testFunction(conn)
+    new Object {
+      def commitAndClose(): Unit = {
+        conn.commit()
+        conn.close()
+      }
     }
-    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
   }
 
   @VisibleForTesting
-  def readLockContract(
-      internalContractId: Long,
-      releaseLock: Promise[Unit],
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
-    val locked = Promise[Unit]()
-    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingReadLockContract")) {
-      QueryStrategy.withoutNetworkTimeout { connection =>
-        eventStorageBackend.readLockInternalContractIds(Set(internalContractId))(connection).discard
-        locked.trySuccess(()).discard
-        Await.result(releaseLock.future, timeout)
-      }(_, noTracingLogger)
-    }
-    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
-  }
+  def lockPruning = withConnectionForTest(
+    QueryStrategy.withoutNetworkTimeout(
+      eventStorageBackend.lockExclusivelyPruningProcessingTable
+    )(_, noTracingLogger)
+  )
 
   @VisibleForTesting
-  def writeLockContract(
-      internalContractId: Long,
-      releaseLock: Promise[Unit],
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
-    val locked = Promise[Unit]()
-    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingWriteLockContract")) {
-      QueryStrategy.withoutNetworkTimeout { connection =>
-        eventStorageBackend
-          .writeLockInternalContractIds(cSQL"= $internalContractId")(connection)
-          .discard
-        locked.trySuccess(()).discard
-        Await.result(releaseLock.future, timeout)
-      }(_, noTracingLogger)
-    }
-    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
-  }
+  def readLockContract(internalContractId: Long) = withConnectionForTest(
+    QueryStrategy.withoutNetworkTimeout(
+      eventStorageBackend.readLockInternalContractIds(Set(internalContractId))(_).discard
+    )(_, noTracingLogger)
+  )
+
+  @VisibleForTesting
+  def writeLockContract(internalContractId: Long) = withConnectionForTest(
+    QueryStrategy.withoutNetworkTimeout(
+      eventStorageBackend.writeLockInternalContractIds(cSQL"= $internalContractId")(_)
+    )(_, noTracingLogger)
+  )
 
   @VisibleForTesting
   def numberOfAcceptedTransactionsFor(synchronizerId: SynchronizerId)(implicit

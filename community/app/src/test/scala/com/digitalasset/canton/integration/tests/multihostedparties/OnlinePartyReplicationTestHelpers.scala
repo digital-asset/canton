@@ -358,6 +358,7 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
       targetParticipant: ParticipantReference,
       addPartyRequestId: String,
       expectedNumContractsO: Option[NonNegativeInt],
+      onImportDone: () => Unit,
       waitAtMost: FiniteDuration = 2.minutes, // default enough for ~400 contracts
   ): Unit =
     eventually(
@@ -373,18 +374,27 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
             s"TP completed party replication but had unexpected number of contracts: $tpStatus, expected $expectedNumContractsO"
           )
         case tpStatus =>
+          if (acsImportDone(tpStatus, expectedNumContractsO)) {
+            logger.info(s"TP done with ACS import with status $tpStatus")
+            onImportDone()
+          }
+
           fail(s"TP did not complete party replication. TP status $tpStatus")
       }
     }
 
   private def finished(status: PartyReplicationStatus) =
     status.hasCompleted && status.errorO.isEmpty
+  private def acsImportDone(
+      status: PartyReplicationStatus,
+      expectedNumContractsO: Option[NonNegativeInt],
+  ) = status.replicationO.exists(progress =>
+    progress.fullyProcessedAcs && expectedNumContractsO.forall(progress.processedContractCount == _)
+  )
   private def countsMatch(
       status: PartyReplicationStatus,
       expectedNumContractsO: Option[NonNegativeInt],
-  ) = finished(status) && status.replicationO.exists(progress =>
-    progress.fullyProcessedAcs && expectedNumContractsO.forall(progress.processedContractCount == _)
-  )
+  ) = finished(status) && acsImportDone(status, expectedNumContractsO)
 
   @nowarn("msg=match may not be exhaustive")
   protected def eventuallyLedgerApiAcsInSyncBetweenSPAndTP(

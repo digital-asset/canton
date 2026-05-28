@@ -20,6 +20,11 @@ final class StepCount(val batchSize: Long) extends MetricPlugin {
   }
 
   override def totalCount: Result = stepBatchCount * batchSize + stepCount
+
+  override def reset(): Unit = {
+    stepBatchCount = 0
+    stepCount = 0
+  }
 }
 
 object StepCount {

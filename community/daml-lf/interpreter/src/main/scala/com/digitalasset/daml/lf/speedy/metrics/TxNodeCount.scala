@@ -17,4 +17,8 @@ final class TxNodeCount extends MetricPlugin {
   override def totalCount: Result = {
     txNodeCount
   }
+
+  override def reset(): Unit = {
+    txNodeCount = 0
+  }
 }

@@ -68,10 +68,9 @@ class SynchronizersFilterTest
       forAll(unsupportedSchemes) { unsupportedHashingScheme =>
         unsupportedHashingScheme shouldBe unsupportedHashingScheme
         val lfSerializationVersion =
-          LfSerializationVersionToProtocolVersions.lfSerializationVersionToMinimumProtocolVersions.collectFirst {
-            case (lfSerialization, minimumPv) if testedProtocolVersion >= minimumPv =>
-              lfSerialization
-          }.value
+          LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion(
+            testedProtocolVersion
+          )
         val filter =
           SynchronizersFilterForTx(
             Transactions.Create.tx(lfSerializationVersion),
@@ -182,10 +181,9 @@ class SynchronizersFilterTest
         filter
           .split(correctTopology, Transactions.Create.correctPackages)
           .futureValueUS
-      val requiredPV =
-        LfSerializationVersionToProtocolVersions.lfSerializationVersionToMinimumProtocolVersions
-          .get(LfSerializationVersion.VDev)
-          .value
+      val requiredPV = LfSerializationVersionToProtocolVersions.getMinimumSupportedProtocolVersion(
+        LfSerializationVersion.VDev
+      )
       unusableSynchronizers shouldBe List(
         UsableSynchronizers.UnsupportedMinimumProtocolVersion(
           synchronizerId = DefaultTestIdentities.physicalSynchronizerId,

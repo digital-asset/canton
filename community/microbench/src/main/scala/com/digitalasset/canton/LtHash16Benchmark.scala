@@ -17,21 +17,20 @@ class LtHash16Benchmark {
   private val input: Array[Byte] = new Array[Byte](80)
   private val rnd = new Random(42L)
 
-  def setup(): Unit = {
+  def setup(): Unit =
     rnd.nextBytes(input)
-  }
 
   @Benchmark
   def addOneBlake2(blackhole: Blackhole): Unit = {
     val h = LtHash16()
     h.add(input)
-    blackhole.consume(h.get())
+    blackhole.consume(h.getByteString())
   }
 
   @Benchmark
   def addOneBlake3(blackhole: Blackhole): Unit = {
-    val h = LtHash16Blake3()
+    val h = LtHash16Blake3.empty
     h.add(input)
-    blackhole.consume(h.get())
+    blackhole.consume(h.getByteString)
   }
 }

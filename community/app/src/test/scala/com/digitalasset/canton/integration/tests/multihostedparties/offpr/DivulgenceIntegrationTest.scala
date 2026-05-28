@@ -23,7 +23,7 @@ trait DivulgenceIntegrationTest extends OfflinePartyReplicationIntegrationTestBa
 
   // Make sure deduplication duration does not block pruning
   private val maxDedupDuration = java.time.Duration.ofSeconds(2)
-  private val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
+  override protected val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
 
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition

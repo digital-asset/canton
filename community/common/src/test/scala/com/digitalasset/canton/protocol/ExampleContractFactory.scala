@@ -15,6 +15,7 @@ import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKeyWithMaintainers,
   Node,
+  SerializationVersion,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueInt64}
@@ -50,7 +51,6 @@ object ExampleContractFactory extends EitherValues {
       signatories: Set[Ref.Party] = Set(signatory),
       stakeholders: Set[Ref.Party] = Set(signatory, observer, extra),
       keyOpt: Option[GlobalKeyWithMaintainers] = None,
-      version: LfSerializationVersion = LfTransactionBuilder.defaultSerializationVersion,
       cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
       overrideContractId: Option[ContractId] = None,
   ): GenContractInstance { type InstCreatedAtTime <: Time } = {
@@ -68,7 +68,7 @@ object ExampleContractFactory extends EitherValues {
       signatories = signatories,
       stakeholders = stakeholders,
       keyOpt = keyOpt,
-      version = version,
+      version = if (keyOpt.isDefined) SerializationVersion.V2 else SerializationVersion.V1,
     )
     fromCreateInternal[Time](create, createdAt, salt, cantonContractIdVersion, overrideContractId)
   }

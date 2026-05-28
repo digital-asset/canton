@@ -4,7 +4,6 @@
 package com.daml.ledger.api.testtool.infrastructure
 
 import com.daml.ledger.api.v2.state_service.GetConnectedSynchronizersRequest
-import com.daml.timer.RetryStrategy
 
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
@@ -17,8 +16,12 @@ object RetryingGetConnectedSynchronizersForParty {
   def apply(services: LedgerServices, party: String, minSynchronizers: Int)(implicit
       ec: ExecutionContext
   ): Future[Seq[String]] =
-    RetryStrategy
-      .exponentialBackoff(attempts = 20, 125.millis) { (_, _) =>
+    Eventually
+      .eventually(
+        "RetryingGetConnectedSynchronizersForParty",
+        attempts = 20,
+        firstWaitTime = 125.millis,
+      ) {
         services.state
           .getConnectedSynchronizers(new GetConnectedSynchronizersRequest(party, "", ""))
           .map(_.connectedSynchronizers.map(_.synchronizerId))

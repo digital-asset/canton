@@ -220,7 +220,8 @@ class IssConsensusModuleTest
                   nodes = nodes.toSet,
                   activationTime = nextTopologyActivationTime,
                 ),
-                allIds,
+                leaders = allIds,
+                blacklistedNodes = Seq.empty,
               ),
               failingCryptoProvider,
             )
@@ -249,7 +250,8 @@ class IssConsensusModuleTest
           Membership(
             myId,
             anOrderingTopology.copy(activationTime = TestBootstrapTopologyActivationTime),
-            allIds,
+            leaders = allIds,
+            blacklistedNodes = Seq.empty,
           )
         val latestCompletedEpochFromStore = EpochStore.Epoch(
           EpochInfo.forTesting(
@@ -479,7 +481,8 @@ class IssConsensusModuleTest
                       nodes = nodes.toSet,
                       activationTime = nextTopologyActivationTime,
                     ),
-                    nodes,
+                    leaders = nodes,
+                    blacklistedNodes = Seq.empty,
                   ),
                   failingCryptoProvider,
                 )
@@ -564,7 +567,8 @@ class IssConsensusModuleTest
                   nodes = allIds.toSet,
                   activationTime = nextTopologyActivationTime,
                 ),
-                allIds,
+                leaders = allIds,
+                blacklistedNodes = Seq.empty,
               ),
               failingCryptoProvider,
             )
@@ -1338,7 +1342,7 @@ private[iss] object IssConsensusModuleTest {
   private def anOrderingTopology(implicit pv: ProtocolVersion) =
     OrderingTopology.forTesting(allIds.toSet)
   private def aMembership(implicit pv: ProtocolVersion) =
-    Membership(myId, anOrderingTopology, allIds)
+    Membership(myId, anOrderingTopology, allIds, Seq.empty)
   private val aFakeCryptoProviderInstance1: CryptoProvider[ProgrammableUnitTestEnv] =
     failingCryptoProvider
   private val aFakeCryptoProviderInstance2: CryptoProvider[ProgrammableUnitTestEnv] =
@@ -1346,12 +1350,14 @@ private[iss] object IssConsensusModuleTest {
   private def aTopologyInfo(implicit pv: ProtocolVersion) =
     OrderingTopologyInfo[ProgrammableUnitTestEnv](
       myId,
-      anOrderingTopology,
-      aFakeCryptoProviderInstance2,
-      allIds,
+      currentTopology = anOrderingTopology,
+      currentCryptoProvider = aFakeCryptoProviderInstance2,
+      currentLeaders = allIds,
+      currentBlacklistedNodes = Seq.empty,
       previousTopology = anOrderingTopology, // not relevant
-      aFakeCryptoProviderInstance1,
-      allIds,
+      previousCryptoProvider = aFakeCryptoProviderInstance1,
+      previousLeaders = allIds,
+      previousBlacklistedNodes = Seq.empty,
     )
   private val aBootstrapEpoch = bootstrapEpoch(TestBootstrapTopologyActivationTime)
   private val aBootstrapEpochInfo = aBootstrapEpoch.info

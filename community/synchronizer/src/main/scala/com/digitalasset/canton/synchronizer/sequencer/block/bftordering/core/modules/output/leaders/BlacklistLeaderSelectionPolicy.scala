@@ -85,6 +85,18 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
     state.computeLeaders()
   }
 
+  override def getBlacklistedNodes(
+      orderingTopology: OrderingTopology,
+      epochNumber: EpochNumber,
+  ): Seq[BftNodeId] = {
+    assert(
+      state.epochNumber == epochNumber,
+      s"Leader selection is asked for blacklisted nodes in epoch $epochNumber but expects epoch ${state.epochNumber}",
+    )
+
+    state.computeBlacklistedNodes()
+  }
+
   private def updateState(
       topology: OrderingTopology,
       epochNumber: EpochNumber,

@@ -11,7 +11,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.nowarn
 
-class BasicDataContinuityTestPostgres_1
+final class BasicDataContinuityTestPostgresShard1
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -19,7 +19,7 @@ class BasicDataContinuityTestPostgres_1
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).first
 }
 
-class BasicDataContinuityTestPostgres_2
+final class BasicDataContinuityTestPostgresShard2
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -28,7 +28,7 @@ class BasicDataContinuityTestPostgres_2
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).second
 }
 
-class BasicDataContinuityTestPostgres_3
+final class BasicDataContinuityTestPostgresShard3
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -37,7 +37,7 @@ class BasicDataContinuityTestPostgres_3
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).third
 }
 
-class BasicDataContinuityTestPostgres_4
+final class BasicDataContinuityTestPostgresShard4
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -46,7 +46,7 @@ class BasicDataContinuityTestPostgres_4
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).fourth
 }
 
-class SynchronizerChangeDataContinuityTestPostgres_1
+final class SynchronizerChangeDataContinuityTestPostgresShard1
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -54,7 +54,7 @@ class SynchronizerChangeDataContinuityTestPostgres_1
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).first
 }
 
-class SynchronizerChangeDataContinuityTestPostgres_2
+final class SynchronizerChangeDataContinuityTestPostgresShard2
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -62,7 +62,7 @@ class SynchronizerChangeDataContinuityTestPostgres_2
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).second
 }
 
-class SynchronizerChangeDataContinuityTestPostgres_3
+final class SynchronizerChangeDataContinuityTestPostgresShard3
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
@@ -71,7 +71,7 @@ class SynchronizerChangeDataContinuityTestPostgres_3
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).third
 }
 
-class SynchronizerChangeDataContinuityTestPostgres_4
+final class SynchronizerChangeDataContinuityTestPostgresShard4
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)

@@ -226,7 +226,12 @@ sealed trait OnlinePartyReplicationFileBasedTest
     val expectedNumContracts = NonNegativeInt.tryCreate(numContractsInCreateBatch) * 2
 
     // Wait until TP reports that party replication has completed.
-    eventuallyOnPRCompletesOnTP(targetParticipant, addPartyRequestId, Some(expectedNumContracts))
+    eventuallyOnPRCompletesOnTP(
+      targetParticipant,
+      addPartyRequestId,
+      Some(expectedNumContracts),
+      () => (),
+    )
   }
 
   "Ensure source and target participant Ledger Api ACS match" onlyRunWith ProtocolVersion.dev in {

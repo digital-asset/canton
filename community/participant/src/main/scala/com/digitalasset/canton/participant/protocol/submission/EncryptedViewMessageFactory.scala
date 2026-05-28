@@ -117,7 +117,7 @@ object EncryptedViewMessageFactory {
         maxRequestSize <- getMaxRequestSize(cryptoSnapshot)
         encryptedMultiView <- EitherT.fromEither[FutureUnlessShutdown](
           EncryptedMultipleViews
-            .compressed[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType)(
+            .compressAndEncryptViews[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType)(
               viewTrees,
               MaxBytesToDecompress(maxRequestSize.value),
             )
@@ -213,9 +213,10 @@ object EncryptedViewMessageFactory {
     for {
       maxRequestSize <- getMaxRequestSize(cryptoSnapshot)
       messages <-
-        if (parallel) {
-          // TODO(#32314) Add parallelism limit to the parTraverse calls
-          viewTreesWithRecipients.forgetNE.parTraverse { case (recipients, view) =>
+        if (parallel)
+          MonadUtil.parTraverseWithLimit(cryptoSnapshot.pureCrypto.encryptionParallelism)(
+            viewTreesWithRecipients
+          ) { case (recipients, view) =>
             doEncryptNonGroupedView(viewType)(
               view,
               viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
@@ -226,7 +227,7 @@ object EncryptedViewMessageFactory {
               protocolVersion,
             )
           }
-        } else {
+        else
           MonadUtil.sequentialTraverse(viewTreesWithRecipients) { case (recipients, view) =>
             doEncryptNonGroupedView(viewType)(
               view,
@@ -238,7 +239,6 @@ object EncryptedViewMessageFactory {
               protocolVersion,
             )
           }
-        }
     } yield NonEmptyUtil.fromUnsafe(
       messages
     ) // We know it's non empty, since we started with a NonEmpty instance as input
@@ -537,26 +537,27 @@ object EncryptedViewMessageFactory {
     // we start from top to bottom of the tree (i.e., pre-order) so the parent's randomness is created before it's
     // actually needed
     for {
-      viewRecipientsAndInformeeParticipants <- viewRecipients.parTraverse {
-        case (vhR, parentRecipientsO, informees) =>
-          getInformeeParticipantsAndKeys(informees).flatMap {
-            case (informeeParticipants, encryptionKeys) =>
-              NonEmpty
-                .from(informeeParticipants)
-                .toRight(
-                  UnableToDetermineRecipients(
-                    "The list of informee participants is empty"
-                  ): EncryptedViewMessageCreationError
+      viewRecipientsAndInformeeParticipants <- MonadUtil.parTraverseWithLimit(
+        cryptoSnapshot.pureCrypto.encryptionParallelism
+      )(viewRecipients) { case (vhR, parentRecipientsO, informees) =>
+        getInformeeParticipantsAndKeys(informees).flatMap {
+          case (informeeParticipants, encryptionKeys) =>
+            NonEmpty
+              .from(informeeParticipants)
+              .toRight(
+                UnableToDetermineRecipients(
+                  "The list of informee participants is empty"
+                ): EncryptedViewMessageCreationError
+              )
+              .map(informeeParticipantsNE =>
+                vhR -> ViewParticipantsKeysAndParentRecipients(
+                  informeeParticipantsNE,
+                  encryptionKeys,
+                  parentRecipientsO,
                 )
-                .map(informeeParticipantsNE =>
-                  vhR -> ViewParticipantsKeysAndParentRecipients(
-                    informeeParticipantsNE,
-                    encryptionKeys,
-                    parentRecipientsO,
-                  )
-                )
-                .toEitherT[FutureUnlessShutdown]
-          }
+              )
+              .toEitherT[FutureUnlessShutdown]
+        }
       }
 
       // this map keeps track of the randomnesses that we generate/revoke or use directly from the cache
@@ -575,8 +576,10 @@ object EncryptedViewMessageFactory {
         }
       viewKeyDataWithReferences <-
         if (parallel)
-          randomnessRevocationMap.toList
-            .parTraverse { case (recipientGroup, randomnessRevocationInfo) =>
+          MonadUtil
+            .parTraverseWithLimit(pureCrypto.encryptionParallelism)(
+              randomnessRevocationMap.toList
+            ) { case (recipientGroup, randomnessRevocationInfo) =>
               mkSessionKeyData(
                 recipientGroup,
                 randomnessRevocationInfo,

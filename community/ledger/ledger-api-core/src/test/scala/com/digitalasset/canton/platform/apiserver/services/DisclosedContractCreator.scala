@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services
 import com.daml.ledger.api.v2.commands.DisclosedContract
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.LfValue
-import com.digitalasset.canton.protocol.{ExampleContractFactory, LfSerializationVersion}
+import com.digitalasset.canton.protocol.ExampleContractFactory
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.{
@@ -18,8 +18,6 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueTrue}
 
 object DisclosedContractCreator {
-
-  private val testTxVersion = LfSerializationVersion.minVersion
 
   private object api {
     val templateId: Identifier =
@@ -73,7 +71,6 @@ object DisclosedContractCreator {
         signatories = api.signatories,
         stakeholders = api.stakeholders,
         keyOpt = Some(lf.keyWithMaintainers),
-        version = testTxVersion,
       )
       .inst
   }

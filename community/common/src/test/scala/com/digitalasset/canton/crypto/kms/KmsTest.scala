@@ -38,6 +38,7 @@ import com.digitalasset.canton.crypto.{
   SigningPublicKey,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ByteString190, ByteString256, ByteString4096}
@@ -94,6 +95,7 @@ trait KmsTest extends BaseTest with BeforeAndAfterAll {
       SessionEncryptionKeyCacheConfig(),
       CachingConfigs.defaultPublicKeyConversionCache,
       CryptoSchemes.tryFromConfig(config),
+      CommonMockMetrics.cryptoMetrics,
       loggerFactory,
     )
     .valueOrFail("create crypto with JCE provider")

@@ -150,7 +150,7 @@ final case class EncryptedMultipleViews[+VT <: ViewType](
 }
 
 object EncryptedMultipleViews {
-  def compressed[VT <: ViewType](
+  def compressAndEncryptViews[VT <: ViewType](
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       viewType: VT,

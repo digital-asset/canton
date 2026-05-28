@@ -27,7 +27,7 @@ private[backend] trait StorageBackendTestsContracts
 
   behavior of "StorageBackend (contracts)"
 
-  it should "correctly find key states" in {
+  it should "correctly find key states using non-unique key lookup with limit 1" in {
     val key1 = GlobalKey.assertBuild(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
@@ -78,6 +78,7 @@ private[backend] trait StorageBackendTestsContracts
         event_offset = 4L,
         event_sequential_id = 4L,
         internal_contract_id = Some(internalContractId2),
+        deactivated_event_sequential_id = Some(3L),
         stakeholders = Set(signatory),
         template_id = someTemplateId,
       ),
@@ -90,73 +91,59 @@ private[backend] trait StorageBackendTestsContracts
         stakeholders = Set(signatory),
         template_id = someTemplateId,
       ),
+      dtosConsumingExercise(
+        event_offset = 6L,
+        event_sequential_id = 6L,
+        internal_contract_id = Some(internalContractId4),
+        deactivated_event_sequential_id = Some(1L),
+        stakeholders = Set(signatory),
+        template_id = someTemplateId,
+      ),
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
-      updateLedgerEnd(offset(5), 5L)
+      updateLedgerEnd(offset(6), 6L)
     )
-    val keyStates2 = executeSql(
-      backend.contract.keyStates(
-        List(
-          key1,
-          key2,
-        ),
-        2L,
+
+    def lookupKeyState(key: GlobalKey, validAt: Long): Option[Long] =
+      executeSql(
+        backend.contract.contractKey(
+          KeysPageQuery(key = key, validAtEventSeqId = validAt, limit = 1, nextPageToken = None)
+        )
+      ).internalContractIds.headOption
+
+    def lookupKeyStates(keys: List[GlobalKey], validAt: Long): Map[GlobalKey, Long] = {
+      val queries = keys.map(key =>
+        KeysPageQuery(key = key, validAtEventSeqId = validAt, limit = 1, nextPageToken = None)
       )
-    )
-    val keyStateKey1_2 = executeSql(
-      backend.contract.keyState(key1, 2L)
-    )
-    val keyStateKey2_2 = executeSql(
-      backend.contract.keyState(key2, 2L)
-    )
-    val keyStates3 = executeSql(
-      backend.contract.keyStates(
-        List(
-          key1,
-          key2,
-        ),
-        3L,
+      val results = executeSql(
+        backend.contract.contractKeysPlain(queries, validAt)
       )
-    )
-    val keyStateKey1_3 = executeSql(
-      backend.contract.keyState(key1, 3L)
-    )
-    val keyStateKey2_3 = executeSql(
-      backend.contract.keyState(key2, 3L)
-    )
-    val keyStates4 = executeSql(
-      backend.contract.keyStates(
-        List(
-          key1,
-          key2,
-        ),
-        4L,
-      )
-    )
-    val keyStateKey1_4 = executeSql(
-      backend.contract.keyState(key1, 4L)
-    )
-    val keyStateKey2_4 = executeSql(
-      backend.contract.keyState(key2, 4L)
-    )
-    val keyStates5 = executeSql(
-      backend.contract.keyStates(
-        List(
-          key1,
-          key2,
-        ),
-        5L,
-      )
-    )
-    val keyStateKey1_5 = executeSql(
-      backend.contract.keyState(key1, 5L)
-    )
-    val keyStateKey2_5 = executeSql(
-      backend.contract.keyState(key2, 5L)
-    )
+      keys
+        .zip(results)
+        .flatMap { case (key, result) =>
+          result.internalContractIds.headOption.map(key -> _)
+        }
+        .toMap
+    }
+
+    val keyStates2 = lookupKeyStates(List(key1, key2), 2L)
+    val keyStateKey1_2 = lookupKeyState(key1, 2L)
+    val keyStateKey2_2 = lookupKeyState(key2, 2L)
+    val keyStates3 = lookupKeyStates(List(key1, key2), 3L)
+    val keyStateKey1_3 = lookupKeyState(key1, 3L)
+    val keyStateKey2_3 = lookupKeyState(key2, 3L)
+    val keyStates4 = lookupKeyStates(List(key1, key2), 4L)
+    val keyStateKey1_4 = lookupKeyState(key1, 4L)
+    val keyStateKey2_4 = lookupKeyState(key2, 4L)
+    val keyStates5 = lookupKeyStates(List(key1, key2), 5L)
+    val keyStateKey1_5 = lookupKeyState(key1, 5L)
+    val keyStateKey2_5 = lookupKeyState(key2, 5L)
+    val keyStates6 = lookupKeyStates(List(key1, key2), 6L)
+    val keyStateKey1_6 = lookupKeyState(key1, 6L)
+    val keyStateKey2_6 = lookupKeyState(key2, 6L)
 
     keyStates2 shouldBe Map(
       key1 -> internalContractId,
@@ -171,9 +158,10 @@ private[backend] trait StorageBackendTestsContracts
     keyStateKey1_3 shouldBe Some(internalContractId2)
     keyStateKey2_3 shouldBe Some(internalContractId4)
     keyStates4 shouldBe Map(
-      key2 -> internalContractId4
+      key1 -> internalContractId,
+      key2 -> internalContractId4,
     )
-    keyStateKey1_4 shouldBe None
+    keyStateKey1_4 shouldBe Some(internalContractId)
     keyStateKey2_4 shouldBe Some(internalContractId4)
     keyStates5 shouldBe Map(
       key1 -> internalContractId3,
@@ -181,6 +169,11 @@ private[backend] trait StorageBackendTestsContracts
     )
     keyStateKey1_5 shouldBe Some(internalContractId3)
     keyStateKey2_5 shouldBe Some(internalContractId4)
+    keyStates6 shouldBe Map(
+      key1 -> internalContractId3
+    )
+    keyStateKey1_6 shouldBe Some(internalContractId3)
+    keyStateKey2_6 shouldBe None
   }
 
   it should "correctly find non unique contract key contracts" in {
@@ -256,7 +249,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 1,
@@ -270,7 +263,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 1,
@@ -284,7 +277,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 10,
@@ -298,7 +291,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 3,
@@ -312,7 +305,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 2,
@@ -326,7 +319,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 3,
@@ -340,7 +333,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key1,
           limit = 3,
@@ -354,7 +347,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     executeSql(
-      backend.contract.nonUniqueContractKey(
+      backend.contract.contractKey(
         KeysPageQuery(
           key = key2,
           limit = 3,
@@ -442,7 +435,7 @@ private[backend] trait StorageBackendTestsContracts
 
     // Batch query: multiple keys in a single call
     val batchResults = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq(
           KeysPageQuery(key = key1, limit = 10, nextPageToken = None, validAtEventSeqId = 5),
           KeysPageQuery(key = key2, limit = 10, nextPageToken = None, validAtEventSeqId = 5),
@@ -461,7 +454,7 @@ private[backend] trait StorageBackendTestsContracts
     )
 
     val pagedResult = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq(
           KeysPageQuery(key = key1, limit = 1, nextPageToken = None, validAtEventSeqId = 5)
         ),
@@ -475,7 +468,7 @@ private[backend] trait StorageBackendTestsContracts
 
     // Batch query with nextPageToken
     val nextPageResult = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq(
           KeysPageQuery(key = key1, limit = 10, nextPageToken = Some(5L), validAtEventSeqId = 5)
         ),
@@ -489,7 +482,7 @@ private[backend] trait StorageBackendTestsContracts
 
     // Batch query respects deactivation visibility (validAtEventSeqId = 3, before the archive)
     val beforeArchive = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq(
           KeysPageQuery(key = key1, limit = 10, nextPageToken = None, validAtEventSeqId = 3)
         ),
@@ -503,7 +496,7 @@ private[backend] trait StorageBackendTestsContracts
 
     // Batch query with mixed limits: limit=1 for key1, limit=2 for key2
     val mixedLimits = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq(
           KeysPageQuery(key = key1, limit = 1, nextPageToken = None, validAtEventSeqId = 5),
           KeysPageQuery(key = key2, limit = 2, nextPageToken = None, validAtEventSeqId = 5),
@@ -525,7 +518,7 @@ private[backend] trait StorageBackendTestsContracts
 
     // Empty batch
     val emptyResult = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq.empty,
         validAtEventSeqId = 5L,
       )
@@ -539,7 +532,7 @@ private[backend] trait StorageBackendTestsContracts
       KeysPageQuery(key = key2, limit = 10, nextPageToken = None, validAtEventSeqId = 5)
 
     val identicalQueries = executeSql(
-      backend.contract.nonUniqueContractKeysPlain(
+      backend.contract.contractKeysPlain(
         Seq(
           key1PageQuery,
           key2PageQuery,
@@ -609,7 +602,7 @@ private[backend] trait StorageBackendTestsContracts
 
     def queryAt(validAt: Long): KeysPageResult =
       executeSql(
-        backend.contract.nonUniqueContractKeysPlain(
+        backend.contract.contractKeysPlain(
           Seq(
             KeysPageQuery(key = key, limit = 100, nextPageToken = None, validAtEventSeqId = validAt)
           ),

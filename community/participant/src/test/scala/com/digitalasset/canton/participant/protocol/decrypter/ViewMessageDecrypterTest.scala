@@ -25,6 +25,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.DecryptedViews
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
@@ -95,6 +96,7 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
           CacheConfig(PositiveNumeric.tryCreate(1)),
           new InMemoryCryptoPrivateStore(testedReleaseProtocolVersion, loggerFactory),
           new InMemoryCryptoPublicStore(loggerFactory),
+          CommonMockMetrics.cryptoMetrics,
           timeouts,
           loggerFactory,
         )
@@ -173,11 +175,17 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
     val viewKeyData: Seq[(SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]])] =
       randomness.map(mkViewKeyData)
 
-    val lightTree: Seq[LightTransactionViewTree] = allViewIndices.map(i =>
-      LightTransactionViewTree
-        .fromTransactionViewTree(fullTree(i), subviewKeyRandomness(i), testedProtocolVersion)
-        .value
-    )
+    val lightTree: Seq[LightTransactionViewTree] =
+      // TODO(#32393): adapt so decryption uses either a lightweight view tree referencing view hash or ciphertextId
+      allViewIndices.map(i =>
+        LightTransactionViewTree
+          .fromTransactionViewTreeUsingViewHashReference(
+            fullTree(i),
+            subviewKeyRandomness(i),
+            testedProtocolVersion,
+          )
+          .value
+      )
 
     val encryptedViewMessage: Seq[EncryptedViewMessage[TransactionViewType.type]] =
       interceptEncryptedViewMessages(

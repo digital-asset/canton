@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.messages.AcsCommitment
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
@@ -64,6 +65,7 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
         CryptoSchemes
           .fromConfig(config.crypto)
           .valueOrFail("fail to validate crypto schemes from the configuration file"),
+        CommonMockMetrics.cryptoMetrics,
         loggerFactory,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create pure crypto api: $err"))

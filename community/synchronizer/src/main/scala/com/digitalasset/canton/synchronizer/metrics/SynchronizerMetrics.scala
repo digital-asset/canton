@@ -22,12 +22,17 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
   ActiveRequestsMetrics,
+  CryptoMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,
+  DecryptionHistograms,
+  DecryptionMetrics,
   KmsMetrics,
   SequencerClientHistograms,
   SequencerClientMetrics,
+  SigningHistograms,
+  SigningMetrics,
   TrafficConsumptionMetrics,
 }
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
@@ -46,6 +51,8 @@ class SequencerHistograms(val parent: MetricName)(implicit
   private[metrics] val prefix = parent :+ "sequencer"
   private[metrics] val sequencerClient = new SequencerClientHistograms(parent)
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
+  private[metrics] val signing: SigningHistograms = new SigningHistograms(parent)
+  private[metrics] val decryption: DecryptionHistograms = new DecryptionHistograms(parent)
   private[metrics] val bftOrdering: BftOrderingHistograms = new BftOrderingHistograms(prefix)
 }
 
@@ -83,8 +90,6 @@ class SequencerMetrics(
       openTelemetryMetricsFactory,
     )
 
-  val kmsMetrics: KmsMetrics = new KmsMetrics(histograms.prefix, openTelemetryMetricsFactory)
-
   val eventBuffer: CacheMetrics =
     new CacheMetrics("events-fan-out-buffer", openTelemetryMetricsFactory)
 
@@ -98,6 +103,8 @@ class SequencerMetrics(
     new CacheMetrics("member-cache", openTelemetryMetricsFactory)
 
   override def storageMetrics: DbStorageMetrics = dbStorage
+
+  override def cryptoMetrics: CryptoMetrics = crypto
 
   val block: BlockMetrics = new BlockMetrics(prefix, openTelemetryMetricsFactory)
 
@@ -238,6 +245,13 @@ class SequencerMetrics(
 
   val dbStorage: DbStorageMetrics =
     new DbStorageMetrics(histograms.dbStorage, openTelemetryMetricsFactory)
+
+  val crypto: CryptoMetrics =
+    new CryptoMetrics(
+      new SigningMetrics(histograms.signing, openTelemetryMetricsFactory),
+      new DecryptionMetrics(histograms.decryption, openTelemetryMetricsFactory),
+      Some(new KmsMetrics(prefix, openTelemetryMetricsFactory)),
+    )
 
   // Private constructor to avoid being instantiated multiple times by accident
   final class TrafficControlMetrics private[SequencerMetrics] {
@@ -414,6 +428,8 @@ class MediatorHistograms(val parent: MetricName)(implicit
   private[metrics] val prefix = parent :+ "mediator"
   private[metrics] val sequencerClient = new SequencerClientHistograms(parent)
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
+  private[metrics] val signing: SigningHistograms = new SigningHistograms(parent)
+  private[metrics] val decryption: DecryptionHistograms = new DecryptionHistograms(parent)
 
   private[metrics] val responseLatencies: Item = Item(
     prefix :+ "response-latency",
@@ -454,10 +470,17 @@ class MediatorMetrics(
   val dbStorage: DbStorageMetrics =
     new DbStorageMetrics(histograms.dbStorage, openTelemetryMetricsFactory)
 
+  override def cryptoMetrics: CryptoMetrics = crypto
+
+  val crypto: CryptoMetrics =
+    new CryptoMetrics(
+      new SigningMetrics(histograms.signing, openTelemetryMetricsFactory),
+      new DecryptionMetrics(histograms.decryption, openTelemetryMetricsFactory),
+      Some(new KmsMetrics(prefix, openTelemetryMetricsFactory)),
+    )
+
   val sequencerClient: SequencerClientMetrics =
     new SequencerClientMetrics(histograms.sequencerClient, openTelemetryMetricsFactory)
-
-  val kmsMetrics: KmsMetrics = new KmsMetrics(histograms.prefix, openTelemetryMetricsFactory)
 
   val outstanding: Gauge[Int] =
     openTelemetryMetricsFactory.gauge(

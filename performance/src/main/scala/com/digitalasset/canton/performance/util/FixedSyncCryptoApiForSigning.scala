@@ -15,7 +15,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParametersWithValidity,
   SequencingParametersWithValidity,
-  StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.*
@@ -45,8 +44,7 @@ import scala.concurrent.ExecutionContext
 
 class FixedSyncCryptoApiForSigning(
     member: Member,
-    crypto: Crypto,
-    staticSynchronizerParameters: StaticSynchronizerParameters,
+    crypto: SynchronizerCrypto,
     signingKey: SigningPublicKey,
     override val loggerFactory: NamedLoggerFactory,
     timestampOverride: CantonTimestamp = CantonTimestamp.MinValue,
@@ -54,8 +52,7 @@ class FixedSyncCryptoApiForSigning(
     extends SyncCryptoApi
     with NamedLogging {
 
-  override def pureCrypto: SynchronizerCryptoPureApi =
-    new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto)
+  override def pureCrypto: SynchronizerCryptoPureApi = crypto.pureCrypto
 
   private val signer = new SyncCryptoSignerWithLongTermKeys(
     member,
