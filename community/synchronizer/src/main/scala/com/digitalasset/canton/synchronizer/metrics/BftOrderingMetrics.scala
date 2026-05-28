@@ -12,9 +12,15 @@ import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.pretty.PrettyNameOnlyCase
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
+  CryptoMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,
+  DecryptionHistograms,
+  DecryptionMetrics,
+  KmsMetrics,
+  SigningHistograms,
+  SigningMetrics,
 }
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
@@ -45,6 +51,9 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
   private[metrics] val prefix = parent :+ BftOrderingMetrics.Prefix
 
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
+
+  private[metrics] val signingHistograms = new SigningHistograms(parent)
+  private[metrics] val decryptionHistograms = new DecryptionHistograms(parent)
 
   // Private constructor to avoid being instantiated multiple times by accident
   private[metrics] final class PerformanceHistograms private[BftOrderingHistograms] {
@@ -202,14 +211,23 @@ class BftOrderingMetrics private[metrics] (
 
   private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
+  override val prefix: MetricName = histograms.prefix
+
   val dbStorage: DbStorageMetrics =
     new DbStorageMetrics(histograms.dbStorage, openTelemetryMetricsFactory)
 
-  override val prefix: MetricName = histograms.prefix
+  val crypto = new CryptoMetrics(
+    new SigningMetrics(histograms.signingHistograms, openTelemetryMetricsFactory),
+    new DecryptionMetrics(histograms.decryptionHistograms, openTelemetryMetricsFactory),
+    Some(new KmsMetrics(prefix, openTelemetryMetricsFactory)),
+  )
+
   override val declarativeApiMetrics: DeclarativeApiMetrics =
     new DeclarativeApiMetrics(prefix, openTelemetryMetricsFactory)
 
   override def storageMetrics: DbStorageMetrics = dbStorage
+
+  override def cryptoMetrics: CryptoMetrics = crypto
 
   // Private constructor to avoid being instantiated multiple times by accident
   final class PerformanceMetrics private[BftOrderingMetrics] {
@@ -474,6 +492,7 @@ class BftOrderingMetrics private[metrics] (
           case object RequestTooBig extends OutcomeValue
           case object InvalidTag extends OutcomeValue
           case object P2PNotReady extends OutcomeValue
+          case object BlackListed extends OutcomeValue
         }
       }
     }

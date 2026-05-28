@@ -16,7 +16,9 @@ metric_short_version = "canton.failed_test_grouped"
 
 # The number of consecutive git commits a test must fail on before triggering a Slack alert.
 # Set to 3 to avoid alerting on single transient failures or manual CircleCI job retries.
+# Set to 10 for unstable tests. The trade off is about false alarms vs not detecting broken test.
 CONSECUTIVE_FAILURES_THRESHOLD: Final[int] = 3
+CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE: Final[int] = 10
 
 milestone = "Flaky Tests" # flaky tests milestone M97 (milestone number 31)
 flaky_test_project = "PVT_kwDOAJX-Fc4AbncN" # https://github.com/orgs/DACH-NY/projects/38/
@@ -31,9 +33,63 @@ branches_to_report = {
     "main-2.x" : "073b4df3" # ID of the value "main-2.x" for the Release Line field in the project
 }
 
+# gha-migration: changed getting branch name, build url, node index, job name
+# and commit hash to account for CircleCI and GHA
+def is_github_actions_ci() -> bool:
+    return os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+
+def is_circle_ci() -> bool:
+    return os.environ.get("CIRCLECI", "").lower() == "true"
+
+def get_ci_branch() -> str:
+    if is_github_actions_ci():
+        return os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME", "")
+    if is_circle_ci():
+        return os.environ.get("CIRCLE_BRANCH", "")
+    return os.environ.get("CIRCLE_BRANCH", "")
+
+def get_ci_build_url() -> str:
+    if is_github_actions_ci():
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+        repository = os.environ.get("GITHUB_REPOSITORY", "")
+        run_id = os.environ.get("GITHUB_RUN_ID", "")
+        if repository and run_id:
+            return f"{server}/{repository}/actions/runs/{run_id}"
+        return ""
+    if is_circle_ci():
+        return os.environ.get("CIRCLE_BUILD_URL", "")
+    return os.environ.get("CIRCLE_BUILD_URL", "")
+
+def get_ci_node_index() -> str:
+    if is_github_actions_ci():
+        return os.environ.get("MATRIX_SHARD", "0")
+    if is_circle_ci():
+        return os.environ.get("CIRCLE_NODE_INDEX", "0")
+    return os.environ.get("CIRCLE_NODE_INDEX", "0")
+
+def get_ci_job_name() -> str:
+    if is_circle_ci():
+        return os.environ.get("CIRCLE_JOB", "unknown")
+    if is_github_actions_ci():
+        return os.environ.get("GITHUB_JOB", "unknown")
+    return os.environ.get("CIRCLE_JOB", "unknown")
+
+def get_ci_commit_hash() -> str:
+    if is_github_actions_ci():
+        return os.environ.get("GITHUB_SHA", "unknown")
+    if is_circle_ci():
+        return os.environ.get("CIRCLE_SHA1", "unknown")
+    return os.environ.get("CIRCLE_SHA1", "unknown")
+
+def get_ci_parallel_run_url(build_url: str, node_index: str) -> str:
+    if is_github_actions_ci():
+        return build_url
+    if is_circle_ci():
+        return f"{build_url.replace('circleci.com/gh/', 'app.circleci.com/jobs/github/')}/parallel-runs/{node_index}"
+    return f"{build_url.replace('circleci.com/gh/', 'app.circleci.com/jobs/github/')}/parallel-runs/{node_index}"
 
 
-branch = os.environ.get('CIRCLE_BRANCH', '')
+branch = get_ci_branch()
 
 # replace GITHUB_TOKEN with GITHUB_FLAKY_TEST_TOKEN, which also is permitted to use the project scope.
 # this is required to use the gh command to unarchive/restore issues
@@ -146,6 +202,9 @@ def format_issue_title(test_name: str) -> str:
 
 def format_test_name(test_name: str):
     test_name = remove_everything_after_first_slash(remove_non_ascii_characters(test_name))
+    # Collapse shard partitions so all `FooShard0Test`, `FooShard1Test`, ... map to the same
+    # name, since they are the same logical test split across parallel CI runners.
+    test_name = re.sub(r'Shard\d+', '', test_name)
     if len(test_name) > 200:
         print(f"Truncating {test_name} to 200 characters.")
     return test_name[:200]
@@ -153,8 +212,11 @@ def format_test_name(test_name: str):
 
 def report_to_datadog(metric_name: str, test_name: str):
     from datadog import initialize, api
+    api_key = os.environ.get('DATADOG_API_KEY', '').strip()
+    if not api_key:
+        raise RuntimeError("DATADOG_API_KEY is empty or missing")
     options = {
-        'api_key': os.environ['DATADOG_API_KEY'],
+        'api_key': api_key,
         'api_host': 'https://api.datadoghq.com/'
     }
     initialize(**options)
@@ -164,9 +226,9 @@ def report_to_datadog(metric_name: str, test_name: str):
         'points': 1,
         'tags': [f"name:{format_test_name(test_name)}",
                  f"branch:{branch}",
-                 f"url:{os.environ['CIRCLE_BUILD_URL']}",
-                 f"container_index:{os.environ['CIRCLE_NODE_INDEX']}",
-                 f"job:{os.environ['CIRCLE_JOB']}",
+                 f"url:{get_ci_build_url()}",
+                 f"container_index:{get_ci_node_index()}",
+                 f"job:{get_ci_job_name()}",
                  ]
     }
     resp = api.Metric.send(**send_args)
@@ -245,14 +307,14 @@ def create_issue_table_header():
 
 def create_issue_table_row():
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    commit_hash = os.environ['CIRCLE_SHA1']
+    commit_hash = get_ci_commit_hash()
     project_username = os.environ.get('CIRCLE_PROJECT_USERNAME', 'DACH-NY')
     commit_url = f"https://github.com/{project_username}/canton/commit/{commit_hash}"
-    job = os.environ['CIRCLE_JOB']
-    node_index = os.environ['CIRCLE_NODE_INDEX']
-    build_url = os.environ['CIRCLE_BUILD_URL']
+    build_url = get_ci_build_url()
     build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
-    parallel_run_url = f"{build_url.replace('circleci.com/gh/', 'app.circleci.com/jobs/github/')}/parallel-runs/{node_index}"
+    job = get_ci_job_name()
+    node_index = get_ci_node_index()
+    parallel_run_url = get_ci_parallel_run_url(build_url, node_index)
     return f"| {date_str} | {job} | {node_index} | [{build_number}]({parallel_run_url}) | [{commit_hash[:8]}]({commit_url}) |"
 
 def gh_assign_release_line(idx: str, project_item_id: str):
@@ -340,10 +402,10 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
         print("SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS not set. Skipping Slack channel summary.")
         return
     volunteer = select_volunteer()
-    commit_hash = os.environ['CIRCLE_SHA1']
+    commit_hash = get_ci_commit_hash()
     commit_link = f"<https://github.com/DACH-NY/canton/commit/{commit_hash}|{commit_hash[:8]}>"
     mention = f"<@{volunteer}> " if volunteer else ""
-    description = f"Flaky tests have failed on {CONSECUTIVE_FAILURES_THRESHOLD} consecutive commits ending at {commit_link} on branch `{branch}`."
+    description = f"Flaky tests have failed on several consecutive commits ending at {commit_link} on branch `{branch}`."
     issue_lines = []
     for idx, title, _ in duplicates:
         issue_url = f"https://github.com/DACH-NY/canton/issues/{idx}"
@@ -351,7 +413,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f":rotating_light: Flaky test alert on {branch}", "emoji": True},
+            "text": {"type": "plain_text", "text": f":this-is-fine-fire: Flaky test alert on {branch}", "emoji": True},
         },
         {
             "type": "section",
@@ -362,7 +424,12 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
             "text": {"type": "mrkdwn", "text": "*Affected tests:*\n" + "\n".join(issue_lines)},
         },
     ]
-    payload = json.dumps({"channel": channel, "blocks": blocks, "icon_emoji": ":fire:"}).encode("utf-8")
+    payload = json.dumps({
+        "channel": channel,
+        "blocks": blocks,
+        "icon_emoji": ":rotating_light:",
+        "text": f"Flaky test alert on {branch}",  # fallback summary for push notifications and screen readers
+    }).encode("utf-8")
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
         data=payload,
@@ -398,17 +465,18 @@ def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
         return False
     return older_hash in result.stdout.splitlines()
 
-def update_issue(idx: str, title: str, body: str, threshold: Optional[int] = None) -> Optional[tuple[str, str, str]]:
-    if threshold is None:
-        threshold = CONSECUTIVE_FAILURES_THRESHOLD
+def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, str]]:
+    job = get_ci_job_name()
+    threshold = CONSECUTIVE_FAILURES_THRESHOLD if job != 'unstable_test' else CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+
     header = "| Date | Job | Node | Build | Commit |"
     if header not in body:
         body = body + "\n" + create_issue_table_header()
-    commit_hash = os.environ['CIRCLE_SHA1']
+    commit_hash = get_ci_commit_hash()
 
     consecutive_streak = False
-    job = os.environ.get('CIRCLE_JOB', '')
-    if commit_hash != 'unknown' and job != 'unstable_test':
+
+    if commit_hash != 'unknown':
         existing_commits = extract_commit_hashes_from_body(body)
         recent = existing_commits[-(threshold - 1):]
         if len(recent) >= threshold - 1:
@@ -431,12 +499,25 @@ def gh_unarchive_issue(idx: str, project_item_id: str):
 def self_test():
     test_gh_flags()
     test_compute_single_log_failure()
+    test_format_test_name_collapses_shards()
     test_create_issue_table_row()
     test_update_issue_old_format()
     test_update_issue_new_format()
-    test_update_issue_returns_consecutive_streak_info()
+    test_update_issue_returns_consecutive_streak_info('test_job', CONSECUTIVE_FAILURES_THRESHOLD)
+    test_update_issue_returns_consecutive_streak_info('unstable_test', CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE)
     test_report_issue_skips_slack_if_assignee()
     print("All self-checks passed")
+
+def test_format_test_name_collapses_shards():
+    # Shard partitions of the same logical test must collapse to the same name
+    assert format_test_name("LedgerApiShard0ConformanceTestPostgres") == "LedgerApiConformanceTestPostgres"
+    assert format_test_name("LedgerApiShard5ConformanceTestPostgres") == "LedgerApiConformanceTestPostgres"
+    # Two-digit shard indices
+    assert format_test_name("LedgerApiShard10ConformanceTest") == "LedgerApiConformanceTest"
+    # Non-shard names are unchanged
+    assert format_test_name("RegularFlakyTest") == "RegularFlakyTest"
+    # "Shard" without a digit suffix must not be stripped
+    assert format_test_name("ShardingLayerTest") == "ShardingLayerTest"
 
 def test_gh_flags():
     checks = [
@@ -451,14 +532,17 @@ def test_gh_flags():
             assert flag in help_text, f"`gh {' '.join(subcommand[:-1])}` help does not mention flag `{flag}` — was it renamed?"
 
 def test_create_issue_table_row():
-    env = {
+    # Test CircleCI (DACH-NY)
+    env_circleci_dach = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
         'CIRCLE_JOB': 'test_with_java17',
         'CIRCLE_NODE_INDEX': '5',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/3196076',
         'CIRCLE_SHA1': 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
         'CIRCLE_PROJECT_USERNAME': 'DACH-NY',
     }
-    with patch.dict(os.environ, env, clear=False):
+    with patch.dict(os.environ, env_circleci_dach, clear=False):
         header = create_issue_table_header()
         assert '| Date | Job | Node | Build | Commit |' in header, f"Missing header in: {header}"
         line = create_issue_table_row()
@@ -467,32 +551,55 @@ def test_create_issue_table_row():
         assert '[3196076](https://app.circleci.com/jobs/github/DACH-NY/canton/3196076/parallel-runs/5)' in line, f"Missing parallel-run build link in: {line}"
         assert '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)' in line, f"Missing commit in: {line}"
 
-    oss_canton_env = {
+    # Test CircleCI (OSS digital-asset)
+    env_circleci_oss = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
         'CIRCLE_JOB': 'test_protocol_version_dev',
         'CIRCLE_NODE_INDEX': '6',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/digital-asset/canton/1491',
         'CIRCLE_SHA1': 'b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3',
         'CIRCLE_PROJECT_USERNAME': 'digital-asset',
     }
-    with patch.dict(os.environ, oss_canton_env, clear=False):
+    with patch.dict(os.environ, env_circleci_oss, clear=False):
         line = create_issue_table_row()
         assert '[1491](https://app.circleci.com/jobs/github/digital-asset/canton/1491/parallel-runs/6)' in line, f"Missing OSS canton build link in: {line}"
         assert '[b2c3d4e5](https://github.com/digital-asset/canton/commit/b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3)' in line, f"Missing OSS canton commit link in: {line}"
 
+    # Test GitHub Actions
+    env_gha = {
+        'CIRCLECI': 'false',
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_JOB': 'integration-tests-shard-2',
+        'MATRIX_SHARD': '2',
+        'GITHUB_RUN_ID': '9876543210',
+        'GITHUB_REPOSITORY': 'DACH-NY/canton',
+        'GITHUB_SERVER_URL': 'https://github.com',
+        'GITHUB_SHA': 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    }
+    with patch.dict(os.environ, env_gha, clear=False):
+        line = create_issue_table_row()
+        assert '| integration-tests-shard-2 |' in line, f"Missing GHA job name in: {line}"
+        assert '| 2 |' in line, f"Missing GHA matrix shard in: {line}"
+        assert '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210)' in line, f"Missing GHA build link in: {line}"
+        assert '[c3d4e5f6](https://github.com/DACH-NY/canton/commit/c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4)' in line, f"Missing GHA commit link in: {line}"
+
 def test_update_issue_old_format():
-    # Old issues have flat-text lines with no table header — the header must be injected before the new row
+    # Test CircleCI
     old_body = (
         "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
         "2026-04-14 12:05:05 job:test node_index:1 url:https://circleci.com/gh/DACH-NY/canton/1234\n"
         "2026-04-14 13:00:00 job:sequential_test node_index:3 url:https://circleci.com/gh/DACH-NY/canton/5678"
     )
-    env = {
+    env_cci = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
         'CIRCLE_SHA1': 'unknown_hash',
         'CIRCLE_JOB': 'test_job',
         'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
-    with patch.dict(os.environ, env, clear=False), \
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
         update_issue("42", "Flaky test", old_body)
         mock_gh.assert_called_once()
@@ -501,20 +608,43 @@ def test_update_issue_old_format():
         assert header in msg, f"Table header was not injected into old-format body: {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once"
 
+    # Test GitHub Actions
+    env_gha = {
+        'CIRCLECI': 'false',
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_SHA': 'unknown_hash',
+        'GITHUB_JOB': 'test_job',
+        'MATRIX_SHARD': '0',
+        'GITHUB_RUN_ID': '1234567890',
+        'GITHUB_REPOSITORY': 'DACH-NY/canton',
+        'GITHUB_SERVER_URL': 'https://github.com',
+    }
+    with patch.dict(os.environ, env_gha, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
+        update_issue("42", "Flaky test", old_body)
+        mock_gh.assert_called_once()
+        msg = mock_gh.call_args[0][2]
+        header = "| Date | Job | Node | Build | Commit |"
+        assert header in msg, f"Table header was not injected into old-format body (GHA): {msg}"
+        assert msg.count(header) == 1, "Table header must appear exactly once (GHA)"
+
 def test_update_issue_new_format():
     # New issues already have the table header — the new row is simply appended, no duplicate header
+    # Test CircleCI
     new_body = (
         "This issue was created automatically by the CI system. Please fix the test before closing the issue.\n\n"
         "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n"
         "| 2026-04-14 12:05:05 | test | 1 | [link](https://circleci.com/gh/DACH-NY/canton/1234) | [a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2) |"
     )
-    env = {
+    env_cci = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
         'CIRCLE_SHA1': 'unknown_hash',
         'CIRCLE_JOB': 'test_job',
         'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
-    with patch.dict(os.environ, env, clear=False), \
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
         update_issue("42", "Flaky test", new_body)
         mock_gh.assert_called_once()
@@ -522,18 +652,30 @@ def test_update_issue_new_format():
         header = "| Date | Job | Node | Build | Commit |"
         assert msg.count(header) == 1, f"Table header must appear exactly once in updated body: {msg}"
 
-def test_update_issue_returns_consecutive_streak_info():
+    # Test GitHub Actions
+    env_gha = {
+        'CIRCLECI': 'false',
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_SHA': 'unknown_hash',
+        'GITHUB_JOB': 'test_job',
+        'MATRIX_SHARD': '0',
+        'GITHUB_RUN_ID': '1234567890',
+        'GITHUB_REPOSITORY': 'DACH-NY/canton',
+        'GITHUB_SERVER_URL': 'https://github.com',
+    }
+    with patch.dict(os.environ, env_gha, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
+        update_issue("42", "Flaky test", new_body)
+        mock_gh.assert_called_once()
+        msg = mock_gh.call_args[0][2]
+        header = "| Date | Job | Node | Build | Commit |"
+        assert msg.count(header) == 1, f"Table header must appear exactly once in updated body (GHA): {msg}"
+
+def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
     # Build exactly CONSECUTIVE_FAILURES_THRESHOLD commits: prior ones go in the body, last is current
-    commits = [format(i, '040x') for i in range(CONSECUTIVE_FAILURES_THRESHOLD)]
+    commits = [format(i, '040x') for i in range(threshold)]
     current = commits[-1]
     prior = commits[:-1]  # CONSECUTIVE_FAILURES_THRESHOLD - 1 commits
-
-    env = {
-        'CIRCLE_SHA1': current,
-        'CIRCLE_JOB': 'test_job',
-        'CIRCLE_NODE_INDEX': '0',
-        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
-    }
 
     def make_body(commit_list):
         rows = "\n".join(
@@ -551,37 +693,75 @@ def test_update_issue_returns_consecutive_streak_info():
     def not_consecutive(older, newer):
         return False
 
-    # exactly threshold-1 prior commits, all consecutive → streak fires
-    with patch.dict(os.environ, env, clear=False), \
+    # Test CircleCI
+    env_cci = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': job,
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    # exactly threshold-1 prior commits, all consecutive → streak fires (CCI)
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
         result = update_issue("42", "Flaky test", make_body(prior))
-        assert result is not None, f"Expected streak with {CONSECUTIVE_FAILURES_THRESHOLD} consecutive commits"
+        assert result is not None, f"Expected streak with {threshold} consecutive commits (CCI)"
         idx, title, commit = result
         assert idx == "42", f"Expected issue idx '42', got: {idx}"
         assert commit == current, f"Expected current commit in result, got: {commit}"
 
-    # one commit short → not enough history, no streak
-    with patch.dict(os.environ, env, clear=False), \
+    # one commit short → not enough history, no streak (CCI)
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
         result = update_issue("42", "Flaky test", make_body(prior[:-1]))
-        assert result is None, f"Expected None with only {len(prior) - 1} prior commits"
+        assert result is None, f"Expected None with only {len(prior) - 1} prior commits (CCI)"
 
-    # full history but not consecutive → no streak
-    with patch.dict(os.environ, env, clear=False), \
+    # full history but not consecutive → no streak (CCI)
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
         result = update_issue("42", "Flaky test", make_body(prior))
-        assert result is None, "Expected None for non-consecutive commits"
+        assert result is None, "Expected None for non-consecutive commits (CCI)"
 
-    # consecutive streak from unstable_test → no alert
-    unstable_env = {**env, 'CIRCLE_JOB': 'unstable_test'}
-    with patch.dict(os.environ, unstable_env, clear=False), \
+    # Test GitHub Actions
+    env_gha = {
+        'CIRCLECI': 'false',
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_SHA': current,
+        'GITHUB_JOB': job,
+        'MATRIX_SHARD': '0',
+        'GITHUB_RUN_ID': '1234567890',
+        'GITHUB_REPOSITORY': 'DACH-NY/canton',
+        'GITHUB_SERVER_URL': 'https://github.com',
+    }
+
+    # exactly threshold-1 prior commits, all consecutive → streak fires (GHA)
+    with patch.dict(os.environ, env_gha, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
         result = update_issue("42", "Flaky test", make_body(prior))
-        assert result is None, "Expected None when job is unstable_test"
+        assert result is not None, f"Expected streak with {threshold} consecutive commits (GHA)"
+        idx, title, commit = result
+        assert idx == "42", f"Expected issue idx '42', got: {idx}"
+        assert commit == current, f"Expected current commit in result, got: {commit}"
+
+    # one commit short → not enough history, no streak (GHA)
+    with patch.dict(os.environ, env_gha, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
+        result = update_issue("42", "Flaky test", make_body(prior[:-1]))
+        assert result is None, f"Expected None with only {len(prior) - 1} prior commits (GHA)"
+
+    # full history but not consecutive → no streak (GHA)
+    with patch.dict(os.environ, env_gha, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
+        result = update_issue("42", "Flaky test", make_body(prior))
+        assert result is None, "Expected None for non-consecutive commits (GHA)"
 
 
 def test_report_issue_skips_slack_if_assignee():
@@ -598,12 +778,6 @@ def test_report_issue_skips_slack_if_assignee():
         "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n" + rows
     )
     consecutive_pairs = set(zip(commits, commits[1:]))
-    env = {
-        'CIRCLE_SHA1': current,
-        'CIRCLE_JOB': 'test_job',
-        'CIRCLE_NODE_INDEX': '0',
-        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
-    }
 
     def make_search_response(total_count):
         return json.dumps({"data": {"search": {"nodes": [{
@@ -614,26 +788,69 @@ def test_report_issue_skips_slack_if_assignee():
             "projectItems": {"nodes": []},
         }]}}})
 
-    # assigned issue: body is updated but Slack is suppressed
-    with patch.dict(os.environ, env, clear=False), \
+    # Test CircleCI
+    env_cci = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    # assigned issue: body is updated but Slack is suppressed (CCI)
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit, \
          patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
          patch(f'{__name__}.run_gh_with_retries') as mock_gh:
         mock_gh.return_value.returncode = 0
         mock_gh.return_value.stdout = make_search_response(total_count=1)
         result = report_issue("SomeFlakyTest")
-        assert result is None, "Expected None when issue has an assignee (no Slack notification)"
+        assert result is None, "Expected None when issue has an assignee (no Slack notification) (CCI)"
         mock_edit.assert_called_once()
 
-    # unassigned issue with same streak: Slack is not suppressed
-    with patch.dict(os.environ, env, clear=False), \
+    # unassigned issue with same streak: Slack is not suppressed (CCI)
+    with patch.dict(os.environ, env_cci, clear=False), \
          patch(f'{__name__}.gh_issue_edit_cmd'), \
          patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
          patch(f'{__name__}.run_gh_with_retries') as mock_gh:
         mock_gh.return_value.returncode = 0
         mock_gh.return_value.stdout = make_search_response(total_count=0)
         result = report_issue("SomeFlakyTest")
-        assert result is not None, "Expected streak result when issue has no assignee"
+        assert result is not None, "Expected streak result when issue has no assignee (CCI)"
+
+    # Test GitHub Actions
+    env_gha = {
+        'CIRCLECI': 'false',
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_SHA': current,
+        'GITHUB_JOB': 'test_job',
+        'MATRIX_SHARD': '0',
+        'GITHUB_RUN_ID': '1234567890',
+        'GITHUB_REPOSITORY': 'DACH-NY/canton',
+        'GITHUB_SERVER_URL': 'https://github.com',
+    }
+
+    # assigned issue: body is updated but Slack is suppressed (GHA)
+    with patch.dict(os.environ, env_gha, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit, \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
+         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+        mock_gh.return_value.returncode = 0
+        mock_gh.return_value.stdout = make_search_response(total_count=1)
+        result = report_issue("SomeFlakyTest")
+        assert result is None, "Expected None when issue has an assignee (no Slack notification) (GHA)"
+        mock_edit.assert_called_once()
+
+    # unassigned issue with same streak: Slack is not suppressed (GHA)
+    with patch.dict(os.environ, env_gha, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
+         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+        mock_gh.return_value.returncode = 0
+        mock_gh.return_value.stdout = make_search_response(total_count=0)
+        result = report_issue("SomeFlakyTest")
+        assert result is not None, "Expected streak result when issue has no assignee (GHA)"
 
 def test_compute_single_log_failure():
     # Logs
@@ -671,8 +888,14 @@ def test_compute_single_log_failure():
 
 def assert_required_env_vars():
     """Ensures all expected CI environment variables are present before execution."""
-    required = ['DATADOG_API_KEY', 'CIRCLE_SHA1', 'CIRCLE_BUILD_URL', 'CIRCLE_JOB', 'CIRCLE_NODE_INDEX']
-    missing = [var for var in required if var not in os.environ]
+    if is_github_actions_ci():
+        required = ['DATADOG_API_KEY', 'GITHUB_SHA', 'GITHUB_JOB', 'GITHUB_RUN_ID', 'GITHUB_REPOSITORY', 'MATRIX_SHARD']
+    elif is_circle_ci():
+        required = ['DATADOG_API_KEY', 'CIRCLE_SHA1', 'CIRCLE_BUILD_URL', 'CIRCLE_JOB', 'CIRCLE_NODE_INDEX']
+    else:
+        # Keep backward compatibility in unknown CI contexts with CircleCI-style vars.
+        required = ['DATADOG_API_KEY', 'CIRCLE_SHA1', 'CIRCLE_BUILD_URL', 'CIRCLE_JOB', 'CIRCLE_NODE_INDEX']
+    missing = [var for var in required if not os.environ.get(var)]
     if missing:
         raise RuntimeError(f"Cannot execute CI script. Missing required environment variables: {', '.join(missing)}")
 

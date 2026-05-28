@@ -70,12 +70,14 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     val topology = OrderingTopology.forTesting(allIds.toSet)
     OrderingTopologyInfo[ProgrammableUnitTestEnv](
       self,
-      topology,
-      cryptoProvider,
-      allIds,
-      topology,
-      cryptoProvider,
-      allIds,
+      currentTopology = topology,
+      currentCryptoProvider = cryptoProvider,
+      currentLeaders = allIds,
+      currentBlacklistedNodes = Seq.empty,
+      previousTopology = topology,
+      previousCryptoProvider = cryptoProvider,
+      previousLeaders = allIds,
+      previousBlacklistedNodes = Seq.empty,
     )
   }
 

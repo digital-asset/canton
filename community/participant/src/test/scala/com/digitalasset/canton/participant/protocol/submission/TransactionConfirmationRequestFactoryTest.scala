@@ -298,11 +298,12 @@ class TransactionConfirmationRequestFactoryTest
 
           val (recipients, _) = hashToKeyMap(tree.viewHash)
 
+          // TODO(#32835): adapt so encryption uses either a lightweight view tree referencing view hash or ciphertextId
           (
             recipients,
             (
               LightTransactionViewTree
-                .fromTransactionViewTree(
+                .fromTransactionViewTreeUsingViewHashReference(
                   tree,
                   tree.subviewHashes.map(viewHash => hashToKeyMap(viewHash)._2),
                   testedProtocolVersion,
@@ -339,7 +340,7 @@ class TransactionConfirmationRequestFactoryTest
             .flatMap(_.keySet)
 
           val encryptedViews = EncryptedMultipleViews
-            .compressed(
+            .compressAndEncryptViews(
               cryptoPureApi,
               sessionKey,
               TransactionViewType,

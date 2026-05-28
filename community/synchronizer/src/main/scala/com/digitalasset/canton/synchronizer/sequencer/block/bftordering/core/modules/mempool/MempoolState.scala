@@ -9,10 +9,9 @@ import io.opentelemetry.api.trace.Span
 import scala.collection.mutable
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
-class MempoolState(weakQuorumSize: Int) {
+class MempoolState(var weakQuorum: Int, var isBlacklisted: Boolean = false) {
   val receivedOrderRequests: mutable.Queue[(Mempool.OrderRequest, Span)] = mutable.Queue()
   var toBeProvidedToAvailability: Int = 0
-  var weakQuorum: Int = weakQuorumSize
   var authenticatedCount: Int = 1
 
   def canDisseminate: Boolean = authenticatedCount >= weakQuorum

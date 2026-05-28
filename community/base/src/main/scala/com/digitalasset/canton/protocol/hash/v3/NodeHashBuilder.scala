@@ -7,12 +7,7 @@ import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.protocol.{LfHash, hash}
 import com.digitalasset.canton.version.HashingSchemeVersion
-import com.digitalasset.daml.lf.transaction.{
-  GlobalKeyWithMaintainers,
-  Node,
-  NodeId,
-  SerializationVersion,
-}
+import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, Node, SerializationVersion}
 
 /** Node hash builder for HashingSchemeVersion.V3
   *
@@ -100,15 +95,13 @@ private[hash] class NodeHashBuilder(
         _.addOptional(node.keyOpt, _.addGlobalKeyWithMaintainers)
       )
 
-  override protected def addNode(
+  override protected def initNode(
       node: Node,
       nodeSeedO: Option[LfHash],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
   ): this.type =
     node match {
       // Check first for queryByKey nodes and handle them before falling back to the V2 builder where they would be rejected
       case queryByKey: Node.QueryByKey => addQueryByKeyNode(queryByKey)
-      case _ => super.addNode(node, nodeSeedO, nodes, nodeSeeds)
+      case _ => super.initNode(node, nodeSeedO)
     }
 }

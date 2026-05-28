@@ -17,6 +17,8 @@ class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAft
     sys.env.get("MIN_STEP_COUNT").fold[Option[Long]](None)(n => Some(n.toLong))
   private lazy val minTxNodeCount =
     sys.env.get("MIN_TX_NODE_COUNT").fold[Option[Long]](None)(n => Some(n.toLong))
+  private lazy val minFetchNodeCount =
+    sys.env.get("MIN_FETCH_NODE_COUNT").fold[Option[Long]](None)(n => Some(n.toLong))
   private var snapshotDir: Path = _
 
   override protected def beforeAll(): Unit = {
@@ -35,21 +37,25 @@ class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAft
       .getPathMatcher(s"glob:$snapshotDir/snapshot-$participantId*.bin")
 
   private def runWhenEnvVarSet(name: String)(testFun: => Assertion): Unit =
-    if (sys.env.get("STANDALONE").nonEmpty) {
+    if (sys.env.contains("STANDALONE")) {
+      println(name)
       name.in(testFun)
     } else {
       name.ignore(testFun)
     }
 
-  private val filteringLabel = (minStepCount, minTxNodeCount) match {
-    case (Some(stepCount), None) =>
-      s" - filtering with step count >= $stepCount"
-    case (None, Some(txNodeCount)) =>
-      s" - filtering with tx node count >= $txNodeCount"
-    case (Some(stepCount), Some(txNodeCount)) =>
-      s" - filtering with step count >= $stepCount and tx node count >= $txNodeCount"
-    case _ =>
+  private val filteringLabel = {
+    val filteringLabels = (
+      minStepCount.map(stepCount => s"step count >= $stepCount")
+        ++ minTxNodeCount.map(txNodeCount => s"tx node count >= $txNodeCount")
+        ++ minFetchNodeCount.map(fetchNodeCount => s"fetch node count >= $fetchNodeCount")
+    ).mkString(" and ")
+
+    if (filteringLabels.isEmpty) {
       ""
+    } else {
+      s" - filtering with $filteringLabels"
+    }
   }
 
   runWhenEnvVarSet(s"Extract all top level choices from snapshot data $filteringLabel") {
@@ -62,6 +68,7 @@ class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAft
         snapshotFile,
         minStepCount,
         minTxNodeCount,
+        minFetchNodeCount,
         debug = true,
       )
 

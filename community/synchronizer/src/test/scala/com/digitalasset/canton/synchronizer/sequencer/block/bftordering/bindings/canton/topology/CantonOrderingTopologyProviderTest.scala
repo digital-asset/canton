@@ -27,9 +27,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.BftOrderingSigningKeyUsage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
+  DefaultLeaderSelectionPolicyConfig,
   DefaultSegmentLength,
+  NoBlacklistingLeaderSelectionPolicyConfig,
   SegmentLength,
 }
 import com.digitalasset.canton.topology.*
@@ -74,34 +78,69 @@ class CantonOrderingTopologyProviderTest
         (None, Some(false)),
       ).forEvery {
         case (activationTimestampAndMaxEffectiveTimestampO, expectedPendingTopologyChangesFlag) =>
-          Table(
-            ("segmentLength in config", "segmentLength in dynamic", "segmentLength used)"),
+          val nonDefaultSegmentLength = mkSegmentLength(DefaultSegmentLength.length.value + 1)
+          val nonDefaultLeaderSelectionPolicy =
+            DefaultLeaderSelectionPolicyConfig.copy(howLongToBlacklist =
+              DefaultLeaderSelectionPolicyConfig.howLongToBlacklist match {
+                case HowLongToBlacklist.Linear(_) =>
+                  HowLongToBlacklist.NoBlacklisting
+                case HowLongToBlacklist.NoBlacklisting => HowLongToBlacklist.Linear(Some(1L))
+              }
+            )
+          Table[Option[Long], Option[Long], SegmentLength, Option[
+            BlacklistLeaderSelectionPolicyConfig
+          ], Option[BlacklistLeaderSelectionPolicyConfig], BlacklistLeaderSelectionPolicyConfig](
+            (
+              "segmentLength in config",
+              "segmentLength in dynamic",
+              "segmentLength expected to be used",
+              "leader selection policy in config",
+              "leader selection policy in dynamic",
+              "leader selection policy expected to be used",
+            ),
             // In pv=34 we use value in config if exists or default
             // In pv>34 we use value from sequencing parameters if exists or default
-            (None, None, DefaultSegmentLength),
+            (None, None, DefaultSegmentLength, None, None, DefaultLeaderSelectionPolicyConfig),
             (
               None,
-              Some(100L),
+              Some(nonDefaultSegmentLength.length.value),
               if (testedProtocolVersion == ProtocolVersion.v34) DefaultSegmentLength
-              else mkSegmentLength(100),
+              else nonDefaultSegmentLength,
+              None,
+              Some(NoBlacklistingLeaderSelectionPolicyConfig),
+              if (testedProtocolVersion == ProtocolVersion.v34) DefaultLeaderSelectionPolicyConfig
+              else NoBlacklistingLeaderSelectionPolicyConfig,
             ),
             (
               Some(123L),
               Some(100L),
               if (testedProtocolVersion == ProtocolVersion.v34) mkSegmentLength(123)
               else mkSegmentLength(100),
+              Some(NoBlacklistingLeaderSelectionPolicyConfig),
+              Some(nonDefaultLeaderSelectionPolicy),
+              if (testedProtocolVersion == ProtocolVersion.v34)
+                NoBlacklistingLeaderSelectionPolicyConfig
+              else nonDefaultLeaderSelectionPolicy,
             ),
             (
               Some(123L),
               None,
               if (testedProtocolVersion == ProtocolVersion.v34) mkSegmentLength(123)
               else DefaultSegmentLength,
+              Some(NoBlacklistingLeaderSelectionPolicyConfig),
+              None,
+              if (testedProtocolVersion == ProtocolVersion.v34)
+                NoBlacklistingLeaderSelectionPolicyConfig
+              else DefaultLeaderSelectionPolicyConfig,
             ),
           ).forEvery {
             case (
                   configSegmentLength,
                   dynamicSequencingParametersSegmentLength,
-                  correctSegmentLength,
+                  expectedSegmentLength,
+                  configLeaderSelectionPolicy,
+                  dynamicSequencingParametersLeaderSelectionPolicy,
+                  expectedLeaderSelectionPolicy,
                 ) =>
               val crypto =
                 SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
@@ -139,7 +178,12 @@ class CantonOrderingTopologyProviderTest
               when(topologySnapshotMock.findDynamicSequencingParameters()(any[TraceContext]))
                 .thenReturn(
                   FutureUnlessShutdown.pure(
-                    Right(someDynamicSequencingParameters(dynamicSequencingParametersSegmentLength))
+                    Right(
+                      someDynamicSequencingParameters(
+                        dynamicSequencingParametersSegmentLength,
+                        dynamicSequencingParametersLeaderSelectionPolicy,
+                      )
+                    )
                   )
                 )
               when(
@@ -180,7 +224,10 @@ class CantonOrderingTopologyProviderTest
               }
               new CantonOrderingTopologyProvider(
                 cryptoApiMock,
-                BftBlockOrdererConfig(segmentLengthForPv34 = configSegmentLength),
+                BftBlockOrdererConfig(
+                  segmentLengthForPv34 = configSegmentLength,
+                  leaderSelectionPolicyConfigForPv34 = configLeaderSelectionPolicy,
+                ),
                 loggerFactory,
                 SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
               )
@@ -215,9 +262,10 @@ class CantonOrderingTopologyProviderTest
                         keyIds = Set(FingerprintKeyId.toBftKeyId(pk.id))
                       )
                     )
-                  orderingTopology.epochLength shouldBe correctSegmentLength.epochLength(
+                  orderingTopology.epochLength shouldBe expectedSegmentLength.epochLength(
                     someSequencerIds.size.toLong
                   )
+                  orderingTopology.sequencingParameters.blacklistLeaderSelectionPolicyConfig shouldBe expectedLeaderSelectionPolicy
                   orderingTopology.maxBytesToDecompress shouldBe defaultMaxBytesToDecompress
                 }
           }
@@ -288,19 +336,33 @@ object CantonOrderingTopologyProviderTest {
   private def mkSegmentLength(length: Long): SegmentLength = SegmentLength(
     PositiveLong.tryCreate(length)
   )
-  private def sequencingParameters(segmentLength: Long): topology.SequencingParameters =
-    topology.SequencingParameters.create(
-      topology.SequencingParameters.DefaultPbftViewChangeTimeout,
-      mkSegmentLength(segmentLength),
-      topology.SequencingParameters.DefaultLeaderSelectionPolicyConfig,
-    )(testedProtocolVersion)
-  private def someDynamicSequencingParameters(segmentLength: Option[Long]) =
+  private def someDynamicSequencingParameters(
+      segmentLengthO: Option[Long],
+      leaderSelectionPolicyConfigO: Option[BlacklistLeaderSelectionPolicyConfig],
+  ) = {
+    val pvr = SequencingParameters.protocolVersionRepresentativeFor(testedProtocolVersion)
     SequencingParametersWithValidity(
-      SequencingParameters(segmentLength.map(sequencingParameters(_).toByteString))(
-        SequencingParameters.protocolVersionRepresentativeFor(testedProtocolVersion)
-      ),
+      (segmentLengthO, leaderSelectionPolicyConfigO) match {
+        case (None, None) => SequencingParameters(None)(pvr)
+        case (slO, lspO) =>
+          SequencingParameters(
+            Some(sequencingParameters(segmentLengthO, leaderSelectionPolicyConfigO).toByteString)
+          )(pvr)
+      },
       validFrom = aTimestamp,
       validUntil = None,
       synchronizerId = SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),
     )
+  }
+  private def sequencingParameters(
+      segmentLengthO: Option[Long],
+      leaderSelectionPolicyConfigO: Option[BlacklistLeaderSelectionPolicyConfig],
+  ): topology.SequencingParameters =
+    topology.SequencingParameters.create(
+      topology.SequencingParameters.DefaultPbftViewChangeTimeout,
+      segmentLengthO.map(mkSegmentLength).getOrElse(DefaultSegmentLength),
+      leaderSelectionPolicyConfigO.getOrElse(
+        topology.SequencingParameters.DefaultLeaderSelectionPolicyConfig
+      ),
+    )(testedProtocolVersion)
 }

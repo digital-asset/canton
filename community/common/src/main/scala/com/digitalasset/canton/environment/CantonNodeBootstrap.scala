@@ -63,7 +63,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
-import com.digitalasset.canton.metrics.{DbStorageMetrics, DeclarativeApiMetrics}
+import com.digitalasset.canton.metrics.{CryptoMetrics, DbStorageMetrics, DeclarativeApiMetrics}
 import com.digitalasset.canton.networking.grpc.{
   CantonGrpcUtil,
   CantonMutableHandlerRegistry,
@@ -126,7 +126,7 @@ import com.digitalasset.canton.util.{
   SimpleExecutionQueue,
   SingleUseCell,
 }
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion, ReleaseVersion}
 import com.digitalasset.canton.watchdog.WatchdogService
 import io.grpc.ServerServiceDefinition
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
@@ -181,6 +181,7 @@ trait BaseMetrics {
     new CacheMetrics("topology", openTelemetryMetricsFactory)
   def healthMetrics: HealthMetrics
   def storageMetrics: DbStorageMetrics
+  def cryptoMetrics: CryptoMetrics
   val declarativeApiMetrics: DeclarativeApiMetrics
 
 }
@@ -285,7 +286,7 @@ abstract class CantonNodeBootstrapImpl[
     getNode
       .map(_.status)
       .map(NodeStatus.Success(_))
-      .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor))
+      .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor, ReleaseVersion.current))
 
   private def waitingFor: Option[WaitingForExternalInput] = {
     @tailrec
@@ -492,6 +493,7 @@ abstract class CantonNodeBootstrapImpl[
             ReleaseProtocolVersion.latest,
             arguments.futureSupervisor,
             arguments.clock,
+            arguments.metrics.cryptoMetrics,
             executionContext,
             bootstrapStageCallback.timeouts,
             arguments.config.parameters.batching,

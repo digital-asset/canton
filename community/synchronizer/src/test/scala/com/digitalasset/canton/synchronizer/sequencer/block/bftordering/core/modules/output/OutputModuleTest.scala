@@ -781,6 +781,16 @@ class OutputModuleTest
             )
           )
         )
+      when(store.getBlock(sequencerFirstBlockOfEpoch))
+        .thenReturn(() =>
+          Some(
+            OutputBlockMetadata(
+              sequencerEpochIsAt,
+              sequencerFirstBlockOfEpoch,
+              sequencerTimestampOfEpoch,
+            )
+          )
+        )
       when(store.getEpoch(sequencerEpochIsAt)).thenReturn(() =>
         Some(
           OutputEpochMetadata(
@@ -829,6 +839,9 @@ class OutputModuleTest
 
       output.previousStoredBlock.getBlockNumberAndBftTime shouldBe Some(
         previousBlockNumber -> previousTimestamp
+      )
+      output.previousStoredBlock.getInitialBlockNumberAndBftTime shouldBe Some(
+        sequencerFirstBlockOfEpoch -> sequencerTimestampOfEpoch
       )
       output.leaderSelectionPolicy shouldBe sequencerEpochPolicy
     }
@@ -1147,7 +1160,7 @@ class OutputModuleTest
             verify(consensusRef, times(1)).asyncSend(
               Consensus.NewEpochTopology(
                 secondEpochNumber,
-                Membership(BftNodeId("node1"), newOrderingTopology, Seq.empty),
+                Membership.forTesting(BftNodeId("node1"), newOrderingTopology),
                 any[CryptoProvider[ProgrammableUnitTestEnv]],
               )
             )(any[TraceContext], any[MetricsContext])

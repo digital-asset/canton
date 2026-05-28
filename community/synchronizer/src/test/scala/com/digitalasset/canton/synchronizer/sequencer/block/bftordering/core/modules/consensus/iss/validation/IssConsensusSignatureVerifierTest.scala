@@ -35,18 +35,21 @@ class IssConsensusSignatureVerifierTest extends AnyWordSpec with BftSequencerBas
   val otherIds: IndexedSeq[BftNodeId] = (1 to 3).map(index => BftNodeId(s"node$index"))
   val allIds: Seq[BftNodeId] = (myId +: otherIds).sorted
   val anOrderingTopology = OrderingTopology.forTesting(allIds.toSet)
-  val aMembership = Membership(myId, anOrderingTopology, allIds)
+  val aMembership =
+    Membership(myId, anOrderingTopology, leaders = allIds, blacklistedNodes = Seq.empty)
   def aTopologyInfo(
       currentCryptoProvider: CryptoProvider[ProgrammableUnitTestEnv] = new FailingCryptoProvider()
   ) =
     OrderingTopologyInfo[ProgrammableUnitTestEnv](
       myId,
-      anOrderingTopology,
-      currentCryptoProvider,
-      allIds,
+      currentTopology = anOrderingTopology,
+      currentCryptoProvider = currentCryptoProvider,
+      currentLeaders = allIds,
+      currentBlacklistedNodes = Seq.empty,
       previousTopology = anOrderingTopology, // not relevant
-      currentCryptoProvider,
-      allIds,
+      previousCryptoProvider = currentCryptoProvider,
+      previousLeaders = allIds,
+      previousBlacklistedNodes = Seq.empty,
     )
 
   val blockMetadata = BlockMetadata(EpochNumber.First, BlockNumber.First)

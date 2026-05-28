@@ -488,9 +488,6 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
   private lazy val updateFetchByKey =
     Id("fetch_by_key") ~! `@` ~> fullIdentifier ^^ UpdateFetchByKey.apply
 
-  private lazy val updateLookupByKey =
-    Id("lookup_by_key") ~! `@` ~> fullIdentifier ^^ UpdateLookupByKey.apply
-
   private lazy val updateQueryNByKey =
     Id("query_n_by_key") ~! `@` ~> fullIdentifier ^^ UpdateQueryNByKey.apply
 
@@ -524,7 +521,6 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       updateExerciseInterfaceWithGuard |
       updateExerciseByKey |
       updateFetchByKey |
-      updateLookupByKey |
       updateQueryNByKey |
       updateGetTime |
       updateLedgerTimeLT |

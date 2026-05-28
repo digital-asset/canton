@@ -287,6 +287,7 @@ class OutputModule[E <: Env[E]](
           } yield {
             logger.info(
               s"Output module bootstrap wanted to recover from block $recoverFromBlockNumberThatCouldBeInMiddleOfEpoch " +
+                s"= min(ack: $lastAcknowledgedBlockNumber, stored: $lastStoredBlockNumber, leader: ${leaderSelectionPolicy.firstBlockWeNeedToAdd}) " +
                 s"which is in epoch $startEpochNumber; " +
                 s"we adjust to first block of that epoch which is $startBlockNumber}"
             )
@@ -352,6 +353,21 @@ class OutputModule[E <: Env[E]](
               previousStoredBlock.update(
                 previousBlock.blockNumber,
                 previousBlock.blockBftTime,
+              )
+            }
+
+          // The previous block might have been pruned (but in that case we do have the current block we try to recover
+          // from). It is okay to set initial even if we set the previous, as long as we set one of them (or we are in
+          // genesis).
+          context
+            .blockingAwait(
+              store.getBlock(BlockNumber(recoverFromBlockNumber)),
+              config.blockingDbReadTimeout,
+            )
+            .foreach { initialBlock =>
+              previousStoredBlock.setInitial(
+                initialBlock.blockNumber,
+                initialBlock.blockBftTime,
               )
             }
           val epochMetadata =
@@ -889,7 +905,9 @@ class OutputModule[E <: Env[E]](
     val orderingTopology =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochOrderingTopology)(_._1)
     val newEpochLeaders = leaderSelectionPolicy.getLeaders(orderingTopology, newEpochNumber)
-    val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders)
+    val newEpochBlacklisted =
+      leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber)
+    val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders, newEpochBlacklisted)
     val cryptoProvider =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
 
@@ -1004,8 +1022,15 @@ object OutputModule {
 
   private[bftordering] final class PreviousStoredBlock {
 
+    private val initialBlockAndBftTimeRef =
+      new AtomicReference[Option[(BlockNumber, CantonTimestamp)]](None)
+
     private val blockNumberAndBftTimeRef =
       new AtomicReference[Option[(BlockNumber, CantonTimestamp)]](None)
+
+    private[bftordering] def getInitialBlockNumberAndBftTime
+        : Option[(BlockNumber, CantonTimestamp)] =
+      initialBlockAndBftTimeRef.get()
 
     private[bftordering] def getBlockNumberAndBftTime: Option[(BlockNumber, CantonTimestamp)] =
       blockNumberAndBftTimeRef.get()
@@ -1016,16 +1041,25 @@ object OutputModule {
         .map(b => s"(block number = ${b._1}, BFT time = ${b._2})")
         .getOrElse("undefined")
 
+    def setInitial(blockNumber: BlockNumber, blockBftTime: CantonTimestamp): Unit =
+      initialBlockAndBftTimeRef.set(Some(blockNumber -> blockBftTime))
+
     @VisibleForTesting
     private[output] def update(blockNumber: BlockNumber, blockBftTime: CantonTimestamp): Unit =
       blockNumberAndBftTimeRef.set(Some(blockNumber -> blockBftTime))
 
     private[OutputModule] def computeBlockBftTime(orderedBlock: OrderedBlock): CantonTimestamp =
-      BftTime.blockBftTime(
-        orderedBlock.canonicalCommitSet,
-        previousBlockBftTime =
-          blockNumberAndBftTimeRef.get().map(_._2).getOrElse(CantonTimestamp.Epoch),
-      )
+      initialBlockAndBftTimeRef
+        .get()
+        .filter(_._1 == orderedBlock.metadata.blockNumber)
+        .map(_._2)
+        .getOrElse(
+          BftTime.blockBftTime(
+            orderedBlock.canonicalCommitSet,
+            previousBlockBftTime =
+              blockNumberAndBftTimeRef.get().map(_._2).getOrElse(CantonTimestamp.Epoch),
+          )
+        )
   }
 
   trait RequestInspector {

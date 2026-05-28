@@ -174,7 +174,7 @@ message GetUpdatesPageRequest {
   // ``next_page_token`` of the last ``GetUpdatesPageResponse``.
   // To achieve correct paging: subsequent requests must
   //
-  // - be executed on the same participant with the same version of canton,
+  // - be executed on the same participant,
   // - have the same begin_offset_exclusive,
   // - have the same end_offset_inclusive,
   // - have the same update_format and

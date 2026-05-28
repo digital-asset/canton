@@ -11,6 +11,10 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.{
+  HowLongToBlacklist,
+  HowManyCanWeBlacklist,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
 import com.digitalasset.canton.time.PositiveFiniteDuration
@@ -43,6 +47,18 @@ final case class SequencingParameters private (
       param("segmentLength", _.segmentLength.length.value),
       param("blacklistConfig", _.blacklistLeaderSelectionPolicyConfig),
     )
+
+  def update(
+      pbftViewChangeTimeout: PositiveFiniteDuration = this.pbftViewChangeTimeout,
+      segmentLength: SegmentLength = this.segmentLength,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
+        this.blacklistLeaderSelectionPolicyConfig,
+  ): SequencingParameters =
+    SequencingParameters(
+      pbftViewChangeTimeout = pbftViewChangeTimeout,
+      segmentLength = segmentLength,
+      blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
+    )(representativeProtocolVersion)
 
   def toProto30: v30.DynamicSequencingParametersPayload = v30.DynamicSequencingParametersPayload(
     Option(pbftViewChangeTimeout.toProtoPrimitive)
@@ -78,6 +94,11 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultHowLongToBlackList,
       DefaultHowManyCanWeBlacklist,
     )
+  val NoBlacklistingLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
+    BlacklistLeaderSelectionPolicyConfig(
+      HowLongToBlacklist.NoBlacklisting,
+      HowManyCanWeBlacklist.NoBlacklisting,
+    )
 
   val DefaultSegmentLength: SegmentLength = SegmentLength(PositiveLong.tryCreate(10L))
   def Default(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
@@ -85,6 +106,14 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultPbftViewChangeTimeout,
       DefaultSegmentLength,
       DefaultLeaderSelectionPolicyConfig,
+    )(
+      protocolVersionRepresentativeFor(synchronizerProtocolVersion)
+    )
+  def NoBlacklisting(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
+    SequencingParameters(
+      DefaultPbftViewChangeTimeout,
+      DefaultSegmentLength,
+      NoBlacklistingLeaderSelectionPolicyConfig,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -149,9 +178,10 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
     )
 
   def create(
-      pbftViewChangeTimeout: PositiveFiniteDuration,
-      segmentLength: SegmentLength,
-      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+      pbftViewChangeTimeout: PositiveFiniteDuration = DefaultPbftViewChangeTimeout,
+      segmentLength: SegmentLength = DefaultSegmentLength,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
+        DefaultLeaderSelectionPolicyConfig,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout,

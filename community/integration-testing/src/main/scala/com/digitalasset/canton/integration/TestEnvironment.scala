@@ -30,6 +30,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
@@ -61,7 +62,7 @@ trait TestEnvironment
 
   private lazy val cryptoET: EitherT[FutureUnlessShutdown, String, Crypto] = Crypto
     .create(
-      CryptoConfig(),
+      CryptoConfig(enableExperimental = true), // Enable PQC for tests
       CachingConfigs.defaultKmsMetadataCache,
       SessionEncryptionKeyCacheConfig(),
       CachingConfigs.defaultPublicKeyConversionCache,
@@ -70,6 +71,7 @@ trait TestEnvironment
       testedReleaseProtocolVersion,
       FutureSupervisor.Noop,
       environment.clock,
+      CommonMockMetrics.cryptoMetrics,
       executionContext,
       environmentTimeouts,
       BatchingConfig(),

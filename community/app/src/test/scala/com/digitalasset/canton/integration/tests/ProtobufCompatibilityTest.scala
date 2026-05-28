@@ -173,6 +173,10 @@ final class ProtobufCompatibilityReaderTest
       // Added ML-DSA support to 3.6, crypto handshake handles missing schemes with 3.5
       """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "5" on enum "SigningKeySpec" was deleted.""",
       """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "4" on enum "SigningAlgorithmSpec" was deleted.""",
+      // Expose the release version in NotInitialized, is going to be added to 3.5.1-rc4+
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "3" with name "version" on message "NotInitialized" was deleted.""",
+      // undefined epoch_number case is handled
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Previously present field "2" with name "epoch_number" on message "BatchRequest" was deleted.""",
     ),
   )
 

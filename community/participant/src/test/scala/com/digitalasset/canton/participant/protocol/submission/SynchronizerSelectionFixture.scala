@@ -44,10 +44,9 @@ private[submission] object SynchronizerSelectionFixture extends TestIdFactory {
    version needs high protocol version).
    */
   lazy val fixtureSerializationVersion: LfSerializationVersion =
-    LfSerializationVersionToProtocolVersions.lfSerializationVersionToMinimumProtocolVersions.collect {
-      case (txVersion, protocolVersion) if protocolVersion <= BaseTest.testedProtocolVersion =>
-        txVersion
-    }.last
+    LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion(
+      BaseTest.testedProtocolVersion
+    )
 
   /*
   Simple topology, with two parties (signatory, observer) each connected to one

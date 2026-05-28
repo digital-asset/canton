@@ -24,26 +24,27 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.Future
 import scala.util.{Random, Success}
 
-class SubmissionTrackerTest
+final class SubmissionTrackerTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
     with ProtocolVersionChecksAnyWordSpec
     with BeforeAndAfterEach {
-  lazy val participantId = ParticipantId(
+  private lazy val participantId = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("participant::participant")
   )
-  lazy val otherParticipantId = ParticipantId(
+  private lazy val otherParticipantId = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("participant::other-participant")
   )
 
-  lazy val rootHash: RootHash = RootHash(TestHash.digest(1))
-  lazy val requestId: RequestId = RequestId(CantonTimestamp.Epoch)
-  lazy val requestIds: Seq[RequestId] =
+  private lazy val rootHash: RootHash = RootHash(TestHash.digest(1))
+  private lazy val requestId: RequestId = RequestId(CantonTimestamp.Epoch)
+  private lazy val requestIds: Seq[RequestId] =
     (1 to 1000).map(i => RequestId(CantonTimestamp.Epoch.plusSeconds(i.toLong)))
 
-  lazy val submissionTrackerStore = new InMemorySubmissionTrackerStore(loggerFactory)
-  lazy val submissionTracker: SubmissionTracker = SubmissionTracker(
+  private lazy val submissionTrackerStore =
+    new InMemorySubmissionTrackerStore(loggerFactory, timeouts)
+  private lazy val submissionTracker: SubmissionTracker = SubmissionTracker(
     participantId,
     submissionTrackerStore,
     futureSupervisor,

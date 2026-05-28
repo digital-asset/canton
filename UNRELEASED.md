@@ -35,6 +35,7 @@ Template for a bigger topic
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
+- *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
 
 ### Preview Features
 - preview feature

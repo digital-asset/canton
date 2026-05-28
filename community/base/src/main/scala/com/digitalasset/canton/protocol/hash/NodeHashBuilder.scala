@@ -5,36 +5,42 @@ package com.digitalasset.canton.protocol.hash
 
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.protocol.LfHash
+import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
+import com.digitalasset.canton.util.RoseTree
 import com.digitalasset.canton.version.HashingSchemeVersion
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{Node, NodeId, SerializationVersion}
 
 import scala.collection.immutable.SortedMap
 
-import TransactionHash.*
-
 /** Hash builder with additional methods to encode and hash nodes. Specific hashing version schemes
   * must implement this class.
   */
-private abstract class NodeHashBuilder(
+private[hash] abstract class NodeHashBuilder(
     purpose: HashPurpose,
     hashTracer: HashTracer,
     protected val hashingSchemeVersion: HashingSchemeVersion,
 ) extends LfValueHashBuilder(purpose, hashTracer) {
 
-  /** Adds a node to this builder, and returns it
+  /** Initializes this builder with a node's fields. For exercise and rollback nodes (which have
+    * children), writes all fields including the children array length prefix, but NOT the children
+    * hashes themselves. Use [[hashNode]] to hash a complete subtree iteratively.
     */
-  protected def addNode(
+  protected def initNode(
       node: Node,
       nodeSeedO: Option[LfHash],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
   ): this.type
 
   /** Creates a new builder, using the provided hash tracer
     */
   private[hash] def newBuilder(hashTracer: HashTracer): NodeHashBuilder
 
+  /** Hashes a node and its entire subtree using an iterative (stack-safe) traversal powered by
+    * [[RoseTree.foldLeft]]. Exercise and rollback nodes are handled by writing the children array
+    * length prefix in [[initNode]], then adding each child hash via the fold update step, avoiding
+    * recursive JVM stack frames. Takes a `Node` directly rather than a `NodeId` because the
+    * metadata hasher calls this for disclosed Create nodes that have no NodeId. Using NodeId as the
+    * item type would require Option[NodeId] or a fake id at the metadata callsite.
+    */
   private[hash] final def hashNode(
       node: Node,
       nodeSeed: Option[LfHash],
@@ -42,41 +48,53 @@ private abstract class NodeHashBuilder(
       nodeSeeds: Map[NodeId, LfHash],
       hashTracer: HashTracer,
   ): Hash = {
-    // Ensure the LF serialization version of the node (optVersion) can be hashed
-    // with the HashingSchemeVersion implemented by this class (hashingSchemeVersion)
-    node.optVersion
-      .foreach(
-        NodeHashBuilder
-          .assertHashingVersionSupportsLfSerializationVersion(_, hashingSchemeVersion)
-      )
+    // Validate the root node's LF serialization version upfront.
+    node.optVersion.foreach(
+      NodeHashBuilder
+        .assertHashingVersionSupportsLfSerializationVersion(_, hashingSchemeVersion)
+    )
 
-    newBuilder(hashTracer)
-      .addNode(node, nodeSeed, nodes, nodeSeeds)
-      .finish()
-  }
+    // Each item carries the node, its seed, and the tracer to use when creating its builder.
+    // The tracer is threaded through the children iterator so that nesting depth is preserved for
+    // debug tracers (each level uses subNodeTracer of its parent).
+    // Node is used directly rather than NodeId because we don't know the nodeId of root nodes here.
+    // It also keeps the RoseTree.foldLeft call very simple because we keep the NodeId -> Node lookup
+    // localized to the children call.
+    type Item = (Node, Option[LfHash], HashTracer)
 
-  @throws[NodeHashingError]
-  private def addNodeFromNodeId(
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): (this.type, NodeId) => this.type =
-    (builder, nodeId) => {
-      val node = nodes.getOrElse(nodeId, throw NodeHashingError.IncompleteTransactionTree(nodeId))
-      addHash(
-        builder.hashNode(node, nodeSeeds.get(nodeId), nodes, nodeSeeds, hashTracer.subNodeTracer),
-        "(Hashed Inner Node)",
-      )
+    val treeOps = new RoseTree.TreeOps[Item] {
+      override def children(item: Item): Iterator[Item] = {
+        val (n, _, itemTracer) = item
+        val childTracer = itemTracer.subNodeTracer
+        val childIds: Iterator[NodeId] = n match {
+          case e: Node.Exercise => e.children.iterator
+          case r: Node.Rollback => r.children.iterator
+          case _ => Iterator.empty
+        }
+        childIds.map { id =>
+          val child =
+            nodes.getOrElse(id, throw NodeHashingError.IncompleteTransactionTree(id))
+          // Validate each child's LF serialization version before descending.
+          child.optVersion.foreach(
+            NodeHashBuilder
+              .assertHashingVersionSupportsLfSerializationVersion(_, hashingSchemeVersion)
+          )
+          (child, nodeSeeds.get(id), childTracer)
+        }
+      }
     }
 
-  def addNodesFromNodeIds(
-      nodeIds: ImmArray[NodeId],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): this.type =
-    addArray(nodeIds)(addNodeFromNodeId(nodes, nodeSeeds))
+    RoseTree.foldLeft(treeOps, (node, nodeSeed, hashTracer))(
+      init = { case (n, seedOpt, tracer) => newBuilder(tracer).initNode(n, seedOpt) }
+    )(
+      finish = _.finish()
+    )(
+      update = { (builder, childHash) => builder.addHash(childHash, "(Hashed Inner Node)") }
+    )
+  }
 }
 
-private object NodeHashBuilder {
+private[hash] object NodeHashBuilder {
   private[hash] val HashingVersionToMaxSupportedLFSerializationVersionMapping
       : SortedMap[HashingSchemeVersion, SerializationVersion] =
     SortedMap(

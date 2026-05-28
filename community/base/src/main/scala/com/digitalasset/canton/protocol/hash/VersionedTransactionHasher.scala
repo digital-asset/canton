@@ -19,8 +19,13 @@ object VersionedTransactionHasher {
       versionedTransaction: VersionedTransaction,
       nodeSeeds: Map[NodeId, LfHash],
       hashTracer: HashTracer = HashTracer.NoOp,
-  ): Hash =
-    NodeHashBuilder(
+  ): Hash = {
+    val txNodes = versionedTransaction.nodes
+
+    // A versioned transaction is a forest of trees. Hash the root count prefix, then hash each
+    // root tree independently (stack-safe via RoseTree.foldLeft inside hashNode) and add the
+    // resulting hash to the transaction builder.
+    val builder = NodeHashBuilder(
       HashPurpose.PreparedSubmission,
       hashTracer,
       enforceNodeSeedForCreateNodes = true,
@@ -30,8 +35,18 @@ object VersionedTransactionHasher {
       .withContext("Serialization Version")(
         _.addString(SerializationVersion.toProtoValue(versionedTransaction.version))
       )
-      .withContext("Root Nodes")(
-        _.addNodesFromNodeIds(versionedTransaction.roots, versionedTransaction.nodes, nodeSeeds)
+      .withContext("Root Nodes")(_.addInt(versionedTransaction.roots.length))
+
+    versionedTransaction.roots.foreach { rootId =>
+      val rootNode =
+        txNodes.getOrElse(rootId, throw NodeHashingError.IncompleteTransactionTree(rootId))
+      builder.addHash(
+        builder
+          .hashNode(rootNode, nodeSeeds.get(rootId), txNodes, nodeSeeds, hashTracer.subNodeTracer),
+        "(Hashed Root Node)",
       )
-      .finish()
+    }
+
+    builder.finish()
+  }
 }

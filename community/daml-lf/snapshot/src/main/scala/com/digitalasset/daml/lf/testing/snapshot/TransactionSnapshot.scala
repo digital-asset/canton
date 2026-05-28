@@ -12,7 +12,7 @@ import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, Transaction
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.Speedy
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot.SubmissionEntry.EntryCase
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.{
@@ -58,7 +58,11 @@ final case class TransactionSnapshot(
     )
 
   private[this] lazy val metricPlugins =
-    Seq(new StepCount(engine.config.iterationsBetweenInterruptions), new TxNodeCount)
+    Seq(
+      new FetchNodeCount,
+      new StepCount(engine.config.iterationsBetweenInterruptions),
+      new TxNodeCount,
+    )
 
   def replay(): Either[Error, Speedy.Metrics] =
     engine
@@ -135,6 +139,7 @@ private[snapshot] object TransactionSnapshot {
       dumpFile: Path,
       stepCountFilter: Option[Long] = None,
       txNodeCountFilter: Option[Long] = None,
+      fetchNodeCountFilter: Option[Long] = None,
       debug: Boolean = false,
   ): Set[String] = {
     val inputStream = new BufferedInputStream(Files.newInputStream(dumpFile))
@@ -158,6 +163,26 @@ private[snapshot] object TransactionSnapshot {
         )
     }
 
+    def filterLabel(
+        pluginCount: Option[Long],
+        filterCount: Option[Long],
+        label: String,
+    ): Option[String] =
+      (filterCount, pluginCount) match {
+        case (Some(minCount), Some(count)) if count < minCount =>
+          Some(s"$label = $count < $minCount")
+        case (Some(_), None) =>
+          Some(s"no $label metric plugin enabled")
+        case _ =>
+          None
+      }
+
+    def filterEnabled(pluginCount: Option[Long], filterCount: Option[Long]): Boolean =
+      (filterCount, pluginCount) match {
+        case (Some(minCount), Some(count)) => count < minCount
+        case _ => false
+      }
+
     def updateWithChoicesFromTx(txEntry: Snapshot.TransactionEntry, tx: SubmittedTx): Unit = {
       val stepCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
         case plugin if plugin.getName == "StepCount" =>
@@ -167,33 +192,36 @@ private[snapshot] object TransactionSnapshot {
         case plugin if plugin.getName == "TxNodeCount" =>
           plugin.getTotal
       }
+      val fetchNodeCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
+        case plugin if plugin.getName == "FetchNodeCount" =>
+          plugin.getTotal
+      }
       tx.foreachInExecutionOrder(
         exerciseBegin = { (_, exe) =>
-          (stepCountFilter, txNodeCountFilter) match {
-            case (None, None) =>
-              result = result + s"${exe.templateId}:${exe.choiceId}"
-            case (Some(minStepCount), None) if stepCount.exists(_ >= minStepCount) =>
-              result = result + s"${exe.templateId}:${exe.choiceId}"
-            case (Some(minStepCount), None) if debug =>
-              println(
-                s"Filtering out ${exe.templateId}:${exe.choiceId} as step count = $stepCount < $minStepCount"
-              )
-            case (None, Some(minTxNodeCount)) if txNodeCount.exists(_ >= minTxNodeCount) =>
-              result = result + s"${exe.templateId}:${exe.choiceId}"
-            case (None, Some(minTxNodeCount)) if debug =>
-              println(
-                s"Filtering out ${exe.templateId}:${exe.choiceId} as tx node count = $txNodeCount < $minTxNodeCount"
-              )
-            case (Some(minStepCount), Some(minTxNodeCount))
-                if stepCount.exists(_ >= minStepCount) && txNodeCount.exists(_ >= minTxNodeCount) =>
-              result = result + s"${exe.templateId}:${exe.choiceId}"
-            case (Some(minStepCount), Some(minTxNodeCount)) if debug =>
-              println(
-                s"Filtering out ${exe.templateId}:${exe.choiceId} as step count = $stepCount < $minStepCount or tx node count = $txNodeCount < $minTxNodeCount"
-              )
-            case _ =>
-            // Do nothing
+          val filteringLabels = (
+            filterLabel(stepCount, stepCountFilter, "step count")
+              ++ filterLabel(txNodeCount, txNodeCountFilter, "tx node count")
+              ++ filterLabel(fetchNodeCount, fetchNodeCountFilter, "fetch node count")
+          ).mkString(" and ")
+          val noFilterDefined =
+            stepCountFilter.isEmpty
+              && txNodeCountFilter.isEmpty
+              && fetchNodeCountFilter.isEmpty
+          val someFilterEnabled =
+            filterEnabled(stepCount, stepCountFilter)
+              || filterEnabled(txNodeCount, txNodeCountFilter)
+              || filterEnabled(fetchNodeCount, fetchNodeCountFilter)
+
+          if (someFilterEnabled && debug) {
+            println(
+              s"Filtering out ${exe.templateId}:${exe.choiceId} as $filteringLabels"
+            )
           }
+
+          if (noFilterDefined || !someFilterEnabled) {
+            result = result + s"${exe.templateId}:${exe.choiceId}"
+          }
+
           ChildrenRecursion.DoNotRecurse
         },
         rollbackBegin = (_, _) => ChildrenRecursion.DoNotRecurse,

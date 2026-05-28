@@ -220,14 +220,14 @@ final class LsuMetricsIntegrationTest extends LsuBase {
             .filter(_.item.sequencerId == sequencer2.id)
             .loneElement
         )
-      }
 
-      getLsuStatusMetricValues(participant1) shouldBe Map(
-        fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
-      )
-      getLsuStatusMetricValues(participant2) shouldBe Map(
-        fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
-      )
+        getLsuStatusMetricValues(participant1) shouldBe Map(
+          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+        )
+        getLsuStatusMetricValues(participant2) shouldBe Map(
+          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+        )
+      }
     }
 
     "when handshake/topology copy is done" in { implicit env =>

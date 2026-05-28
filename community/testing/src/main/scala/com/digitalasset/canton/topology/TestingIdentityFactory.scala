@@ -23,6 +23,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
@@ -375,7 +376,7 @@ class TestingIdentityFactory(
       ips(availableUpToInclusive, currentSnapshotApproximationTimestamp),
       crypto,
       cryptoConfig,
-      None,
+      CommonMockMetrics.cryptoMetrics,
       CachingConfigs.defaultPublicKeyConversionCache,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,

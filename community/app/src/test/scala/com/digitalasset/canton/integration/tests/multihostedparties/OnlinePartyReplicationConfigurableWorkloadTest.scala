@@ -75,7 +75,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   private val createContractsOnboardingOnTP = true
   // Tests that rely on indexer pausing support arbitrary workload including
   // exercises of onboarding party contracts.
-  private val exerciseContractsOnboardingOnTP = pauseIndexer
+  protected def exerciseContractsOnboardingOnTP: Boolean = pauseIndexer
 
   private val numContractsInCreateBatch = 100
   // Approximate target duration of OnPR used if necessary to slow down OnPR so that
@@ -164,7 +164,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
       sourceParticipant = participant1
       targetParticipant = participant2
 
-      var testDone = false
+      var stopWorkload = false
       var amount: Double = minIouAmountOfDynamicallyCreatedIOUs
       @SuppressWarnings(Array("org.wartremover.warts.While"))
       val workloadF = Future {
@@ -198,7 +198,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
               }
             )
 
-        while (!testDone) {
+        while (!stopWorkload) {
           if (createContractsAlreadyOnTP) createIouWith(bob)
           if (exerciseContractsAlreadyOnTP) exerciseIou(aliceBob)
           if (createContractsOnboardingOnTP) createIouWith(carol)
@@ -238,6 +238,13 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
               targetParticipant,
               addPartyRequestId,
               None,
+              // TODO(#32580): Keep workload running until the end of test once indexing no longer gets
+              //  stuck in the face of uninterrupted workload.
+              () =>
+                if (!stopWorkload) {
+                  logger.info(s"TP done with ACS import")
+                  stopWorkload = true
+                },
               waitAtMost = maxExpectedTestDuration,
             )
           },
@@ -248,7 +255,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
           )),
         )
       } finally {
-        testDone = true
+        stopWorkload = true
         workloadF.futureValue
       }
   }
@@ -280,4 +287,5 @@ class OnlinePartyReplicationWithOnlineIndexingAndLimitedWorkloadTestPostgres
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected def pauseIndexer: Boolean = false
+  override protected def exerciseContractsOnboardingOnTP: Boolean = false
 }

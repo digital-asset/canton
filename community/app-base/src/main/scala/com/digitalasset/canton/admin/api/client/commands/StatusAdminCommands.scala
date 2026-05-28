@@ -52,7 +52,7 @@ object StatusAdminCommands {
       s match {
         case _: NodeStatus.Failure | _: NodeStatus.Success[?] =>
           false
-        case NodeStatus.NotInitialized(_active, waitingFor) =>
+        case NodeStatus.NotInitialized(_active, waitingFor, _version) =>
           waitingFor.contains(kind)
       }
   }

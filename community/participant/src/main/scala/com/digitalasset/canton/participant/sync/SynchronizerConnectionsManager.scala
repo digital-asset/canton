@@ -894,6 +894,54 @@ private[sync] class SynchronizerConnectionsManager(
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[StaticSynchronizerParameters]] = {
     val successorPsid = initialPendingOperation.operation.successorPsid
 
+    /*
+       Transform the result to abort if the operation is not needed anymore.
+       Recall that retries are stopped on a Right
+     */
+    def transformError(
+        error: SyncServiceError
+    ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[StaticSynchronizerParameters]] =
+      pendingLsuOperationsStore
+        .get(
+          initialPendingOperation.synchronizer,
+          initialPendingOperation.key,
+          initialPendingOperation.name,
+        )
+        .value
+        .map {
+          case Some(`initialPendingOperation`) =>
+            val isRetryable = error.retryable.isDefined
+
+            // e.g., transient network or pool errors
+            if (isRetryable) {
+              logger.info(
+                s"Unable to perform handshake with $successorPsid: $error. Will retry."
+              )
+              Left(error) // Retry
+            } else {
+              logger.warn(
+                s"Unable to perform handshake with $successorPsid: $error. Error is not retryable."
+              )
+              Right(Option.empty[StaticSynchronizerParameters])
+            }
+
+          // The pending operation is different. Possibly a cancellation followed by a new LSU.
+          case Some(other) =>
+            logger.info(
+              s"Found $other pending LSU operation that is different from the initial $initialPendingOperation. Not retrying."
+            )
+
+            Right(Option.empty[StaticSynchronizerParameters])
+
+          case None => // LSU was cancelled or the operation was completed elsewhere
+            logger.info(
+              s"No pending LSU operation found for ${initialPendingOperation.synchronizer}. Not retrying."
+            )
+
+            Right(Option.empty[StaticSynchronizerParameters])
+        }
+        .pipe(EitherT(_))
+
     syncPersistentStateManager.get(successorPsid) match {
       case Some(state) =>
         logger.info("Static synchronizer parameters found. Handshake is not needed.")
@@ -917,51 +965,7 @@ private[sync] class SynchronizerConnectionsManager(
               .unlessShutdown(
                 performPureHandshake(successorPsid, isLsu = true)
                   .map(Some(_))
-                  /*
-                  Transform the result to abort if the operation is not needed anymore.
-                  Recall that retries are stopped on a Right
-                   */
-                  .leftFlatMap { error =>
-                    pendingLsuOperationsStore
-                      .get(
-                        initialPendingOperation.synchronizer,
-                        initialPendingOperation.key,
-                        initialPendingOperation.name,
-                      )
-                      .value
-                      .map {
-                        case Some(`initialPendingOperation`) =>
-                          val isRetryable = error.retryable.isDefined
-
-                          // e.g., transient network or pool errors
-                          if (isRetryable) {
-                            logger.info(
-                              s"Unable to perform handshake with $successorPsid: $error. Will retry."
-                            )
-                            Left(error) // Retry
-                          } else {
-                            logger.warn(
-                              s"Unable to perform handshake with $successorPsid: $error. Error is not retryable."
-                            )
-                            Right(Option.empty[StaticSynchronizerParameters])
-                          }
-
-                        case Some(other) => // The pending operation is different. Possibly a cancellation followed by a new LSU.
-                          logger.info(
-                            s"Found $other pending LSU operation that is different from the initial $initialPendingOperation. Not retrying."
-                          )
-
-                          Right(Option.empty[StaticSynchronizerParameters])
-
-                        case None => // LSU was cancelled or the operation was completed elsewhere
-                          logger.info(
-                            s"No pending LSU operation found for ${initialPendingOperation.synchronizer}. Not retrying."
-                          )
-
-                          Right(Option.empty[StaticSynchronizerParameters])
-                      }
-                      .pipe(EitherT(_))
-                  }
+                  .leftFlatMap(transformError)
                   .value,
                 DbExceptionRetryPolicy,
               )

@@ -288,7 +288,7 @@ class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSup
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase {
+trait LedgerApiKeysAndRollbackConformanceTest extends SingleVersionLedgerApiConformanceBase {
   override def lfVersion = LanguageVersion.v2_3
 
   override def connectedSynchronizersCount = 1
@@ -304,8 +304,15 @@ trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase
           suites =
             "ContractKeysCommandDeduplicationIT,ContractKeysContractIdIT,ContractKeysDeeplyNestedValueIT," +
               "ContractKeysDivulgenceIT,ContractKeysExplicitDisclosureIT,ContractKeysMultiPartySubmissionIT," +
-              "ContractKeysWronglyTypedContractIdIT,ContractKeysIT,RaceConditionIT,PrefetchContractKeysIT",
+              "ContractKeysWronglyTypedContractIdIT,ContractKeysIT,RaceConditionIT,PrefetchContractKeysIT," +
+              "ExceptionsIT,ExceptionRaceConditionIT,EventsDescendantsIT",
           exclude = Seq(
+            // TODO(#16065)
+            "ExceptionRaceConditionIT:RWRollbackCreateVsNonTransientCreate",
+            "ExceptionRaceConditionIT:RWArchiveVsRollbackFailedLookupByKey",
+            "ExceptionsIT:ExRollbackDuplicateKeyArchived",
+            "ExceptionsIT:ExRollbackDuplicateKeyCreated",
+            "ExceptionsIT:ExRollbackExerciseCreateLookup",
             // tests with divulged/disclosed contracts fail on Canton as does scoping by maintainer unless we're on a UCK synchronizer (see below)
             "ContractKeysIT:CKFetchOrLookup",
             "ContractKeysIT:CKMaintainerScoped",
@@ -328,56 +335,8 @@ trait LedgerApiKeysConformanceTest extends SingleVersionLedgerApiConformanceBase
   }
 }
 
-class LedgerApiKeysConformanceTest_Postgres extends LedgerApiKeysConformanceTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  // On registerPlugin(new UseBftSequencer(loggerFactory)) PrefetchContractKeysIT fails with
-  // ABORTED: SEQUENCER_BACKPRESSURE(2,54fe840c): The sequencer is overloaded.
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
-}
-
-trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConformanceBase {
-
-  override def lfVersion = LanguageVersion.devLfVersion
-
-  override def connectedSynchronizersCount = 1
-
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
-      .withSetup(setupLedgerApiConformanceEnvironment)
-
-  "Ledger Api Test Tool" can {
-    "pass experimental tests for 2.dev lf version" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
-      implicit env =>
-        ledgerApiTestToolPlugin.runSuites(
-          suites = "ExceptionsIT,ExceptionRaceConditionIT,EventsDescendantsIT",
-          exclude = Seq(
-            // TODO(#16065)
-            "ExceptionRaceConditionIT:RWRollbackCreateVsNonTransientCreate",
-            "ExceptionRaceConditionIT:RWArchiveVsRollbackFailedLookupByKey",
-            "ExceptionsIT:ExRollbackDuplicateKeyArchived",
-            "ExceptionsIT:ExRollbackDuplicateKeyCreated",
-            "ExceptionsIT:ExRollbackExerciseCreateLookup",
-            // TODO(#31855): Exclude tests that roll back effects on dev for now, should assert failure instead.
-            "EventsDescendantsIT:DescendantsRollbackCreate",
-            "EventsDescendantsIT:DescendantsRollbackExercise",
-            "ExceptionsIT:ExRollbackActiveExerciseConsuming",
-            "ExceptionsIT:ExRolledbackArchiveConsuming",
-            "ExceptionsIT:ExRolledbackArchiveNonConsuming",
-            "ExceptionsIT:ExRolledbackKeyCreation",
-            "ExceptionsIT:ExRollbackHidden",
-            "ExceptionsIT:ExRollbackProjectionNormalization",
-            "ExceptionsIT:ExRollbackProjectionNesting",
-            "ExceptionsIT:ExRollbackCreate",
-          ),
-          concurrency = 4,
-        )
-    }
-  }
-}
-
-// not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer
-
-class LedgerApiExperimentalConformanceTest_Postgres extends LedgerApiExperimentalConformanceTest {
+class LedgerApiKeysAndRollbackConformanceTest_Postgres
+    extends LedgerApiKeysAndRollbackConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
   // On registerPlugin(new UseBftSequencer(loggerFactory)) PrefetchContractKeysIT fails with
   // ABORTED: SEQUENCER_BACKPRESSURE(2,54fe840c): The sequencer is overloaded.

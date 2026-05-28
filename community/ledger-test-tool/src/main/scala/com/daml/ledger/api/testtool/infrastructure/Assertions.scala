@@ -3,7 +3,6 @@
 
 package com.daml.ledger.api.testtool.infrastructure
 
-import com.daml.timer.RetryStrategy
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.google.rpc.ErrorInfo
@@ -117,9 +116,9 @@ object Assertions extends OptionValues with LoneElement {
       additionalErrorAssertions: Throwable => Unit = _ => (),
   ): Unit =
     t match {
-      case RetryStrategy.FailedRetryException(cause) =>
+      case exception: EventuallyException =>
         assertGrpcErrorRegex(
-          cause,
+          exception.error,
           errorCode,
           optPattern,
           checkDefiniteAnswerMetadata,

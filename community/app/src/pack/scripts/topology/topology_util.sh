@@ -20,7 +20,7 @@ encode_to_base64() {
 
 # Decode base64 string to bytes
 decode_from_base64() {
-  openssl base64 -d
+  openssl base64 -d -A
 }
 
 # Encode bytes read from stdin to hexadecimal

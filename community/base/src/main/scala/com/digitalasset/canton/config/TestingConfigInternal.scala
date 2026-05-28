@@ -55,6 +55,8 @@ import com.digitalasset.canton.metrics.MetricsFactoryType.External
   *   our testing framework any test can run colocated with any other test, any test, load-intensive
   *   or not, can issue the warning. Therefore, this parameter should be set to false in tests,
   *   unless the test expressly checks the behavior of the degradation.
+  * @param useLegacyContractIdVersionV11
+  *   Uses contract id version V11 for testing purposes.
   */
 final case class TestingConfigInternal(
     testSequencerClientFor: Set[TestSequencerClientFor] = Set.empty,
@@ -68,6 +70,7 @@ final case class TestingConfigInternal(
     participantsWithoutLapiVerification: Set[String] = Set.empty,
     enableInMemoryTransactionStoreForParticipants: Boolean = false,
     warnOnAcsCommitmentDegradation: Boolean = true,
+    useLegacyContractIdVersionV11: Boolean = false,
 )
 
 /** @param environmentId

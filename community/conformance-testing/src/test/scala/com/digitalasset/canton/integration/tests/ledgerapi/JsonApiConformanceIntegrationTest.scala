@@ -197,19 +197,19 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
   protected def testCaseName = "pass the Ledger API conformance tests"
 }
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_0
+final class JsonApiConformanceIntegrationShardedTest_Shard0
     extends JsonApiConformanceIntegrationShardedTest(shard = 0, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_1
+final class JsonApiConformanceIntegrationShardedTest_Shard1
     extends JsonApiConformanceIntegrationShardedTest(shard = 1, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_2
+final class JsonApiConformanceIntegrationShardedTest_Shard2
     extends JsonApiConformanceIntegrationShardedTest(shard = 2, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_3
+final class JsonApiConformanceIntegrationShardedTest_Shard3
     extends JsonApiConformanceIntegrationShardedTest(shard = 3, numShards = 5)
 
-final class JsonApiConformanceIntegrationShardedTest_Shard_4
+final class JsonApiConformanceIntegrationShardedTest_Shard4
     extends JsonApiConformanceIntegrationShardedTest(shard = 4, numShards = 5)
 
 private[ledgerapi] trait NonSharded {

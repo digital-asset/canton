@@ -6,7 +6,7 @@ package testing.snapshot
 
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import org.openjdk.jmh.annotations.*
 
@@ -44,9 +44,9 @@ class ReplayBenchmark {
 
   private var benchmark: TransactionSnapshot = _
 
-  @Fork(value = 1, warmups = 1)
-  @Warmup(iterations = 1, time = 500, timeUnit = TimeUnit.MILLISECONDS)
-  @Measurement(iterations = 3, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  @Fork(value = 2, warmups = 3)
+  @Warmup(iterations = 3, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -57,6 +57,8 @@ class ReplayBenchmark {
     val Right(metrics) = result
     counters.stepCount += metrics.totalCount[StepCount].get
     counters.transactionNodeCount += metrics.totalCount[TxNodeCount].get
+    counters.fetchNodeCount += metrics.totalCount[FetchNodeCount].get
+    metrics.reset()
   }
 
   @Setup(Level.Trial)
@@ -112,9 +114,12 @@ object ReplayBenchmark {
 
     var transactionNodeCount: Long = 0
 
+    var fetchNodeCount: Long = 0
+
     def reset(): Unit = {
       stepCount = 0
       transactionNodeCount = 0
+      fetchNodeCount = 0
     }
   }
 }

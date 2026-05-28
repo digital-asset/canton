@@ -33,6 +33,12 @@ final case class RecipientsTree(
     recipientGroup ++ tail
   }
 
+  /** Computes the depth of the recipients tree, defined as the length of the longest path from this
+    * node to a leaf node. A leaf node has depth 1 .
+    */
+  def depth: Int =
+    1 + children.foldLeft(0)((maxDepth, child) => maxDepth.max(child.depth))
+
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] =
     NonEmpty.from(children) match {
       case Some(childrenNE) =>

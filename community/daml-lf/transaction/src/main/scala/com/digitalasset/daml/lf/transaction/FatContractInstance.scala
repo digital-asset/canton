@@ -4,7 +4,10 @@
 package com.digitalasset.daml.lf
 package transaction
 
+import com.digitalasset.daml.lf.value.Value.ValueRecord
+import com.google.common.annotations.VisibleForTesting
 import data.{Bytes, Ref, Time}
+import monocle.Lens
 import value.{CidContainer, Value}
 
 import scala.collection.immutable.TreeSet
@@ -88,12 +91,11 @@ private[lf] final case class FatContractInstanceImpl[Time <: CreationTime](
     "template ID of the contract key must match the template ID of the contract",
   )
 
-  override def mapCid(f: Value.ContractId => Value.ContractId): FatContractInstanceImpl[Time] = {
+  override def mapCid(f: Value.ContractId => Value.ContractId): FatContractInstanceImpl[Time] =
     copy(
       contractId = f(contractId),
       createArg = createArg.mapCid(f),
     )
-  }
 
   override def mapCreatedAt[NewCreatedAtTime <: CreationTime](
       f: Time => NewCreatedAtTime
@@ -154,19 +156,32 @@ object FatContractInstance {
       createdAt = createTime,
       authenticationData = authenticationData,
     )
+
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  object Optics {
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    val createArgUnsafe: Lens[FatContractInstance, ValueRecord] =
+      Lens[FatContractInstance, ValueRecord](_.createArg.asInstanceOf[ValueRecord])(newCreateArg =>
+        inst =>
+          inst
+            .asInstanceOf[FatContractInstanceImpl[inst.CreatedAtTime]]
+            .copy(createArg = newCreateArg)
+      )
+  }
 }
 
 /** Trait for specifying the creation time of a contract */
 sealed trait CreationTime extends Product with Serializable
 object CreationTime {
 
-  /** The creation time of a contract as an absolute timestamp.
-    * This is ledger time of the creating transaction.
+  /** The creation time of a contract as an absolute timestamp. This is ledger time of the creating
+    * transaction.
     */
   final case class CreatedAt(time: Time.Timestamp) extends CreationTime
 
-  /** A symbolic point in time for contracts created in the same transaction,
-    * when the ledger time of the transaction is not yet known.
+  /** A symbolic point in time for contracts created in the same transaction, when the ledger time
+    * of the transaction is not yet known.
     */
   case object Now extends CreationTime
 

@@ -23,8 +23,8 @@ class JournalGarbageCollectorTest extends BaseTestWordSpec with HasExecutionCont
         traceContext: TraceContext
     ): FutureUnlessShutdown[Unit] = {
       val ret = Promise[Unit]()
-      runningPromise.getAndSet(Some((ret))) match {
-        case Some(value) => fail("should not be running")
+      runningPromise.getAndSet(Some(ret)) match {
+        case Some(_value) => fail("should not be running")
         case None =>
           FutureUnlessShutdown.outcomeF(ret.future.map { _ =>
             runningPromise.set(None)

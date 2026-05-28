@@ -355,6 +355,7 @@ snapshot_release() {
   if [ -z "$suffix" ];then
     echo "A snapshot release requires a suffix!"
   fi
+  validate_version_tag "v$suffix"
   preflight
   current_version=$(extract_version)
   release_version=$(next_release_version "$current_version") || exit 1

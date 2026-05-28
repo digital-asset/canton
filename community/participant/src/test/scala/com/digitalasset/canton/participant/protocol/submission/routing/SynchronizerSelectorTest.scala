@@ -164,10 +164,9 @@ class SynchronizerSelectorTest
       val oldPV = ProtocolVersion.v34
 
       val serializationVersion = LfSerializationVersion.VDev
-      val newPV =
-        LfSerializationVersionToProtocolVersions.lfSerializationVersionToMinimumProtocolVersions
-          .get(serializationVersion)
-          .value
+      val newPV = LfSerializationVersionToProtocolVersions.getMinimumSupportedProtocolVersion(
+        serializationVersion
+      )
 
       val selectorOldPV = selectorForExerciseByInterface(
         serializationVersion = serializationVersion, // requires protocol version dev

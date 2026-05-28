@@ -6,6 +6,7 @@ module Universal where
 import Daml.Script
 import DA.Assert
 import DA.List
+import DA.ContractKeys
 
 {-
 Template allowing to configure maintainers, signatories, observers, actors, and key separately.
@@ -84,13 +85,16 @@ template UniversalContract
         do fetchByKey @UniversalContract k
 
     -- Choice that looks up a universal contract by key as its consequence.
-    nonconsuming choice DelegateLookup: Optional (ContractId UniversalContract)
+    nonconsuming choice DelegateLookup: [ContractId UniversalContract]
       with
         k: ([Party], Text)
+        n: Int
         delegateObservers: [Party]
       observer delegateObservers
       controller actors
-        do lookupByKey @UniversalContract k
+      do
+        cidsAndContracts <- lookupNByKey @UniversalContract n k
+        return (map fst cidsAndContracts)
 
     -- Choice that exercises Touch as its consequence.
     nonconsuming choice DelegateTouch: ()
@@ -197,13 +201,13 @@ test = script do
 
   -- delegate lookup (positive)
   delegateLookupPosCid <- submit eve $ exerciseCmd rootEve DelegateLookup with
-    k = ([eve], "keyText"), delegateObservers = [obs!!4]
-  delegateLookupPosCid === Some universal
+    k = ([eve], "keyText"), n = 2, delegateObservers = [obs!!4]
+  delegateLookupPosCid === [universal]
 
   -- delegate lookup (negative)
   delegateLookupNegCid <- submit eve $ exerciseCmd rootEve DelegateLookup with
-    k = ([eve], "not-assigned"), delegateObservers = [obs!!5]
-  delegateLookupNegCid === None
+    k = ([eve], "not-assigned"), n = 1, delegateObservers = [obs!!5]
+  delegateLookupNegCid === []
 
   -- delegate touch
   () <- submit charlie $ exerciseCmd rootCharlie DelegateTouch with

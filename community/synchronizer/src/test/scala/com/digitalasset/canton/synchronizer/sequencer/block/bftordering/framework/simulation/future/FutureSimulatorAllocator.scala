@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future
 
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.FutureSimulator.{
   FutureSimulatorState,
@@ -15,6 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   FutureSettings,
   RunFuture,
 }
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.util.Random
 
@@ -24,7 +26,9 @@ class FutureSimulatorAllocator(
     agenda: Agenda,
     random: Random,
     nodeId: BftNodeId,
-) extends FutureAllocator {
+    override val loggerFactory: NamedLoggerFactory,
+) extends FutureAllocator
+    with NamedLogging {
 
   override def newFuture[T](
       future: SimulationFuture[T],
@@ -42,6 +46,7 @@ class FutureSimulatorAllocator(
       None,
       None,
     )
+    logger.trace(s"Allocated Future (to be scheduled) $runningFuture")(TraceContext.empty)
     if (waitingFor.isEmpty) {
       agenda.addOne(
         RunFuture(nodeId, runningFuture),

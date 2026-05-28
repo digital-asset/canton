@@ -792,7 +792,7 @@ class ExampleTransactionFactory(
         packagePreference = packagePreference,
       )
 
-    val viewParticipantData = ViewParticipantData.tryCreate(cryptoOps)(
+    val viewParticipantData = ViewParticipantData.tryCreate(
       coreInputContracts,
       createWithSerialization,
       createdInSubviewArchivedInCore,
@@ -800,8 +800,7 @@ class ExampleTransactionFactory(
       actionDescription,
       RollbackContext.empty,
       participantDataSalt(viewIndex),
-      protocolVersion,
-    )
+    )(cryptoOps, protocolVersion, None)
 
     val subViews = TransactionSubviews(subviews)(protocolVersion, cryptoOps)
     TransactionView.tryCreate(cryptoOps)(

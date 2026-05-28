@@ -74,7 +74,10 @@ final case class EnvironmentDefinition(
     configTransforms.foldLeft(baseConfig)((config, transform) => transform(config))
 
   def withManualStart: EnvironmentDefinition =
-    copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(true))
+    setManualStart(true)
+
+  def setManualStart(manualStart: Boolean): EnvironmentDefinition =
+    copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(manualStart))
 
   /** Enable traffic control on all configured synchronizers
     * @param syncSynchronizerOwnersTime

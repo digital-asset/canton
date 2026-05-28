@@ -43,10 +43,10 @@ class GenTransactionTreeTest
   private def generateRandomKeysForSubviewHashes(
       subviewHashes: Seq[ViewHash],
       pureCrypto: CryptoPureApi,
-  ): Seq[ViewHashAndKey] =
+  ): Seq[SubviewReferenceAndKey] =
     subviewHashes.map(subviewHash =>
-      ViewHashAndKey(
-        subviewHash,
+      SubviewReferenceAndKey(
+        ByViewHash(subviewHash),
         pureCrypto.generateSecureRandomness(
           EncryptedViewMessage.computeRandomnessLength(pureCrypto)
         ),
@@ -57,7 +57,8 @@ class GenTransactionTreeTest
       tvt: FullTransactionViewTree,
       pureCrypto: CryptoPureApi,
   ): Either[String, LightTransactionViewTree] =
-    LightTransactionViewTree.fromTransactionViewTree(
+    // TODO(#32393): depending on the protocol version we should use view hash or ciphertext ID references
+    LightTransactionViewTree.fromTransactionViewTreeUsingViewHashReference(
       tvt,
       // we are not interested in the correctness of the subtree keys
       generateRandomKeysForSubviewHashes(tvt.subviewHashes, pureCrypto)

@@ -381,6 +381,9 @@ object TestingTimeServiceConfig {
   *   - true: Uses Assign/Unassign; preserves existing reassignment counters.
   * @param commitAfterFailedActivenessCheck
   *   For internal testing only. Do not enable this in production.
+  * @param validateLegacyContractsV11
+  *   Enables an extra validation for contracts with contract id version V11. Keep this enabled in
+  *   production.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -421,6 +424,7 @@ final case class ParticipantNodeParameterConfig(
     alphaMultiSynchronizerSupport: Boolean = false,
     commitAfterFailedActivenessCheck: Boolean = false,
     lsu: LsuConfig = LsuConfig(),
+    validateLegacyContractsV11: Boolean = true,
 ) extends LocalNodeParametersConfig
 
 /** Config for LSU.
@@ -436,7 +440,7 @@ final case class ParticipantNodeParameterConfig(
   *   Config for the retries of the task that fetches the sequencer ids.
   * @param purgeObsoleteTopology
   *   Config for purging of the topology store of the old physical synchronizer id, after the LSU is
-  *   complete.
+  *   complete. Default: no purging.
   */
 final case class LsuConfig(
     // TODO(#25344): check whether this should be removed
@@ -464,7 +468,7 @@ final case class LsuConfig(
   * @param chunkSize
   *   The amount of data that should be removed per purge iteration
   * @param cron
-  *   A cron expression, definining when the purges can take place
+  *   A cron expression, defining when the purges can take place
   * @param maxDuration
   *   Once triggered, the amount of time to repeatedly purge chunks, before having to wait for the
   *   next cron-defined trigger.

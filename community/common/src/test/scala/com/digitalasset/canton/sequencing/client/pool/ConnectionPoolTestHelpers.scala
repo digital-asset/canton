@@ -39,6 +39,7 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.
   SequencerSubscriptionPoolConfig,
   SequencerSubscriptionPoolHealth,
 }
+import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.client.{
   SequencedEventValidator,
@@ -46,7 +47,6 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.{
   ProcessingSerializedEvent,
-  SequencerAggregator,
   SequencerConnectionPoolDelays,
   SequencerConnections,
 }
@@ -295,7 +295,7 @@ trait ConnectionPoolTestHelpers {
       connectionPool = connectionPool,
       member = testMember,
       initialSubscriptionEventO = None,
-      mock[SequencerAggregator],
+      mock[SubscriptionStartProvider],
     )
 
     val listener = new TestHealthListener(subscriptionPool.health)

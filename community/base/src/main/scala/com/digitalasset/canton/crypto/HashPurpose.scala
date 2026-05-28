@@ -112,6 +112,7 @@ object HashPurpose {
   val AcsContinuationToken = HashPurpose(61, "AcsContinuationToken")
   val LsuSequencingTestMessageContent = HashPurpose(62, "LsuSequencingTestMessageContent")
   val UpdatesPageToken = HashPurpose(63, "UpdatesPageToken")
+  val CiphertextId = HashPurpose(64, "CiphertextId")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

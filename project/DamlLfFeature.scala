@@ -94,7 +94,7 @@ object DamlLfFeature {
   val featureNUCK = DamlLfFeature(
     name = "Non-unique contract keys",
     cppFlag = "DAML_NUCK",
-    versionRange = VersionRange.From(v2_3_1),
+    versionRange = VersionRange.From(v2_3),
   )
 
   val featureContractKeys = DamlLfFeature(
@@ -148,7 +148,7 @@ object DamlLfFeature {
   val featureExtendedCryptoPrimitives = DamlLfFeature(
     name = "Extended crypto primitives",
     cppFlag = "DAML_ExtendedCryptoPrimitives",
-    versionRange = VersionRange.From(v2_3_1),
+    versionRange = VersionRange.From(v2_3),
   )
 
   val featurePV34 = DamlLfFeature(

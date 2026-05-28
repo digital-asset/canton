@@ -5,6 +5,8 @@ package com.digitalasset.canton.crypto.signer
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -31,7 +33,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.KmsMetrics
+import com.digitalasset.canton.metrics.{CryptoMetrics, SigningHistograms, SigningMetrics}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
@@ -66,7 +68,7 @@ class SyncCryptoSignerWithSessionKeys(
     staticSynchronizerParameters: StaticSynchronizerParameters,
     member: Member,
     signPrivateApiWithLongTermKeys: SigningPrivateOps,
-    kmsMetrics: Option[KmsMetrics],
+    cryptoMetrics: CryptoMetrics,
     override protected val cryptoPrivateStore: CryptoPrivateStore,
     sessionSigningKeysConfig: SessionSigningKeysConfig,
     publicKeyConversionCacheConfig: CacheConfig,
@@ -106,6 +108,14 @@ class SyncCryptoSignerWithSessionKeys(
       // this `JcePureCrypto` object only holds private key conversions spawned from sign calls
       privateKeyConversionCacheTtl = Some(sessionSigningKeysConfig.keyEvictionPeriod.underlying),
       signatureVerificationParallelism = PositiveInt.one, // not used
+      encryptionParallelism = PositiveInt.one, // not used
+      signingMetrics = new SigningMetrics(
+        new SigningHistograms(MetricName("signing"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(
+        MetricsContext.Empty
+      ), // not used since we only want to record latency for KMS signing requests
+      decryptionMetrics = cryptoMetrics.decryptionMetrics, // not used
       loggerFactory = loggerFactory,
     )
 
@@ -548,7 +558,9 @@ class SyncCryptoSignerWithSessionKeys(
                   _.validityPeriodEnd.contains(CantonTimestamp.MaxValue)
                 )
               )
-                kmsMetrics.foreach(_.sessionSigningKeysFallback.inc())
+                cryptoMetrics.kmsMetricsO.foreach(kmsMetrics =>
+                  kmsMetrics.sessionSigningKeysFallback.inc()
+                )
               signPrivateApiWithLongTermKeys
                 .sign(hash, activeLongTermKey.id, usage)
                 .leftMap[SyncCryptoError](SyncCryptoError.SyncCryptoSigningError.apply)

@@ -2,6 +2,7 @@ module Foo where
 
 import IBaz
 import Baz
+import IBar
 
 template Foo
   with
@@ -19,3 +20,11 @@ template Foo
           bazCid <- create Baz with owner = owner, obs = owner
           _ <- exercise (toInterfaceContractId @IBaz bazCid) IBaz_Exe with subInformee = subInformee
           pure ()
+
+    -- Never called choice
+    -- Added to test support of unvetted dependency in TAPS
+    -- See SystematicTopologyAwareUpgradingIntegrationTest
+    choice Foo_GetIBar: IBarView
+      controller owner
+        do
+          error "Not implemented"

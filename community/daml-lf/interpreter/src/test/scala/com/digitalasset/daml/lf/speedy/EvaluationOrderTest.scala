@@ -708,7 +708,7 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
           val (res, msgs) = evalUpdateApp(
             pkgs,
             e"""\(maintainer: Party) (exercisingParty: Party) (cId: ContractId M:T) ->
-           ubind x : Option (ContractId M:T) <- lookup_by_key @M:T (M:toKey maintainer)
+           ubind x : Option (List (${TestPkg.tuple2TyCon} (ContractId M:T) M:T)) <- query_n_by_key @M:T 1 (M:toKey maintainer)
            in Test:exercise_by_id exercisingParty cId (M:Either:Left @Int64 @Int64 0)
            """,
             ArraySeq(SParty(alice), SParty(charlie), SContractId(cId)),
@@ -1535,7 +1535,7 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
           val (res, msgs) = evalUpdateApp(
             pkgs,
             e"""\(maintainer: Party) (fetchingParty: Party) (cId: ContractId M:T) ->
-           ubind x : Option (ContractId M:T) <- lookup_by_key @M:T (M:toKey maintainer)
+           ubind x : Option (List (${TestPkg.tuple2TyCon} (ContractId M:T) M:T)) <- query_n_by_key @M:T 1 (M:toKey maintainer)
            in Test:fetch_by_id fetchingParty cId
            """,
             ArraySeq(SParty(alice), SParty(charlie), SContractId(cId)),
@@ -2411,175 +2411,6 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
                 msgs shouldBe buildLog("starts test", "maintainers")
             }
           }
-        }
-      }
-    }
-
-    if (withKey) "lookup_by_key" - {
-      "a non-cached global contract" - {
-
-        // TEST_EVIDENCE: Integrity: Evaluation order of successful lookup_by_key of a non-cached global contract
-        "success" in {
-          val (res, msgs) = evalUpdateApp(
-            pkgs,
-            e"""\(lookingParty:Party) (sig: Party) -> Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
-            ArraySeq(SParty(alice), SParty(alice)),
-            Set(alice),
-            getContract = getContract,
-            getKeys = mapKeys(getKeys, getContract),
-          )
-          inside(res) { case Success(Right(_)) =>
-            msgs shouldBe buildLog(
-              "starts test",
-              "maintainers",
-              "authorizes lookup-by-key",
-              "queries key",
-              "queries contract",
-              "precondition",
-              "contract signatories",
-              "contract observers",
-              "key",
-              "maintainers",
-              "ends test",
-            )
-          }
-        }
-      }
-
-      "a cached global contract" - {
-
-        // TEST_EVIDENCE: Integrity: Evaluation order of successful lookup_by_key of a cached global contract
-        "success" in {
-          val (res, msgs) = evalUpdateApp(
-            pkgs,
-            e"""\(lookingParty:Party) (sig: Party) (cId: ContractId M:T) ->
-             ubind x: M:T <- fetch_template @M:T cId
-             in Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
-            ArraySeq(SParty(alice), SParty(alice), SContractId(cId)),
-            Set(alice),
-            getContract = getContract,
-            getKeys = mapKeys(getKeys, getContract),
-          )
-          inside(res) { case Success(Right(_)) =>
-            msgs shouldBe buildLog("starts test", "maintainers", "authorizes lookup-by-key", "queries key", "ends test")
-          }
-        }
-
-        // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key of an inactive global contract
-        "inactive contract" in {
-
-          val (res, msgs) = evalUpdateApp(
-            pkgs,
-            e"""\(cId: ContractId M:T) (lookingParty: Party) (sig: Party) ->
-         ubind x: Unit <- exercise @M:T Archive cId ()
-         in Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
-            ArraySeq(SContractId(cId), SParty(alice), SParty(alice)),
-            Set(alice),
-            getContract = getContract,
-            getKeys = mapKeys(getKeys, getContract),
-          )
-          inside(res) { case Success(Right(_)) =>
-            msgs shouldBe buildLog("starts test", "maintainers", "authorizes lookup-by-key", "queries key", "ends test")
-          }
-        }
-      }
-
-      "a local contract" - {
-
-        // TEST_EVIDENCE: Integrity: Evaluation order of successful lookup_by_key of a local contract
-        "success" in {
-          val (res, msgs) = evalUpdateApp(
-            pkgs,
-            e"""\(sig : Party) (obs : Party) (lookingParty: Party)  ->
-         ubind
-           cId: ContractId M:T <- create @M:T M:T { signatory = sig, observer = obs, precondition = True, key = M:toKey sig, nested = M:buildNested 0 }
-         in Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
-            ArraySeq(SParty(alice), SParty(bob), SParty(alice)),
-            Set(alice),
-          )
-          inside(res) { case Success(Right(_)) =>
-            msgs shouldBe buildLog("starts test", "maintainers", "authorizes lookup-by-key", "ends test")
-          }
-        }
-
-        // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key of an inactive local contract
-        "inactive contract" in {
-          val (res, msgs) = evalUpdateApp(
-            pkgs,
-            e"""\(sig : Party) (obs : Party) (lookingParty: Party) ->
-         ubind
-           cId: ContractId M:T <- create @M:T M:T { signatory = sig, observer = obs, precondition = True, key = M:toKey sig, nested = M:buildNested 0 };
-           x: Unit <- exercise @M:T Archive cId ()
-         in Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
-            ArraySeq(SParty(alice), SParty(bob), SParty(alice)),
-            Set(alice),
-          )
-          inside(res) { case Success(Right(_)) =>
-            msgs shouldBe buildLog("starts test", "maintainers", "authorizes lookup-by-key", "queries key", "ends test")
-          }
-        }
-      }
-
-      "an undefined key" - {
-        // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key of an unknown contract key
-        "successful" in {
-          val (res, msgs) = evalUpdateApp(
-            pkgs,
-            e"""\(lookingParty:Party) (sig: Party) -> Test:lookup_by_key lookingParty (Some @Party sig) None @(ContractId Unit) 0""",
-            ArraySeq(SParty(alice), SParty(alice)),
-            Set(alice),
-            getContract = getContract,
-            getKeys = PartialFunction.empty,
-          )
-          inside(res) { case Success(Right(_)) =>
-            msgs shouldBe buildLog("starts test", "maintainers", "authorizes lookup-by-key", "queries key", "ends test")
-          }
-        }
-      }
-
-      // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key with empty contract key maintainers
-      "empty contract key maintainers" in {
-        val (res, msgs) = evalUpdateApp(
-          pkgs,
-          e"""\(lookingParty: Party) -> Test:lookup_by_key lookingParty Test:noParty Test:noCid 0""",
-          ArraySeq(SParty(alice)),
-          Set(alice),
-        )
-        inside(res) {
-          case Success(
-                Left(SErrorDamlException(IE.FetchEmptyContractKeyMaintainers(T, _, _)))
-              ) =>
-            msgs shouldBe buildLog("starts test", "maintainers")
-        }
-      }
-
-      // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key with contract ID in contract key
-      "contract ID in contract key " in {
-        val (res, msgs) = evalUpdateApp(
-          pkgs,
-          e"""\(lookingParty: Party) (sig: Party) (cId: ContractId M:T) ->
-             Test:lookup_by_key lookingParty (Test:someParty sig) (Test:someCid cId) 0""",
-          ArraySeq(SParty(alice), SParty(alice), SContractId(cId)),
-          Set(alice),
-        )
-        inside(res) { case Success(Left(SErrorDamlException(IE.ContractIdInContractKey(_)))) =>
-          msgs shouldBe buildLog("starts test", "maintainers")
-        }
-      }
-
-      // TEST_EVIDENCE: Integrity: Evaluation order of lookup_by_key with contract key exceeding max nesting
-      "key exceeds max nesting" in {
-        val (res, msgs) = evalUpdateApp(
-          pkgs,
-          e"""\(sig : Party) (lookingParty: Party) -> Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 100""",
-          ArraySeq(SParty(alice), SParty(alice)),
-          Set(alice),
-        )
-        inside(res) {
-          case Success(
-                Left(SErrorDamlException(IE.ValueNesting(_)))
-              ) =>
-            msgs shouldBe buildLog("starts test", "maintainers")
         }
       }
     }
