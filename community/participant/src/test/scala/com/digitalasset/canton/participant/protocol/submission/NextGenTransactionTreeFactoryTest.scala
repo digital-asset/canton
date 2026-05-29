@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.GenTransactionTree
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -26,9 +27,11 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TestContractHasher
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.CantonOnly
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
-import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine
+import com.digitalasset.daml.lf.transaction.{ExternalCallResult, LegacyContractStateMachine}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -50,6 +53,76 @@ final class NextGenTransactionTreeFactoryTest
   private def failedLookup(testErrorMessage: String): ContractInstanceOfId =
     id => EitherT.leftT(ContractLookupError(id, testErrorMessage))
 
+  private val externalCallResult = ExternalCallResult(
+    extensionId = "extension",
+    functionId = "function",
+    config = Bytes.fromStringUtf8("config"),
+    input = Bytes.fromStringUtf8("input"),
+    output = Bytes.fromStringUtf8("output"),
+  )
+
+  private def withExternalCallResults(
+      example: ExampleTransaction,
+      nodeId: LfNodeId,
+      results: ImmArray[ExternalCallResult],
+  ): WellFormedTransaction[WithoutSuffixes] =
+    withExternalCallResults(
+      example.versionedUnsuffixedTransaction,
+      example.metadata,
+      nodeId,
+      results,
+    )
+
+  private def withExternalCallResults(
+      example: ExampleTransaction,
+      resultsByNode: Map[LfNodeId, ImmArray[ExternalCallResult]],
+  ): WellFormedTransaction[WithoutSuffixes] = {
+    val updatedNodes =
+      resultsByNode.foldLeft(example.versionedUnsuffixedTransaction.nodes) {
+        case (nodes, (nodeId, results)) =>
+          val exercise = nodes(nodeId).asInstanceOf[LfNodeExercises]
+          nodes.updated(
+            nodeId,
+            exercise.copy(
+              externalCallResults = results,
+              version = LfSerializationVersion.VDev,
+            ),
+          )
+      }
+    val updatedTransaction = CantonOnly.lfVersionedTransaction(
+      nodes = updatedNodes,
+      roots = example.versionedUnsuffixedTransaction.roots,
+    )
+    WellFormedTransaction.checkOrThrow(
+      updatedTransaction,
+      example.metadata,
+      WithoutSuffixes,
+    )
+  }
+
+  private def withExternalCallResults(
+      transaction: LfVersionedTransaction,
+      metadata: TransactionMetadata,
+      nodeId: LfNodeId,
+      results: ImmArray[ExternalCallResult],
+      updateExercise: LfNodeExercises => LfNodeExercises = identity,
+  ): WellFormedTransaction[WithoutSuffixes] = {
+    val exercise = updateExercise(transaction.nodes(nodeId).asInstanceOf[LfNodeExercises])
+    val updatedExercise = exercise.copy(
+      externalCallResults = results,
+      version = LfSerializationVersion.VDev,
+    )
+    val updatedTransaction = CantonOnly.lfVersionedTransaction(
+      nodes = transaction.nodes.updated(nodeId, updatedExercise),
+      roots = transaction.roots,
+    )
+    WellFormedTransaction.checkOrThrow(
+      updatedTransaction,
+      metadata,
+      WithoutSuffixes,
+    )
+  }
+
   forAll(Table("contract id version", CantonContractIdVersion.all*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
@@ -57,7 +130,7 @@ final class NextGenTransactionTreeFactoryTest
 
     s"TransactionTreeFactoryImpl for contract ID version $contractIdVersion" should {
 
-      def createTransactionTreeFactory: TransactionTreeFactory =
+      def createTransactionTreeFactory(): TransactionTreeFactory =
         new NextGenTransactionTreeFactory(
           ExampleTransactionFactory.submittingParticipant,
           factory.psid,
@@ -97,7 +170,7 @@ final class NextGenTransactionTreeFactoryTest
 
         "everything is ok" must {
           forEvery(factory.standardHappyCases) { example =>
-            lazy val treeFactory = createTransactionTreeFactory
+            lazy val treeFactory = createTransactionTreeFactory()
 
             s"create the correct views for: $example" in {
               createTransactionTree(
@@ -108,11 +181,237 @@ final class NextGenTransactionTreeFactoryTest
               ).value.flatMap(_ should equal(Right(example.transactionTree)))
             }
           }
+
+          "record external call results from same-view exercise nodes with view-local occurrence indexes" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val treeFactory = createTransactionTreeFactory()
+            val example = factory.MultipleRootsAndSimpleViewNesting
+            val rootExerciseNodeId = LfNodeId(1)
+            val sameViewExerciseNodeId = LfNodeId(5)
+            val rootCall = externalCallResult.copy(functionId = "root-function")
+            val sameViewCall = externalCallResult.copy(functionId = "same-view-function")
+
+            createTransactionTree(
+              treeFactory,
+              withExternalCallResults(
+                example,
+                Map(
+                  rootExerciseNodeId -> ImmArray(rootCall),
+                  sameViewExerciseNodeId -> ImmArray(sameViewCall),
+                ),
+              ),
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+            ).value.map { result =>
+              val tree = result.value
+              tree.rootViews.unblindedElements should have size 2
+              val view1 = tree.rootViews.unblindedElements.drop(1).headOption.value
+              val records = view1.viewParticipantData.tryUnwrap.externalCallResults.toSeq
+
+              records.map(record =>
+                (record.result, record.exerciseIndex, record.callIndex, record.checkingParties)
+              ) shouldBe Seq(
+                (
+                  rootCall,
+                  NonNegativeInt.zero,
+                  NonNegativeInt.zero,
+                  Set(
+                    ExampleTransactionFactory.signatory,
+                    ExampleTransactionFactory.submitter,
+                  ),
+                ),
+                (
+                  sameViewCall,
+                  NonNegativeInt.one,
+                  NonNegativeInt.zero,
+                  Set(
+                    ExampleTransactionFactory.signatory,
+                    ExampleTransactionFactory.submitter,
+                  ),
+                ),
+              )
+            }
+          }
+
+          "record repeated identical external call results on one exercise node with increasing call indexes" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val treeFactory = createTransactionTreeFactory()
+            val example = factory.MultipleRootsAndSimpleViewNesting
+            val nodeId = LfNodeId(5)
+
+            createTransactionTree(
+              treeFactory,
+              withExternalCallResults(
+                example,
+                nodeId,
+                ImmArray(externalCallResult, externalCallResult),
+              ),
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+            ).value.map { result =>
+              val tree = result.value
+              val view1 = tree.rootViews.unblindedElements.drop(1).headOption.value
+              val records = view1.viewParticipantData.tryUnwrap.externalCallResults.toSeq
+
+              records should have size 2
+              records.map(_.result) shouldBe Seq(externalCallResult, externalCallResult)
+              records.map(_.exerciseIndex).toSet shouldBe Set(NonNegativeInt.tryCreate(1))
+              records.map(_.callIndex) shouldBe Seq(NonNegativeInt.zero, NonNegativeInt.one)
+              records.map(_.checkingParties).toSet shouldBe Set(
+                Set(
+                  ExampleTransactionFactory.signatory,
+                  ExampleTransactionFactory.submitter,
+                )
+              )
+            }
+          }
+
+          "record external call results from child views only once" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val treeFactory = createTransactionTreeFactory()
+            val example = factory.ViewInterleavings
+            val externalCallNodeId = LfNodeId(2)
+
+            createTransactionTree(
+              treeFactory,
+              withExternalCallResults(example, externalCallNodeId, ImmArray(externalCallResult)),
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+            ).value.map { result =>
+              val tree = result.value
+              tree.rootViews.unblindedElements should have size 3
+              val parentView = tree.rootViews.unblindedElements.drop(1).headOption.value
+              val childView = parentView.subviews.unblindedElements.headOption.value
+
+              parentView.viewParticipantData.tryUnwrap.externalCallResults shouldBe ImmArray.Empty
+              val record =
+                childView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+
+              record.result shouldBe externalCallResult
+              record.exerciseIndex shouldBe NonNegativeInt.zero
+              record.callIndex shouldBe NonNegativeInt.zero
+              record.checkingParties shouldBe Set(ExampleTransactionFactory.signatory)
+            }
+          }
+
+          "preserve distinct same-result external call occurrences across parent and child views" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val treeFactory = createTransactionTreeFactory()
+            val example = factory.TransientContracts
+            val childExternalCallNodeId = LfNodeId(3)
+            val parentExternalCallNodeId = LfNodeId(5)
+
+            createTransactionTree(
+              treeFactory,
+              withExternalCallResults(
+                example,
+                Map(
+                  childExternalCallNodeId -> ImmArray(externalCallResult),
+                  parentExternalCallNodeId -> ImmArray(externalCallResult),
+                ),
+              ),
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+            ).value.map { result =>
+              val tree = result.value
+              tree.rootViews.unblindedElements should have size 2
+              val parentView = tree.rootViews.unblindedElements.drop(1).headOption.value
+              val childView = parentView.subviews.unblindedElements.loneElement
+
+              val parentRecord =
+                parentView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+              parentRecord.result shouldBe externalCallResult
+              parentRecord.exerciseIndex shouldBe NonNegativeInt.tryCreate(1)
+              parentRecord.callIndex shouldBe NonNegativeInt.zero
+              parentRecord.checkingParties shouldBe Set(ExampleTransactionFactory.submitter)
+
+              val childRecord =
+                childView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+              childRecord.result shouldBe externalCallResult
+              childRecord.exerciseIndex shouldBe NonNegativeInt.zero
+              childRecord.callIndex shouldBe NonNegativeInt.zero
+              childRecord.checkingParties shouldBe Set(
+                ExampleTransactionFactory.submitter,
+                ExampleTransactionFactory.signatory,
+              )
+            }
+          }
+
+          "record external call checking parties from signatories and actors" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val treeFactory = createTransactionTreeFactory()
+            val example = factory.SingleExerciseWithNonstakeholderActor(factory.deriveNodeSeed(0))
+
+            createTransactionTree(
+              treeFactory,
+              withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult)),
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+            ).value.map { result =>
+              val tree = result.value
+              val view = tree.rootViews.unblindedElements.loneElement
+              val record =
+                view.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+
+              record.checkingParties shouldBe Set(
+                ExampleTransactionFactory.signatory,
+                ExampleTransactionFactory.submitter,
+              )
+            }
+          }
+
+          "reconstruct non-root same-view external call records with view-local exercise indexes" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val submittingTreeFactory = createTransactionTreeFactory()
+            val validatingTreeFactory = createTransactionTreeFactory()
+            val example = factory.MultipleRootsAndSimpleViewNesting
+            val externalCallNodeId = LfNodeId(5)
+            val transaction =
+              withExternalCallResults(example, externalCallNodeId, ImmArray(externalCallResult))
+            val (_, (reinterpretedTx, reinterpretedMetadata, reinterpretedKeyResolver), _) =
+              example.reinterpretedSubtransactions(1)
+            val reinterpretedTransaction = withExternalCallResults(
+              reinterpretedTx,
+              reinterpretedMetadata,
+              externalCallNodeId,
+              ImmArray(externalCallResult),
+            )
+
+            createTransactionTree(
+              submittingTreeFactory,
+              transaction,
+              successfulLookup(example),
+              example.keyResolver.asCidOptionMap,
+            ).value.flatMap { result =>
+              val tree = result.value
+              val submittedView = tree.rootViews.unblindedElements.drop(1).headOption.value
+
+              validatingTreeFactory
+                .tryReconstruct(
+                  transaction = reinterpretedTransaction,
+                  rootPosition = tree.viewPosition(submittedView.viewHash.toRootHash).value,
+                  mediator = factory.mediatorGroup,
+                  submittingParticipantO = Some(ExampleTransactionFactory.submittingParticipant),
+                  salts = submittingTreeFactory.saltsFromView(submittedView),
+                  transactionUuid = factory.transactionUuid,
+                  topologySnapshot = factory.topologySnapshot,
+                  contractOfId = successfulLookup(example),
+                  rbContext = RollbackContext.empty,
+                  legacyKeyResolver = reinterpretedKeyResolver,
+                  absolutizer = factory.absolutizer(tree.updateId),
+                )
+                .failOnShutdown
+                .value
+                .map { reconstruction =>
+                  val (reconstructedView, _) = reconstruction.value
+                  val record =
+                    reconstructedView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+
+                  reconstructedView shouldBe submittedView
+                  record.exerciseIndex shouldBe NonNegativeInt.tryCreate(1)
+                }
+            }
+          }
+
         }
 
         "a contract lookup fails" must {
           lazy val errorMessage = "Test error message"
-          lazy val treeFactory = createTransactionTreeFactory
+          lazy val treeFactory = createTransactionTreeFactory()
 
           lazy val example = factory.SingleExercise(
             factory.deriveNodeSeed(0)
@@ -133,7 +432,7 @@ final class NextGenTransactionTreeFactoryTest
         }
 
         "empty actAs set is empty" must {
-          lazy val treeFactory = createTransactionTreeFactory
+          lazy val treeFactory = createTransactionTreeFactory()
 
           "reject the input" in {
             val example = factory.standardHappyCases.headOption.value
@@ -151,7 +450,7 @@ final class NextGenTransactionTreeFactoryTest
         }
 
         "checking package vettings" must {
-          lazy val treeFactory = createTransactionTreeFactory
+          lazy val treeFactory = createTransactionTreeFactory()
           "fail if the main package is not vetted" in {
             val example = factory.standardHappyCases(2)
             createTransactionTree(

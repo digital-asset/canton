@@ -4,20 +4,27 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Salt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
-import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
+import com.digitalasset.canton.protocol.{v32, *}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
   LfPackageId,
+  LfPartyId,
   LfVersioned,
+  ProtoDeserializationError,
   ProtocolVersionChecksAnyWordSpec,
 }
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import org.scalatest.wordspec.AnyWordSpec
+
+import scala.collection.immutable.ListSet
 
 class TransactionViewTest
     extends AnyWordSpec
@@ -43,6 +50,44 @@ class TransactionViewTest
   private val nodeSeed: LfHash = ExampleTransactionFactory.lfHash(1)
 
   private val defaultPackagePreference = Set(ExampleTransactionFactory.packageId)
+  private val externalCallResult: ExternalCallResult =
+    ExternalCallResult(
+      extensionId = "extension",
+      functionId = "function",
+      config = Bytes.fromStringUtf8("config"),
+      input = Bytes.fromStringUtf8("input"),
+      output = Bytes.fromStringUtf8("output"),
+    )
+  private val externalCallCheckingParties =
+    Set(ExampleTransactionFactory.submitter, ExampleTransactionFactory.signatory)
+
+  private def viewExternalCallResult(
+      exerciseIndex: Int,
+      result: ExternalCallResult = externalCallResult,
+      callIndex: Int = 0,
+      checkingParties: Set[LfPartyId] = externalCallCheckingParties,
+  ): ViewParticipantData.ViewExternalCallResult =
+    ViewParticipantData.ViewExternalCallResult(
+      result,
+      NonNegativeInt.tryCreate(exerciseIndex),
+      NonNegativeInt.tryCreate(callIndex),
+      checkingParties,
+    )
+
+  private def externalCallResultProto(
+      exerciseIndex: Int = 7,
+      callIndex: Int = 1,
+  ): v32.ViewExternalCallResult =
+    v32.ViewExternalCallResult(
+      extensionId = externalCallResult.extensionId,
+      functionId = externalCallResult.functionId,
+      config = externalCallResult.config.toByteString,
+      input = externalCallResult.input.toByteString,
+      output = externalCallResult.output.toByteString,
+      exerciseIndex = exerciseIndex,
+      callIndex = callIndex,
+      checkingParties = externalCallCheckingParties.toSeq.sorted,
+    )
 
   private val defaultActionDescription: ActionDescription =
     ActionDescription.tryFromLfActionNode(
@@ -50,6 +95,16 @@ class TransactionViewTest
       Some(ExampleTransactionFactory.lfHash(5)),
       defaultPackagePreference,
     )
+
+  private val exerciseActionDescription: ActionDescription =
+    ActionDescription.tryFromLfActionNode(
+      ExampleTransactionFactory.exerciseNodeWithoutChildren(absoluteId),
+      Some(nodeSeed),
+      defaultPackagePreference,
+    )
+
+  private def exerciseCoreInputs: Map[LfContractId, GenContractInstance] =
+    Map(absoluteId -> ExampleContractFactory.build(overrideContractId = Some(absoluteId)))
 
   forEvery(factory.standardHappyCases) { example =>
     s"The views of $example" when {
@@ -164,6 +219,7 @@ class TransactionViewTest
         createdIds: Seq[LfContractId] = Seq(createdId),
         archivedInSubviews: Set[LfContractId] = Set.empty,
         resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] = Map.empty,
+        externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult] = ImmArray.Empty,
     ): Either[String, ViewParticipantData] = {
 
       val created = createdIds.map { id =>
@@ -184,6 +240,7 @@ class TransactionViewTest
           RollbackContext.empty,
           salt,
           testedProtocolVersion,
+          externalCallResults,
         )
         .flatMap { data =>
           // Return error message if root action is not valid
@@ -275,6 +332,43 @@ class TransactionViewTest
 
     }
 
+    "external call results have duplicate occurrence identities" must {
+      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        create(
+          actionDescription = exerciseActionDescription,
+          coreInputs = exerciseCoreInputs,
+          externalCallResults = ImmArray(
+            viewExternalCallResult(exerciseIndex = 7, callIndex = 1),
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              result = externalCallResult.copy(functionId = "other-function"),
+            ),
+          ),
+        ).left.value shouldBe
+          "externalCallResults contains duplicate occurrence (exercise index 7, call index 1)"
+      }
+    }
+
+    "external call results on a non-exercise root action" must {
+      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        create(
+          externalCallResults = ImmArray(viewExternalCallResult(exerciseIndex = 7))
+        ).left.value shouldBe "External call results require an exercise root action"
+      }
+    }
+
+    "external call results on a non-dev protocol version" must {
+      "reject creation" onlyRunWithOrLessThan ProtocolVersion.v35 in {
+        create(
+          actionDescription = exerciseActionDescription,
+          coreInputs = exerciseCoreInputs,
+          externalCallResults = ImmArray(viewExternalCallResult(exerciseIndex = 7)),
+        ).left.value shouldBe
+          s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards"
+      }
+    }
+
     "deserialized" must {
 
       "reconstruct unkeyed view participant data" in {
@@ -326,6 +420,115 @@ class TransactionViewTest
             vpd.getCryptographicEvidence
           )
           .map(_.unwrap) shouldBe Right(Right(vpd))
+      }
+
+      "reconstruct dev external call results" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val vpd = create(
+          actionDescription = exerciseActionDescription,
+          coreInputs = exerciseCoreInputs,
+          externalCallResults = ImmArray(
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              checkingParties = externalCallCheckingParties,
+            )
+          ),
+        ).value
+
+        ViewParticipantData
+          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
+            vpd.getCryptographicEvidence
+          )
+          .map(_.unwrap) shouldBe Right(Right(vpd))
+      }
+
+      "reconstruct dev keyed external call results" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val key = ExampleTransactionFactory.globalKeyWithMaintainers()
+
+        val usedContract = ExampleContractFactory.build(
+          overrideContractId = Some(absoluteId),
+          keyOpt = Some(key.unversioned),
+        )
+        val vpd = create(
+          actionDescription = exerciseActionDescription,
+          consumed = Set(absoluteId),
+          createdIds = Seq(createdId),
+          coreInputs = Map(absoluteId -> usedContract),
+          archivedInSubviews = Set(otherAbsoluteId),
+          resolvedKeys = Map(
+            ExampleTransactionFactory.defaultGlobalKey ->
+              LfVersioned(
+                key.version,
+                KeyResolutionWithMaintainers(
+                  Vector(usedContract.contractId),
+                  key.unversioned.maintainers,
+                ),
+              )
+          ),
+          externalCallResults = ImmArray(
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              checkingParties = externalCallCheckingParties,
+            )
+          ),
+        ).value
+
+        ViewParticipantData
+          .fromByteString(testedProtocolVersion, (hashOps, testedProtocolVersion))(
+            vpd.getCryptographicEvidence
+          )
+          .map(_.unwrap) shouldBe Right(Right(vpd))
+      }
+
+      "serialize external call checking parties canonically" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val vpd = create(
+          actionDescription = exerciseActionDescription,
+          coreInputs = exerciseCoreInputs,
+          externalCallResults = ImmArray(
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              checkingParties = ListSet(
+                ExampleTransactionFactory.submitter,
+                ExampleTransactionFactory.signatory,
+              ),
+            )
+          ),
+        ).value
+
+        val reorderedVpd = vpd.copy(
+          externalCallResults = ImmArray(
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              checkingParties = ListSet(
+                ExampleTransactionFactory.signatory,
+                ExampleTransactionFactory.submitter,
+              ),
+            )
+          )
+        )
+
+        vpd.getCryptographicEvidence shouldBe reorderedVpd.getCryptographicEvidence
+      }
+
+      "reject an external call result with negative exercise_index" in {
+        ViewParticipantData.ViewExternalCallResult
+          .fromProtoV32(externalCallResultProto(exerciseIndex = -1))
+          .left
+          .value should matchPattern {
+          case ProtoDeserializationError.InvariantViolation(Some("exercise_index"), _) =>
+        }
+      }
+
+      "reject an external call result with negative call_index" in {
+        ViewParticipantData.ViewExternalCallResult
+          .fromProtoV32(externalCallResultProto(callIndex = -1))
+          .left
+          .value should matchPattern {
+          case ProtoDeserializationError.InvariantViolation(Some("call_index"), _) =>
+        }
       }
     }
   }

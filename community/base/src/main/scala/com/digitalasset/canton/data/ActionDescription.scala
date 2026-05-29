@@ -34,8 +34,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
-import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.value.{Value, ValueCoder, ValueOuterClass}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -124,7 +122,7 @@ object ActionDescription {
             exerciseResult,
             _key,
             byKey,
-            externalCallResults,
+            _externalCallResults,
             version,
           ) =>
         for {
@@ -140,7 +138,6 @@ object ActionDescription {
             byKey,
             seed,
             failed = exerciseResult.isEmpty, // absence of exercise result indicates failure
-            externalCallResults,
           )
         } yield actionDescription
 
@@ -203,7 +200,6 @@ object ActionDescription {
       interfaceIdP,
       templateIdP,
       packagePreferenceP,
-      externalCallResultsP,
     ) = e
     for {
       inputContractId <- ProtoConverter.parseLfContractId(inputContractIdP)
@@ -219,15 +215,6 @@ object ActionDescription {
         .leftMap(err => ValueDeserializationError("chosen_value", err.errorMessage))
       actors <- actorsP.traverse(ProtoConverter.parseLfPartyId(_, field = "actors")).map(_.toSet)
       seed <- LfHash.fromProtoPrimitive("node_seed", seedP)
-      externalCallResults = ImmArray.from(externalCallResultsP.map { r =>
-        ExternalCallResult(
-          extensionId = r.extensionId,
-          functionId = r.functionId,
-          config = Bytes.fromByteString(r.config),
-          input = Bytes.fromByteString(r.input),
-          output = Bytes.fromByteString(r.output),
-        )
-      })
       actionDescription <- ExerciseActionDescription
         .create(
           inputContractId,
@@ -240,7 +227,6 @@ object ActionDescription {
           byKey,
           seed,
           failed,
-          externalCallResults,
         )
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
@@ -354,7 +340,6 @@ object ActionDescription {
       override val byKey: Boolean,
       seed: LfHash,
       failed: Boolean,
-      externalCallResults: ImmArray[ExternalCallResult],
   ) extends ActionDescription {
 
     private val serializedChosenValue: ByteString = serializeChosenValue(chosenValue)
@@ -380,15 +365,6 @@ object ActionDescription {
         byKey = byKey,
         nodeSeed = seed.toProtoPrimitive,
         failed = failed,
-        externalCallResults = externalCallResults.toSeq.map { r =>
-          v30.ActionDescription.ExternalCallResult(
-            extensionId = r.extensionId,
-            functionId = r.functionId,
-            config = r.config.toByteString,
-            input = r.input.toByteString,
-            output = r.output.toByteString,
-          )
-        },
       )
 
     override protected def pretty: Pretty[ExerciseActionDescription] = prettyOfClass(
@@ -415,7 +391,6 @@ object ActionDescription {
         byKey: Boolean = this.byKey,
         seed: LfHash = this.seed,
         failed: Boolean = this.failed,
-        externalCallResults: ImmArray[ExternalCallResult] = this.externalCallResults,
     ): ExerciseActionDescription =
       ExerciseActionDescription(
         inputContractId,
@@ -428,7 +403,6 @@ object ActionDescription {
         byKey,
         seed,
         failed,
-        externalCallResults,
       )
 
   }
@@ -445,7 +419,6 @@ object ActionDescription {
         byKey: Boolean,
         seed: LfHash,
         failed: Boolean,
-        externalCallResults: ImmArray[ExternalCallResult] = ImmArray.Empty,
     ): ExerciseActionDescription = create(
       inputContractId,
       templateId,
@@ -457,7 +430,6 @@ object ActionDescription {
       byKey,
       seed,
       failed,
-      externalCallResults,
     ).fold(err => throw err, identity)
 
     def create(
@@ -471,7 +443,6 @@ object ActionDescription {
         byKey: Boolean,
         seed: LfHash,
         failed: Boolean,
-        externalCallResults: ImmArray[ExternalCallResult] = ImmArray.Empty,
     ): Either[InvalidActionDescription, ExerciseActionDescription] =
       Either.catchOnly[InvalidActionDescription](
         ExerciseActionDescription(
@@ -485,7 +456,6 @@ object ActionDescription {
           byKey,
           seed,
           failed,
-          externalCallResults,
         )
       )
 

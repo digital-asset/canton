@@ -8,6 +8,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
@@ -31,6 +32,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.CreationTime
 import io.scalaland.chimney.dsl.*
@@ -40,6 +43,7 @@ import scala.annotation.{nowarn, tailrec}
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
+import scala.math.Ordered.orderingToOrdered
 
 class NextGenTransactionTreeFactory(
     participantId: ParticipantId,
@@ -297,6 +301,9 @@ class NextGenTransactionTreeFactory(
 
     // contract IDs have not yet been suffixed
     val coreOtherBuilder = List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
+    val collectExternalCallResults = protocolVersion >= ProtocolVersion.dev
+    lazy val externalCallResultsBuilder =
+      List.newBuilder[ViewParticipantData.ViewExternalCallResult]
 
     val childViewsBuilder = Seq.newBuilder[TransactionView]
 
@@ -322,12 +329,18 @@ class NextGenTransactionTreeFactory(
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var createIndex = 0
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    var exerciseIndex = 0
 
     val nbSubViews = view.allNodes.count {
       case _: TransactionViewDecomposition.NewView => true
       case _ => false
     }
     val subviewIndex = TransactionSubviews.indices(nbSubViews).iterator
+    def viewExternalCallResultsFromCollected()
+        : ImmArray[ViewParticipantData.ViewExternalCallResult] =
+      if (collectExternalCallResults) ImmArray.from(externalCallResultsBuilder.result())
+      else ImmArray.Empty
 
     for {
       // Compute salts
@@ -378,6 +391,20 @@ class NextGenTransactionTreeFactory(
               case lfNode: LfActionNode =>
                 val suffixedNode = trySuffixNode(state)(nodeId -> lfNode)
                 coreOtherBuilder += ((nodeId, lfNode) -> rbScope)
+                lfNode match {
+                  case exercise: LfNodeExercises if collectExternalCallResults =>
+                    val currentExerciseIndex = NonNegativeInt.tryCreate(exerciseIndex)
+                    exerciseIndex += 1
+                    if (
+                      exercise.version >= LfSerializationVersion.VDev &&
+                      exercise.externalCallResults.nonEmpty
+                    )
+                      externalCallResultsBuilder ++= externalCallResultsFromCoreNode(
+                        currentExerciseIndex,
+                        exercise,
+                      )
+                  case _ => ()
+                }
                 EitherT.pure[FutureUnlessShutdown, TransactionTreeConversionError](suffixedNode)
             }
 
@@ -404,6 +431,7 @@ class NextGenTransactionTreeFactory(
       coreOtherNodes = coreOtherBuilder.result().map { case (nodeInfo, rbc) =>
         (checked(trySuffixNode(state)(nodeInfo)), rbc)
       }
+      externalCallResults = viewExternalCallResultsFromCollected()
       childViews = childViewsBuilder.result()
 
       suffixedRootNode: LfActionNode = coreOtherNodes.headOption
@@ -436,6 +464,7 @@ class NextGenTransactionTreeFactory(
         viewParticipantDataSalt,
         contractOfId,
         view.rbContext,
+        externalCallResults,
       )
 
     } yield {
@@ -618,6 +647,7 @@ class NextGenTransactionTreeFactory(
       salt: Salt,
       contractOfId: ContractInstanceOfId,
       rbContextCore: RollbackContext,
+      externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult],
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, ViewParticipantData] = {
 
     val consumedInCore =
@@ -681,6 +711,7 @@ class NextGenTransactionTreeFactory(
             rollbackContext = rbContextCore,
             salt = salt,
             protocolVersion = protocolVersion,
+            externalCallResults = externalCallResults,
           )
         )
         .leftMap[TransactionTreeConversionError](ViewParticipantDataError.apply)
@@ -819,6 +850,23 @@ class NextGenTransactionTreeFactory(
 }
 
 object NextGenTransactionTreeFactory {
+
+  private[submission] def externalCallResultsFromCoreNode(
+      exerciseIndex: NonNegativeInt,
+      exercise: LfNodeExercises,
+  ): Seq[ViewParticipantData.ViewExternalCallResult] = {
+    val checkingParties =
+      LfTransactionUtil.signatoriesOrMaintainers(exercise) |
+        LfTransactionUtil.actingParties(exercise)
+    exercise.externalCallResults.toSeq.zipWithIndex.map { case (result, callIndex) =>
+      ViewParticipantData.ViewExternalCallResult(
+        result = result,
+        exerciseIndex = exerciseIndex,
+        callIndex = NonNegativeInt.tryCreate(callIndex),
+        checkingParties = checkingParties,
+      )
+    }
+  }
 
   // TODO(#31527): SPM add test for RolledBackEffect
   private def transactionEffectful(tx: LfVersionedTransaction): Boolean =

@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
@@ -16,7 +17,7 @@ import com.digitalasset.canton.data.ActionDescription.{
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{v30, v31, v32, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   ProtoConverter,
@@ -38,6 +39,8 @@ import com.digitalasset.canton.{
   ProtoDeserializationError,
   checked,
 }
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
@@ -70,10 +73,13 @@ import scala.math.Ordered.orderingToOrdered
   *   The description of the root action of the view
   * @param rollbackContext
   *   The rollback context of the root action of the view.
+  * @param externalCallResults
+  *   External call results recorded by exercise nodes in the core of this view.
   * @throws ViewParticipantData$.InvalidViewParticipantData
   *   if [[createdCore]] contains two elements with the same contract id, if
   *   [[coreInputs]]`(id).contractId != id` if [[createdInSubviewArchivedInCore]] overlaps with
-  *   [[createdCore]]'s ids.
+  *   [[createdCore]]'s ids, or if [[externalCallResults]] is non-empty for a non-exercise root
+  *   action.
   * @throws com.digitalasset.canton.serialization.SerializationCheckFailed
   *   if this instance cannot be serialized
   */
@@ -85,6 +91,7 @@ final case class ViewParticipantData private (
     actionDescription: ActionDescription,
     rollbackContext: RollbackContext,
     salt: Salt,
+    externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult],
 )(
     hashOps: HashOps,
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
@@ -95,7 +102,7 @@ final case class ViewParticipantData private (
     with HasProtocolVersionedWrapper[ViewParticipantData]
     with ProtocolVersionedMemoizedEvidence {
   {
-    def tryRequireDistinct[A](vals: Seq[A])(message: A => String): Unit = {
+    def requireDistinct[A](vals: Seq[A])(message: A => String): Unit = {
       val set = scala.collection.mutable.Set[A]()
       vals.foreach { v =>
         if (set(v)) throw InvalidViewParticipantData(message(v))
@@ -104,7 +111,7 @@ final case class ViewParticipantData private (
     }
 
     val createdIds = createdCore.map(_.contract.contractId)
-    tryRequireDistinct(createdIds) { id =>
+    requireDistinct(createdIds) { id =>
       val indices = createdIds.zipWithIndex.collect {
         case (createdId, idx) if createdId == id => idx
       }
@@ -129,6 +136,30 @@ final case class ViewParticipantData private (
         s"Contract created in a subview are also created in the core: $transientOverlap"
       )
 
+    if (
+      externalCallResults.nonEmpty &&
+      representativeProtocolVersion < ViewParticipantData.protocolVersionRepresentativeFor(
+        ProtocolVersion.dev
+      )
+    )
+      throw InvalidViewParticipantData(
+        s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards"
+      )
+
+    if (externalCallResults.nonEmpty) {
+      actionDescription match {
+        case _: ExerciseActionDescription => ()
+        case _ =>
+          throw InvalidViewParticipantData("External call results require an exercise root action")
+      }
+
+      val externalCallOccurrenceIds =
+        externalCallResults.toSeq.map(result => (result.exerciseIndex, result.callIndex))
+      requireDistinct(externalCallOccurrenceIds) { case (exerciseIndex, callIndex) =>
+        s"externalCallResults contains duplicate occurrence (exercise index ${exerciseIndex.unwrap}, call index ${callIndex.unwrap})"
+      }
+    }
+
   }
 
   private def legacyIsAssignedKeyInconsistent(
@@ -144,7 +175,7 @@ final case class ViewParticipantData private (
     }
   }
 
-  private def tryCheckLegacyResolutionsReferenceInputContracts(): Unit = {
+  private def checkLegacyResolutionsReferenceInputContracts(): Unit = {
     val keyInconsistencies = keyResolution.filter(legacyIsAssignedKeyInconsistent)
     if (keyInconsistencies.nonEmpty) {
       throw InvalidViewParticipantData(
@@ -158,7 +189,7 @@ final case class ViewParticipantData private (
       ProtocolVersion.v34
     )
   ) {
-    tryCheckLegacyResolutionsReferenceInputContracts()
+    checkLegacyResolutionsReferenceInputContracts()
   }
 
   val rootAction: RootAction =
@@ -197,7 +228,6 @@ final case class ViewParticipantData private (
             byKey,
             _seed,
             failed,
-            _externalCallResults,
           ) =>
         val inputContract = coreInputs.getOrElse(
           inputContractId,
@@ -319,6 +349,19 @@ final case class ViewParticipantData private (
     salt = Some(salt.toProtoV30),
   )
 
+  private[ViewParticipantData] def toProtoV32: v32.ViewParticipantData = v32.ViewParticipantData(
+    coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
+    createdCore = createdCore.map(_.toProtoV30),
+    createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
+    resolvedKeys = keyResolution.toList.map { case (k, v) =>
+      KeyResolutionWithMaintainers.toProtoV31(k, v)
+    },
+    actionDescription = Some(actionDescription.toProtoV31),
+    rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV30),
+    salt = Some(salt.toProtoV30),
+    externalCallResults = externalCallResults.toSeq.map(_.toProtoV32),
+  )
+
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
@@ -332,6 +375,12 @@ final case class ViewParticipantData private (
     param("action description", _.actionDescription),
     param("rollback context", _.rollbackContext),
     param("salt", _.salt),
+    paramIfNonEmpty(
+      "external call results",
+      _.externalCallResults.toSeq.map(result =>
+        s"${result.result.extensionId}:${result.result.functionId}@${result.exerciseIndex.unwrap}.${result.callIndex.unwrap}".unquoted
+      ),
+    ),
   )
 
   @VisibleForTesting
@@ -344,6 +393,8 @@ final case class ViewParticipantData private (
       actionDescription: ActionDescription = this.actionDescription,
       rollbackContext: RollbackContext = this.rollbackContext,
       salt: Salt = this.salt,
+      externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult] =
+        this.externalCallResults,
   ): ViewParticipantData =
     ViewParticipantData(
       coreInputs,
@@ -353,6 +404,7 @@ final case class ViewParticipantData private (
       actionDescription,
       rollbackContext,
       salt,
+      externalCallResults,
     )(hashOps, representativeProtocolVersion, None)
 }
 
@@ -375,6 +427,10 @@ object ViewParticipantData
       supportedProtoVersionMemoized(_)(ic(fromProtoV31)),
       _.toProtoV31,
     ),
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(v32.ViewParticipantData)(
+      supportedProtoVersionMemoized(_)(ic(fromProtoV32)),
+      _.toProtoV32,
+    ),
   )
 
   /** Creates a view participant data.
@@ -393,8 +449,8 @@ object ViewParticipantData
     *   [[ViewParticipantData.actionDescription]] is a
     *   [[com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription]] or
     *   [[com.digitalasset.canton.data.ActionDescription.FetchActionDescription]] and the input
-    *   contract is not in [[ViewParticipantData.coreInputs]]
-    *
+    *   contract is not in [[ViewParticipantData.coreInputs]], or if
+    *   [[ViewParticipantData.externalCallResults]] is non-empty for a non-exercise root action
     * @throws com.digitalasset.canton.serialization.SerializationCheckFailed
     *   if this instance cannot be serialized
     *
@@ -412,6 +468,7 @@ object ViewParticipantData
       actionDescription: ActionDescription,
       rollbackContext: RollbackContext,
       salt: Salt,
+      externalCallResults: ImmArray[ViewExternalCallResult],
   )(
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
@@ -428,6 +485,7 @@ object ViewParticipantData
       actionDescription,
       rollbackContext,
       salt,
+      externalCallResults,
     )(hashOps, protocolVersionRepresentativeFor(protocolVersion), deserializedFrom)
   }
 
@@ -468,7 +526,8 @@ object ViewParticipantData
     * [[ViewParticipantData.actionDescription]] is a
     * [[com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription]] or
     * [[com.digitalasset.canton.data.ActionDescription.FetchActionDescription]] and the input
-    * contract is not in [[ViewParticipantData.coreInputs]]
+    * contract is not in [[ViewParticipantData.coreInputs]], or if
+    * [[ViewParticipantData.externalCallResults]] is non-empty for a non-exercise root action
     */
   def create(hashOps: HashOps)(
       coreInputs: Map[LfContractId, InputContract],
@@ -479,6 +538,7 @@ object ViewParticipantData
       rollbackContext: RollbackContext,
       salt: Salt,
       protocolVersion: ProtocolVersion,
+      externalCallResults: ImmArray[ViewExternalCallResult],
   ): Either[String, ViewParticipantData] =
     returnLeftWhenInitializationFails(
       ViewParticipantData.tryCreate(
@@ -489,6 +549,7 @@ object ViewParticipantData
         actionDescription,
         rollbackContext,
         salt,
+        externalCallResults,
       )(hashOps, protocolVersion, None)
     )
 
@@ -543,6 +604,7 @@ object ViewParticipantData
         createdCoreP,
         createdInSubviewArchivedInCoreP,
         rbContextP,
+        ImmArray.Empty,
       )
     } yield {
       viewParticipantData
@@ -583,6 +645,48 @@ object ViewParticipantData
         createdCoreP,
         createdInSubviewArchivedInCoreP,
         rbContextP,
+        ImmArray.Empty,
+      )
+    } yield viewParticipantData
+  }
+
+  private def fromProtoV32(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+      dataP: v32.ViewParticipantData,
+  )(
+      bytes: ByteString
+  ): ParsingResult[ViewParticipantData] = {
+    val v32.ViewParticipantData(
+      saltP,
+      coreInputsP,
+      createdCoreP,
+      createdInSubviewArchivedInCoreP,
+      resolvedKeysP,
+      actionDescriptionP,
+      rbContextP,
+      externalCallResultsP,
+    ) = dataP
+
+    for {
+      resolvedKeys <- resolvedKeysP.traverse(KeyResolutionWithMaintainers.fromProtoV31)
+      actionDescription <- ProtoConverter
+        .required("action_description", actionDescriptionP)
+        .flatMap(ActionDescription.fromProtoV31)
+      externalCallResults <- externalCallResultsP.traverse(ViewExternalCallResult.fromProtoV32)
+      viewParticipantData <- fromProto(
+        hashOps,
+        resolvedKeys.toMap,
+        actionDescription,
+        protocolVersion,
+        bytes,
+      )(
+        saltP,
+        coreInputsP,
+        createdCoreP,
+        createdInSubviewArchivedInCoreP,
+        rbContextP,
+        ImmArray.from(externalCallResults),
       )
     } yield viewParticipantData
   }
@@ -599,6 +703,7 @@ object ViewParticipantData
       createdCoreP: Seq[v30.CreatedContract],
       createdInSubviewArchivedInCoreP: Seq[String],
       rollbackContextP: Option[v30.ViewParticipantData.RollbackContext],
+      externalCallResults: ImmArray[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
       coreInputsSeq <- coreInputsP.traverse(InputContract.fromProtoV30)
@@ -623,6 +728,7 @@ object ViewParticipantData
           actionDescription = actionDescription,
           rollbackContext = rollbackContext,
           salt = salt,
+          externalCallResults = externalCallResults,
         )(hashOps, protocolVersion, Some(bytes))
       ).leftMap(ProtoDeserializationError.OtherError.apply)
     } yield viewParticipantData
@@ -644,6 +750,68 @@ object ViewParticipantData
         s"ViewParticipantData contains contracts with serialization versions not supported by protocol version $protocolVersion: $invalid"
       )
 
+  /** External-call result recorded in this view's core.
+    *
+    * @param exerciseIndex
+    *   Zero-based index of the exercise node in this view's core traversal.
+    * @param callIndex
+    *   Zero-based index of the external call result on that exercise node.
+    * @param checkingParties
+    *   Node-level confirming parties responsible for checking this result.
+    */
+  final case class ViewExternalCallResult(
+      result: ExternalCallResult,
+      exerciseIndex: NonNegativeInt,
+      callIndex: NonNegativeInt,
+      checkingParties: Set[LfPartyId],
+  ) {
+    private[ViewParticipantData] def toProtoV32: v32.ViewExternalCallResult =
+      v32.ViewExternalCallResult(
+        extensionId = result.extensionId,
+        functionId = result.functionId,
+        config = result.config.toByteString,
+        input = result.input.toByteString,
+        output = result.output.toByteString,
+        exerciseIndex = exerciseIndex.unwrap,
+        callIndex = callIndex.unwrap,
+        checkingParties = checkingParties.toSeq.sorted,
+      )
+  }
+
+  object ViewExternalCallResult {
+    def fromProtoV32(
+        resultP: v32.ViewExternalCallResult
+    ): ParsingResult[ViewExternalCallResult] = {
+      val v32.ViewExternalCallResult(
+        extensionId,
+        functionId,
+        config,
+        input,
+        output,
+        exerciseIndexP,
+        callIndexP,
+        checkingPartiesP,
+      ) = resultP
+      for {
+        exerciseIndex <- ProtoConverter.parseNonNegativeInt("exercise_index", exerciseIndexP)
+        callIndex <- ProtoConverter.parseNonNegativeInt("call_index", callIndexP)
+        checkingParties <- checkingPartiesP
+          .traverse(ProtoConverter.parseLfPartyId(_, field = "checking_parties"))
+      } yield ViewExternalCallResult(
+        result = ExternalCallResult(
+          extensionId = extensionId,
+          functionId = functionId,
+          config = Bytes.fromByteString(config),
+          input = Bytes.fromByteString(input),
+          output = Bytes.fromByteString(output),
+        ),
+        exerciseIndex = exerciseIndex,
+        callIndex = callIndex,
+        checkingParties = checkingParties.toSet,
+      )
+    }
+  }
+
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
   object Optics {
@@ -655,6 +823,8 @@ object ViewParticipantData
       GenLens[ViewParticipantData](_.actionDescription)
     val saltUnsafe: Lens[ViewParticipantData, Salt] =
       GenLens[ViewParticipantData](_.salt)
+    val externalCallResultsUnsafe: Lens[ViewParticipantData, ImmArray[ViewExternalCallResult]] =
+      GenLens[ViewParticipantData](_.externalCallResults)
   }
 
 }

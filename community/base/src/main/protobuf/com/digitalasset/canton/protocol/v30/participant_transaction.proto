@@ -179,18 +179,6 @@ message ActionDescription {
     optional string interface_id = 9;
     string template_id = 10;
     repeated string package_preference = 11;
-    repeated ExternalCallResult external_call_results = 12;
-  }
-
-  // Result of an external call recorded under an exercise node.
-  // Stores the call identity, config/input bytes, and output bytes for
-  // deterministic replay and validation.
-  message ExternalCallResult {
-    string extension_id = 1; // Extension service identifier
-    string function_id = 2; // Function identifier within the extension
-    bytes config = 3; // Extension configuration
-    bytes input = 4; // Input data sent to the extension
-    bytes output = 5; // Output data returned by the extension
   }
 
   message FetchActionDescription {

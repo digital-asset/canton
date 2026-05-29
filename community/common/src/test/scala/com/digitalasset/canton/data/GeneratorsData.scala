@@ -22,7 +22,8 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.SeqUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GeneratorsLf, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
-import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.transaction.{CreationTime, ExternalCallResult}
 import com.digitalasset.daml.lf.value.Value.ValueInt64
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -245,6 +246,46 @@ final class GeneratorsData(
     }
   }
 
+  private def viewExternalCallResultsGenFor(
+      actionDescription: ActionDescription
+  ): Gen[ImmArray[ViewParticipantData.ViewExternalCallResult]] =
+    actionDescription match {
+      case _: ExerciseActionDescription if protocolVersion >= ProtocolVersion.dev =>
+        boundedListGen {
+          for {
+            extensionId <- Gen.identifier
+            functionId <- Gen.identifier
+            config <- Gen.alphaStr
+            input <- Gen.alphaStr
+            output <- Gen.alphaStr
+            exerciseIndex <- Gen.choose(1, 10).map(NonNegativeInt.tryCreate)
+            checkingParties <- boundedSetGen[LfPartyId]
+          } yield (
+            ExternalCallResult(
+              extensionId = extensionId,
+              functionId = functionId,
+              config = Bytes.fromStringUtf8(config),
+              input = Bytes.fromStringUtf8(input),
+              output = Bytes.fromStringUtf8(output),
+            ),
+            exerciseIndex,
+            checkingParties,
+          )
+        }.map(results =>
+          ImmArray.from(results.zipWithIndex.map {
+            case ((result, exerciseIndex, checkingParties), callIndex) =>
+              ViewParticipantData.ViewExternalCallResult(
+                result = result,
+                exerciseIndex = exerciseIndex,
+                callIndex = NonNegativeInt.tryCreate(callIndex),
+                checkingParties = checkingParties,
+              )
+          })
+        )
+
+      case _ => Gen.const(ImmArray.Empty)
+    }
+
   implicit val viewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
     for {
       actionDescription <- actionDescriptionArb.arbitrary
@@ -398,6 +439,7 @@ final class GeneratorsData(
 
       rollbackContext <- Arbitrary.arbitrary[RollbackContext]
       salt <- Arbitrary.arbitrary[Salt]
+      externalCallResults <- viewExternalCallResultsGenFor(actionDescription)
 
       hashOps = TestHash // Not used for serialization
     } yield ViewParticipantData.tryCreate(
@@ -408,6 +450,7 @@ final class GeneratorsData(
       actionDescription,
       rollbackContext,
       salt,
+      externalCallResults,
     )(hashOps, protocolVersion, None)
   )
 
