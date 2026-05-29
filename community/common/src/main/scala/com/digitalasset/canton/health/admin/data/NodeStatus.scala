@@ -42,10 +42,17 @@ object NodeStatus {
   }
 
   /** A node is running but not yet initialized. */
-  final case class NotInitialized(active: Boolean, waitingFor: Option[WaitingForExternalInput])
-      extends NodeStatus[Nothing] {
+  final case class NotInitialized(
+      active: Boolean,
+      waitingFor: Option[WaitingForExternalInput],
+      version: ReleaseVersion,
+  ) extends NodeStatus[Nothing] {
     override protected def pretty: Pretty[NotInitialized] =
-      prettyOfClass(param("active", _.active), paramIfDefined("waitingFor", _.waitingFor))
+      prettyOfClass(
+        param("active", _.active),
+        paramIfDefined("waitingFor", _.waitingFor),
+        param("version", _.version),
+      )
     override def trySuccess: Nothing = sys.error(s"Node is not yet initialized.")
     override def successOption: Option[Nothing] = None
 
@@ -65,7 +72,7 @@ object NodeStatus {
         case None => V30WaitingForExternalInput.WAITING_FOR_EXTERNAL_INPUT_UNSPECIFIED
       }
 
-      v30.NotInitialized(active, waitingForP)
+      v30.NotInitialized(active, waitingForP, version.fullVersion)
     }
   }
 

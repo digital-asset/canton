@@ -73,7 +73,7 @@ object Dependencies {
 
   lazy val pekko_http_backend_version = "3.9.0"
   lazy val protostuff_version = "3.1.40"
-  lazy val postgres_version = "42.7.3"
+  lazy val postgres_version = "42.7.11"
   lazy val pprint_version = "0.9.3"
   lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"

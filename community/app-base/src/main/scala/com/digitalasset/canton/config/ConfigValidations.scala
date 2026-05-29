@@ -94,6 +94,7 @@ object ConfigValidations extends NamedLogging {
       awsKmsDisableSSLVerificationRequiresNonStandard,
       defaultUpdatesPageSizeMustBeLeqMaximalPageSize,
       defaultAcsPageSizeMustBeLeqMaxPageSize,
+      validateLegacyContractsV11Enabled,
     ) ++ (if (ensurePortsSet) List(portsArtSet) else Nil)
 
   /** Group node configs by db access to find matching db storage configs. Overcomplicated types
@@ -893,4 +894,22 @@ object ConfigValidations extends NamedLogging {
         )
       )
     }.toSeq)
+
+  private def validateLegacyContractsV11Enabled(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated {
+      val errors = Seq.newBuilder[String]
+
+      for ((name, participantConfig) <- config.participants) {
+        if (
+          !config.parameters.nonStandardConfig && !participantConfig.parameters.validateLegacyContractsV11
+        )
+          errors += s"Participant $name has 'parameters.validate-legacy-contracts-v-11' disabled. " +
+            s"This should only be disabled if advised by the Digital Asset support. " +
+            s"Set 'canton.parameters.non-standard-config = true' to override."
+      }
+
+      errors.result()
+    }
 }

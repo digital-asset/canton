@@ -23,6 +23,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.{CantonBaseError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.metrics.SigningMetrics
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   CryptoParseAndValidationError,
@@ -33,7 +34,7 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -51,7 +52,7 @@ import scala.concurrent.ExecutionContext
 /** Signing operations that do not require access to a private key store but operates with provided
   * keys.
   */
-trait SigningOps {
+trait SigningOps extends SigningMetricsSupport {
 
   def signatureVerificationParallelism: PositiveInt
 
@@ -70,10 +71,28 @@ trait SigningOps {
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = signingAlgorithmSpecs.default,
   )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
-    signBytes(hash.getCryptographicEvidence, signingKey, usage, signingAlgorithmSpec)
+    signingMetrics.signingLatency.time(
+      signBytesInternal(hash.getCryptographicEvidence, signingKey, usage, signingAlgorithmSpec)
+    )
 
-  /** Preferably, we sign a hash; however, we also allow signing arbitrary bytes when necessary. */
+  /** Signs raw bytes using the private signing key. Convenience wrapper used when signing
+    * non-hashed data.
+    */
   protected[crypto] def signBytes(
+      bytes: ByteString,
+      signingKey: SigningPrivateKey,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+      signingAlgorithmSpec: SigningAlgorithmSpec = signingAlgorithmSpecs.default,
+  )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
+    signingMetrics.signingLatency.time(
+      signBytesInternal(bytes, signingKey, usage, signingAlgorithmSpec)
+    )
+
+  /** Internal signing primitive implemented by concrete backends. Performs the actual cryptographic
+    * signing of raw bytes. This bypasses higher-level wrappers (e.g. metrics and validation) and
+    * should only be used by internal signing logic.
+    */
+  private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -98,23 +117,47 @@ trait SigningOps {
 }
 
 /** Signing operations that require access to stored private keys. */
-trait SigningPrivateOps {
+trait SigningPrivateOps extends SigningMetricsSupport {
 
   def signingSchemes: SigningCryptoSchemes
 
-  /** Signs the given hash using the referenced private signing key. */
+  /** Signs the given hash using the referenced private signing key. Latency of the signing
+    * operation is recorded for all outcomes (successful signatures and signing failures).
+    */
   def sign(
       hash: Hash,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = signingSchemes.algorithmSpecs.default,
   )(implicit
-      tc: TraceContext
+      ec: ExecutionContext,
+      tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, SigningError, Signature] =
-    signBytes(hash.getCryptographicEvidence, signingKeyId, usage, signingAlgorithmSpec)
+    EitherTUtil.timed(signingMetrics.signingLatency)(
+      signBytesInternal(hash.getCryptographicEvidence, signingKeyId, usage, signingAlgorithmSpec)
+    )
 
-  /** Signs the byte string directly, however it is encouraged to sign a hash. */
+  /** Signs the byte string directly, however it is encouraged to sign a hash. Latency of the
+    * signing operation is recorded for all outcomes (successful signatures and signing failures).
+    */
   def signBytes(
+      bytes: ByteString,
+      signingKeyId: Fingerprint,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+      signingAlgorithmSpec: SigningAlgorithmSpec = signingSchemes.algorithmSpecs.default,
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, SigningError, Signature] =
+    EitherTUtil.timed(signingMetrics.signingLatency)(
+      signBytesInternal(bytes, signingKeyId, usage, signingAlgorithmSpec)
+    )
+
+  /** Internal signing primitive that produces a signature for the given bytes. This bypasses
+    * higher-level wrappers (e.g. metrics and validation) and should only be used by internal
+    * signing logic.
+    */
+  private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -134,6 +177,11 @@ trait SigningPrivateOps {
 
 }
 
+/** Provides signing-related metrics. */
+trait SigningMetricsSupport {
+  def signingMetrics: SigningMetrics
+}
+
 /** A default implementation with a private key store */
 trait SigningPrivateStoreOps extends SigningPrivateOps {
 
@@ -143,7 +191,7 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
 
   protected val signingOps: SigningOps
 
-  override def signBytes(
+  override private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],

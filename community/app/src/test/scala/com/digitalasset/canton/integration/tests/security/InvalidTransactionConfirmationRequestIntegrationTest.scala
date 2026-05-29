@@ -22,8 +22,8 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{
   GenTransactionTree,
   LightTransactionViewTree,
+  SubviewReferenceAndKey,
   TransactionView,
-  ViewHashAndKey,
 }
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -693,15 +693,17 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
           }
 
           // change the randomness assigned to the first subview in the view tree
-          val subviewHash =
-            viewTree.subviewHashesAndKeys.headOption.valueOrFail("retrieve subview").viewHash
+          val subviewReference =
+            viewTree.subviewReferencesAndKeys.headOption
+              .valueOrFail("retrieve subview")
+              .subviewReference
 
           val newLtvt = LightTransactionViewTree.tryCreate(
             viewTree.tree,
-            viewTree.subviewHashesAndKeys.updated(
+            viewTree.subviewReferencesAndKeys.updated(
               0,
-              ViewHashAndKey(
-                subviewHash,
+              SubviewReferenceAndKey(
+                subviewReference,
                 pureCrypto.generateSecureRandomness(
                   EncryptedViewMessage.computeRandomnessLength(pureCrypto)
                 ),

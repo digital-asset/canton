@@ -61,6 +61,10 @@ private[lf] object Speedy {
         .get(implicitly[ClassTag[P]].runtimeClass.getSimpleName)
         .map(_.totalCount.asInstanceOf[P#Result])
     }
+
+    private[lf] def reset(): Unit = {
+      registeredPlugins.values.foreach(_.reset())
+    }
   }
 
   /** Instrumentation counters. */

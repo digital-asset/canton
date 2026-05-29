@@ -657,7 +657,7 @@ class SequencerNodeBootstrap(
               staticSynchronizerParameters,
               crypto,
               cryptoConfig,
-              Some(arguments.metrics.kmsMetrics),
+              arguments.metrics.cryptoMetrics,
               parameters.cachingConfigs.publicKeyConversionCache,
               parameters.processingTimeouts,
               futureSupervisor,

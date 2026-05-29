@@ -128,40 +128,46 @@ trait CantonNetworkRecentTopologyIntegrationTest
     * [[PhysicalSynchronizerId]] if the file exists and contains valid JSON with a
     * "physicalSynchronizerId" field, or [[None]] otherwise.
     */
-  private def downloadAndParseMetadata(snapshotFolder: String): Option[PhysicalSynchronizerId] = {
+  private def downloadAndParseMetadata(snapshotFolder: String): PhysicalSynchronizerId = {
     val storage = StorageOptions.getDefaultInstance.getService
     val metadataBlobName = s"$snapshotFolder/metadata"
 
     val blob = Option(storage.get(bucketName, metadataBlobName))
-    blob.flatMap { b =>
-      val content = new String(b.getContent(), "UTF-8")
-      logger.info(s"Downloaded metadata file: $content")
-      circeParser
-        .parse(content)
-        .toOption
-        .flatMap(_.hcursor.get[String]("physicalSynchronizerId").toOption)
-        .flatMap { psidStr =>
-          PhysicalSynchronizerId.fromString(psidStr) match {
-            case Right(psid) =>
-              logger.info(s"Parsed physicalSynchronizerId from metadata: $psid")
-              Some(psid)
-            case Left(err) =>
-              logger.warn(s"Failed to parse physicalSynchronizerId '$psidStr': $err")
-              None
+    blob
+      .flatMap { b =>
+        val content = new String(b.getContent(), "UTF-8")
+        logger.info(s"Downloaded metadata file: $content")
+        circeParser
+          .parse(content)
+          .toOption
+          .flatMap(_.hcursor.get[String]("physicalSynchronizerId").toOption)
+          .flatMap { psidStr =>
+            PhysicalSynchronizerId.fromString(psidStr) match {
+              case Right(psid) =>
+                logger.info(s"Parsed physicalSynchronizerId from metadata: $psid")
+                Some(psid)
+              case Left(err) =>
+                logger.warn(s"Failed to parse physicalSynchronizerId '$psidStr': $err")
+                None
+            }
           }
-        }
-    }
+      }
+      .getOrElse(
+        fail(
+          s"Unable to extract physical synchronizer id from topology snapshot $snapshotFolder"
+        )
+      )
   }
 
   private val snapshot = new AtomicReference[Option[GenericStoredTopologyTransactions]](None)
-  private val physicalSynchronizerId = new AtomicReference[Option[PhysicalSynchronizerId]](None)
+  private var physicalSynchronizerId: PhysicalSynchronizerId = _
 
   "Canton node " can {
     "successfully deserialize the topology snapshot" in { env =>
       import env.*
 
       val (in, snapshotFolder) = downloadLatestOnboardingState()
-      physicalSynchronizerId.set(downloadAndParseMetadata(snapshotFolder))
+      physicalSynchronizerId = downloadAndParseMetadata(snapshotFolder)
       val transactions =
         try {
           GrpcStreamingUtils
@@ -184,7 +190,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
         snapshot.get().value,
         cleanupTopologyState = false,
         timeout,
-        physicalSynchronizerIdOverride = physicalSynchronizerId.get(),
+        physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
       ).discard
     }
   }

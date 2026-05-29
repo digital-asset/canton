@@ -431,6 +431,7 @@ trait Kms extends FlagCloseable with CloseableAtomicHealthComponent {
           logger.warn(s"KMS operation `$description` failed", err)
       }
   }
+
 }
 
 /** A KMS public key where only its raw byte representation and key specification are stored.

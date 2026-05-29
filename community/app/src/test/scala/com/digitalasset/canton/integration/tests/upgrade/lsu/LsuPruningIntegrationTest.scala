@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import cats.syntax.functor.*
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -16,9 +19,11 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.participant.store.{
+  ActiveContractStore,
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
 }
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.synchronizer.sequencer.SequencerUtils
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
 import monocle.macros.syntax.lens.*
@@ -42,6 +47,8 @@ import scala.util.chaining.*
   *     - new physical stores (sequenced event store, request journal)
   *     - ACS commitment store before upgrade time
   *     - ACS commitment store after upgrade time
+  *   - Check that data can be garbage collected
+  *     - ActiveContractStore is cleaned
   */
 @nowarn("cat=deprecation")
 final class LsuPruningIntegrationTest extends LsuBase {
@@ -63,6 +70,12 @@ final class LsuPruningIntegrationTest extends LsuBase {
   override protected lazy val newOldMediators: Map[String, String] = Map("mediator2" -> "mediator1")
 
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+
+  /*
+  Big value compared to (upgradeTime - Epoch) so that contracts of the ActiveContractStore
+  cannot be garbage collected before the LSU.
+   */
+  private lazy val journalGarbageCollectionDelay = config.NonNegativeFiniteDuration.ofDays(1)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Config
@@ -88,6 +101,12 @@ final class LsuPruningIntegrationTest extends LsuBase {
          */
         ConfigTransforms.updateMaxDeduplicationDurations(10.seconds.toJava)
       )
+      .addConfigTransform(
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.journalGarbageCollectionDelay)
+            .replace(journalGarbageCollectionDelay)
+        )
+      )
       .withSetup { implicit env =>
         defaultEnvironmentSetup()
       }
@@ -95,6 +114,9 @@ final class LsuPruningIntegrationTest extends LsuBase {
   private var fixture: Fixture = _
   private var alice: PartyId = _
   private var bank: PartyId = _
+
+  private var iou1: Iou.Contract = _
+  private var iou2: Iou.Contract = _
 
   private def noOutstandingCommitments(
       p: LocalParticipantReference,
@@ -122,6 +144,39 @@ final class LsuPruningIntegrationTest extends LsuBase {
   ): LogicalSyncPersistentState =
     p.underlying.value.sync.syncPersistentStateManager.getAllLogical.get(lsid).value
 
+  /** Wait until the safe to prune timestamp reaches the given timestamp.
+    *
+    * Returns the corresponding offset and timestamp.
+    */
+  private def waitP2SafeTsReaches(
+      targetTs: CantonTimestamp
+  )(implicit env: TestConsoleEnvironment): (Long, CantonTimestamp) = {
+    import env.*
+
+    eventually() {
+      environment.simClock.value.advance(15.seconds.toJava)
+      participant1.health.ping(participant2)
+
+      val computedSafeOffset =
+        participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
+
+      val safeTimestamp =
+        participant2.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
+          .lastSynchronizerOffsetBeforeOrAt(
+            fixture.lsid,
+            Offset.tryFromLong(computedSafeOffset),
+          )
+          .futureValueUS
+          .value
+          .recordTime
+          .pipe(t => CantonTimestamp.assertFromInstant(t.toInstant))
+
+      safeTimestamp should be > targetTs
+
+      (computedSafeOffset, safeTimestamp)
+    }
+  }
+
   "When an LSU is done" in { implicit env =>
     import env.*
 
@@ -132,8 +187,9 @@ final class LsuPruningIntegrationTest extends LsuBase {
     alice = participant1.parties.enable("Alice")
     bank = participant2.parties.enable("Bank")
 
-    IouSyntax.archive(participant2)(IouSyntax.createIou(participant2)(bank, alice, 1.0), bank)
-    IouSyntax.createIou(participant2)(bank, alice, 2.0)
+    iou1 = IouSyntax.createIou(participant2)(bank, alice, 1.0)
+    IouSyntax.archive(participant2)(iou1, bank)
+    iou2 = IouSyntax.createIou(participant2)(bank, alice, 2.0)
 
     clue("assert that prunable stores are not empty") {
       getPhysicalState(participant2, fixture.currentPsid).sequencedEventStore
@@ -221,28 +277,7 @@ final class LsuPruningIntegrationTest extends LsuBase {
         that is at least oldSynchronizerLastSequencingTime. This allows to completely prune the old
         sequenced event store.
        */
-      val (safeOffset, safeTimestamp) = eventually() {
-        environment.simClock.value.advance(15.seconds.toJava)
-        participant1.health.ping(participant2)
-
-        val computedSafeOffset =
-          participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
-
-        val safeTimestamp =
-          participant2.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
-            .lastSynchronizerOffsetBeforeOrAt(
-              fixture.lsid,
-              Offset.tryFromLong(computedSafeOffset),
-            )
-            .futureValueUS
-            .value
-            .recordTime
-            .pipe(t => CantonTimestamp.assertFromInstant(t.toInstant))
-
-        safeTimestamp should be > oldSynchronizerLastSequencingTime
-
-        (computedSafeOffset, safeTimestamp)
-      }
+      val (safeOffset, safeTimestamp) = waitP2SafeTsReaches(oldSynchronizerLastSequencingTime)
 
       // Check that there is data that is prunable on the new sequencedEventStore
       clue("prunable stores on the new synchronizer have prunable data") {
@@ -302,6 +337,39 @@ final class LsuPruningIntegrationTest extends LsuBase {
             period.toInclusive.forgetRefinement < safeTimestamp
           } shouldBe empty
       }
+    }
+  }
+
+  "Journal garbage collection" should {
+    "work correctly" in { implicit env =>
+      import env.*
+
+      val pcs2 = participant2.underlying.value.sync.syncPersistentStateManager.getAllLogical
+        .get(daId)
+        .value
+        .activeContractStore
+
+      val cid1 = LfContractId.assertFromString(iou1.id.contractId)
+      val cid2 = LfContractId.assertFromString(iou2.id.contractId)
+
+      // Entries are in the store
+      pcs2.fetchStates(Seq(cid1, cid2)).futureValueUS.fmap(_.status) shouldBe
+        Map(cid1 -> ActiveContractStore.Archived, cid2 -> ActiveContractStore.Archived)
+
+      /*
+        Time needs to advance by at least the recordTime+journalGarbageCollectionDelay.
+        Timestamp needs to be become clean.
+       */
+      val targetTs = CantonTimestamp.Epoch.add(journalGarbageCollectionDelay.asJava).plusSeconds(15)
+      environment.simClock.value.advanceTo(targetTs)
+      waitForTargetTimeOnSequencer(sequencer2, targetTs, logger)
+      waitP2SafeTsReaches(targetTs)
+
+      eventually() {
+        pcs2.fetchStates(Seq(cid1, cid2)).futureValueUS shouldBe empty
+      }
+
+      pcs2.fetchStates(Seq(cid1, cid2)).futureValueUS.foreach(println)
     }
   }
 }

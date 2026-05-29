@@ -60,7 +60,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
       txs
         .collectOfMapping[SynchronizerParametersState]
         .result
-        .headOption
+        .lastOption
         .value
         .mapping
         .synchronizerId

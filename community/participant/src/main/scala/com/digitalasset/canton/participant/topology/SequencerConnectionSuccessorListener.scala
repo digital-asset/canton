@@ -39,7 +39,6 @@ import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, PhysicalSy
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
-import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
@@ -140,10 +139,7 @@ class SequencerConnectionSuccessorListener(
           Overwriting the sequencer connections is fine because we always reconstruct from topology state and
           current config.
            */
-          transform = _.focus(_.synchronizerId)
-            .replace(Some(successorPsid))
-            .focus(_.sequencerConnections)
-            .replace(successorConfig.sequencerConnections),
+          overrideSequencerConnections = Some(successorConfig.sequencerConnections),
         )
         .tapLeft(err =>
           logger.warn(s"Unable to upsert synchronizer config of $successorPsid: $err")

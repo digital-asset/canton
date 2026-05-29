@@ -14,7 +14,7 @@ import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.data.support._
 import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.metrics.TxNodeCount
+import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, TxNodeCount}
 import com.digitalasset.daml.lf.speedy.SError._
 import com.digitalasset.daml.lf.speedy.SExpr._
 import com.digitalasset.daml.lf.speedy.SValue.{SValue => SV, _}
@@ -2071,6 +2071,7 @@ private[lf] object SBuiltinFun {
             case Right(ptx) =>
               machine.ptx = ptx
               machine.metrics.incrCount[TxNodeCount]()
+              machine.metrics.incrCount[FetchNodeCount]()
               Control.Value(templateArg)
             case Left(err) =>
               Control.Error(err)

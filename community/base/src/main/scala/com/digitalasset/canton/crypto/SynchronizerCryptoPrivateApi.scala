@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
@@ -26,6 +27,8 @@ import scala.concurrent.ExecutionContext
 final class SynchronizerCryptoPrivateApi(
     override val staticSynchronizerParameters: StaticSynchronizerParameters,
     privateCrypto: CryptoPrivateApi,
+    override val signingMetrics: SigningMetrics,
+    override val decryptionMetrics: DecryptionMetrics,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -36,7 +39,7 @@ final class SynchronizerCryptoPrivateApi(
   override private[crypto] def getInitialHealthState: ComponentHealthState =
     privateCrypto.getInitialHealthState
 
-  override def decrypt[M](
+  override private[crypto] def decryptInternal[M](
       encrypted: AsymmetricEncrypted[M]
   )(
       deserialize: ByteString => Either[DeserializationError, M]
@@ -67,7 +70,7 @@ final class SynchronizerCryptoPrivateApi(
 
   override def signingSchemes: SigningCryptoSchemes = privateCrypto.signingSchemes
 
-  override def signBytes(
+  override private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],

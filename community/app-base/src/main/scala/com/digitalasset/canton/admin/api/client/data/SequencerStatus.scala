@@ -123,9 +123,14 @@ object SequencerStatus {
         )
 
       case sequencerV30.SequencerStatusResponse.Kind.NotInitialized(notInitialized) =>
+        // Be lenient on the version: older nodes don't populate it, and we don't want to fail the
+        // whole status response over an unparseable version string.
+        val version = ReleaseVersion
+          .fromProtoPrimitive(notInitialized.version, "NotInitialized.version")
+          .toOption
         WaitingForExternalInput
           .fromProtoV30(notInitialized.waitingForExternalInput)
-          .map(NodeStatus.NotInitialized(notInitialized.active, _))
+          .map(NodeStatus.NotInitialized(notInitialized.active, _, version))
     }
 }
 

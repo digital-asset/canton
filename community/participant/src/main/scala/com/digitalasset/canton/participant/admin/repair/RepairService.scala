@@ -648,13 +648,13 @@ final class RepairService(
     choiceId = LfChoiceName.assertFromString("Archive"),
     consuming = true,
     actingParties = c.metadata.signatories,
-    chosenValue = c.inst.createArg,
+    chosenValue = LfValue.ValueRecord(None, ImmArray.empty),
     stakeholders = c.metadata.stakeholders,
     signatories = c.metadata.signatories,
     choiceObservers = Set.empty[LfPartyId], // default archive choice has no choice observers
     choiceAuthorizers = None, // default (signatories + actingParties)
     children = ImmArray.empty[LfNodeId],
-    exerciseResult = Some(LfValue.ValueNone),
+    exerciseResult = Some(LfValue.ValueUnit),
     keyOpt = c.metadata.maybeKeyWithMaintainers,
     byKey = false,
     externalCallResults = ImmArray.empty,

@@ -51,7 +51,7 @@ import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, Prun
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.scheduler.{
   ParticipantPruningScheduler,
-  ParticipantPurgeObsoleteTopologyScheduler,
+  ParticipantPurgeStoresAfterLsuScheduler,
 }
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.MutablePackageMetadataViewImpl
@@ -400,7 +400,7 @@ class ParticipantNodeBootstrap(
           ips,
           crypto,
           cryptoConfig,
-          Some(arguments.metrics.kmsMetrics),
+          arguments.metrics.cryptoMetrics,
           parameters.cachingConfigs.publicKeyConversionCache,
           timeouts,
           futureSupervisor,
@@ -665,7 +665,7 @@ class ParticipantNodeBootstrap(
                 clock,
                 logger,
               )
-              ParticipantPurgeObsoleteTopologyScheduler.create(
+              ParticipantPurgeStoresAfterLsuScheduler.create(
                 schedule = Some(schedule),
                 chunkSize = purgeCfg.chunkSize,
                 synchronizerConnectionConfigStore,

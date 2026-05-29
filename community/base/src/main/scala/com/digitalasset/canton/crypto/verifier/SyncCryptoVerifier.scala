@@ -6,6 +6,8 @@ package com.digitalasset.canton.crypto.verifier
 import cats.data.EitherT
 import cats.implicits.{catsSyntaxAlternativeSeparate, catsSyntaxValidatedId}
 import cats.syntax.either.*
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CacheConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -33,6 +35,12 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{
+  DecryptionHistograms,
+  DecryptionMetrics,
+  SigningHistograms,
+  SigningMetrics,
+}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
@@ -88,6 +96,15 @@ class SyncCryptoVerifier(
       // with a public signing key, and the private key conversion cache is never used.
       privateKeyConversionCacheTtl = None,
       signatureVerificationParallelism = signatureVerificationParallelism,
+      encryptionParallelism = PositiveInt.one, // not used
+      signingMetrics = new SigningMetrics(
+        new SigningHistograms(MetricName("signing"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(MetricsContext.Empty), // not used
+      decryptionMetrics = new DecryptionMetrics(
+        new DecryptionHistograms(MetricName("decryption"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(MetricsContext.Empty), // not used
       loggerFactory = loggerFactory,
     )
 

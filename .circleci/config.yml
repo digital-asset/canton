@@ -4,7 +4,7 @@ _canton_docker_executor:
     auth:
         password: $DOCKERHUB_PASSWORD
         username: $DOCKERHUB_USERNAME
-    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
 _postgres_docker_executor:
     command: |-
         postgres
@@ -735,7 +735,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1018,7 +1018,7 @@ commands:
     setup_gcp_gar:
         steps:
             - run:
-                command: |-
+                command: |
                     key=$(mktemp)
                     echo "${GAC_JSON}" > $key
                     echo "export GOOGLE_CREDENTIALS_FILE=$key" >> "$BASH_ENV"
@@ -1073,7 +1073,7 @@ commands:
                 when: always
             - slack/status:
                 fail_only: true
-                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: Person on support takes care of failed nightly jobs.)'
+                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: the support CI rota takes care of failed nightly jobs.)'
                 mentions: ${SELECTED_VOLUNTEER}
                 only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
                 webhook: << parameters.webhook_url >>
@@ -1251,7 +1251,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 3200M
@@ -1263,7 +1263,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1293,7 +1293,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 12000M
@@ -1305,7 +1305,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1335,7 +1335,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1347,7 +1347,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1358,7 +1358,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1388,7 +1388,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 2500M
             EXECUTOR_JVM_METASPACE_SIZE: 400M
@@ -1400,7 +1400,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 1200M
             EXECUTOR_JVM_METASPACE_SIZE: 200M
@@ -1412,7 +1412,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 6500M
             EXECUTOR_JVM_METASPACE_SIZE: 3100M
@@ -1424,7 +1424,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1454,7 +1454,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1485,7 +1485,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1510,7 +1510,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1535,7 +1535,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1560,7 +1560,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1585,7 +1585,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-9c005e2e2644
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1667,6 +1667,79 @@ jobs:
                 num_parallel_tasks: "1"
             - post_benchmark_metrics
             - slack_red_main_with_volunteer
+    benchmark_transaction_snapshot:
+        executor: canton-xlarge-docker-with-postgres
+        parameters:
+            min_fetch_nodes:
+                default: 0
+                type: integer
+            min_steps:
+                default: 0
+                type: integer
+            min_transaction_nodes:
+                default: 0
+                type: integer
+            persist_benchmarking_result:
+                default: true
+                type: boolean
+            snapshot_version:
+                default: 53ab9995a
+                type: string
+        steps:
+            - checkout_and_restore_caches
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    echo "export SNAPSHOT_VERSION=$SNAPSHOT_VERSION" >> $BASH_ENV
+                    echo "export SNAPSHOT_DIR_BASE=/tmp/workspace/daml-lf-snapshot-data" >> $BASH_ENV
+                    source "$BASH_ENV"
+                    echo "export SNAPSHOT_DIR=$SNAPSHOT_DIR_BASE/$SNAPSHOT_VERSION" >> $BASH_ENV
+                environment:
+                    SNAPSHOT_VERSION: << parameters.snapshot_version >>
+            - run:
+                command: |
+                    echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
+                    mkdir -p $SNAPSHOT_DIR
+                    gcloud storage cp --recursive "gs://daml-lf-snapshot-data/$SNAPSHOT_VERSION" "$SNAPSHOT_DIR_BASE"
+                    echo "export SNAPSHOT_FILE=$(ls $SNAPSHOT_DIR/snapshot-*.bin | head -n 1)" >> $BASH_ENV
+            - run:
+                command: |
+                    export STANDALONE=True
+                    .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.daml.lf.testing.snapshot.ExtractSnapshotChoices"
+                environment:
+                    EXECUTOR_NUM_CPUS: 1
+                    MIN_FETCH_NODE_COUNT: << parameters.min_fetch_nodes >>
+                    MIN_STEP_COUNT: << parameters.min_steps >>
+                    MIN_TX_NODE_COUNT: << parameters.min_transaction_nodes >>
+            - run:
+                command: |
+                    mkdir -p "$SNAPSHOT_DIR/results/$CIRCLE_SHA1/$CIRCLE_BUILD_NUM"
+                    echo "export BENCHMARKING_RESULT_FILE=$SNAPSHOT_DIR/results/$CIRCLE_SHA1/$CIRCLE_BUILD_NUM/benchmarking-results.json" >> $BASH_ENV
+                    CHOICE_NAMES=$(paste -sd, ${SNAPSHOT_FILE}.choices)
+                    source "$BASH_ENV"
+                    .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/Jmh/run -p entriesFile=$SNAPSHOT_FILE -p choiceName=$CHOICE_NAMES -p darDir=$SNAPSHOT_DIR/dars -rff $BENCHMARKING_RESULT_FILE -rf json"
+                environment:
+                    EXECUTOR_NUM_CPUS: 1
+                    TIMEOUT: 1h
+            - run:
+                command: |
+                    if [[ "<< parameters.persist_benchmarking_result >>" == "true" ]]; then
+                      echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
+                      gcloud storage cp --recursive "$SNAPSHOT_DIR/results" "gs://daml-lf-snapshot-data/$SNAPSHOT_VERSION"
+                    fi
+            - run:
+                command: |
+                    mkdir -p log
+                    cp $BENCHMARKING_RESULT_FILE log
+                name: Copy benchmarking results and preserve them as build artefacts
+                when: always
+            - store_artifacts:
+                destination: log
+                name: Store log directory as artifacts (if any)
+                path: log
+            - slack_red_main_with_volunteer:
+                fixed_volunteer: U03K3A3UAGY
     blackduck:
         executor: canton-large-docker
         steps:
@@ -1896,6 +1969,53 @@ jobs:
                 name: Upload data continuity dumps to S3
             - cleanup_test_job
             - slack_red_main_with_volunteer
+    generate_transaction_snapshot:
+        executor: canton-xlarge-docker-with-postgres
+        parameters:
+            git_commit:
+                default: ""
+                type: string
+            repository_url:
+                default: https://github.com/DACH-NY/canton-network-apps.git
+                type: string
+        steps:
+            - checkout_and_restore_caches
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    echo "export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION" >> $BASH_ENV
+                environment:
+                    SNAPSHOT_VERSION: << parameters.git_commit >>
+            - run:
+                command: |
+                    cd /tmp/workspace
+
+                    BASE_REPOSITORY_URL=$(echo << parameters.repository_url >> | cut -c 9-)
+
+                    if [ -z "<< parameters.git_commit >>" ]; then
+                      git clone --depth 1 https://canton-machine:${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+                    else
+                      git clone --depth 1 --revision << parameters.git_commit >> https://canton-machine:${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+                    fi
+
+                    cd $(basename << parameters.repository_url >> .git)
+                    dpm build --all
+                    find . -regex ".*/test/\.daml/.*\.dar" -print -exec cp {} $SNAPSHOT_DIR/dars \;
+                name: Clone and Build Daml project from Github URL, then save test dar files
+            - run:
+                command: |
+                    export DAR_DIR=$SNAPSHOT_DIR/dars
+                    .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.canton.integration.tests.snapshot.GenerateSnapshots" checkErrors
+                environment:
+                    EXECUTOR_NUM_CPUS: 1
+                    STANDALONE: "True"
+            - run:
+                command: |
+                    echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
+                    gcloud storage cp --recursive "$SNAPSHOT_DIR" "gs://daml-lf-snapshot-data"
+            - slack_red_main_with_volunteer:
+                fixed_volunteer: U03K3A3UAGY
     ledger_api_compatibility_tests:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 5
@@ -1962,6 +2082,8 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: "2"
                 timeout: 60m
+            - slack_red_main_with_volunteer:
+                fixed_volunteer: U04S25SG9D5
     nightly_integration_test_sequencer_only:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -2057,14 +2179,6 @@ jobs:
             - obtain_release_suffix:
                 is_manual: << parameters.is_manual >>
                 is_nightly_workflow: << parameters.is_nightly_workflow >>
-            - package:
-                artifact_suffix: .{jar,pom}
-                cmd: kms-driver-api/package kms-driver-api/packageSrc kms-driver-api/packageDoc kms-driver-api/makePom
-                location: community/kms-driver-api/target/scala-2.13
-            - package:
-                artifact_suffix: .{jar,pom}
-                cmd: kms-driver-testing-lib/package kms-driver-testing-lib/packageSrc kms-driver-testing-lib/packageDoc kms-driver-testing-lib/makePom
-                location: kms-driver-testing-lib/target/scala-2.13
             - package:
                 artifact_suffix: .{jar,pom}
                 cmd: aws-kms-driver/assembly aws-kms-driver/packageSrc aws-kms-driver/packageDoc aws-kms-driver/makePom
@@ -2270,26 +2384,6 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
             - slack_red_main_with_volunteer
-    replicate_docs:
-        executor: canton-xlarge-docker-with-postgres
-        parameters:
-            env:
-                type: string
-        steps:
-            - checkout_and_restore_caches
-            - restore_packaged_release:
-                location: community/app/target/release
-            - unpack_scaladoc_in_workspace
-            - execute_sbt_command:
-                cmd: packageDocsWithExistingRelease
-                use_maven_mirror: false
-            - cleanup_test_job
-            - authorize_git
-            - run:
-                command: |
-                    nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "./scripts/docs/replication.sh --env <<parameters.env>> --githubAuth canton-machine:$GITHUB_TOKEN"
-                name: Replicate the docs
-            - cleanup_build_job
     run_propose_script:
         executor: canton-large-docker-on-cci
         parameters:
@@ -2620,69 +2714,6 @@ jobs:
                 num_parallel_tasks: "1"
                 succeed_on_error: true
                 timeout: 90m
-    transaction_snapshot_benchmark:
-        executor: canton-xlarge-docker-with-postgres
-        parameters:
-            github_tag:
-                default: main
-                type: string
-            repository_url:
-                default: https://github.com/DACH-NY/canton-network-utilities.git
-                type: string
-        steps:
-            - attach_workspace:
-                at: /tmp/workspace
-            - run:
-                command: |
-                    git clone --depth 1 --branch << parameters.github_tag >> << parameters.repository_url >>
-                    cd $(basename << parameters.repository_url >> .git)
-                    dpm build --all
-                name: Clone and Build Daml project from Github URL
-            - run:
-                command: |
-                    mkdir -p $SNAPSHOT_DIR/dars
-                    cd $(basename << parameters.repository_url >> .git)
-                    find . -regex ".*/test/\.daml/.*\.dar" -print -exec cp {} $SNAPSHOT_DIR/dars \;
-                environment:
-                    SNAPSHOT_DIR: /tmp/workspace
-                name: Save Test Dar Files to Workspace
-            - run_tests:
-                command: dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.canton.integration.tests.snapshot.GenerateSnapshots" checkErrors
-                environment:
-                    DAR_DIR: /tmp/workspace/dars
-                    SNAPSHOT_DIR: /tmp/workspace
-                    STANDALONE: "True"
-                filter: cat
-                num_parallel_tasks: "1"
-                num_test_buckets: ""
-                report_to_datadog: false
-            - run_tests:
-                command: dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.canton.integration.tests.snapshot.ExtractSnapshotChoices" checkErrors
-                environment:
-                    SNAPSHOT_DIR: /tmp/workspace
-                    STANDALONE: "True"
-                filter: cat
-                num_parallel_tasks: "1"
-                num_test_buckets: ""
-                report_to_datadog: false
-            - execute_sbt_command:
-                cmd: daml-lf-snapshot/Jmh/run -p entriesFile=$SNAPSHOT_FILE -p choiceName=$(paste -sd, ${SNAPSHOT_FILE}.choices) -p darDir=$SNAPSHOT_DIR/dars -rff $SNAPSHOT_DIR/benchmarking-results.json -rf json
-                environment:
-                    SNAPSHOT_DIR: /tmp/workspace
-                    SNAPSHOT_FILE: $(ls $SNAPSHOT_DIR/snapshot-*.bin | head -n 1)
-                fail_on_error_in_output: false
-                timeout: 1h
-            - run:
-                command: |
-                    mkdir -p log
-                    mv $SNAPSHOT_DIR/snapshot-*.bin log
-                    mv $SNAPSHOT_DIR/benchmarking-results.json log
-                environment:
-                    SNAPSHOT_DIR: /tmp/workspace
-                name: Copy Dar files, snapshot data and benchmarking results and preserve them as build artefacts
-                when: always
-            - slack_red_main_with_volunteer:
-                fixed_volunteer: U03K3A3UAGY
     unit_test_coverage:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -3133,23 +3164,6 @@ workflows:
                         only: /^v.*/
                 requires:
                     - compile
-            - protocol_continuity_test_latest:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - da-images
-                    - maven-mirror
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
             - scalafix:
                 context:
                     - datadog
@@ -3248,6 +3262,29 @@ workflows:
         when:
             equal:
                 - adhoc-daml-update
+                - << pipeline.parameters.manual_job >>
+    manual_benchmark_transaction_snapshot:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - benchmark_transaction_snapshot:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - gcp_daml-lf-snapshot-data
+                requires:
+                    - compile
+        when:
+            equal:
+                - benchmark-transaction-snapshot
                 - << pipeline.parameters.manual_job >>
     manual_blackduck:
         jobs:
@@ -3458,6 +3495,29 @@ workflows:
         when:
             equal:
                 - generate-data-continuity-dumps
+                - << pipeline.parameters.manual_job >>
+    manual_generate_transaction_snapshot:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - generate_transaction_snapshot:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - gcp_daml-lf-snapshot-data
+                requires:
+                    - compile
+        when:
+            equal:
+                - generate-transaction-snapshot
                 - << pipeline.parameters.manual_job >>
     manual_ledger_api_compatibility_tests:
         jobs:
@@ -3857,6 +3917,35 @@ workflows:
             and:
                 - equal:
                     - release-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_sequential_test:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - sequential_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - print_tests
+        when:
+            and:
+                - equal:
+                    - sequential-test
                     - << pipeline.parameters.manual_job >>
                 - not:
                     equal:
@@ -4288,13 +4377,15 @@ workflows:
             - print_tests:
                 context:
                     - azure-self-cache
+                    - maven-mirror
             - topology_chaos_test:
                 context:
                     - datadog
                     - artifactory
+                    - azure-self-cache
+                    - maven-mirror
                     - aws_kms_testing
                     - gcp_kms_testing
-                    - azure-self-cache
                 name: topology_chaos_test_specific
                 requires:
                     - print_tests
@@ -4354,33 +4445,6 @@ workflows:
             and:
                 - equal:
                     - toxiproxy-slow-test
-                    - << pipeline.parameters.manual_job >>
-                - not:
-                    equal:
-                        - main
-                        - << pipeline.git.branch >>
-    manual_transaction_snapshot_benchmark:
-        jobs:
-            - compile:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-            - transaction_snapshot_benchmark:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - compile
-        when:
-            and:
-                - equal:
-                    - transaction-snapshot-benchmark
                     - << pipeline.parameters.manual_job >>
                 - not:
                     equal:

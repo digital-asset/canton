@@ -36,8 +36,10 @@ final case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extend
 
 object RecordTime {
   val lowestTiebreaker: Long = Long.MinValue
+  val highestTiebreaker: Long = Long.MaxValue
 
   val MinValue: RecordTime = RecordTime(CantonTimestamp.MinValue, lowestTiebreaker)
+  val MaxValue: RecordTime = RecordTime(CantonTimestamp.MaxValue, highestTiebreaker)
 
   implicit val recordTimeOrdering: Ordering[RecordTime] =
     Ordering.by(rt => (rt.timestamp -> rt.tieBreaker))

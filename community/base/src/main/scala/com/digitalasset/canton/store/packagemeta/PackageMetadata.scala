@@ -33,7 +33,8 @@ final case class PackageMetadata(
     * @param packageIds
     *   the set of packages from which to compute the dependencies
     * @return
-    *   the map of input package IDs to their transitive dependency sets
+    *   the map of input package IDs to their transitive dependency sets, including the dependent
+    *   package ID itself
     */
   def allDependencySetsRecursively(
       packageIds: Set[Ref.PackageId]

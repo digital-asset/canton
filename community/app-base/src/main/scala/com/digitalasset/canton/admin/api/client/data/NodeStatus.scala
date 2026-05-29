@@ -32,7 +32,7 @@ sealed trait NodeStatus[+S <: NodeStatus.Status]
   /** Return the node activeness if it is known or None otherwise.
     */
   def isActive: Option[Boolean]
-  def releaseVersion: Option[ReleaseVersion] = successOption.map(_.version)
+  def releaseVersion: Option[ReleaseVersion]
 }
 
 object NodeStatus {
@@ -49,13 +49,28 @@ object NodeStatus {
     override def isInitialized: Boolean = false
 
     override def isRunning: Boolean = false
+
+    override def releaseVersion: Option[ReleaseVersion] = None
   }
 
-  /** A node is running but not yet initialized. */
-  final case class NotInitialized(active: Boolean, waitingFor: Option[WaitingForExternalInput])
-      extends NodeStatus[Nothing] {
+  /** A node is running but not yet initialized.
+    *
+    * @param version
+    *   The version of the node binary, if known. May be `None` when talking to an older node that
+    *   did not yet include the version in its `NotInitialized` status, or if the version string
+    *   could not be parsed.
+    */
+  final case class NotInitialized(
+      active: Boolean,
+      waitingFor: Option[WaitingForExternalInput],
+      version: Option[ReleaseVersion],
+  ) extends NodeStatus[Nothing] {
     override protected def pretty: Pretty[NotInitialized] =
-      prettyOfClass(param("active", _.active), paramIfDefined("waitingFor", _.waitingFor))
+      prettyOfClass(
+        param("active", _.active),
+        paramIfDefined("waitingFor", _.waitingFor),
+        paramIfDefined("version", _.version),
+      )
     override def trySuccess: Nothing = sys.error(s"Node is not yet initialized.")
     override def successOption: Option[Nothing] = None
 
@@ -64,6 +79,8 @@ object NodeStatus {
     override def isInitialized: Boolean = false
 
     override def isRunning: Boolean = true
+
+    override def releaseVersion: Option[ReleaseVersion] = version
   }
 
   final case class Success[S <: Status](status: S) extends NodeStatus[S] {
@@ -76,6 +93,8 @@ object NodeStatus {
     override def isInitialized: Boolean = true
 
     override def isRunning: Boolean = true
+
+    override def releaseVersion: Option[ReleaseVersion] = Some(status.version)
   }
 
   trait Status extends PrettyPrinting with Product with Serializable {

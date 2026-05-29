@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
@@ -31,6 +31,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.ContractLookupError
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
@@ -63,7 +64,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.Ref.UserId
 import com.digitalasset.daml.lf.transaction.test.TestIdFactory
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, SubmittedTransaction, Transaction}
+import com.digitalasset.daml.lf.transaction.{SubmittedTransaction, Transaction}
 import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.*
 
@@ -487,6 +488,12 @@ class MaliciousParticipantNode(
       now = sequencerClient.clock.now
       maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
 
+      contractOfIdWithDisclosure = (cid: LfContractId) =>
+        command.disclosedContracts.get(cid) match {
+          case Some(contract) => EitherT.rightT[FutureUnlessShutdown, ContractLookupError](contract)
+          case None => contractOfId(cid)
+        }
+
       transactionTree <- transactionTreeFactory
         .createTransactionTree(
           wfTransaction,
@@ -496,7 +503,7 @@ class MaliciousParticipantNode(
           command.transactionSeed,
           command.transactionUuid,
           cryptoSnapshot.ipsSnapshot,
-          contractOfId,
+          contractOfIdWithDisclosure,
           metadata.globalKeyMapping,
           maxSequencingTime,
           validatePackageVettings = false,
@@ -572,10 +579,6 @@ object MaliciousParticipantNode extends FutureHelpers {
         MediatorGroupIndex.zero
       ),
       testSubmissionServiceOverrideO: Option[TestSubmissionService] = None,
-      resolveContractOverride: LfContractId => OptionT[
-        FutureUnlessShutdown,
-        GenContractInstance,
-      ] = _ => OptionT(FutureUnlessShutdown.pure[Option[GenContractInstance]](None)),
   )(implicit
       env: TestConsoleEnvironment,
       traceContext: TraceContext,
@@ -594,28 +597,10 @@ object MaliciousParticipantNode extends FutureHelpers {
         // Switch off authorization, so we can also test unauthorized commands.
         checkAuthorization = false,
         enableLfDev = true,
-        resolveContractOverride = resolveContractOverride(_)
-          .mapK(
-            FutureUnlessShutdown.failOnShutdownToAbortExceptionK("MaliciousParticipantNode")
-          )
-          .map[FatContractInstance](_.inst),
       )
     )
     val seedGenerator = new SeedGenerator(participantNode.cryptoPureApi)
-
-    def contractOfId(cid: LfContractId): EitherT[
-      FutureUnlessShutdown,
-      TransactionTreeFactory.ContractLookupError,
-      GenContractInstance,
-    ] = {
-      val lookupFromStore = TransactionTreeFactory.contractInstanceLookup(contractStore)
-      resolveContractOverride(cid)
-        .toRight(())
-        .orElse[TransactionTreeFactory.ContractLookupError, GenContractInstance](
-          lookupFromStore(cid)
-        )
-    }
-
+    val contractOfId = TransactionTreeFactory.contractInstanceLookup(contractStore)
     val confirmationRequestFactory = connectedSynchronizer.requestGenerator
     val sequencerClient = connectedSynchronizer.sequencerClient
 

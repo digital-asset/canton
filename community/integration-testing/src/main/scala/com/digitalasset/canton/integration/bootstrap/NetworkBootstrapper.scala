@@ -58,7 +58,7 @@ class NetworkBootstrapper(networks: NetworkTopologyDescription*)(implicit
       synchronizerOwners = desc.synchronizerOwners,
       synchronizerThreshold = desc.synchronizerThreshold,
       staticSynchronizerParameters = desc.staticSynchronizerParameters,
-      mediatorRequestAmplification = SubmissionRequestAmplification.NoAmplification,
+      mediatorRequestAmplification = desc.mediatorRequestAmplification,
       mediatorThreshold = desc.mediatorThreshold,
     )
 

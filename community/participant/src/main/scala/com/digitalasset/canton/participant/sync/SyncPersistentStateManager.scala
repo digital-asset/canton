@@ -146,14 +146,14 @@ class SyncPersistentStateManager(
   def initializePersistentStates()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = lock.withWriteLockHandle { implicit lockHandle =>
-    def getStaticSynchronizerParameters(synchronizerId: PhysicalSynchronizerId)(implicit
+    def getStaticSynchronizerParameters(psid: PhysicalSynchronizerId)(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, StaticSynchronizerParameters] =
       EitherT
         .fromOptionF(
           SynchronizerConnectivityStatusStore(
             storage,
-            synchronizerId,
+            psid,
             parameters.processingTimeouts,
             loggerFactory,
           ).lastParameters,

@@ -38,29 +38,6 @@ build_docs:
         use_maven_mirror: false
     - cleanup_test_job
 
-replicate_docs:
-  executor: canton-xlarge-docker-with-postgres
-  parameters:
-    env:
-      type: string
-  steps:
-    - checkout_and_restore_caches
-    - restore_packaged_release:
-        location: community/app/target/release
-    - unpack_scaladoc_in_workspace
-    - execute_sbt_command:
-        cmd: packageDocsWithExistingRelease
-        # `use_maven_mirror` is set to false, because the sbt sphinx plugin is trying
-        # to authorize in the mirror from Python but can't. and it fail the build
-        use_maven_mirror: false
-    - cleanup_test_job
-    - authorize_git
-    - run:
-        name: Replicate the docs
-        command: |
-          nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "./scripts/docs/replication.sh --env <<parameters.env>> --githubAuth canton-machine:$GITHUB_TOKEN"
-    - cleanup_build_job
-
 # TODO(i29845): Fix and re-enable
 #build_systematic_testing_inventory:
 #  executor: canton-large-docker

@@ -15,7 +15,9 @@ import com.digitalasset.canton.ledger.participant.state.{Reassignment, Reassignm
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationIndexingWorkflow.{
-  ContractToIndex,
+  ContractActivation,
+  ContractActivationChange,
+  ContractDeactivation,
   indexingBatchSize,
 }
 import com.digitalasset.canton.participant.event.{AcsChangeSupport, RecordOrderPublisher}
@@ -92,44 +94,33 @@ class PartyReplicationIndexingWorkflow(
       s"Indexing request ${params.requestId} party ${params.partyId} batch $onprBatchCounter"
     )
 
-    val generatesUniqueUpdateIds = new GeneratesUniqueUpdateIds {
-      override def uniqueUpdateId(
-          onprBatchCounter: NonNegativeLong,
-          batch: Seq[(TimeOfChange, LfContractId, ChangeType, ReassignmentCounter)],
-      ): UpdateId = {
-        // Add the onpr batch counter to the hash to arrive at unique per-OPR updateIds.
-        val hash = batch
-          .foldLeft {
-            pureCrypto
-              .build(HashPurpose.OnlinePartyReplicationId)
-              .addString(params.partyId.toProtoPrimitive)
-              .addLong(onprBatchCounter.unwrap)
-          } {
-            // TODO(#26468): Use validation packages
-            case (builder, (_toc, contractId, _change, reassignmentCounter)) =>
-              builder
-                .addLong(reassignmentCounter.v)
-                .addString(contractId.coid)
-          }
-          .finish()
-        UpdateId(hash)
-      }
-    }
-
     for {
       nextBatchO <- EitherT.right[String](
-        indexingStore
-          .consumeNextActivationChangesBatch(
-            params.partyId,
-            onprBatchCounter,
-            indexingBatchSize,
-          )(generatesUniqueUpdateIds)
+        indexingStore.consumeNextActivationChangesBatch(indexingBatchSize)
       )
       numContractsIndexedO <- nextBatchO.traverse {
-        case ContractActivationChangeBatch(updateId, contractActivationChanges) =>
+        case ContractActivationChangeBatch(contractActivationChanges, batchWatermark) =>
+          // Add the onpr batch counter to the hash to arrive at unique per-OPR updateIds.
+          val hash = contractActivationChanges
+            .foldLeft {
+              pureCrypto
+                .build(HashPurpose.OnlinePartyReplicationId)
+                .addByteString(params.requestId.unwrap)
+                .addLong(batchWatermark.timestamp.toMicros)
+                .addLong(batchWatermark.counter.unwrap)
+            } {
+              // TODO(#26468): Use validation packages
+              case (builder, (contractId, (_change, reassignmentCounter))) =>
+                builder
+                  .addLong(reassignmentCounter.v)
+                  .addString(contractId.coid)
+            }
+            .finish()
+
+          val updateId = UpdateId(hash)
           indexContractActivationChangeBatch(
             contractActivationChanges,
-            onprBatchCounter,
+            batchWatermark.counter,
             updateId,
             params,
             recordOrderPublisher,
@@ -143,11 +134,11 @@ class PartyReplicationIndexingWorkflow(
           // at which we last drained.
           indexingAlmostDoneWatermarkO = Some(indexingProgress.indexedContractActivationChangeCount)
         )
-      )(numContractsIndexed =>
+      )(numChangesIndexed =>
         indexingProgress.copy(
           indexedContractActivationChangeCount =
             indexingProgress.indexedContractActivationChangeCount +
-              checked(NonNegativeLong.tryCreate(numContractsIndexed.unwrap.toLong)),
+              checked(NonNegativeLong.tryCreate(numChangesIndexed.unwrap.toLong)),
           nextIndexingCounter = onprBatchCounter.increment.toNonNegative,
         )
       )
@@ -167,7 +158,7 @@ class PartyReplicationIndexingWorkflow(
     * passing the indexer update event to the record order publisher.
     */
   private def indexContractActivationChangeBatch(
-      contractActivationChanges: NonEmpty[Map[LfContractId, (ChangeType, ReassignmentCounter)]],
+      contractActivationChanges: NonEmpty[Seq[(LfContractId, (ChangeType, ReassignmentCounter))]],
       onprIndexingCounter: NonNegativeLong,
       updateId: UpdateId,
       params: PartyReplicationStatus.ReplicationParams,
@@ -177,34 +168,37 @@ class PartyReplicationIndexingWorkflow(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, PositiveInt] =
     for {
-      activeContracts <- MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(
-        contractActivationChanges.forgetNE.toSeq
-      ) { case (contractId, (_, reassignmentCounter)) =>
+      activationChanges <- MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(
+        contractActivationChanges.forgetNE
+      ) { case (contractId, (change, reassignmentCounter)) =>
         EitherT(
           contractStore.value
             .lookupPersisted(contractId)
             .map(
               _.toRight(s"Unable to look up contract $contractId in contract store")
-                .map[ContractToIndex](persistedContract =>
-                  (
-                    ContractReassignment(
-                      persistedContract.asContractInstance,
-                      // TODO(#26468): Use validation packages
-                      ReassignmentTag
-                        .Source(persistedContract.asContractInstance.templateId.packageId),
-                      ReassignmentTag
-                        .Target(persistedContract.asContractInstance.templateId.packageId),
-                      reassignmentCounter,
-                    ),
-                    persistedContract.internalContractId,
+                .map[ContractActivationChange] { persistedContract =>
+                  val reassignment = ContractReassignment(
+                    persistedContract.asContractInstance,
+                    // TODO(#26468): Use validation packages
+                    ReassignmentTag
+                      .Source(persistedContract.asContractInstance.templateId.packageId),
+                    ReassignmentTag
+                      .Target(persistedContract.asContractInstance.templateId.packageId),
+                    reassignmentCounter,
                   )
-                )
+
+                  change match {
+                    case ChangeType.Activation =>
+                      ContractActivation(reassignment, persistedContract.internalContractId)
+                    case ChangeType.Deactivation => ContractDeactivation(reassignment)
+                  }
+                }
             )
         )
       }
-      activeContractsNE <- EitherT.fromEither[FutureUnlessShutdown](
+      activationChangesNE <- EitherT.fromEither[FutureUnlessShutdown](
         NonEmpty
-          .from(activeContracts)
+          .from(activationChanges)
           .toRight(
             s"OnPR indexing batch $onprIndexingCounter with update $updateId not expected to be empty"
           )
@@ -212,10 +206,10 @@ class PartyReplicationIndexingWorkflow(
       _ <- EitherT.right[String](
         FutureUnlessShutdown.lift(
           recordOrderPublisher.schedulePublishAddContracts(
-            indexerEventFromActiveContracts(
+            indexerEventFromActivationChanges(
               onprIndexingCounter,
               updateId,
-              activeContractsNE,
+              activationChangesNE,
               params,
               indexingStore,
             )
@@ -223,34 +217,34 @@ class PartyReplicationIndexingWorkflow(
         )
       )
     } yield {
-      // Returning positive int as activeContractsNE is non-empty
-      checked(PositiveInt.tryCreate(activeContractsNE.size))
+      // Returning positive int as activationChangesNE is non-empty
+      checked(PositiveInt.tryCreate(activationChangesNE.size))
     }
 
-  /** Determines the indexer event corresponding to the imported active contracts
+  /** Determines the indexer event corresponding to the contract activation changes
     * @param onprIndexingCounter
     *   the batch counter used for a unique updateId
-    * @param activeContracts
-    *   the active contracts to publish
+    * @param activationChanges
+    *   the contract activation changes (activations and deactivations) to publish
     * @param timestamp
     *   the record time to publish the event at
     * @return
     *   the event to publish
     */
-  private def indexerEventFromActiveContracts(
+  private def indexerEventFromActivationChanges(
       onprIndexingCounter: NonNegativeLong,
       updateId: UpdateId,
-      activeContracts: NonEmpty[Seq[ContractToIndex]],
+      activationChanges: NonEmpty[Seq[ContractActivationChange]],
       params: PartyReplicationStatus.ReplicationParams,
       indexingStore: PartyReplicationIndexingStore,
   )(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Update.OnPRReassignmentAccepted = {
-    val contractIdCounters = activeContracts.map {
+    val contractIdCounters = activationChanges.map(_.contract match {
       // TODO(#26468): Use validation packages
-      case (ContractReassignment(contract, _, _, reassignmentCounter), _) =>
+      case ContractReassignment(contract, _, _, reassignmentCounter) =>
         (contract.contractId, reassignmentCounter)
-    }
+    })
 
     val artificialReassignmentInfo = ReassignmentInfo(
       sourceSynchronizer = ReassignmentTag.Source(params.synchronizerId),
@@ -264,11 +258,29 @@ class PartyReplicationIndexingWorkflow(
       ),
       isReassigningParticipant = false,
     )
-    val commitSet = CommitSet.createForAssignment(
-      artificialReassignmentInfo.reassignmentId,
-      activeContracts.map { case (reassignment, _) => reassignment },
-      artificialReassignmentInfo.sourceSynchronizer,
-    )
+    val commitSet = NonEmpty
+      .from(activationChanges.collect[ContractReassignment] {
+        case ContractActivation(reassignment, _) => reassignment
+      })
+      .fold(CommitSet.empty)(reassignmentsNE =>
+        CommitSet.createForAssignment(
+          artificialReassignmentInfo.reassignmentId,
+          reassignmentsNE,
+          artificialReassignmentInfo.sourceSynchronizer,
+        )
+      )
+      .copy(unassignments =
+        activationChanges
+          .collect { case ContractDeactivation(reassignment) => reassignment }
+          .map(reassignment =>
+            reassignment.contract.contractId -> CommitSet.UnassignmentCommit(
+              targetSynchronizerId = ReassignmentTag.Target(params.synchronizerId),
+              stakeholders = reassignment.contract.metadata.stakeholders,
+              reassignmentCounter = reassignment.counter,
+            )
+          )
+          .toMap
+      )
     val acsChangeFactory = AcsChangeSupport.fromCommitSet(commitSet)
     Update
       .OnPRReassignmentAccepted(
@@ -276,10 +288,13 @@ class PartyReplicationIndexingWorkflow(
         updateId = updateId,
         reassignmentInfo = artificialReassignmentInfo,
         reassignment = Reassignment.Batch(
-          activeContracts.zipWithIndex.map {
+          activationChanges.zipWithIndex.map[Reassignment] {
             // TODO(#26468): Use validation packages
             case (
-                  (ContractReassignment(contract, _, _, reassignmentCounter), internalContractId),
+                  ContractActivation(
+                    ContractReassignment(contract, _, _, reassignmentCounter),
+                    internalContractId,
+                  ),
                   idx,
                 ) =>
               Reassignment.Assign(
@@ -289,6 +304,19 @@ class PartyReplicationIndexingWorkflow(
                   internalContractId = internalContractId,
                   inst = contract.inst,
                 ),
+              )
+            case (
+                  ContractDeactivation(ContractReassignment(contract, _, _, reassignmentCounter)),
+                  idx,
+                ) =>
+              Reassignment.Unassign(
+                contractId = contract.contractId,
+                templateId = contract.templateId,
+                packageName = contract.inst.packageName,
+                stakeholders = contract.metadata.stakeholders,
+                assignmentExclusivity = None,
+                reassignmentCounter = reassignmentCounter.v,
+                nodeId = idx,
               )
           }
         ),
@@ -302,7 +330,7 @@ class PartyReplicationIndexingWorkflow(
         // TODO(#30121): Move indexer confirmation to indexer post-processing
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           indexingStore.markContractActivationChangesAsIndexed(
-            update.updateId
+            PartyReplicationIndexingStore.Watermark(timestamp, onprIndexingCounter)
           ),
           s"Failed to mark update ${update.updateId} indexed",
           level = Level.WARN,
@@ -312,7 +340,15 @@ class PartyReplicationIndexingWorkflow(
 }
 
 object PartyReplicationIndexingWorkflow {
-  type ContractToIndex = (ContractReassignment, Long)
+  private sealed trait ContractActivationChange {
+    def contract: ContractReassignment
+  }
+  private final case class ContractActivation(
+      contract: ContractReassignment,
+      internalContractId: Long,
+  ) extends ContractActivationChange
+  private final case class ContractDeactivation(contract: ContractReassignment)
+      extends ContractActivationChange
 
   private lazy val indexingBatchSize = PositiveInt.tryCreate(200)
 }

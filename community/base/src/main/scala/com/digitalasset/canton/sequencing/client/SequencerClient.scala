@@ -1470,17 +1470,17 @@ class RichSequencerClientImpl(
           .putIfAbsent(postAggregationHandler)
           .foreach(_ => ErrorUtil.invalidState("Post aggregation handler already exists"))
 
-        val sequencerAggregator =
-          new SequencerAggregator(
-            postAggregationHandler,
-            syncCryptoClient.pureCrypto,
-            config.eventInboxSize,
-            loggerFactory,
-            MessageAggregationConfig(sequencerTransports.sequencerTrustThreshold),
-            updateSendTracker = sendTracker.update,
-            timeouts,
-            futureSupervisor,
-          )
+        val sequencerAggregator = SequencerAggregator.create(
+          config.useNewAggregator,
+          postAggregationHandler,
+          syncCryptoClient.pureCrypto,
+          config.eventInboxSize,
+          loggerFactory,
+          MessageAggregationConfig(sequencerTransports.sequencerTrustThreshold),
+          updateSendTracker = sendTracker.update,
+          timeouts,
+          futureSupervisor,
+        )
         sequencerAggregatorRef
           .putIfAbsent(sequencerAggregator)
           .foreach(_ => ErrorUtil.invalidState("Sequencer aggregator already exists"))

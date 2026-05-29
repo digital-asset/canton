@@ -138,6 +138,18 @@ snapshot_version() (
 )
 
 extract_major_minor() {
-    version="$1"
-    echo "$version" | sed -E 's/^([0-9]+)\.([0-9]+).*/\1.\2/'
+  version="$1"
+  echo "$version" | sed -E 's/^([0-9]+)\.([0-9]+).*/\1.\2/'
+}
+
+# validate that the parameter is a valid version tag:
+#   - starts with a v
+#   - contains a-Z, 0-9 and the following non alphanumeric characters: _ . -
+validate_version_tag() {
+  local tag="$1"
+
+  if [[ ! "$tag" =~ ^v[a-zA-Z0-9_.-]+$ ]]; then
+    echo "Error: version '$tag' is invalid. It must start with 'v' followed only by alphanumeric characters, dashes, underscores, or dots." >&2
+    exit 1
+  fi
 }

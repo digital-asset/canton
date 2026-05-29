@@ -9,7 +9,6 @@ import com.daml.metrics.api.MetricQualification
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.testing.MetricValues
 import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{
@@ -73,7 +72,7 @@ import scala.concurrent.duration.*
   * Check the events/s in the `log` folder after the run:
   *
   * {{{
-  * cat canton_test.log | grep 'sequencer2 events/s'
+  * cat canton_test.log | grep 'sequencer4 events/s'
   * }}}
   *
   * More options:
@@ -127,7 +126,6 @@ import scala.concurrent.duration.*
   *   - Attach a profiler to the new java process. Make sure you stop profiling before the process
   *     stops.
   */
-@UnstableTest // TODO(#29963)
 class SequencerCatchUpPerformanceIntegrationTest
     extends BasePerformanceIntegrationTest
     with SharedEnvironment
@@ -139,7 +137,7 @@ class SequencerCatchUpPerformanceIntegrationTest
   // Enable to see metrics in Prometheus or Grafana. For some reason, doesn't work with the 'countBlockEvents' flag
   private val exposeHttpMetrics = false
 
-  // Enable to automatically count events/s, grep 'sequencer2 events/s' after the test run
+  // Enable to automatically count events/s, grep 'sequencer4 events/s' after the test run
   // Set to true by default, so we can print the sequencer speed on CircleCI
   private val countBlockEvents = true
 
@@ -152,13 +150,13 @@ class SequencerCatchUpPerformanceIntegrationTest
   // The duration of load producing before the restart. The bigger the number, the more events will accumulate to catch up with
   private val beforeRestartDurationMillis = 5 * 60000L
 
-  // The max time for the sequencer2 to catch up
+  // The max time for the sequencer4 to catch up
   private val afterRestartDurationMillis = beforeRestartDurationMillis / 2
 
-  // Useful to isolate the sequencer2 performance
+  // Useful to isolate the sequencer4 performance
   private val stopOtherNodesDuringCatchUp = true
 
-  // Keep producing load after catch-up. May result in sequencer2 never catching up, depending on the other settings.
+  // Keep producing load after catch-up. May result in sequencer4 never catching up, depending on the other settings.
   private val produceLoadAfterRestart = false
 
   private val enableTrafficManagement = true
@@ -217,7 +215,7 @@ class SequencerCatchUpPerformanceIntegrationTest
     Option.when(useExternalSequencerProcess)(
       new UseExternalProcess(
         loggerFactory,
-        externalSequencers = Set("sequencer2"),
+        externalSequencers = Set("sequencer4"),
         fileNameHint = this.getClass.getSimpleName,
         configTransforms =
           if (exposeHttpMetrics) Seq(metricsConfigTransform, streamInstrumentationConfigTransform)
@@ -225,11 +223,11 @@ class SequencerCatchUpPerformanceIntegrationTest
       )
     )
 
-  private val sequencer2Proxy = "sequencer2-to-postgres"
+  private val sequencer4Proxy = "sequencer4-to-postgres"
 
   private val toxiproxyPluginOpt: Option[UseToxiproxy] = Option.when(useToxiProxy)(
     new UseToxiproxy(
-      ToxiproxyConfig(proxies = Seq(SequencerToPostgres(sequencer2Proxy, "sequencer2")))
+      ToxiproxyConfig(proxies = Seq(SequencerToPostgres(sequencer4Proxy, "sequencer4")))
     )
   )
 
@@ -239,7 +237,7 @@ class SequencerCatchUpPerformanceIntegrationTest
     new UsePostgres(
       loggerFactory,
       customMaxConnectionsByNode = Some {
-        case "sequencer2" => PositiveInt.tryCreate(10).some
+        case "sequencer4" => PositiveInt.tryCreate(10).some
         case _ => PositiveInt.tryCreate(5).some
       },
     )
@@ -258,7 +256,7 @@ class SequencerCatchUpPerformanceIntegrationTest
     EnvironmentDefinition
       .buildBaseEnvironmentDefinition(
         numParticipants = 2,
-        numSequencers = 2,
+        numSequencers = 4,
         numMediators = 5,
       )
       .withManualStart
@@ -275,6 +273,8 @@ class SequencerCatchUpPerformanceIntegrationTest
         allMediators().foreach(_.start())
 
         sequencer1.start()
+        sequencer2.start()
+        sequencer3.start()
         startSequencer()
 
         participant1.start()
@@ -287,21 +287,23 @@ class SequencerCatchUpPerformanceIntegrationTest
         )
 
         sequencer1.health.wait_for_ready_for_initialization()
+        sequencer2.health.wait_for_ready_for_initialization()
+        sequencer3.health.wait_for_ready_for_initialization()
 
-        val seq2 = if (useExternalSequencerProcess) remoteSequencer2 else sequencer2
-        seq2.health.wait_for_ready_for_initialization()
+        val seq4 = if (useExternalSequencerProcess) remoteSequencer4 else sequencer4
+        seq4.health.wait_for_ready_for_initialization()
       }
       .withNetworkBootstrap { implicit env =>
         import env.*
 
-        val seq2 = if (useExternalSequencerProcess) remoteSequencer2 else sequencer2
+        val seq4 = if (useExternalSequencerProcess) remoteSequencer4 else sequencer4
         val allMediators_ = allMediators()
         new NetworkBootstrapper(
           NetworkTopologyDescription(
             daName,
-            synchronizerOwners = Seq(sequencer1, seq2),
+            synchronizerOwners = Seq(sequencer1, sequencer2, sequencer3, seq4),
             synchronizerThreshold = PositiveInt.one,
-            sequencers = Seq(sequencer1, seq2),
+            sequencers = Seq(sequencer1, sequencer2, sequencer3, seq4),
             mediators = allMediators_,
             overrideMediatorToSequencers = Some(
               allMediators_.map { mediator =>
@@ -415,7 +417,7 @@ class SequencerCatchUpPerformanceIntegrationTest
     participant2.health.ping(participant1.id)
     participant1.health.ping(participant2.id)
 
-    testLogger.info("sequencer2 STOPPING")
+    testLogger.info("sequencer4 STOPPING")
     stopSequencer()
 
     runners.foreach(env.environment.addUserCloseable(_))
@@ -437,11 +439,11 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
-        testLogger.info("sequencer2 RESTARTING")
+        testLogger.info("sequencer4 RESTARTING")
 
         // enable db toxiproxy
         toxiproxyPluginOpt.foreach { toxiproxyPlugin =>
-          val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(sequencer2Proxy)
+          val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(sequencer4Proxy)
           val client = proxy
             .valueOrFail("must be here")
             .underlying
@@ -454,7 +456,7 @@ class SequencerCatchUpPerformanceIntegrationTest
 
         val before = Instant.now()
         val seq2EventCountBeforeOpt: Option[Long] =
-          if (exposeHttpMetrics || !countBlockEvents) None else Some(blockEventCount(sequencer2))
+          if (exposeHttpMetrics || !countBlockEvents) None else Some(blockEventCount(sequencer4))
 
         def instantToSeconds(instant: Instant): Double =
           instant.getEpochSecond.toDouble + (instant.getNano.toDouble / 1000_000_000)
@@ -466,26 +468,26 @@ class SequencerCatchUpPerformanceIntegrationTest
               maxPollInterval = 50 milliseconds,
             ) {
               val seq1EventCount = blockEventCount(sequencer1)
-              val seq2EventCount = blockEventCount(sequencer2)
+              val seq4EventCount = blockEventCount(sequencer4)
 
               testLogger.info(
-                s"Checking if sequencer2 has caught up. sequencer1 events: $seq1EventCount, sequencer2 events: $seq2EventCount"
+                s"Checking if sequencer4 has caught up. sequencer1 events: $seq1EventCount, sequencer4 events: $seq4EventCount"
               )
 
               // seq2 has caught up if it has seen all events.
               // it may see more in case of shutdown during async processing
-              val seq2CaughtUp = seq2EventCount >= seq1EventCount
+              val seq2CaughtUp = seq4EventCount >= seq1EventCount
 
               assert(seq2CaughtUp)
 
               if (seq2CaughtUp) {
                 val now = Instant.now()
-                val processedEventCount = seq2EventCount - seq2EventCountBefore
+                val processedEventCount = seq4EventCount - seq2EventCountBefore
                 val eventsPerSec =
                   processedEventCount.toDouble / (instantToSeconds(now) - instantToSeconds(before))
 
                 val logMessage =
-                  f"sequencer2 events/s: $eventsPerSec%.2f, processed events: $processedEventCount"
+                  f"sequencer4 events/s: $eventsPerSec%.2f, processed events: $processedEventCount"
                 testLogger.info(logMessage)
 
                 // Ugly solution to print the sequencer speed on CircleCI
@@ -496,7 +498,7 @@ class SequencerCatchUpPerformanceIntegrationTest
           case None =>
             Threading.sleep(afterRestartDurationMillis)
         }
-        testLogger.info("sequencer2 COMPLETED")
+        testLogger.info("sequencer4 COMPLETED")
         if (turnOffDebugLogging)
           NodeLoggingUtil.setLevel(level = "DEBUG")
       },
@@ -535,11 +537,11 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     externalProcessOpt match {
       case Some(externalProcess) =>
-        externalProcess.start("sequencer2")
-        assert(externalProcess.isRunning("sequencer2"))
+        externalProcess.start("sequencer4")
+        assert(externalProcess.isRunning("sequencer4"))
       case None =>
-        sequencer2.start()
-        assert(sequencer2.is_running)
+        sequencer4.start()
+        assert(sequencer4.is_running)
     }
   }
 
@@ -548,11 +550,11 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     externalProcessOpt match {
       case Some(externalProcess) =>
-        externalProcess.kill("sequencer2")
-        assert(!externalProcess.isRunning("sequencer2"))
+        externalProcess.kill("sequencer4")
+        assert(!externalProcess.isRunning("sequencer4"))
       case None =>
-        sequencer2.stop()
-        assert(!sequencer2.is_running)
+        sequencer4.stop()
+        assert(!sequencer4.is_running)
     }
   }
 }

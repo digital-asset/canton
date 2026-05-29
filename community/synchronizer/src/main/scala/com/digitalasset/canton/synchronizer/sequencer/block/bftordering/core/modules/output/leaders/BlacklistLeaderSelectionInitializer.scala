@@ -47,13 +47,22 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
         stateFromStore(moduleSystem, epochNumber)
     }
 
-  def leaderFromState(
+  def leadersFromState(
       state: BlacklistLeaderSelectionPolicyState,
       orderingTopology: OrderingTopology,
   ): Seq[BftNodeId] =
     BlacklistLeaderSelectionPolicyStateWithTopology(state, orderingTopology, protocolVersion)
-      .computeLeaders(
-      )
+      .computeLeaders()
+
+  def blacklistedNodesFromState(
+      state: BlacklistLeaderSelectionPolicyState,
+      orderingTopology: OrderingTopology,
+  ): Seq[BftNodeId] =
+    BlacklistLeaderSelectionPolicyStateWithTopology(
+      state,
+      orderingTopology,
+      protocolVersion,
+    ).computeBlacklistedNodes()
 
   def leaderSelectionPolicy(
       blacklistLeaderSelectionPolicyState: BlacklistLeaderSelectionPolicyState,

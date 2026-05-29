@@ -13,9 +13,11 @@ import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric
   */
 final case class CryptoParallelismConfig(
     signatureVerificationParallelism: PositiveInt =
-      CryptoParallelismConfig.defaultSignatureVerificationParallelism
+      CryptoParallelismConfig.defaultSignatureVerificationParallelism,
+    encryptionParallelism: PositiveInt = CryptoParallelismConfig.defaultEncryptionParallelism,
 )
 
 object CryptoParallelismConfig {
   val defaultSignatureVerificationParallelism: PositiveInt = PositiveNumeric.tryCreate(10)
+  val defaultEncryptionParallelism: PositiveInt = PositiveNumeric.tryCreate(10)
 }

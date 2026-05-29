@@ -455,7 +455,7 @@ class AcsCommitmentProcessor private (
 
   private def processBufferedAtInit(
       timestamp: Option[CantonTimestampSecond]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     dbQueue.executeUS(
       timestamp.traverse_(ts => processBuffered(ts, endExclusive = false)),
       "processBufferedAtInit",
@@ -589,7 +589,8 @@ class AcsCommitmentProcessor private (
       toc: RecordTime,
       acsChange: AcsChange,
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit =
     publishInternal(PublishTickData.Regular(toc, () => FutureUnlessShutdown.pure(acsChange)))
 
@@ -760,7 +761,8 @@ class AcsCommitmentProcessor private (
   }
 
   override def publish(acsChanges: NonEmpty[Seq[(RecordTime, AcsChange)]])(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit] =
     collapseAndPublishAcsChanges(acsChanges).map(changes =>
       changes.foreach { case (rt, change) =>
@@ -772,7 +774,8 @@ class AcsCommitmentProcessor private (
       toc: RecordTime,
       acsChangeFactoryO: Option[AcsChangeFactory],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit =
     publishInternal(
       PublishTickData.Regular(
@@ -786,7 +789,7 @@ class AcsCommitmentProcessor private (
     */
   def publishForUpgradeTime(
       upgradeTime: CantonTimestamp
-  )(implicit traceContext: TraceContext): Unit =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Unit =
     publishInternal(PublishTickData.PersistRunningCommitmentsAtUpgradeTime(upgradeTime))
 
   private def computeAcsChange(toc: RecordTime, acsChangeFactoryO: Option[AcsChangeFactory])(
@@ -822,7 +825,8 @@ class AcsCommitmentProcessor private (
   private def publishInternal(
       publishTickData: PublishTickData
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit = {
     @tailrec
     def go(): Unit =
@@ -846,7 +850,7 @@ class AcsCommitmentProcessor private (
                 RecordTime(timestamp = effectiveTime, tieBreaker = 0),
                 () => FutureUnlessShutdown.pure(AcsChange.empty),
               )
-            )(traced.traceContext)
+            )(traced.traceContext, closeContext)
           }
           // now, iterate (there might have been several effective time updates)
           go()
@@ -920,7 +924,8 @@ class AcsCommitmentProcessor private (
   private def publishTick(
       publishTickData: PublishTickData
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit = publishTickData match {
     case PublishTickData.Regular(toc, acsChangeF) =>
       publishTickInternal(toc, acsChangeF)
@@ -933,7 +938,8 @@ class AcsCommitmentProcessor private (
       toc: RecordTime,
       acsChangeF: () => FutureUnlessShutdown[AcsChange],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit = {
     if (!lastPublished.forall(_ < toc))
       throw new IllegalStateException(
@@ -1344,7 +1350,7 @@ class AcsCommitmentProcessor private (
   def processBatch(
       timestamp: CantonTimestamp,
       batch: Traced[Seq[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]]],
-  ): HandlerResult =
+  )(implicit closeContext: CloseContext): HandlerResult =
     batch.withTraceContext(implicit traceContext => processBatchInternal(timestamp, _))
 
   /** Process incoming commitments.
@@ -1371,7 +1377,7 @@ class AcsCommitmentProcessor private (
   def processBatchInternal(
       timestamp: CantonTimestamp,
       batch: Seq[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]],
-  )(implicit traceContext: TraceContext): HandlerResult = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): HandlerResult = {
 
     if (batch.sizeIs != 1) {
       Errors.InternalError
@@ -1653,7 +1659,7 @@ class AcsCommitmentProcessor private (
   @VisibleForTesting
   private[pruning] def indicateLocallyProcessed(
       period: CommitmentPeriod
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     endOfLastProcessedPeriod = Some(period.toInclusive)
     for {
       // mark that we're done with processing this period; safe to do at any point after the commitment has been sent
@@ -1676,7 +1682,7 @@ class AcsCommitmentProcessor private (
   private def checkSignedMessage(
       timestamp: CantonTimestamp,
       envelope: OpenEnvelope[SignedProtocolMessage[AcsCommitment]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     val message = envelope.protocolMessage
     logger.info(
       s"Checking commitment (purportedly by) ${message.message.sender} for period ${message.message.period}"
@@ -1724,7 +1730,7 @@ class AcsCommitmentProcessor private (
 
   private def checkCommitment(
       commitment: AcsCommitment
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     val fut = dbQueue
       .executeUS(
         {
@@ -1774,7 +1780,7 @@ class AcsCommitmentProcessor private (
   private def processBuffered(
       timestamp: CantonTimestampSecond,
       endExclusive: Boolean,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Processing buffered commitments until $timestamp ${if (endExclusive) "exclusive"
       else "inclusive"}")
     for {
@@ -1849,9 +1855,9 @@ class AcsCommitmentProcessor private (
 
   private def checkMatchAndMarkSafe(
       remote: List[AcsCommitmentData]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     logger.info(s"Processing ${remote.size} remote commitments")
-    remote.parTraverse_ { cmt =>
+    MonadUtil.parTraverseWithLimit_(threadCount)(remote) { cmt =>
       for {
         commitments <- store.getComputed(cmt.period, cmt.sender)
         // check if we were in a catch-up phase
@@ -1881,7 +1887,7 @@ class AcsCommitmentProcessor private (
       lastProcessedCatchUpCommitmentTimestamp: Option[CantonTimestampSecond],
       completedPeriod: CommitmentPeriod,
       filterInJustMismatches: Boolean = false,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     logger.debug(
       s"$participantId checkMatchAndMarkSafeOrFixDuringCatchUp for period $completedPeriod"
     )
@@ -1945,23 +1951,24 @@ class AcsCommitmentProcessor private (
             }
 
             // we mark all counter-commitments
-            _ <- analyzedCounterCommitments.parTraverse_ { analyzedCounterCommitment =>
-              val counterCommitment = analyzedCounterCommitment.merge
-              val safe = analyzedCounterCommitment.isRight
-              logger.debug(
-                s"Marked as ${if (safe) "safe" else "unsafe"} commitment $cmt against counterComm $counterCommitment"
-              )
-              val cmtPeriodsNE = NonEmptyUtil.fromElement(counterCommitment.period)
-              for {
-                _ <-
-                  if (safe) store.markSafe(counterCommitment.sender, cmtPeriodsNE)
-                  else store.markUnsafe(counterCommitment.sender, cmtPeriodsNE)
-              } yield {
-                // max to ensure that this metric increases monotonically
-                metrics.lastIncomingProcessed.updateValue(
-                  _ max counterCommitment.period.toInclusive.toMicros
+            _ <- MonadUtil.parTraverseWithLimit_(threadCount)(analyzedCounterCommitments) {
+              analyzedCounterCommitment =>
+                val counterCommitment = analyzedCounterCommitment.merge
+                val safe = analyzedCounterCommitment.isRight
+                logger.debug(
+                  s"Marked as ${if (safe) "safe" else "unsafe"} commitment $cmt against counterComm $counterCommitment"
                 )
-              }
+                val cmtPeriodsNE = NonEmptyUtil.fromElement(counterCommitment.period)
+                for {
+                  _ <-
+                    if (safe) store.markSafe(counterCommitment.sender, cmtPeriodsNE)
+                    else store.markUnsafe(counterCommitment.sender, cmtPeriodsNE)
+                } yield {
+                  // max to ensure that this metric increases monotonically
+                  metrics.lastIncomingProcessed.updateValue(
+                    _ max counterCommitment.period.toInclusive.toMicros
+                  )
+                }
             }
             (mismatches, matching) = analyzedCounterCommitments.separate
 
@@ -2466,7 +2473,7 @@ class AcsCommitmentProcessor private (
   private def markOutstandingIfNonEmpty(
       completedPeriod: CommitmentPeriod,
       participants: Set[ParticipantId],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     NonEmpty.from(participants).traverse_ { counterParticipants =>
       for {
         splitPeriod <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(
@@ -2488,24 +2495,30 @@ class AcsCommitmentProcessor private (
       commitments: Iterable[(CommitmentPeriod, HashedCommitmentType)],
       lastPruningTime: Option[PruningStatus],
       possibleCatchUp: Boolean,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     for {
       splitPeriods <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(cmt.period)
       reconIntervals <- getReconciliationIntervals(cmt.period.toInclusive.forgetRefinement)
       reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
         _.intervalLength.duration.toMillis
       )
+
+      isMatch = matches(
+        cmt,
+        commitments,
+        lastPruningTime.map(_.timestamp),
+        possibleCatchUp,
+        reconIntervalLength,
+      )
+
       _ <- splitPeriods.traverse_ { periods =>
-        val isMatch =
-          matches(
-            cmt,
-            commitments,
-            lastPruningTime.map(_.timestamp),
-            possibleCatchUp,
-            reconIntervalLength,
-          )
-        if (isMatch) store.markSafe(cmt.sender, periods)
-        else store.markUnsafe(cmt.sender, periods)
+        MonadUtil.batchedSequentialTraverseNE_(
+          batchingConfig.parallelism,
+          batchingConfig.maxItemsInBatch,
+        )(periods) { chunk =>
+          if (isMatch) store.markSafe(cmt.sender, chunk)
+          else store.markUnsafe(cmt.sender, chunk)
+        }
       }
     } yield ()
 
@@ -2580,8 +2593,10 @@ class AcsCommitmentProcessor private (
       true
     } else false
 
-  override protected def onClosed(): Unit =
+  override protected def onClosed(): Unit = {
     LifeCycle.close(initializationFlagCloseable, dbQueue, publishQueue, checkpointQueue)(logger)
+    Option(runningCommitments).foreach(_.releaseMemory())
+  }
 
   @VisibleForTesting
   private[pruning] def flush(): FutureUnlessShutdown[Unit] =
@@ -2960,7 +2975,10 @@ object AcsCommitmentProcessor extends HasLoggerName {
       // end has moved, which should mean that all topology events for a given timestamp have been processed before
       // processing the ACS change for the same timestamp
       FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-        processor.processBufferedAtInit(endOfLastProcessedPeriod),
+        processor.processBufferedAtInit(endOfLastProcessedPeriod)(
+          traceContext,
+          initializationFlagCloseable.closeContext,
+        ),
         "processing of buffered commitments at init failed",
       )
       loggingContext.info(

@@ -9,7 +9,7 @@ source "$(dirname "$0")/utils.sh"
 
 # Function to display usage information
 usage() {
-  echo "Usage: $0 --prepared-transaction <path> --signature <path> --signature-algorithm <ed25519|ecdsa256|ecdsa384> --output <prefix> [--fingerprint <value>]"
+  echo "Usage: $0 --prepared-transaction <path> --signature <path> --signature-algorithm <ed25519|ecdsa256|ecdsa384|mldsa65> --output <prefix> [--fingerprint <value>]"
   echo
   echo "Arguments:"
   echo "  --prepared-transaction <path>   Path to the prepared transaction file (required)."
@@ -18,6 +18,7 @@ usage() {
   echo "                                   - ed25519 # The signature must be in the format described at https://datatracker.ietf.org/doc/html/rfc8032#section-3.3"
   echo "                                   - ecdsa256 # The signature must be in the DER format following https://datatracker.ietf.org/doc/html/rfc3279#section-2.2.3"
   echo "                                   - ecdsa384 # The signature must be in the DER format following https://datatracker.ietf.org/doc/html/rfc3279#section-2.2.3"
+  echo "                                   - mldsa65 # The signature must be in the DER format following https://datatracker.ietf.org/doc/html/rfc3279#section-2.2.3"
   echo "  Note that for ed25519 the format is different from the format defined in IEEE P1363, which uses concatenation in big-endian form."
   echo "                                   (required)."
   echo "  --output <prefix>               Output prefix for the generated files (required)."
@@ -69,9 +70,13 @@ while [[ $# -gt 0 ]]; do
           SIGNATURE_ALGORITHM_SPEC="SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_384"
           SIGNATURE_FORMAT="SIGNATURE_FORMAT_DER"
           ;;
+        mldsa65)
+          SIGNATURE_ALGORITHM_SPEC="SIGNING_ALGORITHM_SPEC_ML_DSA_65"
+          SIGNATURE_FORMAT="SIGNATURE_FORMAT_DER"
+          ;;
         # [end-doc-entry: algo spec]
         *)
-          echo "Error: Invalid value for --signature-algorithm. Valid values are: ed25519, ecdsa256, ecdsa384."
+          echo "Error: Invalid value for --signature-algorithm. Valid values are: ed25519, ecdsa256, ecdsa384, mldsa65."
           exit 1
           ;;
       esac
@@ -107,7 +112,8 @@ echo ""
 echo "== Assembling Certificate =="
 # Extract the fingerprint from the transaction
 WRAPPED_TRANSACTION=$(convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.version.v1.UntypedVersionedMessage" < "$PREPARED_TRANSACTION")
-FINGERPRINT=$(echo "$WRAPPED_TRANSACTION" | jq -r .data | decode_from_base64 | convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.TopologyTransaction" | jq -r .mapping.namespaceDelegation.namespace)
+TOPOLOGY_TRANSACTION=$(echo "$WRAPPED_TRANSACTION" | jq -r .data | decode_from_base64 | convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.TopologyTransaction")
+FINGERPRINT=$(echo "$TOPOLOGY_TRANSACTION" | jq -r .mapping.namespaceDelegation.namespace)
 # Wrap the signature into Canton's protobuf Signature message
 TRANSACTION_SIGNATURE_BASE64=$(encode_to_base64 < "$TRANSACTION_SIGNATURE")
 CANTON_SIGNATURE=$(build_canton_signature "$SIGNATURE_FORMAT" "$TRANSACTION_SIGNATURE_BASE64" "$FINGERPRINT" "$SIGNATURE_ALGORITHM_SPEC")

@@ -11,12 +11,12 @@ import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parsePositiveInt}
 import com.digitalasset.canton.util.RoseTree
 import com.digitalasset.canton.version.*
 import monocle.PLens
 
-import scala.annotation.tailrec
+import scala.annotation.{tailrec, unused}
 import scala.collection.mutable
 
 /** Wraps a `GenTransactionTree` where exactly one view is unblinded. The direct subviews of the
@@ -25,7 +25,7 @@ import scala.collection.mutable
   * The `commonMetadata` and `participantMetadata` are also unblinded. The `submitterMetadata` is
   * unblinded if and only if the unblinded view is a root view.
   *
-  * @param subviewHashesAndKeys
+  * @param subviewReferencesAndKeys
   *   contains the hashes of direct subviews together with their view encryption keys. The view
   *   encryption keys are already sent as part of
   *   [[com.digitalasset.canton.protocol.messages.EncryptedViewMessage]]. They need to be sent again
@@ -38,7 +38,7 @@ import scala.collection.mutable
   */
 sealed abstract case class LightTransactionViewTree private[data] (
     tree: GenTransactionTree,
-    subviewHashesAndKeys: Seq[ViewHashAndKey],
+    subviewReferencesAndKeys: Seq[SubviewReferenceAndKey],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       LightTransactionViewTree.type
@@ -47,8 +47,14 @@ sealed abstract case class LightTransactionViewTree private[data] (
     with HasProtocolVersionedWrapper[LightTransactionViewTree]
     with PrettyPrinting {
 
-  override val subviewHashes: Seq[ViewHash] = subviewHashesAndKeys.map {
-    case ViewHashAndKey(viewHash, _) => viewHash
+  // TODO(#32952): change the type of subviewHashes Seq[SubviewReference]
+  override val subviewHashes: Seq[ViewHash] = subviewReferencesAndKeys.map {
+    case SubviewReferenceAndKey(ByViewHash(viewHash), _) => viewHash
+    case SubviewReferenceAndKey(ByCiphertextId(_, _), _) =>
+      // TODO(#32393): enable after fully implementing CiphertextId-based subview references in LightTransactionViewTree
+      throw new NotImplementedError(
+        "CiphertextId-based subview references are not supported in LightTransactionViewTree yet."
+      )
   }
 
   @tailrec
@@ -64,7 +70,7 @@ sealed abstract case class LightTransactionViewTree private[data] (
       case Seq((singleView, index))
           if singleView.viewCommonData.isFullyUnblinded && singleView.viewParticipantData.isFullyUnblinded && singleView.subviews.areFullyBlinded =>
         Right((singleView, index +: viewPosition))
-      case Seq((singleView, _index)) =>
+      case Seq((singleView, _)) =>
         Left(s"Invalid blinding in a light transaction view tree: $singleView")
       case multipleViews =>
         Left(
@@ -90,8 +96,31 @@ sealed abstract case class LightTransactionViewTree private[data] (
   def toProtoV30: v30.LightTransactionViewTree =
     v30.LightTransactionViewTree(
       tree = Some(tree.toProtoV30),
-      subviewHashesAndKeys = subviewHashesAndKeys.map { case ViewHashAndKey(viewHash, key) =>
-        v30.ViewHashAndKey(viewHash.toProtoPrimitive, key.getCryptographicEvidence)
+      subviewHashesAndKeys = subviewReferencesAndKeys.map {
+        case SubviewReferenceAndKey(ByViewHash(viewHash), key) =>
+          v30.ViewHashAndKey(viewHash.toProtoPrimitive, key.getCryptographicEvidence)
+        case SubviewReferenceAndKey(_: ByCiphertextId, _) =>
+          throw new IllegalStateException(
+            "CiphertextId-based subview references cannot be serialized to proto V30."
+          )
+      },
+    )
+
+  @unused
+  def toProtoV31: v31.LightTransactionViewTree =
+    v31.LightTransactionViewTree(
+      tree = Some(tree.toProtoV30),
+      subviewKeysByCiphertextId = subviewReferencesAndKeys.map {
+        case SubviewReferenceAndKey(ByCiphertextId(ciphertextId, index), key) =>
+          v31.CiphertextIdAndKey(
+            ciphertextId.getCryptographicEvidence,
+            index.unwrap,
+            key.getCryptographicEvidence,
+          )
+        case SubviewReferenceAndKey(_: ByViewHash, _) =>
+          throw new IllegalStateException(
+            "ViewHash-based subview references cannot be serialized to proto V31."
+          )
       },
     )
 
@@ -110,6 +139,11 @@ object LightTransactionViewTree
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
     )
+    // TODO(#32393): enable after fully implementing CiphertextId-based subview references in LightTransactionViewTree
+    /*ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v36)(v31.LightTransactionViewTree)(
+      supportedProtoVersion(_)((context, proto) => fromProtoV31(context)(proto)),
+      _.toProtoV31,
+    ),*/
   )
 
   final case class InvalidLightTransactionViewTree(message: String)
@@ -120,19 +154,18 @@ object LightTransactionViewTree
     */
   def tryCreate(
       tree: GenTransactionTree,
-      subviewHashesAndKeys: Seq[ViewHashAndKey],
+      subviewReferencesAndKeys: Seq[SubviewReferenceAndKey],
       protocolVersion: ProtocolVersion,
   ): LightTransactionViewTree =
-    create(tree, subviewHashesAndKeys, protocolVersionRepresentativeFor(protocolVersion)).valueOr(
-      err => throw InvalidLightTransactionViewTree(err)
-    )
+    create(tree, subviewReferencesAndKeys, protocolVersionRepresentativeFor(protocolVersion))
+      .valueOr(err => throw InvalidLightTransactionViewTree(err))
 
   def create(
       tree: GenTransactionTree,
-      subviewHashesAndKeys: Seq[ViewHashAndKey],
+      subviewReferencesAndKeys: Seq[SubviewReferenceAndKey],
       representativeProtocolVersion: RepresentativeProtocolVersion[LightTransactionViewTree.type],
   ): Either[String, LightTransactionViewTree] =
-    new LightTransactionViewTree(tree, subviewHashesAndKeys)(
+    new LightTransactionViewTree(tree, subviewReferencesAndKeys)(
       representativeProtocolVersion
     ) {}.validated
 
@@ -143,20 +176,49 @@ object LightTransactionViewTree
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       ((hashOps, expectedLength), protocolVersion) = context
       tree <- GenTransactionTree.fromProtoV30((hashOps, protocolVersion), protoTree)
-      subviewHashesAndKeys <- protoT.subviewHashesAndKeys.traverse {
+      subviewReferencesAndKeys <- protoT.subviewHashesAndKeys.traverse {
         case v30.ViewHashAndKey(viewHashT, keyT) =>
           for {
-            viewHash <- ViewHash.fromProtoPrimitive(viewHashT)
+            viewHash <- ByViewHash.fromProtoPrimitive(viewHashT)
             key <- SecureRandomness
               .fromByteString(expectedLength)(keyT)
               .leftMap[ProtoDeserializationError](
                 ProtoDeserializationError.CryptoDeserializationError.apply
               )
-          } yield ViewHashAndKey(viewHash, key)
+          } yield SubviewReferenceAndKey(viewHash, key)
       }
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       result <- LightTransactionViewTree
-        .create(tree, subviewHashesAndKeys, rpv)
+        .create(tree, subviewReferencesAndKeys, rpv)
+        .leftMap(e =>
+          ProtoDeserializationError
+            .InvariantViolation("tree", s"Unable to create transaction tree: $e")
+        )
+    } yield result
+
+  @unused
+  private def fromProtoV31(context: ((HashOps, Int), ProtocolVersion))(
+      protoT: v31.LightTransactionViewTree
+  ): ParsingResult[LightTransactionViewTree] =
+    for {
+      protoTree <- ProtoConverter.required("tree", protoT.tree)
+      ((hashOps, expectedLength), protocolVersion) = context
+      tree <- GenTransactionTree.fromProtoV30((hashOps, protocolVersion), protoTree)
+      subviewReferencesAndKeys <- protoT.subviewKeysByCiphertextId.traverse {
+        case v31.CiphertextIdAndKey(ciphertextIdT, indexT, keyT) =>
+          for {
+            ciphertextId <- Hash.fromProtoPrimitive(ciphertextIdT)
+            index <- parsePositiveInt("index", indexT)
+            key <- SecureRandomness
+              .fromByteString(expectedLength)(keyT)
+              .leftMap[ProtoDeserializationError](
+                ProtoDeserializationError.CryptoDeserializationError.apply
+              )
+          } yield SubviewReferenceAndKey(ByCiphertextId(ciphertextId, index), key)
+      }
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+      result <- LightTransactionViewTree
+        .create(tree, subviewReferencesAndKeys, rpv)
         .leftMap(e =>
           ProtoDeserializationError
             .InvariantViolation("tree", s"Unable to create transaction tree: $e")
@@ -269,36 +331,94 @@ object LightTransactionViewTree
   )
 
   /** Turns a full transaction view tree into a lightweight one. Not stack-safe. */
-  def fromTransactionViewTree(
+  private def fromTransactionViewTree(
       tvt: FullTransactionViewTree,
       subviewKeys: Seq[SecureRandomness],
+      byCiphertextIdMapO: Option[Map[ViewHash, ByCiphertextId]],
       protocolVersion: ProtocolVersion,
   ): Either[String, LightTransactionViewTree] = {
     val withBlindedSubviews = tvt.view.tryCopy(subviews = tvt.view.subviews.blindFully)
     val genTransactionTree =
       tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, withBlindedSubviews))
     // you must have one key for each subview (to be able to decrypt them)
-    Either.cond(
-      subviewKeys.sizeIs == tvt.subviewHashes.size,
-      // By definition, the view in a TransactionViewTree has all subviews unblinded
-      LightTransactionViewTree.tryCreate(
-        genTransactionTree,
-        tvt.subviewHashes.lazyZip(subviewKeys).map { case (viewHash, key) =>
-          ViewHashAndKey(viewHash, key)
-        },
-        protocolVersion,
-      ),
-      s"Expected ${tvt.subviewHashes.size} subview keys, but got ${subviewKeys.size}",
+    for {
+      _ <- Either.cond(
+        subviewKeys.sizeCompare(tvt.subviewHashes) == 0,
+        (),
+        s"Expected ${tvt.subviewHashes.size} subview keys, but got ${subviewKeys.size}",
+      )
+      subviewReferencesAndKeys <-
+        // By definition, the view in a TransactionViewTree has all subviews unblinded
+        tvt.subviewHashes
+          .lazyZip(subviewKeys)
+          .toList
+          .traverse { case (viewHash, key) =>
+            byCiphertextIdMapO match {
+              case Some(byCiphertextIdMap) =>
+                // For PV36+, we use the ciphertext ID as the reference for subviews. The ciphertext ID is a hash of the
+                // ciphertext (generated by encrypting all views with the same recipient tree) combined with its
+                // relative "position" before encryption. We no longer use the view hash as a reference in PV36+,
+                // since the view hash is not guaranteed to be unique during decryption.
+                byCiphertextIdMap.get(viewHash) match {
+                  case Some(ref) => Right(SubviewReferenceAndKey(ref, key))
+                  case None =>
+                    Left(
+                      s"Expected to find a ciphertext ID for view hash ${viewHash.unwrap} in the provided " +
+                        s"map, but it was not found."
+                    )
+                }
+              case _ => Right(SubviewReferenceAndKey(ByViewHash(viewHash), key))
+            }
+          }
+    } yield LightTransactionViewTree.tryCreate(
+      genTransactionTree,
+      subviewReferencesAndKeys,
+      protocolVersion,
     )
   }
+
+  /** Builds a LightTransactionViewTree using ViewHash-based references (legacy mode).
+    *
+    * Subviews are identified using their ViewHash, and assumes stability and uniqueness during
+    * encryption/decryption.
+    *
+    * This mode is used for protocol versions <= v35.
+    */
+  def fromTransactionViewTreeUsingViewHashReference(
+      tvt: FullTransactionViewTree,
+      subviewKeys: Seq[SecureRandomness],
+      protocolVersion: ProtocolVersion,
+  ): Either[String, LightTransactionViewTree] =
+    fromTransactionViewTree(tvt, subviewKeys, None, protocolVersion)
+
+  /** Builds a LightTransactionViewTree using Ciphertext ID-based references (PV36+ mode).
+    *
+    * Subviews are identified using deterministic ciphertext IDs derived from encryption output,
+    * ensuring correctness even when ViewHash is not unique during decryption.
+    *
+    * This mode is required for protocol versions > v35.
+    */
+  def fromTransactionViewTreeUsingCiphertextIdReference(
+      tvt: FullTransactionViewTree,
+      subviewKeys: Seq[SecureRandomness],
+      byCiphertextIdMap: Map[ViewHash, ByCiphertextId],
+      protocolVersion: ProtocolVersion,
+  ): Either[String, LightTransactionViewTree] =
+    fromTransactionViewTree(tvt, subviewKeys, Some(byCiphertextIdMap), protocolVersion)
 
 }
 
 /** A view hash and its corresponding encryption key.
   *
+  * @param subviewReference
+  *   identifies the subview this key applies to. It can either be a view hash or a ciphertext ID,
+  *   depending on how the view was referenced during encryption/decryption.
   * @param viewEncryptionKeyRandomness
   *   the view key is encoded as SecureRandomness to have a portable representation.
   *   [[com.digitalasset.canton.crypto.SynchronizerCryptoPureApi.createSymmetricKey]] is used to
   *   derive the symmetric key.
   */
-final case class ViewHashAndKey(viewHash: ViewHash, viewEncryptionKeyRandomness: SecureRandomness)
+final case class SubviewReferenceAndKey(
+    subviewReference: SubviewReference,
+    viewEncryptionKeyRandomness: SecureRandomness,
+)

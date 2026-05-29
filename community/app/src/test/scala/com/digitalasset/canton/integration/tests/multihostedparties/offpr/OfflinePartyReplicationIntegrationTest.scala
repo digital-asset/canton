@@ -24,7 +24,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParametersHistory,
   DynamicSynchronizerParametersWithValidity,
 }
-import com.digitalasset.canton.time.{DelegatingSimClock, PositiveSeconds}
+import com.digitalasset.canton.time.DelegatingSimClock
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   ParticipantPermission as PP,
@@ -46,8 +46,9 @@ trait OfflinePartyReplicationIntegrationTestBase
   // TODO(#27707) - Remove when ACS commitments consider the onboarding flag
   // Alice's replication to the target participant may trigger ACS commitment mismatch warnings.
   // This is expected behavior. To reduce the frequency of these warnings and avoid associated
-  // test flakes, `reconciliationInterval` is set to one year.
-  private val reconciliationInterval = PositiveSeconds.tryOfDays(365 * 10)
+  // test flakes, `reconciliationInterval` is set to ten years.
+  protected val reconciliationInterval: config.PositiveDurationSeconds =
+    config.PositiveDurationSeconds.ofDays(10 * 365)
 
   protected var source: LocalParticipantReference = _
   protected var target: LocalParticipantReference = _
@@ -65,7 +66,7 @@ trait OfflinePartyReplicationIntegrationTestBase
         participants.local.synchronizers.connect_local(sequencer1, daName)
         participants.local.dars.upload(CantonExamplesPath)
         sequencer1.topology.synchronizer_parameters
-          .propose_update(daId, _.update(reconciliationInterval = reconciliationInterval.toConfig))
+          .propose_update(daId, _.update(reconciliationInterval = reconciliationInterval))
 
         alice =
           participant1.parties.testing.enable("Alice", synchronizeParticipants = Seq(participant2))

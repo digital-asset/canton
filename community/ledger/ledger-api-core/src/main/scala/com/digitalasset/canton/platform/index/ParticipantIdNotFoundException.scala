@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.index
 
-class ParticipantIdNotFoundException(attempts: Int)
+class ParticipantIdNotFoundException
     extends RuntimeException(
-      s"""No participant ID found in the index database after $attempts attempts."""
+      "No participant ID found in the index database"
     )

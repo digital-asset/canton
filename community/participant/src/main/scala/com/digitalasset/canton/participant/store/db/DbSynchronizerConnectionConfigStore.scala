@@ -42,6 +42,7 @@ import com.digitalasset.canton.participant.synchronizer.{
 }
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.{
   ConfiguredPhysicalSynchronizerId,
   KnownPhysicalSynchronizerId,
@@ -546,23 +547,37 @@ class DbSynchronizerConnectionConfigStore private[store] (
           SynchronizerConnectionConfigStore.Status,
           Option[SynchronizerPredecessor],
       ),
-      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+      overrideSequencerConnections: Option[SequencerConnections],
+      overridePredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig] = {
     val configId = ConfigIdentifier.WithPsid(psid)
 
+    val data = Map(
+      "insert data" -> insert.toString,
+      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
+      "overridePredecessor" -> overridePredecessor.toString,
+    )
+    logger.info(s"Upserting connection config for synchronizer $psid, with data $data")
+
     val queries = for {
       storedConfigO <- dbEitherT(getInternalQuery(configId).map(_.asRight[Error]))
       newStoredConfig <- storedConfigO match {
         case Some(storedConfig) =>
-          val updatedConnectionConfig = transform(storedConfig.config)
+          val updatedStoredConfig = storedConfig
+            .focus(_.config.sequencerConnections)
+            .modify(value => overrideSequencerConnections.getOrElse(value))
+            .focus(_.predecessor)
+            .modify(value => overridePredecessor.fold(value)(Some(_)))
+            .focus(_.config.synchronizerId)
+            .replace(Some(psid))
 
-          if (updatedConnectionConfig != storedConfig.config)
+          if (updatedStoredConfig != storedConfig)
             dbEitherT[Error](sqlu"""update par_synchronizer_connection_configs
-              set config=$updatedConnectionConfig
+              set config=${updatedStoredConfig.config}, synchronizer_predecessor=${updatedStoredConfig.predecessor}
               where physical_synchronizer_id=$psid""").map(
-              (_, storedConfig.copy(config = updatedConnectionConfig))
+              (_, updatedStoredConfig)
             )
           else
             dbEitherT[Error](DBIO.successful((0, storedConfig))) // No change
@@ -602,13 +617,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
       synchronizerConfigCache
         .updateWith(newStoredConfig.config.synchronizerAlias) {
           case Some(existingEntriesForAlias) =>
-            existingEntriesForAlias
-              .updatedWith(KnownPhysicalSynchronizerId(psid)) {
-                case Some(existingCacheEntry) =>
-                  existingCacheEntry.copy(config = newStoredConfig.config).some
-                case None => Some(newStoredConfig)
-              }
-              .some
+            (existingEntriesForAlias + (KnownPhysicalSynchronizerId(psid) -> newStoredConfig)).some
 
           case None =>
             Map[ConfiguredPhysicalSynchronizerId, StoredSynchronizerConnectionConfig](

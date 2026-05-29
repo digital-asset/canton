@@ -542,9 +542,11 @@ object SynchronizerRegistryHelpers {
                   _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
                 } yield ()
               } else {
-                loggingContext.info(
-                  s"LSU to ${persistentState.psid.suffix}: No need to copy topology (isTopologyInitialized=$isTopologyInitialized, isLateUpgrade=${predecessor.isLateUpgrade})"
-                )
+                if (predecessor.isLateUpgrade)
+                  loggingContext.info(
+                    s"LSU to ${persistentState.psid.suffix}: Topology will not be copied because of late upgrade"
+                  )
+
                 FutureUnlessShutdown.unit
               }
 

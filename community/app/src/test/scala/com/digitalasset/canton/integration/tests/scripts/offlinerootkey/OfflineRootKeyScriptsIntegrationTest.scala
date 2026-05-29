@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.scripts.offlinerootkey
 
 import better.files.*
+import com.digitalasset.canton.config.CryptoProvider.Jce
 import com.digitalasset.canton.config.IdentityConfig.Manual
 import com.digitalasset.canton.crypto.{SigningKeySpec, SigningKeyUsage}
 import com.digitalasset.canton.integration.plugins.UseH2
@@ -22,8 +23,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
-import org.scalatest.BeforeAndAfterEach
-import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 import scala.sys.process.Process
 
@@ -33,170 +32,160 @@ object OfflineRootKeyScriptsIntegrationTest {
   lazy val assemblePath: File = offlineRootKeyPath / "assemble-cert.sh"
 }
 
-/** Test the offline root namespace key scripts with all supported key specs
-  */
-trait OfflineRootKeyScriptsIntegrationTest
+/** Test the offline root namespace key scripts with all supported key specs */
+final class OfflineRootKeyScriptsIntegrationTest
     extends CommunityIntegrationTest
-    with IsolatedEnvironments
-    with BeforeAndAfterEach
-    with ScalaCheckPropertyChecks {
+    with IsolatedEnvironments {
 
   registerPlugin(new UseH2(loggerFactory))
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
-      .addConfigTransform(
+      .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.init.identity).replace(Manual)
-        )
+        ),
+        // Enable experimental crypto to test with PQC schemes
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.crypto.enableExperimental).replace(true)
+        ),
       )
-
-  protected def keySpec: SigningKeySpec
-
-  private def rootKeySpecAlgorithm: String = keySpec match {
-    case SigningKeySpec.EcCurve25519 => "ed25519"
-    case SigningKeySpec.EcP256 | SigningKeySpec.EcSecp256k1 => "ecdsa256"
-    case SigningKeySpec.EcP384 => "ecdsa384"
-    case SigningKeySpec.MlDsa65 => "mldsa65"
-  }
 
   "offline root key init" should {
-    s"work with ${keySpec.name}" in { implicit env =>
-      import env.*
 
-      val processLogger = mkProcessLogger()
-      val tmpDir = better.files.File.newTemporaryDirectory()
-      val outputRootPrefix = (tmpDir / "root").pathAsString
-      val outputIntermediatePrefix = (tmpDir / "intermediate").pathAsString
-
-      val offlineRootKey = global_secret.keys.secret.generate_key(keySpec, SigningKeyUsage.All)
-      val rootPubKeyPath = (tmpDir / "public_root_key.der")
-      rootPubKeyPath.outputStream.apply(os => offlineRootKey.toProtoV30.publicKey.writeTo(os))
-
-      val intermediatePubKeyPath = (tmpDir / "public_intermediate_key.der")
-      val intermediateKey = participant1.keys.secret
-        .generate_signing_key("IntermediateKey", SigningKeyUsage.NamespaceOnly)
-
-      participant1.keys.public.download_to(intermediateKey.id, intermediatePubKeyPath.pathAsString)
-
-      Process(
-        Seq(
-          preparePath.pathAsString,
-          "--root-delegation",
-          "--root-pub-key",
-          rootPubKeyPath.pathAsString,
-          "--target-pub-key",
-          rootPubKeyPath.pathAsString,
-          "--output",
-          outputRootPrefix,
-        ),
-        cwd = offlineRootKeyPath.toJava,
-      ).!(processLogger) shouldBe 0
-      Process(
-        Seq(
-          preparePath.pathAsString,
-          "--intermediate-delegation",
-          "--root-pub-key",
-          rootPubKeyPath.pathAsString,
-          "--canton-target-pub-key",
-          intermediatePubKeyPath.pathAsString,
-          "--output",
-          outputIntermediatePrefix,
-        ),
-        cwd = offlineRootKeyPath.toJava,
-      ).!(processLogger) shouldBe 0
-
-      val rootSignaturePath = File(s"$outputRootPrefix.sig")
-      val intermediateSignaturePath = File(s"$outputIntermediatePrefix.sig")
-
-      rootSignaturePath.outputStream.apply(os =>
-        global_secret
-          .sign(
-            ByteString.copyFrom(File(s"$outputRootPrefix.hash").byteArray),
-            offlineRootKey.fingerprint,
-            SigningKeyUsage.NamespaceOnly,
-          )
-          .toProtoV30
-          .signature
-          .writeTo(os)
-      )
-      intermediateSignaturePath.outputStream.apply(os =>
-        global_secret
-          .sign(
-            ByteString.copyFrom(File(s"$outputIntermediatePrefix.hash").byteArray),
-            offlineRootKey.fingerprint,
-            SigningKeyUsage.NamespaceOnly,
-          )
-          .toProtoV30
-          .signature
-          .writeTo(os)
-      )
-
-      Process(
-        Seq(
-          assemblePath.pathAsString,
-          "--prepared-transaction",
-          (tmpDir / "root.prep").pathAsString,
-          "--signature",
-          rootSignaturePath.pathAsString,
-          "--signature-algorithm",
-          rootKeySpecAlgorithm,
-          "--output",
-          outputRootPrefix,
-        ),
-        cwd = offlineRootKeyPath.toJava,
-      ).!(processLogger) shouldBe 0
-      Process(
-        Seq(
-          assemblePath.pathAsString,
-          "--prepared-transaction",
-          (tmpDir / "intermediate.prep").pathAsString,
-          "--signature",
-          intermediateSignaturePath.pathAsString,
-          "--signature-algorithm",
-          rootKeySpecAlgorithm,
-          "--output",
-          outputIntermediatePrefix,
-        ),
-        cwd = offlineRootKeyPath.toJava,
-      ).!(processLogger) shouldBe 0
-
-      participant1.topology.init_id(
-        "offlinekey",
-        offlineRootKey.fingerprint.toProtoPrimitive,
-        delegationFiles = Seq(
-          (tmpDir / "root.cert").pathAsString,
-          (tmpDir / "intermediate.cert").pathAsString,
-        ),
-      )
-
-      eventually() {
-        participant1.is_initialized shouldBe true
+    forAll(Jce.signingKeys.supported.forgetNE) { keySpec =>
+      val rootKeySpecAlgorithm: String = keySpec match {
+        case SigningKeySpec.EcCurve25519 => "ed25519"
+        case SigningKeySpec.EcP256 | SigningKeySpec.EcSecp256k1 => "ecdsa256"
+        case SigningKeySpec.EcP384 => "ecdsa384"
+        case SigningKeySpec.MlDsa65 => "mldsa65"
       }
 
-      participant1.topology.namespace_delegations
-        .list(
-          Authorized,
-          filterNamespace = offlineRootKey.fingerprint.toProtoPrimitive,
-          filterTargetKey = Some(offlineRootKey.fingerprint.toProtoPrimitive),
+      s"work with ${keySpec.name}" in { implicit env =>
+        import env.*
+
+        val processLogger = mkProcessLogger()
+        val tmpDir = better.files.File.newTemporaryDirectory()
+        val outputRootPrefix = (tmpDir / "root").pathAsString
+        val outputIntermediatePrefix = (tmpDir / "intermediate").pathAsString
+
+        val offlineRootKey = global_secret.keys.secret.generate_key(keySpec, SigningKeyUsage.All)
+        val rootPubKeyPath = (tmpDir / "public_root_key.der")
+        rootPubKeyPath.outputStream.apply(os => offlineRootKey.toProtoV30.publicKey.writeTo(os))
+
+        val intermediatePubKeyPath = (tmpDir / "public_intermediate_key.der")
+        val intermediateKey = participant1.keys.secret
+          .generate_signing_key("IntermediateKey", SigningKeyUsage.NamespaceOnly)
+
+        participant1.keys.public
+          .download_to(intermediateKey.id, intermediatePubKeyPath.pathAsString)
+
+        Process(
+          Seq(
+            preparePath.pathAsString,
+            "--root-delegation",
+            "--root-pub-key",
+            rootPubKeyPath.pathAsString,
+            "--target-pub-key",
+            rootPubKeyPath.pathAsString,
+            "--output",
+            outputRootPrefix,
+          ),
+          cwd = offlineRootKeyPath.toJava,
+        ).!(processLogger) shouldBe 0
+        Process(
+          Seq(
+            preparePath.pathAsString,
+            "--intermediate-delegation",
+            "--root-pub-key",
+            rootPubKeyPath.pathAsString,
+            "--canton-target-pub-key",
+            intermediatePubKeyPath.pathAsString,
+            "--output",
+            outputIntermediatePrefix,
+          ),
+          cwd = offlineRootKeyPath.toJava,
+        ).!(processLogger) shouldBe 0
+
+        val rootSignaturePath = File(s"$outputRootPrefix.sig")
+        val intermediateSignaturePath = File(s"$outputIntermediatePrefix.sig")
+
+        rootSignaturePath.outputStream.apply(os =>
+          global_secret
+            .sign(
+              ByteString.copyFrom(File(s"$outputRootPrefix.hash").byteArray),
+              offlineRootKey.fingerprint,
+              SigningKeyUsage.NamespaceOnly,
+            )
+            .toProtoV30
+            .signature
+            .writeTo(os)
         )
-        .loneElement
-        .item
-        .target
-        .keySpec shouldBe keySpec
+        intermediateSignaturePath.outputStream.apply(os =>
+          global_secret
+            .sign(
+              ByteString.copyFrom(File(s"$outputIntermediatePrefix.hash").byteArray),
+              offlineRootKey.fingerprint,
+              SigningKeyUsage.NamespaceOnly,
+            )
+            .toProtoV30
+            .signature
+            .writeTo(os)
+        )
+
+        Process(
+          Seq(
+            assemblePath.pathAsString,
+            "--prepared-transaction",
+            (tmpDir / "root.prep").pathAsString,
+            "--signature",
+            rootSignaturePath.pathAsString,
+            "--signature-algorithm",
+            rootKeySpecAlgorithm,
+            "--output",
+            outputRootPrefix,
+          ),
+          cwd = offlineRootKeyPath.toJava,
+        ).!(processLogger) shouldBe 0
+        Process(
+          Seq(
+            assemblePath.pathAsString,
+            "--prepared-transaction",
+            (tmpDir / "intermediate.prep").pathAsString,
+            "--signature",
+            intermediateSignaturePath.pathAsString,
+            "--signature-algorithm",
+            rootKeySpecAlgorithm,
+            "--output",
+            outputIntermediatePrefix,
+          ),
+          cwd = offlineRootKeyPath.toJava,
+        ).!(processLogger) shouldBe 0
+
+        participant1.topology.init_id(
+          "offlinekey",
+          offlineRootKey.fingerprint.toProtoPrimitive,
+          delegationFiles = Seq(
+            (tmpDir / "root.cert").pathAsString,
+            (tmpDir / "intermediate.cert").pathAsString,
+          ),
+        )
+
+        eventually() {
+          participant1.is_initialized shouldBe true
+        }
+
+        participant1.topology.namespace_delegations
+          .list(
+            Authorized,
+            filterNamespace = offlineRootKey.fingerprint.toProtoPrimitive,
+            filterTargetKey = Some(offlineRootKey.fingerprint.toProtoPrimitive),
+          )
+          .loneElement
+          .item
+          .target
+          .keySpec shouldBe keySpec
+      }
     }
   }
-}
-
-class OfflineRootKeyScriptsEd25519IntegrationTest extends OfflineRootKeyScriptsIntegrationTest {
-  override protected def keySpec: SigningKeySpec = SigningKeySpec.EcCurve25519
-}
-class OfflineRootKeyScriptsEcp256IntegrationTest extends OfflineRootKeyScriptsIntegrationTest {
-  override protected def keySpec: SigningKeySpec = SigningKeySpec.EcP256
-}
-class OfflineRootKeyScriptsSecP256k1IntegrationTest extends OfflineRootKeyScriptsIntegrationTest {
-  override protected def keySpec: SigningKeySpec = SigningKeySpec.EcSecp256k1
-}
-class OfflineRootKeyScriptsEcp384IntegrationTest extends OfflineRootKeyScriptsIntegrationTest {
-  override protected def keySpec: SigningKeySpec = SigningKeySpec.EcP384
 }

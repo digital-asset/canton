@@ -144,10 +144,7 @@ object InMemoryState {
     val initialLedgerEnd = LedgerEnd.beforeBegin
 
     for {
-      dispatcherState <- DispatcherState.owner(
-        apiStreamShutdownTimeout,
-        loggerFactory,
-      )
+      dispatcherState <- DispatcherState.owner(apiStreamShutdownTimeout, loggerFactory)
       transactionSubmissionTracker <- SubmissionTracker.owner(
         maxCommandsInFlight,
         metrics,

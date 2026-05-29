@@ -182,7 +182,7 @@ class GrpcSequencerConnectService(
       _ <- EitherTUtil.condUnitET[Future](
         upgradeTimeExclusive.forall(now > _),
         failedPrecondition(
-          show"Onboarding is possible only after ${upgradeTimeExclusive.showValue}. Aborting..."
+          show"Onboarding is possible only after ${upgradeTimeExclusive.showValue} but current time is $now. Aborting..."
         ),
       )
 

@@ -30,6 +30,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
+import com.digitalasset.canton.version.ReleaseVersion
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
@@ -82,7 +83,7 @@ trait MemberAutoInitIntegrationTest
   }
 
   private def shouldBeNotInitialized(node: LocalInstanceReference): Assertion =
-    node.health.status should matchPattern { case NodeStatus.NotInitialized(true, _) => }
+    node.health.status should matchPattern { case NodeStatus.NotInitialized(true, _, _) => }
 
   private def testParticipantCanConnect(
       participant: LocalParticipantReference,
@@ -171,7 +172,11 @@ trait MemberAutoInitIntegrationTest
                 "is not initialized and therefore does not have an Id assigned yet"
               ),
             )
-            node.health.status shouldBe NotInitialized(active = true, Some(WaitingForId))
+            node.health.status shouldBe NotInitialized(
+              active = true,
+              Some(WaitingForId),
+              Some(ReleaseVersion.current),
+            )
         }
 
         "can be initialized manually" in { implicit env =>

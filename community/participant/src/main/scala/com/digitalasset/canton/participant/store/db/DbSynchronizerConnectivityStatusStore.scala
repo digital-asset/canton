@@ -17,7 +17,7 @@ import slick.jdbc.SetParameter
 import scala.concurrent.ExecutionContext
 
 class DbSynchronizerConnectivityStatusStore(
-    synchronizerId: PhysicalSynchronizerId,
+    psid: PhysicalSynchronizerId,
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -39,7 +39,7 @@ class DbSynchronizerConnectivityStatusStore(
     // be different even though the parameters are the same
     val query =
       sqlu"""insert into par_synchronizer_connectivity_status(physical_synchronizer_id, params)
-             values ($synchronizerId, $newParameters)
+             values ($psid, $newParameters)
              on conflict do nothing"""
 
     storage.update(query, functionFullName).flatMap { rowCount =>
@@ -68,7 +68,7 @@ class DbSynchronizerConnectivityStatusStore(
   ): FutureUnlessShutdown[Option[StaticSynchronizerParameters]] =
     storage
       .query(
-        sql"select params from par_synchronizer_connectivity_status where physical_synchronizer_id=$synchronizerId"
+        sql"select params from par_synchronizer_connectivity_status where physical_synchronizer_id=$psid"
           .as[StaticSynchronizerParameters]
           .headOption,
         functionFullName,
@@ -79,7 +79,7 @@ class DbSynchronizerConnectivityStatusStore(
       .update_(
         sqlu"""update par_synchronizer_connectivity_status
                 set is_topology_initialized = true
-                where physical_synchronizer_id = $synchronizerId""",
+                where physical_synchronizer_id = $psid""",
         functionFullName,
       )
 
@@ -88,7 +88,7 @@ class DbSynchronizerConnectivityStatusStore(
       .query(
         sql"""select is_topology_initialized
               from par_synchronizer_connectivity_status
-              where physical_synchronizer_id = $synchronizerId"""
+              where physical_synchronizer_id = $psid"""
           .as[Boolean]
           .headOption,
         functionFullName,

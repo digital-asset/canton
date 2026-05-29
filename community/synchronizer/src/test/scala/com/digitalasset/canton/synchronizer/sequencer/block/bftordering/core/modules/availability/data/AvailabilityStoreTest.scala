@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore.BatchIdAndEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
@@ -29,11 +30,14 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
     OrderingRequest(BlockFormat.SendTag, messageId = "mid3", ByteString.copyFromUtf8("payload3"))
   )
 
-  private val batch1 = OrderingRequestBatch.create(Seq(request1, request3), EpochNumber.First)
+  private val batch1Epoch = EpochNumber.First
+  private val batch1 = OrderingRequestBatch.create(Seq(request1, request3), batch1Epoch)
   private val batch1Id = BatchId.from(batch1)
-  private val batch2 = OrderingRequestBatch.create(Seq(request2, request3), EpochNumber(1L))
+  private val batch2Epoch = EpochNumber(1L)
+  private val batch2 = OrderingRequestBatch.create(Seq(request2, request3), batch2Epoch)
   private val batch2Id = BatchId.from(batch2)
-  private val batchEmpty = OrderingRequestBatch.create(Seq(), EpochNumber(2L))
+  private val batchEmptyEpoch = EpochNumber(2L)
+  private val batchEmpty = OrderingRequestBatch.create(Seq(), batchEmptyEpoch)
   private val batchEmptyId = BatchId.from(batchEmpty)
 
   private val missingBatchId1 = BatchId.createForTesting("A missing batchId")
@@ -41,11 +45,14 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
   "AvailbilityStore" should {
     "fail retrieve non-inserted batchId" in {
       val store = createStore()
-
       for {
-        fetchedBatch <- store.fetchBatches(Seq(missingBatchId1))
+        fetchedBatch <- store.fetchBatches(
+          Seq(BatchIdAndEpochNumber(missingBatchId1, EpochNumber.First))
+        )
       } yield {
-        fetchedBatch shouldBe AvailabilityStore.MissingBatches(Set(missingBatchId1))
+        fetchedBatch shouldBe AvailabilityStore.MissingBatches(
+          Set(BatchIdAndEpochNumber(missingBatchId1, EpochNumber.First))
+        )
       }
     }
 
@@ -54,9 +61,11 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
 
       for {
         _ <- store.addBatch(batch1Id, batch1)
-        fetchedBatch <- store.fetchBatches(Seq(batch1Id))
+        fetchedBatch <- store.fetchBatches(Seq(BatchIdAndEpochNumber(batch1Id, batch1Epoch)))
       } yield {
-        fetchedBatch shouldBe AvailabilityStore.AllBatches(Seq(batch1Id -> batch1))
+        fetchedBatch shouldBe AvailabilityStore.AllBatches(
+          Seq(batch1Id -> batch1)
+        )
       }
     }
 
@@ -65,9 +74,13 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
 
       for {
         _ <- store.addBatch(batchEmptyId, batchEmpty)
-        fetchedBatch <- store.fetchBatches(Seq(batchEmptyId))
+        fetchedBatch <- store.fetchBatches(
+          Seq(BatchIdAndEpochNumber(batchEmptyId, batchEmptyEpoch))
+        )
       } yield {
-        fetchedBatch shouldBe AvailabilityStore.AllBatches(Seq(batchEmptyId -> batchEmpty))
+        fetchedBatch shouldBe AvailabilityStore.AllBatches(
+          Seq(batchEmptyId -> batchEmpty)
+        )
       }
     }
 
@@ -87,10 +100,20 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
           _ <- store.addBatch(batch1Id, batch1)
           _ <- store.addBatch(batch2Id, batch2)
           _ <- store.addBatch(batchEmptyId, batchEmpty)
-          batches <- store.fetchBatches(Seq(batch1Id, batchEmptyId, batch2Id))
+          batches <- store.fetchBatches(
+            Seq(
+              BatchIdAndEpochNumber(batch1Id, batch1Epoch),
+              BatchIdAndEpochNumber(batchEmptyId, batchEmptyEpoch),
+              BatchIdAndEpochNumber(batch2Id, batch2Epoch),
+            )
+          )
         } yield {
           batches shouldBe AvailabilityStore.AllBatches(
-            Seq(batch1Id -> batch1, batchEmptyId -> batchEmpty, batch2Id -> batch2)
+            Seq(
+              batch1Id -> batch1,
+              batchEmptyId -> batchEmpty,
+              batch2Id -> batch2,
+            )
           )
         }
       }
@@ -101,9 +124,17 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
         for {
           _ <- store.addBatch(batch1Id, batch1)
           _ <- store.addBatch(batchEmptyId, batchEmpty)
-          batches <- store.fetchBatches(Seq(batch1Id, batchEmptyId, missingBatchId1))
+          batches <- store.fetchBatches(
+            Seq(
+              BatchIdAndEpochNumber(batch1Id, batch1Epoch),
+              BatchIdAndEpochNumber(batchEmptyId, batchEmptyEpoch),
+              BatchIdAndEpochNumber(missingBatchId1, EpochNumber.First),
+            )
+          )
         } yield {
-          batches shouldBe AvailabilityStore.MissingBatches(Set(missingBatchId1))
+          batches shouldBe AvailabilityStore.MissingBatches(
+            Set(BatchIdAndEpochNumber(missingBatchId1, EpochNumber.First))
+          )
         }
       }
 
@@ -112,9 +143,17 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
 
         for {
           _ <- store.addBatch(batch1Id, batch1)
-          batches <- store.fetchBatches(Seq(missingBatchId1, batch1Id, batch1Id))
+          batches <- store.fetchBatches(
+            Seq(
+              BatchIdAndEpochNumber(missingBatchId1, EpochNumber.First),
+              BatchIdAndEpochNumber(batch1Id, batch1Epoch),
+              BatchIdAndEpochNumber(batch1Id, batch1Epoch),
+            )
+          )
         } yield {
-          batches shouldBe AvailabilityStore.MissingBatches(Set(missingBatchId1))
+          batches shouldBe AvailabilityStore.MissingBatches(
+            Set(BatchIdAndEpochNumber(missingBatchId1, EpochNumber.First))
+          )
         }
       }
 
@@ -124,9 +163,11 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
         for {
           _ <- store.addBatch(batch1Id, batch1)
           _ <- store.addBatch(batch1Id, batch2)
-          batches <- store.fetchBatches(Seq(batch1Id))
+          batches <- store.fetchBatches(Seq(BatchIdAndEpochNumber(batch1Id, batch2Epoch)))
         } yield {
-          batches shouldBe AvailabilityStore.AllBatches(Seq(batch1Id -> batch1))
+          batches shouldBe AvailabilityStore.AllBatches(
+            Seq(batch1Id -> batch1)
+          )
         }
       }
 

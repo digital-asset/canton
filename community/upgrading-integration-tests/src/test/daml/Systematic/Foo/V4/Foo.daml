@@ -30,3 +30,9 @@ template Foo
                 _ <- exercise (toInterfaceContractId @IBar barCid) IBar_Exe with subInformee = newSubInformee
                 pure ()
           pure ()
+
+    -- No explicit need to have this choice in V4 but we need it for upgrade-compatibility with V3
+    choice Foo_GetIBar: IBarView
+      controller owner
+        do
+          error "Not implemented"

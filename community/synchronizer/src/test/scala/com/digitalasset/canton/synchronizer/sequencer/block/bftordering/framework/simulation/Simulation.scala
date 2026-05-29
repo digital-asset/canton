@@ -103,6 +103,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
       agenda,
       simSettings.futureSettings,
       futureSimulatorState,
+      loggerFactory,
     )
 
   // the init functions might have already sent messages that we need to add to the agenda

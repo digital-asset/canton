@@ -13,6 +13,7 @@ import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantRe
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.PackageSelectionFailed
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.protocol.validation.TransactionConfirmationResponsesFactory
 import com.digitalasset.canton.participant.store.DamlPackageStore
@@ -21,7 +22,6 @@ import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, Party, PartyId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser}
-import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
 import scala.jdk.CollectionConverters.CollectionHasAsScala
@@ -44,14 +44,6 @@ class ProtocolVettingChecksIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
-      .addConfigTransform(
-        ConfigTransforms.updateAllParticipantConfigs_(
-          // TODO(#29834): TAPS does not yet support package dependency unvetting so disable it to
-          //               showcase the new behavior at the protocol level.
-          //               Implement TAPS support and remove this config
-          _.focus(_.ledgerApi.topologyAwarePackageSelection.enabled).replace(false)
-        )
-      )
       .withSetup { implicit env =>
         import env.*
 
@@ -96,7 +88,12 @@ class ProtocolVettingChecksIntegrationTest
         ) {
           assertThrowsAndLogsCommandFailures(
             participant1.ledger_api.javaapi.commands.submit(Seq(alice), createMainCommand(alice)),
-            _.commandFailureMessage should include("No valid synchronizer for submission found"),
+            logEntry => {
+              logEntry.shouldBeCantonErrorCode(PackageSelectionFailed)
+              logEntry.commandFailureMessage should include(
+                "No synchronizers satisfy the topology requirements for the submitted command"
+              )
+            },
           )
         }
       }
@@ -149,9 +146,10 @@ class ProtocolVettingChecksIntegrationTest
             Seq(bob),
             mainContractId.exerciseMainT_createDep().commands().asScala.toList,
           ),
-          _.commandFailureMessage should (include(
-            "INVALID_PRESCRIBED_SYNCHRONIZER_ID"
-          ) and include("Some packages are not known to all informees")),
+          errLog => {
+            errLog.shouldBeCommandFailure(PackageSelectionFailed)
+            errLog.message should include regex s"Failed to select package-id for package-name '${vettingmain.v1.java.main.MainT.PACKAGE_NAME}' appearing in a command root node due to: Packages with required dependencies not vetted by all interested parties.*"
+          },
         )
       }
     }

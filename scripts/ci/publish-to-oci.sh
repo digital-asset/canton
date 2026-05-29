@@ -24,8 +24,8 @@ if [[ -z "$RELEASE_SUFFIX" ]]; then
 fi
 
 # We don't publish "SNAPSHOT" releases, only properly dated snapshots or full releases.
-if [[ "$current_version" == *"-SNAPSHOT" || ( "$nightly_release" == "true" && $(date +"%u") -ne 2 ) ]]; then
-  echo "Skip publishing of unnamed snapshot release or a nightly release not on Tuesdays"
+if [[ "$current_version" == *"-SNAPSHOT" ]]; then
+  echo "Skip publishing of unnamed snapshot release"
   exit 0
 fi
 

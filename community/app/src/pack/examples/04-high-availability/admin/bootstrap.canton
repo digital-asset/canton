@@ -18,7 +18,7 @@ def isActive(node: InstanceReference): Boolean =
   node.health.status match {
     case NodeStatus.Success(nodeStatus) => nodeStatus.active
     case NodeStatus.Failure(msg) => false
-    case NodeStatus.NotInitialized(active, _) => active
+    case NodeStatus.NotInitialized(active, _, _) => active
   }
 
 def findActive[I <: InstanceReference](node1: I, node2: I): I =

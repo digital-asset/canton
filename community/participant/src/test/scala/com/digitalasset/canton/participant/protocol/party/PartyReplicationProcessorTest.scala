@@ -118,8 +118,7 @@ final class PartyReplicationProcessorTest
         .thenReturn(EitherTUtil.unitUS)
       when(
         indexingStore.addImportedContractActivations(
-          any[PartyId],
-          any[TimeOfChange],
+          any[PartyReplicationIndexingStore.Watermark],
           any[NonEmpty[Seq[ContractReassignment]]],
         )(anyTraceContext)
       )
@@ -172,7 +171,6 @@ final class PartyReplicationProcessorTest
       }
 
       new PartyReplicationTargetParticipantProcessor(
-        partyId = alice,
         requestId = addPartyRequestId,
         psid = psid,
         partyOnboardingAt = EffectiveTime(CantonTimestamp.ofEpochSecond(10)),

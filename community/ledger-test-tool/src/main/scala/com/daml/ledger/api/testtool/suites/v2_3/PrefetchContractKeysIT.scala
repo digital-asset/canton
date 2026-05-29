@@ -12,6 +12,7 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.{
 import com.daml.ledger.api.testtool.infrastructure.Assertions.{assertGrpcError, futureAssertions}
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.v2.commands
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3
 import com.daml.ledger.javaapi.data.PrefetchContractKey
 import com.daml.ledger.test.java.keys.da.types.Tuple2
 import com.daml.ledger.test.java.keys.test.{TextKey, TextKeyOperations, WithKey}
@@ -59,6 +60,7 @@ class PrefetchContractKeysIT extends LedgerTestSuite {
     val prefetch = WithKey.byKey(party).toPrefetchKey().toProtoInner
     val request = ledger
       .prepareSubmissionRequest(party, new WithKey(party).create.commands)
+      .update(_.hashingSchemeVersion := HASHING_SCHEME_VERSION_V3)
       .update(_.prefetchContractKeys := Seq(prefetch))
     for {
       prepareResponse <- ledger.prepareSubmission(request)

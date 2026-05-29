@@ -70,3 +70,30 @@ trait HasSynchronizeWithClosing extends HasRunOnClosing {
       F: Thereafter[F],
   ): UnlessShutdown[F[A]]
 }
+
+object HasSynchronizeWithClosing {
+
+  /** NeverClosing is a utility for things where we don't want or need closing, for example for very
+    * short-lived tasks or in test code.
+    */
+  object NeverClosing extends HasSynchronizeWithClosing {
+    private object DummyLifeCycleRegistrationHandle extends LifeCycleRegistrationHandle {
+      override def cancel(): Boolean = false
+      override def isScheduled: Boolean = false
+    }
+
+    override def synchronizeWithClosingUS[F[_], A](name: String)(
+        f: => F[A]
+    )(implicit traceContext: TraceContext, F: Thereafter[F]): UnlessShutdown[F[A]] =
+      UnlessShutdown.Outcome(f)
+
+    override def runOnClose(task: RunOnClosing): UnlessShutdown[LifeCycleRegistrationHandle] =
+      UnlessShutdown.Outcome(DummyLifeCycleRegistrationHandle)
+
+    override protected[this] def runTaskUnlessDone(task: RunOnClosing)(implicit
+        traceContext: TraceContext
+    ): Unit = ()
+
+    override def isClosing: Boolean = false
+  }
+}

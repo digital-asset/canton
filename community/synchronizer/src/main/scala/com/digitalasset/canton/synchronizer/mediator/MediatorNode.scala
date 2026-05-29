@@ -589,7 +589,7 @@ class MediatorNodeBootstrap(
         staticSynchronizerParameters,
         crypto,
         cryptoConfig,
-        Some(arguments.metrics.kmsMetrics),
+        arguments.metrics.cryptoMetrics,
         parameters.cachingConfigs.publicKeyConversionCache,
         timeouts,
         futureSupervisor,

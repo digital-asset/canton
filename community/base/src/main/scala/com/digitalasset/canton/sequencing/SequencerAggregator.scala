@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
+import cats.syntax.either.*
 import com.daml.nameof.NameOf
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -41,7 +42,37 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, blocking}
 
-class SequencerAggregator(
+trait SequencerAggregator extends FlagCloseable with NamedLogging with SubscriptionStartProvider {
+
+  /** Queue containing received and not yet handled events. Used for batched processing. */
+  def eventQueue: BlockingQueue[SequencedSerializedEvent]
+
+  /** Update the configuration of the SequencerAggregator.
+    *
+    * May trigger the processing of the current event if the new configuration has a lower threshold
+    * which is already reached.
+    */
+  def changeMessageAggregationConfig(newConfig: MessageAggregationConfig): Unit
+
+  @VisibleForTesting
+  def combine(
+      messages: NonEmpty[Seq[SequencedSerializedEvent]]
+  ): Either[SequencerAggregatorError, SequencedSerializedEvent]
+
+  /** Provide a new event for aggregation. The returned `Future` will complete when the
+    * SequencerAggregator has reached a decision regarding this event.
+    *
+    * @return
+    *   A Future that completes with a `Right` if the message has been accepted and passed on to the
+    *   application handler, or with a `Left` if an error has occurred.
+    */
+  def combineAndMergeEvent(sequencerId: SequencerId, message: SequencedSerializedEvent)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[Either[SequencerAggregatorError, Unit]]
+}
+
+class SequencerAggregatorImpl(
     postAggregationHandler: PostAggregationHandler,
     cryptoPureApi: CryptoPureApi,
     eventInboxSize: PositiveInt,
@@ -50,24 +81,20 @@ class SequencerAggregator(
     updateSendTracker: Seq[SequencedEventWithTraceContext[?]] => Unit,
     override val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
-) extends SubscriptionStartProvider
-    with NamedLogging
-    with FlagCloseable {
+) extends SequencerAggregator {
 
   private val lock = Mutex()
 
   private val configRef: AtomicReference[MessageAggregationConfig] =
     new AtomicReference[MessageAggregationConfig](initialConfig)
 
-  def sequencerTrustThreshold: PositiveInt = configRef.get().sequencerTrustThreshold
+  private def sequencerTrustThreshold: PositiveInt = configRef.get().sequencerTrustThreshold
 
   private case class SequencerMessageData(
       eventBySequencer: Map[SequencerId, SequencedSerializedEvent],
       promise: PromiseUnlessShutdown[Either[SequencerAggregatorError, SequencerId]],
   )
 
-  /** Queue containing received and not yet handled events. Used for batched processing.
-    */
   private val receivedEvents: BlockingQueue[SequencedSerializedEvent] =
     new ArrayBlockingQueue[SequencedSerializedEvent](eventInboxSize.unwrap)
 
@@ -93,7 +120,7 @@ class SequencerAggregator(
   override def getLatestProcessedEventO: Option[SequencedSerializedEvent] =
     latestAggregatedEventRef.get
 
-  def eventQueue: BlockingQueue[SequencedSerializedEvent] = receivedEvents
+  override val eventQueue: BlockingQueue[SequencedSerializedEvent] = receivedEvents
 
   private def hash(message: SequencedSerializedEvent) =
     SignedContent.hashContent(
@@ -103,7 +130,7 @@ class SequencerAggregator(
     )
 
   @VisibleForTesting
-  def combine(
+  override def combine(
       messages: NonEmpty[Seq[SequencedSerializedEvent]]
   ): Either[SequencerAggregatorError, SequencedSerializedEvent] = {
     val message: SequencedSerializedEvent = messages.head1
@@ -160,13 +187,11 @@ class SequencerAggregator(
     combine(messages).map(addEventToQueue)
 
   @SuppressWarnings(Array("com.digitalasset.canton.SynchronizedFuture"))
-  def combineAndMergeEvent(
-      sequencerId: SequencerId,
-      message: SequencedSerializedEvent,
-  )(implicit
+  override def combineAndMergeEvent(sequencerId: SequencerId, message: SequencedSerializedEvent)(
+      implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Either[SequencerAggregatorError, Boolean]] =
+  ): FutureUnlessShutdown[Either[SequencerAggregatorError, Unit]] =
     synchronizeWithClosing(NameOf.functionFullName)(
       try {
         lock.exclusive {
@@ -181,9 +206,9 @@ class SequencerAggregator(
 
             pushDownstreamIfConsensusIsReached(nextMinimumTimestamp, nextData)
 
-            sequencerMessageData.promise.futureUS.map(_.map(_ == sequencerId))
+            sequencerMessageData.promise.futureUS.map(_.map(_ => ()))
           } else
-            FutureUnlessShutdown.pure(Right(false))
+            FutureUnlessShutdown.pure(Either.unit)
         }
       } catch {
         case t: Throwable =>
@@ -230,9 +255,7 @@ class SequencerAggregator(
     data.copy(eventBySequencer = data.eventBySequencer.updated(sequencerId, message))
   }
 
-  def changeMessageAggregationConfig(
-      newConfig: MessageAggregationConfig
-  ): Unit =
+  override def changeMessageAggregationConfig(newConfig: MessageAggregationConfig): Unit =
     lock.exclusive {
       configRef.set(newConfig)
       sequenceData.headOption.foreach { case (nextMinimumTimestamp, nextData) =>
@@ -246,7 +269,9 @@ class SequencerAggregator(
 
 object SequencerAggregator {
   final case class MessageAggregationConfig(sequencerTrustThreshold: PositiveInt)
+
   sealed trait SequencerAggregatorError extends Product with Serializable with PrettyPrinting
+
   object SequencerAggregatorError {
     final case class NotTheSameContentHash(hashes: NonEmpty[Set[Hash]])
         extends SequencerAggregatorError {
@@ -254,6 +279,40 @@ object SequencerAggregator {
         prettyOfClass(param("hashes", _.hashes))
     }
   }
+
+  def create(
+      useNewAggregator: Boolean,
+      postAggregationHandler: PostAggregationHandler,
+      cryptoPureApi: CryptoPureApi,
+      eventInboxSize: PositiveInt,
+      loggerFactory: NamedLoggerFactory,
+      initialConfig: MessageAggregationConfig,
+      updateSendTracker: Seq[SequencedEventWithTraceContext[?]] => Unit,
+      timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
+  ): SequencerAggregator =
+    if (useNewAggregator)
+      new SequencerAggregatorXImpl(
+        postAggregationHandler,
+        cryptoPureApi,
+        eventInboxSize,
+        loggerFactory,
+        initialConfig,
+        updateSendTracker,
+        timeouts,
+        futureSupervisor,
+      )
+    else
+      new SequencerAggregatorImpl(
+        postAggregationHandler,
+        cryptoPureApi,
+        eventInboxSize,
+        loggerFactory,
+        initialConfig,
+        updateSendTracker,
+        timeouts,
+        futureSupervisor,
+      )
 
   def aggregateHealthResult(
       healthResult: Map[SequencerId, ComponentHealthState],

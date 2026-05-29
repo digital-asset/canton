@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 sealed trait BatchAggregatorConfig extends Product with Serializable {
 
   def maximumBatchSize: PositiveNumeric[Int]
+  def maximumInFlight: PositiveNumeric[Int]
 }
 
 object BatchAggregatorConfig {
@@ -38,7 +39,8 @@ object BatchAggregatorConfig {
     *   Maximum number of queries in a batch.
     */
   final case class Batching(
-      maximumInFlight: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumInFlight,
+      override val maximumInFlight: PositiveNumeric[Int] =
+        BatchAggregatorConfig.defaultMaximumInFlight,
       override val maximumBatchSize: PositiveNumeric[Int] =
         BatchAggregatorConfig.defaultMaximumBatchSize,
   ) extends BatchAggregatorConfig
@@ -52,5 +54,7 @@ object BatchAggregatorConfig {
       maxParallelBatches: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumInFlight,
       override val maximumBatchSize: PositiveNumeric[Int] =
         BatchAggregatorConfig.defaultMaximumBatchSize,
-  ) extends BatchAggregatorConfig
+  ) extends BatchAggregatorConfig {
+    override def maximumInFlight: PositiveNumeric[Int] = maxParallelBatches
+  }
 }

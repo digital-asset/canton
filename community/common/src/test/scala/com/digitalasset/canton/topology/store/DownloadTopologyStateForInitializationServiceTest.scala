@@ -12,7 +12,7 @@ import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
+import com.digitalasset.canton.{FailOnShutdown, HasActorSystem, HasExecutionContext}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -21,7 +21,8 @@ trait DownloadTopologyStateForInitializationServiceTest
     extends AsyncWordSpec
     with TopologyStoreTestBase
     with FailOnShutdown
-    with HasActorSystem {
+    with HasActorSystem
+    with HasExecutionContext {
 
   protected def mkStore(
       synchronizerId: PhysicalSynchronizerId,
@@ -29,7 +30,7 @@ trait DownloadTopologyStateForInitializationServiceTest
   ): TopologyStore[SynchronizerStore]
 
   private val testData =
-    new TopologyStoreTestData(testedProtocolVersion, loggerFactory, executionContext)
+    new TopologyStoreTestData(testedProtocolVersion, loggerFactory)
   import testData.*
 
   val bootstrapTransactions = StoredTopologyTransactions(

@@ -185,7 +185,6 @@ object TopologyMapping {
         extends Code("mds", v30Code.TOPOLOGY_MAPPING_CODE_MEDIATOR_SYNCHRONIZER_STATE)
     case object SequencerSynchronizerState
         extends Code("sds", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCER_SYNCHRONIZER_STATE)
-
     case object SequencingParametersState
         extends Code("sep", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCING_DYNAMIC_PARAMETERS_STATE)
     case object PartyToKeyMapping
@@ -205,6 +204,7 @@ object TopologyMapping {
       VettedPackages,
       PartyToParticipant,
       SynchronizerParametersState,
+      SequencingParametersState,
       MediatorSynchronizerState,
       SequencerSynchronizerState,
       SequencingParametersState,

@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
@@ -88,6 +89,7 @@ trait KmsCryptoTest
         testedReleaseProtocolVersion,
         futureSupervisor,
         wallClock,
+        CommonMockMetrics.cryptoMetrics,
         executorService,
         timeouts,
         BatchingConfig(),

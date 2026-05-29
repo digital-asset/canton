@@ -229,7 +229,6 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       key: Option[GlobalKeyWithMaintainers] = None,
       templateId: Identifier = someTemplateId,
       contractArgument: LfValue = someContractArgument,
-      serializationVersion: LfSerializationVersion = LfSerializationVersion.V1,
       overrideContractId: Option[ContractId] = None,
   ): Node.Create =
     ExampleContractFactory
@@ -240,7 +239,6 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         signatories = signatories,
         stakeholders = stakeholders,
         keyOpt = key,
-        version = serializationVersion,
         overrideContractId = overrideContractId,
       )
       .inst

@@ -40,17 +40,16 @@ trait SynchronizerConnectivityStatusStore {
 object SynchronizerConnectivityStatusStore {
   def apply(
       storage: Storage,
-      synchronizerId: PhysicalSynchronizerId,
+      psid: PhysicalSynchronizerId,
       processingTimeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SynchronizerConnectivityStatusStore =
     storage match {
       case _: MemoryStorage =>
-        new InMemorySynchronizerConnectivityStatusStore(
-        )
+        new InMemorySynchronizerConnectivityStatusStore()
       case db: DbStorage =>
         new DbSynchronizerConnectivityStatusStore(
-          synchronizerId,
+          psid,
           db,
           processingTimeouts,
           loggerFactory,

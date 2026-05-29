@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
@@ -48,6 +49,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
       testedReleaseProtocolVersion,
       futureSupervisor,
       wallClock,
+      CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
       BatchingConfig(),

@@ -118,7 +118,7 @@ class PartyReplicationTopologyWorkflowTest
   )
 
   private val topologyStoreTestData =
-    new TopologyStoreTestData(testedProtocolVersion, loggerFactory, executionContext)
+    new TopologyStoreTestData(testedProtocolVersion, loggerFactory)
 
   private def topologyWorkflow(p: ParticipantId = tp): PartyReplicationTopologyWorkflow =
     new PartyReplicationTopologyWorkflow(

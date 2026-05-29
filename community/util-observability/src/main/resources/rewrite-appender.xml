@@ -340,5 +340,20 @@
             <testing>true</testing>
         </rewrite>
 
-   </appender>
+        <!-- Need to silence this in tests, as it cannot be intercepted.
+        -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.daml.lf</logger>
+            <contains>LF internal error in</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.daml.lf</logger>
+            <contains>root cause:</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+    </appender>
 </included>

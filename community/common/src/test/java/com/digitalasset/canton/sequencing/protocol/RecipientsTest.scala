@@ -98,6 +98,15 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
       recipients.leafRecipients shouldBe
         NonEmpty.mk(Set, recP2, recP3, recP4, recP6)
     }
+
+    "correctly compute depth of tree" in {
+      t1.depth shouldBe 1
+      t2.depth shouldBe 1
+      t3.depth shouldBe 2
+      t4.depth shouldBe 1
+      t5.depth shouldBe 3
+      t6.depth shouldBe 1
+    }
   }
 }
 

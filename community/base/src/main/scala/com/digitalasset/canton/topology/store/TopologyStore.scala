@@ -25,7 +25,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.{IndexedStringStore, IndexedTopologyStoreId}
+import com.digitalasset.canton.store.{ChunkPurgeable, IndexedStringStore, IndexedTopologyStoreId}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v30 as adminTopoV30
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
@@ -250,7 +250,8 @@ object ValidatedTopologyTransaction {
 
 abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     protected val ec: ExecutionContext
-) extends FlagCloseable {
+) extends FlagCloseable
+    with ChunkPurgeable {
   this: NamedLogging =>
 
   def storeId: StoreID
@@ -576,22 +577,6 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   ): FutureUnlessShutdown[Seq[EffectiveStateChange]]
 
   def deleteAllData()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
-
-  /** Deletes a chunk of items from this store. No guarantees are made around transactionality, nor
-    * about which specific items are deleted.
-    *
-    * After this call, the data should be considered corrupted and should no longer be read. The
-    * intended use case is incremental cleanup after the store is no longer needed, e.g. after an
-    * LSU, where calling deleteAllData may be cause an undesirable load spike.
-    *
-    * @param chunkSize
-    *   Number of items to delete.
-    * @return
-    *   Whether any items were found to delete.
-    */
-  def deleteDataChunk(chunkSize: PositiveInt)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean]
 
   /** Dedups concurrent copies from the predecessor (handshake + connect paths can both trigger
     * one). The first caller runs it, and subsequent callers await the same promise. The reference

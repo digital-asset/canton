@@ -17,6 +17,7 @@ final case class Membership(
     myId: BftNodeId,
     orderingTopology: OrderingTopology,
     leaders: Seq[BftNodeId],
+    blacklistedNodes: Seq[BftNodeId],
 ) extends PrettyPrinting {
   val otherNodes: Set[BftNodeId] = orderingTopology.nodes - myId
   lazy val sortedNodes: Seq[BftNodeId] = orderingTopology.sortedNodes
@@ -41,6 +42,7 @@ object Membership {
       leaders: Option[Seq[BftNodeId]] = None,
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
       epochLength: EpochLength = DefaultEpochLength,
+      blacklistedNodes: Option[Seq[BftNodeId]] = None,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): Membership = {
     val orderingTopology = OrderingTopology.forTesting(
       otherNodes + myId,
@@ -49,7 +51,12 @@ object Membership {
       epochLength = epochLength,
     )
     val nodes = orderingTopology.sortedNodes
-    Membership(myId, orderingTopology, leaders.getOrElse(nodes))
+    Membership(
+      myId,
+      orderingTopology,
+      leaders.getOrElse(nodes),
+      blacklistedNodes.getOrElse(Seq.empty),
+    )
   }
 
   @VisibleForTesting
@@ -57,5 +64,5 @@ object Membership {
       myId: BftNodeId,
       orderingTopology: OrderingTopology,
   ): Membership =
-    Membership(myId, orderingTopology, orderingTopology.sortedNodes)
+    Membership(myId, orderingTopology, orderingTopology.sortedNodes, Seq.empty)
 }

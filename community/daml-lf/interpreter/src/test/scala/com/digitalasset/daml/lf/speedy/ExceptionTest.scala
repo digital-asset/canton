@@ -1005,8 +1005,8 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |  val lookUpByKeyAndCatchErrorGlobal${templateName}: '$commonDefsPkgId':Mod:Key -> Update Text =
          |    \\(key: '$commonDefsPkgId':Mod:Key) ->
          |      try @Text
-         |        ubind _:Option (ContractId $tplQualifiedName) <-
-         |            lookup_by_key @$tplQualifiedName key
+         |        ubind _:Option (List ($tuple2TyCon (ContractId $tplQualifiedName) $tplQualifiedName)) <-
+         |            query_n_by_key @$tplQualifiedName 1 key
          |        in upure @Text "unexpected: contract was looked up by key"
          |      catch
          |        e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
@@ -1108,9 +1108,11 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |          create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
          |      in try @Text
-         |        ubind _:Option (ContractId $v2TplQualifiedName) <-
-         |            lookup_by_key
+         |
+         |        ubind _:Option (List ($tuple2TyCon (ContractId $v2TplQualifiedName) $v2TplQualifiedName)) <-
+         |            query_n_by_key
          |                @$v2TplQualifiedName
+         |                1
          |                ('$commonDefsPkgId':Mod:Key {
          |                    label = "test-key",
          |                    maintainers = (Cons @Party ['$commonDefsPkgId':Mod:alice] (Nil @Party)) })

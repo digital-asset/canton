@@ -41,6 +41,8 @@ trait DbSubmissionTrackerStoreTest extends SubmissionTrackerStoreTest {
   }
 }
 
-class SubmissionTrackerStoreTestH2 extends DbSubmissionTrackerStoreTest with H2Test
+final class SubmissionTrackerStoreTestH2 extends DbSubmissionTrackerStoreTest with H2Test
 
-class SubmissionTrackerStoreTestPostgres extends DbSubmissionTrackerStoreTest with PostgresTest
+final class SubmissionTrackerStoreTestPostgres
+    extends DbSubmissionTrackerStoreTest
+    with PostgresTest

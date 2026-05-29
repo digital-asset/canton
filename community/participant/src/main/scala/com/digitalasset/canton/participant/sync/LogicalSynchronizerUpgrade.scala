@@ -60,7 +60,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.Backoff
 import com.digitalasset.canton.util.{EitherTUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
-import monocle.macros.syntax.lens.*
 
 import scala.concurrent.ExecutionContext
 import scala.math.Ordered.orderingToOrdered
@@ -266,10 +265,8 @@ sealed trait LogicalSynchronizerUpgrade[Req <: LsuRequest] extends NamedLogging 
           SynchronizerConnectionConfigStore.LsuTarget,
           Some(predecessor),
         ),
-        transform = _.focus(_.synchronizerId)
-          .replace(Some(successorPsid))
-          .focus(_.sequencerConnections)
-          .replace(successorConfig.sequencerConnections),
+        overrideSequencerConnections = Some(successorConfig.sequencerConnections),
+        overridePredecessor = Some(predecessor),
       )
       .leftMap(err =>
         NegativeResult(s"Unable to store new synchronizer connection: $err", isRetryable = false)
@@ -927,7 +924,9 @@ class OnlineManualLogicalSynchronizerUpgrade(
   def upgrade()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    logger.info(s"Manual upgrade from $currentPsid to ${request.successorPsid}")
+    logger.info(
+      s"Manual upgrade from $currentPsid to ${request.successorPsid} with upgrade time ${request.upgradeTime}"
+    )
 
     performIfNotUpgradedYet(
       super.upgradeInternal(),
@@ -944,6 +943,7 @@ class OnlineManualLogicalSynchronizerUpgrade(
       _ <- checkCleanSynchronizerIndex(request.upgradeTime)
 
       successorSynchronizerConnectionConfig <- prepareNewSynchronizerConnectionConfig()
+
       _ <- storesSuccessorSynchronizerConnectionConfig(
         request.upgradeTime,
         successorSynchronizerConnectionConfig,

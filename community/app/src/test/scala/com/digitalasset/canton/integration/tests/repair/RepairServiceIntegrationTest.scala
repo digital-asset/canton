@@ -5,9 +5,18 @@ package com.digitalasset.canton.integration.tests.repair
 
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.event.CreatedEvent
+import com.daml.ledger.api.v2.event.Event.Event
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.ledger.api.v2.transaction_filter.{
+  EventFormat,
+  Filters,
+  TransactionFormat,
+  UpdateFormat,
+}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, FeatureFlag}
@@ -27,8 +36,8 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ContractIdAbsolutizer.ContractIdAbsolutizationDataV1
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
+import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.TestEngine
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -48,6 +57,7 @@ import org.scalatest.{Assertion, Tag}
 
 import java.util.UUID
 import scala.concurrent.{Future, Promise}
+import scala.jdk.CollectionConverters.CollectionHasAsScala
 import scala.language.implicitConversions
 
 /** The RepairService"Integration"Test is more of a unit test addressing coverage of the
@@ -468,6 +478,7 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
             createContractInstance(participant1, daId, alice, bob)
           }
 
+          val offsetBeforePurge = participant1.ledger_api.state.end()
           participant1.repair.purge(daName, Seq(contract.contract.contractId))
 
           withSynchronizerConnected(daName) {
@@ -478,6 +489,9 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
                   exactId = contract.contract.contractId.coid,
                 )
               res.headOption.map(_._1) shouldBe Some(false)
+
+              // Assert the synthetically generated purge event
+              assertContractPurgeEvent(contract, alice, bob, offsetBeforePurge)
             }
           }
         }
@@ -832,6 +846,120 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
           )
         }
       }
+    }
+  }
+
+  private def assertContractPurgeEvent(
+      contract: RepairContract,
+      alice: Party,
+      bob: Party,
+      offsetBeforePurge: Long,
+  )(implicit env: FixtureParam): Assertion = {
+    import env.*
+
+    // If multi-synchronizer support is enabled, the purge will be represented as an Unassigned event, otherwise as a synthetic Archive event
+    val multiSynchronizerSupport = participant1.config.parameters.alphaMultiSynchronizerSupport
+
+    val eventFormat = EventFormat(
+      filtersByParty =
+        Map(alice.toProtoPrimitive -> Filters(Nil), bob.toProtoPrimitive -> Filters(Nil)),
+      filtersForAnyParty = None,
+      verbose = true,
+    )
+    val updateWithPurge = participant1.ledger_api.updates
+      .updates(
+        beginOffsetExclusive = offsetBeforePurge,
+        updateFormat = UpdateFormat(
+          includeReassignments = Some(eventFormat),
+          includeTransactions = Some(
+            TransactionFormat(
+              eventFormat = Some(eventFormat),
+              transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+            )
+          ),
+          includeTopologyEvents = None,
+        ),
+        completeAfter = PositiveInt.tryCreate(1),
+        resultFilter = {
+          case unassignment: UpdateService.UnassignedWrapper =>
+            multiSynchronizerSupport && unassignment.events.exists(
+              _.contractId == contract.contract.contractId.coid
+            )
+          case transaction: UpdateService.TransactionWrapper =>
+            !multiSynchronizerSupport && transaction.transaction.events.exists { event =>
+              event.event.exercised.exists(_.contractId == contract.contract.contractId.coid)
+            }
+          case _ => false
+        },
+      )
+
+    if (multiSynchronizerSupport) {
+      // Fetch the synthetically created Unassigned event for the purged contract from the Ledger API
+      val unassignedEventForPurgedContract = updateWithPurge.collectFirst {
+        case reassignment: UpdateService.ReassignmentWrapper =>
+          reassignment.reassignment.events.loneElement.event.unassigned.value
+      }.value
+
+      unassignedEventForPurgedContract.contractId shouldBe contract.contract.contractId.coid
+      unassignedEventForPurgedContract.witnessParties should contain theSameElementsAs contract.contract.stakeholders
+      unassignedEventForPurgedContract.packageName shouldBe contract.contract.packageName
+
+      unassignedEventForPurgedContract.templateId.value.packageId shouldBe contract.contract.templateId.packageId
+      unassignedEventForPurgedContract.templateId.value.moduleName shouldBe contract.contract.templateId.qualifiedName.module.toString
+      unassignedEventForPurgedContract.templateId.value.entityName shouldBe contract.contract.templateId.qualifiedName.name.toString
+
+      unassignedEventForPurgedContract.source shouldBe daId.logical.toProtoPrimitive
+      unassignedEventForPurgedContract.target shouldBe daId.logical.toProtoPrimitive
+
+      unassignedEventForPurgedContract.reassignmentCounter shouldBe contract.reassignmentCounter.unwrap
+    } else {
+      // Fetch from the Ledger API the synthetically created Archive event for the purged contract
+      val exercisedEventForPurgedContract = updateWithPurge
+        .collect { case UpdateService.TransactionWrapper(transaction) =>
+          transaction.events
+        }
+        .flatMap(_.map(_.event))
+        .collectFirst {
+          case Event.Exercised(value) if value.contractId == contract.contract.contractId.coid =>
+            value
+        }
+        .value
+
+      // Generate an organic Archive event to use as reference for comparison with the synthetic purge event
+      val iou = createContract(participant1, participant1.id.adminParty, participant1.id.adminParty)
+      val referenceArchiveEvent = participant1.ledger_api.javaapi.commands
+        .submit(
+          Seq(participant1.id.adminParty),
+          iou.exerciseArchive().commands().asScala.toSeq,
+          transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+        )
+        .getEvents
+        .asScala
+        .loneElement
+        .asScalaProtoExercised
+        .value
+
+      // Compare the synthetic purge event with the reference archive event, ignoring fields that are expected to differ
+      exercisedEventForPurgedContract.copy(
+        nodeId = 0,
+        offset = 0L,
+        contractId = "",
+        actingParties = Seq.empty,
+        witnessParties = Seq.empty,
+        lastDescendantNodeId = 0,
+      ) shouldBe referenceArchiveEvent.copy(
+        nodeId = 0,
+        offset = 0L,
+        contractId = "",
+        actingParties = Seq.empty,
+        witnessParties = Seq.empty,
+        lastDescendantNodeId = 0,
+      )
+
+      // Compare left-out properties against original contract
+      exercisedEventForPurgedContract.contractId shouldBe contract.contract.contractId.coid
+      exercisedEventForPurgedContract.witnessParties should contain theSameElementsAs contract.contract.stakeholders
+      exercisedEventForPurgedContract.actingParties should contain theSameElementsAs contract.contract.signatories
     }
   }
 }
