@@ -330,6 +330,7 @@ final class SerializationDeserializationTest
         actionDescription = vpd.actionDescription,
         rollbackContext = vpd.rollbackContext,
         salt = vpd.salt,
+        externalCallResults = vpd.externalCallResults,
       )(
         hashOps = vpd.hashOps,
         protocolVersion = ProtocolVersion.v34,

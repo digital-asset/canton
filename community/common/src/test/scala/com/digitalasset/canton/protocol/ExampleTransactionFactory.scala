@@ -800,6 +800,7 @@ class ExampleTransactionFactory(
       actionDescription,
       RollbackContext.empty,
       participantDataSalt(viewIndex),
+      ImmArray.Empty,
     )(cryptoOps, protocolVersion, None)
 
     val subViews = TransactionSubviews(subviews)(protocolVersion, cryptoOps)

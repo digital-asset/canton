@@ -122,8 +122,6 @@ object ActionDescription {
             exerciseResult,
             _key,
             byKey,
-            // TODO(https://github.com/digital-asset/canton/issues/513)
-            // handle external calls
             _externalCallResults,
             version,
           ) =>
