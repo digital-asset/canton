@@ -7,7 +7,7 @@ package engine
 import com.daml.nameof.NameOf.qualifiedNameOfMember
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiContractKey}
-import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
+import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, PackageRef, PackageVersion, Party}
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError}
@@ -518,8 +518,6 @@ final class PreprocessorSpecHelpers {
       None -> Value.ValueList(FrontStack.from(ImmArray(ValueParty(alice)))),
     ),
   )
-  val keyHash: Hash = crypto.Hash.assertHashContractKey(withKeyTmplId, pkgName, key)
-
   val withContractIdTmplId: Ref.TypeConId =
     Ref.Identifier.assertFromString("-pkgId-:Mod:WithContractId")
   val withContractIdTmplRef: Ref.TypeConRef =
@@ -532,8 +530,6 @@ final class PreprocessorSpecHelpers {
       None -> Value.ValueList(FrontStack.from(ImmArray(ValueParty(bob)))),
     ),
   )
-  val keyBobHash = crypto.Hash.assertHashContractKey(withKeyTmplId, pkgName, keyBob)
-
   val choiceId: Ref.Name = Ref.Name.assertFromString("Noop")
 
   def buildDisclosedContract(

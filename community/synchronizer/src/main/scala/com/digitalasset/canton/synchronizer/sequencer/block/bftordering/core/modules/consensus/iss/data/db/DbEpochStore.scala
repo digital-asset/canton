@@ -336,7 +336,7 @@ class DbEpochStore(
         case _: Postgres =>
           """insert into ord_pbft_messages_in_progress(block_number, epoch_number, view_number, message, discriminator, from_sequencer_id)
                    values (?, ?, ?, ?, ?, ?)
-                   on conflict (block_number, view_number, discriminator, from_sequencer_id) do nothing
+                   on conflict (epoch_number, block_number, view_number, discriminator, from_sequencer_id) do nothing
                 """
         case _: H2 =>
           """merge into ord_pbft_messages_in_progress

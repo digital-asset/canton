@@ -46,23 +46,20 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.*
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.google.protobuf.ByteString
 import com.google.protobuf.duration.Duration
 import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Sink
 
-import java.io.{ByteArrayOutputStream, OutputStream}
+import java.io.OutputStream
 import java.util.UUID
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.zip.GZIPOutputStream
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContextExecutor, Future}
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Success}
 
 /** grpc service to allow modifying party hosting on participants
   */
@@ -112,89 +109,41 @@ class GrpcPartyManagementService(
   ): StreamObserver[AddPartyWithAcsAsyncRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    // TODO(#30362): This buffer will contain the whole ACS snapshot - switch it to the streaming approach
-    val outputStream = new ByteArrayOutputStream()
-    val arguments = new AtomicReference[Option[PartyReplicationArguments]](None)
-    // for extracting the arguments on the first request
-    val isFirst = new AtomicBoolean(true)
-
-    new StreamObserver[AddPartyWithAcsAsyncRequest] {
-
-      override def onNext(request: AddPartyWithAcsAsyncRequest): Unit = {
-        val processedNext = if (isFirst.getAndSet(false)) {
-          for {
-            argsP <- ProtoConverter
-              .required("arguments", request.arguments)
-              .leftMap(err => s"Arguments must be set on the first request: $err")
-            args <- verifyArguments(argsP)
-          } yield {
-            arguments.set(Some(args))
-            outputStream.write(request.acsSnapshot.toByteArray)
-          }
-        } else {
-          for {
-            _ <- Either.cond(
-              request.arguments.isEmpty,
-              (),
-              s"Arguments must not be set on any request other that the first request: ${request.arguments}",
-            )
-          } yield {
-            outputStream.write(request.acsSnapshot.toByteArray)
-          }
-        }
-
-        processedNext.valueOr(errorMessage =>
-          // On failure: Signal the error, that is throw an exception.
-          // Observer's top-level onError will handle cleanup.
-          responseObserver.onError(new IllegalArgumentException(errorMessage))
+    GrpcStreamingUtils.streamGzippedChunksFromClient[
+      AddPartyWithAcsAsyncRequest,
+      AddPartyWithAcsAsyncResponse,
+      PartyReplicationArguments,
+      ActiveContract,
+    ](
+      responseObserver,
+      Failure(
+        new IllegalArgumentException(
+          "The request stream must contain at least one message with the required AddPartyArguments."
         )
-      }
+      ),
+      getGzippedBytes = _.acsSnapshot,
+      parseMessage = ActiveContract.parseDelimitedFromTrusted,
+    )(contextFromFirstRequest =
+      firstRequest =>
+        (for {
+          argsP <- ProtoConverter
+            .required("arguments", firstRequest.arguments)
+            .leftMap(err => s"Arguments must be set on the first request: $err")
+          args <- verifyArguments(argsP)
+        } yield args)
+          .leftMap(err => new IllegalArgumentException(err))
+          .toTry
+    ) { case (args, source) =>
+      val resultET = for {
+        partyReplicator <- EitherT.fromEither[FutureUnlessShutdown](
+          ensureOnlinePartyReplicationEnabled()
+        )
+        requestId <- partyReplicator
+          .addPartyWithAcsAsync(args, source)
+          .leftMap(toStatusRuntimeException(Status.FAILED_PRECONDITION))
+      } yield AddPartyWithAcsAsyncResponse(requestId.toHexString)
 
-      override def onError(t: Throwable): Unit =
-        try {
-          outputStream.close()
-        } finally {
-          responseObserver.onError(t)
-        }
-
-      override def onCompleted(): Unit = {
-        // Synchronously try to get the snapshot and start the import
-        val result = for {
-          args <- EitherT.fromEither[Future](
-            arguments
-              .get()
-              .toRight(toStatusRuntimeException(Status.INVALID_ARGUMENT)("Arguments not set"))
-          )
-          partyReplicator <- EitherT.fromEither[Future](
-            ensureOnlinePartyReplicationEnabled()
-          )
-          acsByteString <- EitherT.fromEither[Future](
-            Try(ByteString.copyFrom(outputStream.toByteArray)).toEither.leftMap(t =>
-              toStatusRuntimeException(Status.FAILED_PRECONDITION)(t.getMessage)
-            )
-          )
-          activeContracts <- EitherT.fromEither[Future](
-            ActiveContract
-              .loadAcsSnapshot(acsByteString)
-              .leftMap(toStatusRuntimeException(Status.INVALID_ARGUMENT))
-          )
-          requestId <- partyReplicator
-            .addPartyWithAcsAsync(args, activeContracts.iterator)
-            .leftMap(toStatusRuntimeException(Status.FAILED_PRECONDITION))
-            .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
-        } yield requestId
-
-        result
-          .thereafter(_ => outputStream.close())
-          .value
-          .onComplete {
-            case Failure(exception) => responseObserver.onError(exception)
-            case Success(Left(exception)) => responseObserver.onError(exception)
-            case Success(Right(requestId)) =>
-              responseObserver.onNext(AddPartyWithAcsAsyncResponse(requestId.toHexString))
-              responseObserver.onCompleted()
-          }
-      }
+      EitherTUtil.toFutureUnlessShutdown(resultET)
     }
   }
 

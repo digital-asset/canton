@@ -66,5 +66,6 @@ private class DescriptorSchemaProcessor[R](
         )
       case Descriptor.Application(ctor @ Descriptor.Constructor(id, typeParams, body), args) =>
         visitor.application(handle(ctor), typeParams, args.map(handle))
+      case Descriptor.Unknown(id, args) => visitor.unknown(id, args.map(handle))
 
 }

@@ -23,6 +23,7 @@ object GrpcAuthInterceptorFactory {
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       adminTokenConfig: AdminTokenConfig,
       jwksCacheConfig: JwksCacheConfig,
+      warnOnJwtScopeUsage: Boolean,
   ): ServerInterceptor = {
     val authServices =
       if (authServiceConfigs.isEmpty)
@@ -34,6 +35,7 @@ object GrpcAuthInterceptorFactory {
               jwksCacheConfig,
               jwtTimestampLeeway,
               loggerFactory,
+              warnOnJwtScopeUsage,
             )
           )
     val genericInterceptor = new AuthInterceptor(

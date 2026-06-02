@@ -1004,13 +1004,14 @@ sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTe
                 )
                 .value,
               Set.empty,
+              LfSerializationVersion.V2,
             )
 
             val contractInst = LfThinContractInst(
               template = lfNoMaintainerTemplateId,
               packageName = lfPackageName,
               arg = LfVersioned(
-                ExampleTransactionFactory.serializationVersion,
+                LfSerializationVersion.V2,
                 ValueRecord(None, ImmArray(None -> ValueParty(alice.toLf))),
               ),
             )

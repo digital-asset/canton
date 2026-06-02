@@ -18,6 +18,7 @@ import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApiParticipantProvider}
@@ -185,7 +186,7 @@ class CantonSyncService(
     with HasCloseContext
     with InternalIndexServiceProviderImpl {
 
-  private val pendingLsuOperationsStore: PendingLsuOperation.Store =
+  private[canton] val pendingLsuOperationsStore: PendingLsuOperation.Store =
     PendingOperationStore(
       syncPersistentStateManager.storage,
       timeouts,
@@ -1203,6 +1204,30 @@ class CantonSyncService(
       upgrader.finishUpgradeWithoutChecks()
     }
   }
+
+  /** Lists pending LSU operations matching the provided metadata filters. */
+  // TODO(#32445) Remove this method when the listing is not restricted to LSU
+  def getPendingLsuOperations(
+      operationName: NonEmptyString,
+      synchronizerId: Option[Synchronizer],
+      operationKey: Option[String],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[com.digitalasset.canton.store.PendingOperation[
+    PendingLsuOperation,
+    PhysicalSynchronizerId,
+  ]]] =
+    synchronizerId match {
+      case Some(psid: PhysicalSynchronizerId) =>
+        pendingLsuOperationsStore.getAll(operationName, Some(psid), operationKey)
+      case None => pendingLsuOperationsStore.getAll(operationName, None, operationKey)
+      case _ =>
+        FutureUnlessShutdown.failed(
+          new IllegalArgumentException(
+            "Only filtering by PhysicalSynchronizerId is supported for pending LSU operations"
+          )
+        )
+    }
 
   /** All pending LSU operations (handshake and/or topology copy) are resumed. They are done in
     * parallel, and we don't wait on the result.

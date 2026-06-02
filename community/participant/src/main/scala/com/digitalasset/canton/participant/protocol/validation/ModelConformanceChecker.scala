@@ -463,6 +463,12 @@ class ModelConformanceChecker(
     })
   }
 
+  /** Background:
+    *   - https://github.com/DACH-NY/canton/issues/32688
+    *   - https://github.com/DACH-NY/canton/issues/32765
+    *   - https://github.com/DACH-NY/canton/issues/32950
+    */
+  // TODO(i33170): Remove this workaround together with UpgradeFriendlyUnsafe.
   private def checkContractDataForContractIdV11(
       rootViewTrees: Seq[TransactionViewTree]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[ConflictingStoredContract]] = {
@@ -473,7 +479,7 @@ class ModelConformanceChecker(
         CantonContractIdVersion
           .extractCantonContractIdVersion(cid)
           // Also include cid, if the contract id version cannot be determined.
-          .forall(_.contractHashingMethod == LfHash.HashingMethod.UpgradeFriendly) &&
+          .forall(_.contractHashingMethod == LfHash.HashingMethod.UpgradeFriendlyUnsafe) &&
         proneToHashCollision(inputContract.contract.inst.createArg)
       }
       .toSet

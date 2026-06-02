@@ -416,11 +416,11 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
 
       assert(
         missingFromTP.isEmpty,
-        s"These ${missingFromTP.size} contracts are missing from the TP: $missingFromTP",
+        s"These ${missingFromTP.size} contracts for party $replicatedParty are missing from the TP: $missingFromTP",
       )
       assert(
         missingFromSP.isEmpty,
-        s"These ${missingFromSP.size} contracts are missing from the SP: $missingFromSP",
+        s"These ${missingFromSP.size} contracts for party $replicatedParty are missing from the SP: $missingFromSP",
       )
     }
 

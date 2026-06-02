@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetail
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
@@ -25,9 +26,7 @@ import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
-import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent.ReassignmentAccepted
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
-import com.digitalasset.canton.platform.{InMemoryState, Key}
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Ref
@@ -56,7 +55,7 @@ private[platform] object InMemoryStateUpdaterFlow {
       metrics: LedgerApiServerMetrics,
   )(
       inMemoryState: InMemoryState,
-      prepare: (Vector[(Offset, Update)], LedgerEnd, TraceContext) => PrepareResult,
+      prepare: Batch[?] => PrepareResult,
       update: (PrepareResult, Boolean) => Unit,
   ): UpdaterFlow = { repairMode =>
     Flow[Batch[?]]
@@ -64,11 +63,7 @@ private[platform] object InMemoryStateUpdaterFlow {
       .via(updateOffsetCheckpointCacheFlow(inMemoryState, offsetCheckpointCacheUpdateInterval))
       .mapAsync(prepareUpdatesParallelism) { batch =>
         Future {
-          batch -> prepare(
-            batch.offsetsUpdates,
-            batch.ledgerEnd,
-            batch.batchTraceContext,
-          )
+          batch -> prepare(batch)
         }(prepareUpdatesExecutionContext)
       }
       .async
@@ -184,6 +179,7 @@ private[platform] object InMemoryStateUpdater {
       ledgerEnd: LedgerEnd,
       lastTraceContext: TraceContext,
       batchTraceContext: TraceContext,
+      contractStateEvents: Vector[ContractStateEvent],
   )
   type UpdaterFlow =
     Boolean => Flow[Batch[?], Batch[?], NotUsed]
@@ -220,15 +216,14 @@ private[platform] object InMemoryStateUpdater {
   )
 
   private[index] def prepare(
-      batch: Vector[(Offset, Update)],
-      ledgerEnd: LedgerEnd,
-      batchTraceContext: TraceContext,
+      batch: Batch[?]
   ): PrepareResult = {
-    val traceContext = batch.lastOption.fold(
+    val offsetUpdates = batch.offsetsUpdates
+    val traceContext = offsetUpdates.lastOption.fold(
       throw new NoSuchElementException("empty batch")
     )(_._2.traceContext)
     PrepareResult(
-      updates = batch.collect {
+      updates = offsetUpdates.collect {
         case (offset, u: Update.TransactionAccepted) =>
           convertTransactionAccepted(offset, u)
         case (offset, u: Update.CommandRejected) =>
@@ -238,9 +233,10 @@ private[platform] object InMemoryStateUpdater {
         case (offset, u: Update.TopologyTransactionEffective) =>
           convertTopologyTransactionEffective(offset, u)
       },
-      ledgerEnd = ledgerEnd,
+      ledgerEnd = batch.ledgerEnd,
       lastTraceContext = traceContext,
-      batchTraceContext = batchTraceContext,
+      batchTraceContext = batch.batchTraceContext,
+      contractStateEvents = batch.contractStateEvents,
     )
   }
 
@@ -248,7 +244,13 @@ private[platform] object InMemoryStateUpdater {
       inMemoryState: InMemoryState,
       logger: TracedLogger,
   )(result: PrepareResult, repairMode: Boolean): Unit = {
-    updateCaches(inMemoryState, result.updates, result.ledgerEnd, result.batchTraceContext)
+    updateCaches(
+      inMemoryState = inMemoryState,
+      updates = result.updates,
+      ledgerEnd = result.ledgerEnd,
+      batchTraceContext = result.batchTraceContext,
+      contractStateEvents = result.contractStateEvents,
+    )
     // must be the last update: see the comment inside the method for more details
     // must be after cache updates: see the comment inside the method for more details
     // in case of Repair Mode we will update directly, at the end from the indexer queue
@@ -333,15 +335,12 @@ private[platform] object InMemoryStateUpdater {
       updates: Vector[TransactionLogUpdate],
       ledgerEnd: LedgerEnd,
       batchTraceContext: TraceContext,
+      contractStateEvents: Vector[ContractStateEvent],
   ): Unit = {
     inMemoryState.cachesUpdatedUpto.set(None) // mark caches as being updated
     updates.foreach(inMemoryState.inMemoryFanoutBuffer.push)
     NonEmptyVector
-      .fromVector(
-        updates.iterator
-          .flatMap(convertToContractStateEvents)
-          .toVector
-      )
+      .fromVector(contractStateEvents)
       .foreach(
         inMemoryState.contractStateCaches.push(_, ledgerEnd.lastEventSeqId)(batchTraceContext)
       )
@@ -362,63 +361,6 @@ private[platform] object InMemoryStateUpdater {
     inMemoryState.dispatcherState.getDispatcher.signalNewHead(ledgerEnd.lastOffset)
     logger.debug(s"Updated ledger end $ledgerEnd")
   }
-
-  private[index] def convertLogToStateEvent
-      : PartialFunction[TransactionLogUpdate.Event, ContractStateEvent] = {
-    case createdEvent: TransactionLogUpdate.CreatedEvent
-        // no state updates for participant divulged events and transient events as these events
-        // cannot lead to successful contract lookup and usage in interpretation anyway
-        if createdEvent.flatEventWitnesses.nonEmpty =>
-      if (createdEvent.contractKey.isDefined != createdEvent.createKeyHash.isDefined) {
-        throw new IllegalStateException(
-          s"Invalid TransactionLogUpdate.CreatedEvent: contractKey and createKeyHash must be both defined or both empty, but was: $createdEvent"
-        )
-      }
-      ContractStateEvent.Created(
-        contractId = createdEvent.contractId,
-        globalKey = createdEvent.contractKey.zip(createdEvent.createKeyHash).map { case (k, kh) =>
-          Key.assertBuild(
-            createdEvent.templateId,
-            createdEvent.packageName,
-            k.unversioned,
-            kh,
-          )
-        },
-      )
-    case exercisedEvent: TransactionLogUpdate.ExercisedEvent
-        // no state updates for participant divulged events and transient events as these events
-        // cannot lead to successful contract lookup and usage in interpretation anyway
-        if exercisedEvent.consuming && exercisedEvent.flatEventWitnesses.nonEmpty =>
-      if (exercisedEvent.contractKey.isDefined != exercisedEvent.contractKeyHash.isDefined) {
-        throw new IllegalStateException(
-          s"Invalid TransactionLogUpdate.ExercisedEvent: contractKey and contractKeyHash must be both defined or both empty, but was: $exercisedEvent"
-        )
-      }
-      ContractStateEvent.Archived(
-        contractId = exercisedEvent.contractId,
-        globalKey = exercisedEvent.contractKey.flatMap(k =>
-          exercisedEvent.contractKeyHash.map(hash =>
-            Key.assertBuild(
-              exercisedEvent.templateId,
-              exercisedEvent.packageName,
-              k.unversioned,
-              hash,
-            )
-          )
-        ),
-      )
-  }
-
-  private def convertToContractStateEvents(
-      tx: TransactionLogUpdate
-  ): Vector[ContractStateEvent] =
-    tx match {
-      case tx: TransactionLogUpdate.TransactionAccepted =>
-        tx.events.iterator.collect(convertLogToStateEvent).toVector
-      case _: TransactionLogUpdate.ReassignmentAccepted =>
-        Vector(ReassignmentAccepted)
-      case _ => Vector.empty
-    }
 
   private def convertTransactionAccepted(
       offset: Offset,

@@ -32,6 +32,7 @@ final class PruningModule[E <: Env[E]](
     clock: Clock,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
+    partitionPruner: Option[PartitionManager.PartitionPruner[E]] = None,
 )(implicit metricsContext: MetricsContext)
     extends Pruning[E] {
 
@@ -154,27 +155,47 @@ final class PruningModule[E <: Env[E]](
         }
       case Pruning.PerformPruning(epochNumber) =>
         logger.info(s"Pruning at epoch $epochNumber starting")
-        val pruneFuture =
-          context.zipFuture3(
-            stores.outputStore.prune(epochNumber),
-            stores.epochStore.prune(epochNumber),
-            stores.availabilityStore.prune(
-              EpochNumber(epochNumber - OrderingRequestBatch.BatchValidityDurationEpochs + 1L)
-            ),
-            orderingStage = Some("pruning-prune"),
-          )
-        pipeToSelfOpt(pruneFuture) {
-          case Success(
-                (outputStorePrunedRecords, epochStorePrunedRecords, availabilityStorePrunedRecords)
-              ) =>
-            val msg = s"""|Pruning at epoch $epochNumber complete.
-                          |EpochStore: pruned ${epochStorePrunedRecords.epochs} epochs, ${epochStorePrunedRecords.pbftMessagesCompleted} pbft messages.
-                          |OutputStore: pruned ${outputStorePrunedRecords.epochs} epochs and ${outputStorePrunedRecords.blocks} blocks.
-                          |AvailabilityStore: pruned ${availabilityStorePrunedRecords.batches} batches.""".stripMargin
-            logger.info(msg)
-            completePruningOperation(msg)
-          case Failure(exception) =>
-            Some(Pruning.FailedDatabaseOperation("Failed to perform pruning", exception))
+        partitionPruner match {
+          // The partition pruner is only present if using Postgres.
+          // In that case, tables uses partitions and pruning is done by dropping partitions.
+          case Some(partitionPruner) =>
+            // We subtract 1 to turn the exclusive epoch number into inclusive.
+            context.pipeToSelf(partitionPruner.prune(EpochNumber(epochNumber - 1L))) {
+              case Success(msg) =>
+                logger.info(msg)
+                completePruningOperation(msg)
+              case Failure(exception) =>
+                Some(Pruning.FailedDatabaseOperation("Failed to perform pruning", exception))
+            }
+          // If using H2 or in memory storage, we default to the old behavior of pruning each store separately
+          // by deleting all records before the given epoch number.
+          case _ =>
+            val pruneFuture =
+              context.zipFuture3(
+                stores.outputStore.prune(epochNumber),
+                stores.epochStore.prune(epochNumber),
+                stores.availabilityStore.prune(
+                  EpochNumber(epochNumber - OrderingRequestBatch.BatchValidityDurationEpochs + 1L)
+                ),
+                orderingStage = Some("pruning-prune"),
+              )
+            pipeToSelfOpt(pruneFuture) {
+              case Success(
+                    (
+                      outputStorePrunedRecords,
+                      epochStorePrunedRecords,
+                      availabilityStorePrunedRecords,
+                    )
+                  ) =>
+                val msg = s"""|Pruning at epoch $epochNumber complete.
+                              |EpochStore: pruned ${epochStorePrunedRecords.epochs} epochs, ${epochStorePrunedRecords.pbftMessagesCompleted} pbft messages.
+                              |OutputStore: pruned ${outputStorePrunedRecords.epochs} epochs and ${outputStorePrunedRecords.blocks} blocks.
+                              |AvailabilityStore: pruned ${availabilityStorePrunedRecords.batches} batches.""".stripMargin
+                logger.info(msg)
+                completePruningOperation(msg)
+              case Failure(exception) =>
+                Some(Pruning.FailedDatabaseOperation("Failed to perform pruning", exception))
+            }
         }
       case Pruning.FailedDatabaseOperation(msg, exception) =>
         logger.error(msg, exception)

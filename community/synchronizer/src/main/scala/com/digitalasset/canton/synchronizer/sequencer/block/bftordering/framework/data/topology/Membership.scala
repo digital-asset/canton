@@ -27,6 +27,7 @@ final case class Membership(
       param("myId", _.myId.doubleQuoted),
       param("orderingTopology", _.orderingTopology),
       param("leaders", _.leaders.map(_.doubleQuoted)),
+      param("blacklistedNodes", _.blacklistedNodes.map(_.doubleQuoted)),
     )
 }
 

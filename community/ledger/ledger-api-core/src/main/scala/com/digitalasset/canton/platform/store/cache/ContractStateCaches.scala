@@ -10,16 +10,18 @@ import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatu
   Archived,
   ExistingContractStatus,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
-import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.{Assigned, Unassigned}
+import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.{Empty, Last}
+import com.digitalasset.canton.platform.store.cache.ContractStateCaches.computeKeyStateChange
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
-import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent.ReassignmentAccepted
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.transaction.GlobalKey
 
+import scala.collection.immutable.VectorBuilder
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
 /** Encapsulates the contract and key state caches with operations for mutating them. The caches are
@@ -39,43 +41,43 @@ class ContractStateCaches(
     val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
-  /** Update the state caches with a batch of events.
-    *
-    * @param eventsBatch
-    *   The contract state update events batch. The updates batch must be non-empty and with
-    *   strictly increasing event sequential ids.
-    */
   def push(
       eventsBatch: NonEmptyVector[ContractStateEvent],
       lastEventSeqId: Long,
   )(implicit traceContext: TraceContext): Unit = {
-    val keyMappingsBuilder = Map.newBuilder[Key, ContractKeyStateValue]
     val contractMappingsBuilder = Map.newBuilder[ContractId, ExistingContractStatus]
+    val keyEventsBuilder = mutable.Map.empty[Key, VectorBuilder[ContractStateEvent]]
 
     eventsBatch.toVector.foreach {
-      case created: ContractStateEvent.Created =>
-        created.globalKey.foreach(key =>
-          keyMappingsBuilder.addOne(
-            key -> Assigned(created.contractId)
-          )
-        )
-        contractMappingsBuilder.addOne(created.contractId -> Active)
-
-      case archived: ContractStateEvent.Archived =>
-        archived.globalKey.foreach { key =>
-          keyMappingsBuilder.addOne(key -> Unassigned)
+      case activated: ContractStateEvent.Activated =>
+        if (activated.isInitial) {
+          contractMappingsBuilder.addOne(activated.contractId -> Active)
         }
-        contractMappingsBuilder.addOne(archived.contractId -> Archived)
-
-      case ReassignmentAccepted => ()
+        activated.globalKey.foreach(key =>
+          keyEventsBuilder
+            .getOrElseUpdate(key, new VectorBuilder[ContractStateEvent])
+            .addOne(activated)
+        )
+      case deactivated: ContractStateEvent.Deactivated =>
+        if (deactivated.isFinal) {
+          contractMappingsBuilder.addOne(deactivated.contractId -> Archived)
+        }
+        deactivated.globalKey.foreach(key =>
+          keyEventsBuilder
+            .getOrElseUpdate(key, new VectorBuilder[ContractStateEvent])
+            .addOne(deactivated)
+        )
     }
 
-    val keyMappings = keyMappingsBuilder.result()
-    val contractMappings = contractMappingsBuilder.result()
-
     val validAt = lastEventSeqId
-    keyState.putBatch(validAt, keyMappings)
-    contractState.putBatch(validAt, contractMappings)
+    val keyEvents = keyEventsBuilder.view.mapValues(_.result()).toMap
+
+    keyState.putBatchCond(
+      validAtEventSeqId = validAt,
+      keys = keyEvents.keySet,
+      change = computeKeyStateChange(keyEvents, _, logger),
+    )
+    contractState.putBatch(validAt, contractMappingsBuilder.result())
   }
 
   /** Reset the contract and key state caches to the specified offset. */
@@ -87,6 +89,108 @@ class ContractStateCaches(
 }
 
 object ContractStateCaches {
+
+  /** Computes the upserts and invalidations to apply to the key state cache for a batch of per-key
+    * event vectors, given the currently cached values for those keys.
+    *
+    * For each key, folds its events through [[ContractStateCaches.resolveKeyUpdatesFor]] starting
+    * from the cached value (or `None` on cache miss). The final per-key result is routed into:
+    *   - `upserts` when `Some(value)` is produced, or
+    *   - `invalidations` when `None` is produced.
+    */
+  private[cache] def computeKeyStateChange(
+      keyEvents: Map[Key, Vector[ContractStateEvent]],
+      cached: Map[Key, ContractKeyStateValue],
+      logger: TracedLogger,
+  )(implicit traceContext: TraceContext): (Map[Key, ContractKeyStateValue], Set[Key]) = {
+    val upsertsBuilder = Map.newBuilder[Key, ContractKeyStateValue]
+    val invalidationsBuilder = Set.newBuilder[Key]
+    keyEvents.foreach { case (key, events) =>
+      resolveKeyUpdatesFor(events, cached.get(key), logger) match {
+        case Some(value) => upsertsBuilder.addOne(key -> value)
+        case None => invalidationsBuilder.addOne(key)
+      }
+    }
+    (upsertsBuilder.result(), invalidationsBuilder.result())
+  }
+
+  private[cache] def resolveKeyUpdatesFor(
+      events: Vector[ContractStateEvent],
+      initial: Option[ContractKeyStateValue],
+      logger: TracedLogger,
+  )(implicit traceContext: TraceContext): Option[ContractKeyStateValue] =
+    events.foldLeft(initial)(applyContractStateEvent(_, _, logger))
+
+  /** Applies a single [[ContractStateEvent]] to the current cached value for a key. Returns the new
+    * cached value, or `None` to signal an invalidation.
+    */
+  private[cache] def applyContractStateEvent(
+      current: Option[ContractKeyStateValue],
+      event: ContractStateEvent,
+      logger: TracedLogger,
+  )(implicit traceContext: TraceContext): Option[ContractKeyStateValue] =
+    event match {
+      case activated: ContractStateEvent.Activated =>
+        val cid = activated.contractId
+        val eventSeqId = activated.eventSequentialId
+        current match {
+          case None =>
+            // Cache miss: we don't know whether other contracts exist for this key in the DB
+            Some(Last(contractId = cid, eventSequentialId = eventSeqId, thereMightBeMore = true))
+          case Some(Empty) =>
+            // The cache knows that the key had no other contract activated.
+            Some(Last(cid, eventSeqId, thereMightBeMore = false))
+          case Some(Last(_, cachedSeqId, _)) =>
+            if (cachedSeqId == eventSeqId) {
+              // A contract that the cache already records as the last contract for the key is activated
+              // twice. The entry is being removed from the cache.
+              logger.warn(
+                s"Key cache already contains the same contract $cid with eventSequientialId=$cachedSeqId, skipping update"
+              )
+              None
+            } else {
+              // The cache held a different contract as "last" for this key, the newest takes its place.
+              Some(Last(cid, eventSeqId, thereMightBeMore = true))
+            }
+        }
+
+      case deactivated: ContractStateEvent.Deactivated =>
+        val deactivatedEventSequentialId = deactivated.deactivatedEventSequentialId
+        current match {
+          // Cache miss: the current state of the key is unknown. The next lookup will read through.
+          case None => None
+          case Some(Empty) =>
+            // The cache claims the key has no contracts, yet we received a deactivation for it.
+            logger.warn(
+              s"Deactivation with deactivatedEventSequentialId=$deactivatedEventSequentialId encountered, but this entry is already deactivated in the cache"
+            )
+            Some(Empty)
+          case Some(cached @ Last(cid, eventSeqId, thereMightBeMore)) =>
+            if (eventSeqId == deactivatedEventSequentialId) {
+              // The deactivation targets the exact contract recorded in the cache.
+              if (!thereMightBeMore) {
+                // This was the only contract for the key, so no contracts for the key exist.
+                Some(Empty)
+              } else {
+                // There might be other contracts in the DB we don't know about.
+                // Invalidate so the next lookup reads through.
+                None
+              }
+            } else {
+              // The deactivation targets a different contract than the one in the cache.
+              // The cached "last" entry is still the most recent one known. Cache stays unchanged.
+              if (!thereMightBeMore) {
+                // Cache is not aware of any other contract for this key, yet we received a deactivation for a different contract.
+                logger.warn(
+                  s"Deactivation with deactivatedEventSequentialId=$deactivatedEventSequentialId on cache entry assigned to " +
+                    s"contract $cid with sequentialId=$eventSeqId while thereMightBeMore was false"
+                )
+              }
+              Some(cached)
+            }
+        }
+    }
+
   def build(
       initialCacheEventSeqIdIndex: Long,
       maxContractsCacheSize: Long,

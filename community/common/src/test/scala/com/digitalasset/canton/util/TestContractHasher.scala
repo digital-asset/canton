@@ -54,7 +54,7 @@ object TestContractHasher {
       case HashingMethod.Legacy =>
         hashCreate(create, upgradeFriendly = false)
 
-      case HashingMethod.UpgradeFriendly =>
+      case HashingMethod.UpgradeFriendlyUnsafe =>
         hashCreate(create, upgradeFriendly = true)
 
       /** To calculate the TypeNormal hash requires that the template package is available

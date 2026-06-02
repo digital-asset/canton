@@ -62,7 +62,10 @@ import com.digitalasset.canton.util.{
   SingleUseCell,
   retry,
 }
+import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.concurrent.duration.*
@@ -266,85 +269,147 @@ final class PartyReplicator(
   ): Option[PartyReplicationStatus] = partyReplicationStateManager.get(addPartyRequestId)
 
   /** Adds a party to the local target participant using the ACS snapshot provided by a file via an
-    * ACS iterator by importing the ACS synchronously, i.e. when the returned EitherT succeeds, but
+    * ACS stream by importing the ACS synchronously, i.e. when the returned EitherT succeeds, but
     * only fully completing party replication asynchronously (e.g. clearing the onboarding flag).
     *
     * @param args
     *   arguments shared with the [[addPartyAsync]] method
     * @param acsReader
-    *   iterator over ACS contracts
+    *   Pekko Source of ACS contracts streamed from the client
     * @return
     *   a request id that can be used to query for progress or errors via [[getAddPartyStatus]]
     */
   private[admin] def addPartyWithAcsAsync(
       args: PartyReplicationArguments,
-      acsReader: Iterator[ActiveContract],
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, AddPartyRequestId] =
+      acsReader: Source[ActiveContract, NotUsed],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AddPartyRequestId] = {
+
+    implicit val mat: Materializer = Materializer.matFromSystem(actorSystem)
+
+    val PartyReplicationArguments(
+      partyId,
+      synchronizerId,
+      sourceParticipantId,
+      serial,
+      participantPermission,
+    ) = args
+
     executionQueue.executeEUS(
-      {
-        val PartyReplicationArguments(
+      for {
+        _ <- EitherT.cond[FutureUnlessShutdown](
+          syncService.isActive(),
+          logger.info(
+            s"Initiating import of party $partyId with ACS from participant $sourceParticipantId on synchronizer $synchronizerId"
+          ),
+          s"Participant $participantId is inactive",
+        )
+        connectedSynchronizer <-
+          EitherT.fromEither[FutureUnlessShutdown](
+            syncService
+              .readyConnectedSynchronizerById(synchronizerId)
+              .toRight(s"Unknown synchronizer $synchronizerId")
+          )
+        syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
+        onboardingAt <- ensurePartyHostedBySourceAndOnboardingOnTargetParticipant(
+          args,
+          syncPersistentState.topologyStore,
+        )
+        requestId = buildRequestIdHash(args, syncPersistentState.pureCryptoApi)
+        fileImporter = PartyReplicationFileImporter(
           partyId,
-          synchronizerId,
-          sourceParticipantId,
-          serial,
-          participantPermission,
-        ) = args
-        for {
-          _ <- EitherT.cond[FutureUnlessShutdown](
-            syncService.isActive(),
-            logger.info(
-              s"Initiating import of party $partyId with ACS from participant $sourceParticipantId on synchronizer $synchronizerId"
-            ),
-            s"Participant $participantId is inactive",
-          )
-          connectedSynchronizer <-
-            EitherT.fromEither[FutureUnlessShutdown](
-              syncService
-                .readyConnectedSynchronizerById(synchronizerId)
-                .toRight(s"Unknown synchronizer $synchronizerId")
+          requestId,
+          onboardingAt,
+          partyReplicationStateManager,
+          syncService.participantNodePersistentState,
+          connectedSynchronizer,
+          acsReader,
+          testInterceptorO,
+          () => isClosing,
+          loggerFactory,
+        )
+        // Check if this is a retry of a previously failed import
+        existingStatusO = partyReplicationStateManager.get(requestId)
+
+        _ <- existingStatusO match {
+          case None =>
+            // Brand new import
+            val initialStatus = PartyReplicationStatus(
+              PartyReplicationStatus.ReplicationParams(
+                requestId,
+                partyId,
+                synchronizerId,
+                sourceParticipantId,
+                participantId,
+                serial,
+                participantPermission,
+              ),
+              syncPersistentState.staticSynchronizerParameters.protocolVersion,
+              authorizationO = Some(
+                PartyReplicationAuthorization(onboardingAt, isOnboardingFlagCleared = false)
+              ),
+              replicationO = Some(AcsReplicationProgress.initialize(fileImporter)),
             )
-          syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
-          onboardingAt <- ensurePartyHostedBySourceAndOnboardingOnTargetParticipant(
-            args,
-            syncPersistentState.topologyStore,
-          )
-          requestId = buildRequestIdHash(args, syncPersistentState.pureCryptoApi)
-          fileImporter = PartyReplicationFileImporter(
-            partyId,
-            requestId,
-            onboardingAt,
-            partyReplicationStateManager,
-            syncService.participantNodePersistentState,
-            connectedSynchronizer,
-            acsReader,
-            testInterceptorO,
-            loggerFactory,
-          )
-          initialStatus = PartyReplicationStatus(
-            PartyReplicationStatus.ReplicationParams(
-              requestId,
-              partyId,
-              synchronizerId,
-              sourceParticipantId,
-              participantId,
-              serial,
-              participantPermission,
-            ),
-            syncPersistentState.staticSynchronizerParameters.protocolVersion,
-            authorizationO =
-              Some(PartyReplicationAuthorization(onboardingAt, isOnboardingFlagCleared = false)),
-            replicationO = Some(AcsReplicationProgress.initialize(fileImporter)),
-          )
-          _ <- partyReplicationStateManager.add(initialStatus)
-          _ <- fileImporter.importEntireAcsSnapshotInOneGo()
-        } yield {
-          logger.info(s"Adding party $partyId with ACS request $requestId is in progress")
-          activateProgressMonitoring(requestId)
-          requestId
+            partyReplicationStateManager.add(initialStatus)
+
+          // Parameter equality check omitted because:
+          // - Request ID authenticates all fields expect for participant permission.
+          // - ensurePartyHostedBySourceAndOnboardingOnTargetParticipant catches permission mismatches.
+          case Some(existingStatus) =>
+            // Unfinished existing import -> Verify it's in a valid state and retry to finish it
+            EitherT
+              .cond[FutureUnlessShutdown](
+                !existingStatus.replicationO.exists(_.fullyProcessedAcs),
+                (),
+                s"ACS import on behalf of $requestId has already completed.",
+              )
+              .flatMap { _ =>
+                partyReplicationStateManager.update_(
+                  requestId,
+                  _.modifyReplication {
+                    case Some(_persistent: AcsReplicationProgress) =>
+                      logger.info(
+                        "Restart the ACS import from the beginning, so reset the progress from the previous call."
+                      )
+                      AcsReplicationProgress.initialize(fileImporter)
+                    case other =>
+                      logger.info(
+                        s"Unexpectedly missing ACS import progress $other during retry. Re-initializing."
+                      )
+                      AcsReplicationProgress.initialize(fileImporter)
+                  }.modifyErrorO(_ =>
+                    None
+                  ), // Clear previous errors so the state machine can advance!
+                )
+              }
         }
+
+        _ <- fileImporter.importAcsSnapshot().leftSemiflatMap { err =>
+          partyReplicationStateManager
+            .update(
+              requestId,
+              _.modifyErrorO { prevErrorO =>
+                prevErrorO.foreach(prevError =>
+                  logger.warn(
+                    s"Party replication $requestId encountered error $err overwriting unexpected previous error $prevError"
+                  )
+                )
+                Some(PartyReplicationFailed(err))
+              },
+            )
+            .map(_ => err) // Return the error, not the updated status
+            .merge
+        }
+
+      } yield {
+        logger.info(s"Adding party $partyId with ACS request $requestId is in progress")
+        activateProgressMonitoring(requestId)
+        requestId
       },
       s"add party ${args.partyId} on ${args.synchronizerId}",
     )
+  }
 
   /** Checks that the party is
     *   - hosted by the source participant
@@ -851,7 +916,7 @@ final class PartyReplicator(
                     partiesAlreadyHostedByTargetParticipant,
                     indexService,
                     partyReplicationStateManager,
-                    recordError(requestId, traceContext),
+                    recordSequenerChannelError(requestId, traceContext),
                     markDisconnected(requestId),
                     futureSupervisor,
                     exitOnFatalFailures,
@@ -871,7 +936,7 @@ final class PartyReplicator(
                     requestId,
                     onboardingAt,
                     partyReplicationStateManager,
-                    recordError(requestId, traceContext),
+                    recordSequenerChannelError(requestId, traceContext),
                     markDisconnected(requestId),
                     syncService.participantNodePersistentState,
                     connectedSynchronizer,
@@ -1136,7 +1201,9 @@ final class PartyReplicator(
         }
     }
 
-  private def recordError(requestId: AddPartyRequestId, tc: TraceContext)(error: String): Unit = {
+  private def recordSequenerChannelError(requestId: AddPartyRequestId, tc: TraceContext)(
+      error: String
+  ): Unit = {
     implicit val traceContext: TraceContext = tc
     logger.error(s"Party replication $requestId failed: $error")
     executeAsync(requestId, "error party replication") {

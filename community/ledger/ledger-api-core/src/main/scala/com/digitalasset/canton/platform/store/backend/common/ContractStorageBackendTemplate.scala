@@ -112,6 +112,7 @@ class ContractStorageBackendTemplate(
       internalContractIds =
         // we asked for limit plus 1
         internalContractIds.take(keyPageQuery.limit),
+      eventSequentialIds = eventSeqIds.take(keyPageQuery.limit),
       nextPageToken = Option
         // we asked for one more, so there is only make sense to continue if there is limit+1 results
         // and then the exclusive token should be one above the identified one

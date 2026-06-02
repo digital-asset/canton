@@ -160,6 +160,8 @@ class SequencerStateManagerTest
 
   private def newTimestamp() = CantonTimestamp.now()
 
+  private val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
+
   val testedUseUnifiedSequencer = true
 
   "SequencerStateManager" can {
@@ -379,7 +381,7 @@ class SequencerStateManagerTest
       drSequencingTimeUpperBound = None,
       getAnnouncedLsu = None,
       producePostOrderingTopologyTicks = false,
-      SequencerTestMetrics,
+      metrics,
       BatchingConfig(),
       consistencyChecks = true,
       memberValidator = new SequencerMemberValidator {
@@ -449,7 +451,7 @@ class SequencerStateManagerTest
           futureSupervisor,
           loggerFactory,
           BlockSequencerStreamInstrumentationConfig(),
-          SequencerTestMetrics.block,
+          metrics.block,
         )(executorService, traceContext)
 
     private val processingTimestampWatermark =

@@ -139,7 +139,12 @@ case object AuthenticatedContractIdVersionV10 extends CantonContractIdV1Version(
 
 case object AuthenticatedContractIdVersionV11 extends CantonContractIdV1Version(11) {
   lazy val versionPrefixBytes: Bytes = Bytes.fromByteArray(Array(0xca.toByte, 0x11.toByte))
-  override def contractHashingMethod: LfHash.HashingMethod = LfHash.HashingMethod.UpgradeFriendly
+
+  /** It is ok to use UpgradeFriendlyUnsafe (see #32688), as there are mitigations in place (see
+    * #32950).
+    */
+  override def contractHashingMethod: LfHash.HashingMethod =
+    LfHash.HashingMethod.UpgradeFriendlyUnsafe
 }
 
 case object AuthenticatedContractIdVersionV12 extends CantonContractIdV1Version(12) {

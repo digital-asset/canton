@@ -10,12 +10,12 @@ import com.digitalasset.canton.protocol.ViewHash
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.ByteString
 
-/** A reference identifying a subview.
+/** A reference identifying a view.
   *
-  * A subview can be addressed either by its view hash or by a ciphertext-based identifier (PV36+)
+  * A view can be addressed either by its view hash or by a ciphertext-based identifier (PV36+)
   * (ciphertext hash plus index of the view in the list that is encrypted).
   */
-sealed trait SubviewReference extends PrettyPrinting with Product with Serializable
+sealed trait ViewReference extends PrettyPrinting with Product with Serializable
 
 /** A transaction view identifier composed of the hash of the transaction view. This reference type
   * is used for PV35-.
@@ -23,7 +23,7 @@ sealed trait SubviewReference extends PrettyPrinting with Product with Serializa
   * @param viewHash
   *   Hash of the transaction view.
   */
-final case class ByViewHash(private val viewHash: ViewHash) extends SubviewReference {
+final case class ByViewHash(private val viewHash: ViewHash) extends ViewReference {
   def toProtoPrimitive: ByteString = viewHash.toProtoPrimitive
 
   override def pretty: Pretty[ByViewHash] = prettyOfClass(param("viewHash", _.viewHash))
@@ -44,7 +44,7 @@ object ByViewHash {
   *   sharing the same ciphertext hash.
   */
 final case class ByCiphertextId(private val ciphertextId: Hash, index: PositiveInt)
-    extends SubviewReference {
+    extends ViewReference {
 
   override def pretty: Pretty[ByCiphertextId] = prettyOfClass(
     param("ciphertextId", _.ciphertextId),

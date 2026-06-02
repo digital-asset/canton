@@ -53,6 +53,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
           create_key_hash = Some("hash"),
+          notPersistedContractKey = Some(someContractKey),
         )(
           stakeholders = Set(someParty3, someParty4),
           template_id = someTemplateId,
@@ -80,6 +81,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
           create_key_hash = Some("hash"),
+          notPersistedContractKey = Some(someContractKey),
         ),
         DbDto.IdFilterActivateStakeholder(
           IdFilter(
@@ -131,6 +133,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
           create_key_hash = Some("abc"),
+          notPersistedContractKey = Some(someContractKey),
         )(
           stakeholders = someParties("party3", "party4"),
           template_id = someTemplateId,
@@ -158,6 +161,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
           create_key_hash = Some("abc"),
+          notPersistedContractKey = Some(someContractKey),
         ),
         DbDto.IdFilterActivateStakeholder(
           IdFilter(
@@ -211,6 +215,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           package_id = somePackageId,
           stakeholders = someParties("1", "2", "3"),
           ledger_effective_time = 13,
+          notPersistedContractKey = Some(someContractKey),
         )
         .toList should contain theSameElementsInOrderAs List(
         DbDto.EventDeactivate(
@@ -247,6 +252,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           package_id = somePackageId,
           stakeholders = someParties("1", "2", "3"),
           ledger_effective_time = Some(13),
+          notPersistedContractKey = Some(someContractKey),
         ),
         DbDto.IdFilterDeactivateStakeholder(
           IdFilter(
@@ -309,6 +315,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           template_id = someTemplateId,
           package_id = somePackageId,
           stakeholders = someParties("1", "2", "3"),
+          notPersistedContractKey = Some(someContractKey),
         )
         .toList should contain theSameElementsInOrderAs List(
         DbDto.EventDeactivate(
@@ -345,6 +352,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           package_id = somePackageId,
           stakeholders = someParties("1", "2", "3"),
           ledger_effective_time = None,
+          notPersistedContractKey = Some(someContractKey),
         ),
         DbDto.IdFilterDeactivateStakeholder(
           IdFilter(

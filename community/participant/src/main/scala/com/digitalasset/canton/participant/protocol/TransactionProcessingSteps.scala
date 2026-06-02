@@ -686,7 +686,8 @@ class TransactionProcessingSteps(
         protocolVersion,
         crypto.pureCrypto,
         topLevelOnly = true,
-        decryptedViewsWithSignatures,
+        // TODO(#32393): wire ciphertext ID
+        decryptedViewsWithSignatures.map(view => (view, None)),
       )
 
     val incompleteLightViewTreeErrors = incompleteLightViewTrees.map {

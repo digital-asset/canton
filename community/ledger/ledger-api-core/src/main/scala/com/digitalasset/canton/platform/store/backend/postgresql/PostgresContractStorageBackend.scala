@@ -134,6 +134,7 @@ class PostgresContractStorageBackend(
         val (eventSeqIds, internalContractIds) = rows.unzip
         ContractStorageBackend.KeysPageResult(
           internalContractIds = internalContractIds.take(query.limit),
+          eventSequentialIds = eventSeqIds.take(query.limit),
           nextPageToken = Option
             .when(eventSeqIds.sizeIs == query.limit + 1)(
               eventSeqIds.lastOption.map(_ + 1)

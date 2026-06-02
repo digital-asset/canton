@@ -12,7 +12,7 @@ import com.google.protobuf.{ByteString, ProtocolStringList}
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.annotation.nowarn
 import scala.collection.immutable.TreeSet
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object ContractInstanceCoder extends ContractInstanceCoder(allowNullCharacters = false)
 
@@ -23,8 +23,10 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
 
   /** Decode a contract instance from wire format
     *
-    * @param protoCoinst protocol buffer encoded contract instance
-    * @return contract instance value
+    * @param protoCoinst
+    *   protocol buffer encoded contract instance
+    * @return
+    *   contract instance value
     */
   def decodeContractInstance(
       protoCoinst: TransactionOuterClass.ThinContractInstance
@@ -33,8 +35,10 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
 
   /** Encodes a contract instance with the help of the contractId encoding function
     *
-    * @param coinst the contract instance to be encoded
-    * @return protobuf wire format contract instance
+    * @param coinst
+    *   the contract instance to be encoded
+    * @return
+    *   protobuf wire format contract instance
     */
   def encodeContractInstance(
       coinst: Versioned[Value.ThinContractInstance]
@@ -134,15 +138,17 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
         templateId: Ref.TypeConId,
         packageName: Ref.PackageName,
         msg: TransactionOuterClass.KeyWithMaintainers,
-    ): Either[DecodeError, GlobalKeyWithMaintainers] = {
+    ): Either[DecodeError, GlobalKeyWithMaintainers] =
       for {
         maintainers <- toPartySet(msg.getMaintainersList)
         // Contracts written with SerializationVersion.V1 should never contain a key, because canton >=3.5 uses
-        // V2 for contracts with keys, and canton <3.5 doesn't support keys. However, the decoding of keys was
-        // present without a serialization version check in canton <3.5, and we preserve that behavior in order for
-        // all canton versions to fail consistently with an upgrade error when receiving a V1 fat contract instance
-        // with a key, rather than failing with a deserialization error in canton >=3.5 and an upgrade error in
-        // canton <3.5.
+        // V2 for contracts with keys, and canton <3.5 doesn't support keys.
+        // However, as this "lenient parsing" has been released as part of Canton 3.5, it cannot be changed anymore within PV35.
+        // Currently, if a participant sends a contract key at SerializationVersion V1,
+        // the model conformance check fails and the view (as well as all ancestors) get rolled back.
+        // If we failed the same situation already at this point, it would result in a parse error.
+        // Due to EncryptedMultiViews that would result in discarding all members of the same MultiView.
+        // So a model conformance failure and a parse error have different consequences and can therefore not be done interchangeably within PV35.
         keyValue <- ValueCoder.decodeValue(version, msg.getKey)
         hash <-
           if (version >= SerializationVersion.V2)
@@ -158,10 +164,9 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
                 DecodeError(s"unexpected hash field in KeyWithMaintainers for version $version"),
               )
               .flatMap(_ =>
-                // In canton <3.5, this legacy hash function was used when constructing a GlobalKey, so we preserve
-                // that behavior fot the reasons state above.
+                // Ok to call unsafe hash function, as this will fail anyway during the model conformance check, as stated above.
                 crypto.Hash
-                  .hashContractKey(templateId, packageName, keyValue)
+                  .hashContractKeyUnsafe(templateId, packageName, keyValue)
                   .left
                   .map(hashErr => DecodeError(hashErr.msg))
               )
@@ -170,7 +175,6 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
           .left
           .map(hashErr => DecodeError(hashErr.msg))
       } yield GlobalKeyWithMaintainers(gkey, maintainers)
-    }
 
     private[transaction] def strictDecodeKeyWithMaintainers(
         version: SerializationVersion,
@@ -251,7 +255,7 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
     private[ContractInstanceCoder] def encodeFatContractInstanceInternal(
         contractInstance: FatContractInstance
     ): Either[EncodeError, TransactionOuterClass.FatContractInstance] = {
-      import contractInstance._
+      import contractInstance.*
       for {
         encodedArg <- ValueCoder.encodeValue(version, createArg)
         encodedKeyOpt <- contractKeyWithMaintainers match {

@@ -339,6 +339,7 @@ object UpdateToDbDto {
         notPersistedContractId = create.coid,
         internal_contract_id = internal_contract_id,
         create_key_hash = create.keyOpt.map(_.globalKey.hash.bytes.toHexString),
+        notPersistedContractKey = create.keyOpt.map(_.globalKey),
       )(
         stakeholders = stakeholders,
         template_id = templateId,
@@ -414,6 +415,7 @@ object UpdateToDbDto {
         package_id = exercise.templateId.packageId,
         stakeholders = exercise.stakeholders,
         ledger_effective_time = transactionAccepted.transactionMeta.ledgerEffectiveTime.micros,
+        notPersistedContractKey = exercise.keyOpt.map(_.globalKey),
       )
     } else {
       val internal_contract_id =
@@ -559,6 +561,7 @@ object UpdateToDbDto {
       template_id = templateIdWithPackageName(unassign),
       package_id = unassign.templateId.packageId,
       stakeholders = unassign.stakeholders,
+      notPersistedContractKey = unassign.keyOpt.map(_.globalKey),
     )
 
   private def assignToDbDto(
@@ -586,6 +589,7 @@ object UpdateToDbDto {
       notPersistedContractId = assign.createNode.coid,
       internal_contract_id = assign.internalContractId,
       create_key_hash = assign.createNode.keyOpt.map(_.globalKey.hash.bytes.toHexString),
+      notPersistedContractKey = assign.createNode.keyOpt.map(_.globalKey),
     )(
       stakeholders = assign.createNode.stakeholders,
       template_id = templateIdWithPackageName(assign),

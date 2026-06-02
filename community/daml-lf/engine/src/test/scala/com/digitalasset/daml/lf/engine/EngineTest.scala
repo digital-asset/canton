@@ -1764,11 +1764,11 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     }
 
     "be rejected in fetches for v11 contracts" in {
-      expectInvalidValue(runFetch(Hash.HashingMethod.UpgradeFriendly))
+      expectInvalidValue(runFetch(Hash.HashingMethod.UpgradeFriendlyUnsafe))
     }
 
     "be rejected in exercises for v11 contracts" in {
-      expectInvalidValue(runExercise(Hash.HashingMethod.UpgradeFriendly))
+      expectInvalidValue(runExercise(Hash.HashingMethod.UpgradeFriendlyUnsafe))
     }
 
     "be rejected in fetches for v12 contracts" in {
@@ -1817,11 +1817,11 @@ class EngineTest(contractIdVersion: ContractIdVersion)
 
     val expectedLegacyHash =
       Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = false)
+        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendlyUnsafe = false)
         .value
     val expectedUpgradeFriendlyHash =
       Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = true)
+        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendlyUnsafe = true)
         .value
     def expectedTypedNormalFormHash = SValueHash
       .hashContractInstance(
@@ -1862,7 +1862,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     val cases = Table(
       ("hashingMethod", "expectedHash"),
       (Hash.HashingMethod.Legacy, expectedLegacyHash),
-      (Hash.HashingMethod.UpgradeFriendly, expectedUpgradeFriendlyHash),
+      (Hash.HashingMethod.UpgradeFriendlyUnsafe, expectedUpgradeFriendlyHash),
       (Hash.HashingMethod.TypedNormalForm, expectedTypedNormalFormHash),
     )
 

@@ -1135,6 +1135,7 @@ object BuildCommon {
         DamlProjects.`testing-utils` % Test,
         blake2b,
         `community-base`,
+        `community-admin-api`,
         `wartremover-annotations`,
         `community-testing` % Test,
         `wartremover-extension` % "test->test",
@@ -1306,7 +1307,8 @@ object BuildCommon {
         // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
         Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
-            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto"
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto",
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/topology/admin/scalapb/package.proto",
           ),
         addProtobufFilesToHeaderCheck(Compile),
       )

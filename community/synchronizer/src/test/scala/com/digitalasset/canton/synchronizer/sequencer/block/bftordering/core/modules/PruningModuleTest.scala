@@ -400,6 +400,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       mock[EpochStoreReader[E]],
       outputStore,
       mock[BftOrdererPruningSchedulerStore[E]],
+      None,
     )
     val pruning = new PruningModule[E](
       stores,

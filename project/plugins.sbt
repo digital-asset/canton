@@ -1,5 +1,5 @@
 // Linting plugins
-addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
+addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.1")
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.0")
 addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.5.6")
 addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.3")
@@ -35,7 +35,7 @@ libraryDependencies += "com.esotericsoftware.yamlbeans" % "yamlbeans" % "1.13"
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.3.1")
 
 // Need better files for building the config file when doing the 'did we break Protobuf compatibility?' check
-libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.8.0"
+libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.9.2"
 
 // enable dependency tree plugin (now native as of sbt 1.4.x)
 addDependencyTreePlugin

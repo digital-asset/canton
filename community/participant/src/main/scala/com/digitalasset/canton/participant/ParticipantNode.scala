@@ -768,6 +768,7 @@ class ParticipantNodeBootstrap(
                 pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
                 updateServiceConfig = arguments.config.ledgerApi.updateService,
+                warnOnJwtScopeUsage = arguments.testingConfig.warnOnJwtScopeUsage,
               )
             ),
           loggerFactory = loggerFactory,

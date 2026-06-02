@@ -132,7 +132,7 @@ class PekkoStreamParallelBatchedLoader[Key, Value](
   */
 trait ContractLoader {
   def contracts: Loader[(ContractId, Long), ExistingContractStatus]
-  def keys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])]
+  def keys: Loader[KeysPageQuery, (Vector[(ContractId, Long)], Option[Long])]
 }
 
 object ContractLoader {
@@ -236,13 +236,13 @@ object ContractLoader {
       executionContext: ExecutionContext,
   ): ResourceOwner[PekkoStreamParallelBatchedLoader[
     KeysPageQuery,
-    (Vector[ContractId], Option[Long]),
+    (Vector[(ContractId, Long)], Option[Long]),
   ]] =
     ResourceOwner
       .forReleasable(() =>
         new PekkoStreamParallelBatchedLoader[
           KeysPageQuery,
-          (Vector[ContractId], Option[Long]),
+          (Vector[(ContractId, Long)], Option[Long]),
         ](
           batchLoad = { batch =>
             // we can use the latest offset as the API only requires us to not return a state older than the given offset
@@ -270,9 +270,10 @@ object ContractLoader {
             } yield queries
               .zip(pageResults)
               .map { case (query, result) =>
-                val contractIds =
-                  result.internalContractIds.flatMap(internalIdToContractId.get)
-                query -> (contractIds, result.nextPageToken)
+                query -> (
+                  resolveContractIdsWithSeqIds(result, internalIdToContractId),
+                  result.nextPageToken,
+                )
               }
               .toMap
           },
@@ -294,7 +295,7 @@ object ContractLoader {
   )(implicit
       loggingContext: LoggingContextWithTrace,
       ec: ExecutionContext,
-  ): Future[Option[(Vector[ContractId], Option[Long])]] =
+  ): Future[Option[(Vector[(ContractId, Long)], Option[Long])]] =
     for {
       pageResult <- dbDispatcher
         .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
@@ -304,11 +305,20 @@ object ContractLoader {
         .lookupBatchedContractIdsNonReadThrough(pageResult.internalContractIds)(
           loggingContext.traceContext
         )
-    } yield {
-      val contractIds =
-        pageResult.internalContractIds.flatMap(contractIdLookup.get)
-      Some((contractIds, pageResult.nextPageToken))
-    }
+    } yield Some(
+      (resolveContractIdsWithSeqIds(pageResult, contractIdLookup), pageResult.nextPageToken)
+    )
+
+  private def resolveContractIdsWithSeqIds(
+      pageResult: ContractStorageBackend.KeysPageResult,
+      internalIdToContractId: Map[Long, ContractId],
+  ): Vector[(ContractId, Long)] =
+    pageResult.internalContractIds.view
+      .zip(pageResult.eventSequentialIds)
+      .flatMap { case (internalId, eventSeqId) =>
+        internalIdToContractId.get(internalId).map(_ -> eventSeqId)
+      }
+      .toVector
 
   def create(
       participantContractStore: LedgerApiContractStore,
@@ -355,19 +365,20 @@ object ContractLoader {
                 loggingContext: LoggingContextWithTrace
             ): Future[Option[ExistingContractStatus]] = contractsBatchLoader.load(key)
           }
-        override final val keys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] =
+        override final val keys: Loader[KeysPageQuery, (Vector[(ContractId, Long)], Option[Long])] =
           contractKeysBatchLoader match {
             case Some(batchLoader) =>
-              new Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] {
+              new Loader[KeysPageQuery, (Vector[(ContractId, Long)], Option[Long])] {
                 override def load(key: KeysPageQuery)(implicit
                     loggingContext: LoggingContextWithTrace
-                ): Future[Option[(Vector[ContractId], Option[Long])]] = batchLoader.load(key)
+                ): Future[Option[(Vector[(ContractId, Long)], Option[Long])]] =
+                  batchLoader.load(key)
               }
             case None =>
-              new Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] {
+              new Loader[KeysPageQuery, (Vector[(ContractId, Long)], Option[Long])] {
                 override def load(key: KeysPageQuery)(implicit
                     loggingContext: LoggingContextWithTrace
-                ): Future[Option[(Vector[ContractId], Option[Long])]] =
+                ): Future[Option[(Vector[(ContractId, Long)], Option[Long])]] =
                   fetchOneKey(
                     contractStorageBackend,
                     dbDispatcher,
@@ -386,11 +397,11 @@ object ContractLoader {
             loggingContext: LoggingContextWithTrace
         ): Future[Option[ExistingContractStatus]] = Future.successful(None)
       }
-    override final val keys: Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] =
-      new Loader[KeysPageQuery, (Vector[ContractId], Option[Long])] {
+    override final val keys: Loader[KeysPageQuery, (Vector[(ContractId, Long)], Option[Long])] =
+      new Loader[KeysPageQuery, (Vector[(ContractId, Long)], Option[Long])] {
         override def load(key: KeysPageQuery)(implicit
             loggingContext: LoggingContextWithTrace
-        ): Future[Option[(Vector[ContractId], Option[Long])]] = Future.successful(None)
+        ): Future[Option[(Vector[(ContractId, Long)], Option[Long])]] = Future.successful(None)
       }
   }
 }

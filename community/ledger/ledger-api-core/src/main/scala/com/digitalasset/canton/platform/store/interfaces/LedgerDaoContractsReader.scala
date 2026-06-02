@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.store.interfaces
 
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.ExistingContractStatus
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
 import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
@@ -31,22 +30,6 @@ private[platform] trait LedgerDaoContractsReader {
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ExistingContractStatus]]
 
-  /** Looks up the state of a contract key
-    *
-    * Due to batching of several requests, we may return newer information than at the provided
-    * offset, but never older information.
-    *
-    * @param key
-    *   the contract key to query
-    * @param notEarlierThanEventSeqId
-    *   the offset threshold to resolve the key state (state can be newer, but not older)
-    * @return
-    *   the [[KeyState]]
-    */
-  def lookupKeyState(key: GlobalKey, notEarlierThanEventSeqId: Long)(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[KeyState]
-
   /** Batch lookup of contract keys
     *
     * Used to unit test the SQL queries for key lookups. Does not use batching.
@@ -70,24 +53,17 @@ private[platform] trait LedgerDaoContractsReader {
     * @param limit
     *   maximum number of contract IDs to return
     * @return
-    *   a vector of active contract IDs and an optional next page token
+    *   a vector of active contract IDs each paired with the event sequential ID of its activation
+    *   event, and an optional next page token
     */
+  // TODO(#31713) refactor return type to a case class to avoid confusion with the pagination token
   def lookupNonUniqueKey(
       key: GlobalKey,
       notEarlierThanEventSeqId: Long,
       nextPageToken: Option[Long],
       limit: Int,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[(Vector[ContractId], Option[Long])]
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[(Vector[(ContractId, Long)], Option[Long])]
 
-}
-
-object LedgerDaoContractsReader {
-  import com.digitalasset.daml.lf.value.Value as lfval
-  private type ContractId = lfval.ContractId
-
-  sealed trait KeyState extends Product with Serializable
-
-  final case class KeyAssigned(contractId: ContractId) extends KeyState
-
-  final case object KeyUnassigned extends KeyState
 }

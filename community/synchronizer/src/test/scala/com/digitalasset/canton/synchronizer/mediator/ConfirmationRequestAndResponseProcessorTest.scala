@@ -285,7 +285,7 @@ class ConfirmationRequestAndResponseProcessorTest
       new InMemoryFinalizedResponseStore(loggerFactory),
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
       mock[Clock],
-      MediatorTestMetrics,
+      MediatorTestMetrics(this.getClass.getSimpleName),
       testedProtocolVersion,
       timeouts,
       loggerFactory,

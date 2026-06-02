@@ -608,7 +608,14 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
             .map(_.psid)}]"
       )
     } else if (ongoingCopyFromPredecessor.compareAndSet(None, newRef)) {
-      val work = doCopyFromPredecessorSynchronizerStore(sourceStore)
+      errorLoggingContext.info(
+        s"LSU: About to copy topology from ${sourceStore.storeId.psid.suffix}"
+      )
+      val work = doCopyFromPredecessorSynchronizerStore(sourceStore).map { _ =>
+        errorLoggingContext.info(
+          s"LSU: Done copying topology from ${sourceStore.storeId.psid.suffix}"
+        )
+      }
       newPromise
         .completeWithUS(
           work.thereafter(_ => ongoingCopyFromPredecessor.compareAndSet(newRef, None).discard)

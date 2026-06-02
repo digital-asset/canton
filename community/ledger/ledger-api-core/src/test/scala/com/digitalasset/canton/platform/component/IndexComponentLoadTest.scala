@@ -662,6 +662,7 @@ class IndexComponentLoadTest
       assignmentExclusivity = None,
       reassignmentCounter = 11L,
       nodeId = nodeId,
+      keyOpt = None,
     )
 
   private def reassignment(

@@ -13,6 +13,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.data as admin
 import com.digitalasset.canton.admin.api.client.data.PackageDescription.PackageContents
+import com.digitalasset.canton.admin.api.client.data.PendingOperationMetadata
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.PackageServiceGrpc.PackageServiceStub
 import com.digitalasset.canton.admin.participant.v30.ParticipantInspectionServiceGrpc.ParticipantInspectionServiceStub
@@ -63,6 +64,7 @@ import com.digitalasset.canton.topology.{
   PartyId,
   PhysicalSynchronizerId,
   SequencerId,
+  Synchronizer,
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -802,6 +804,44 @@ object ParticipantAdminCommands {
   }
 
   object ParticipantRepairManagement {
+
+    final case class ListPendingOperations(
+        operationName: String, // TODO(#32445): Make operation name optional.
+        synchronizerId: Option[Synchronizer],
+        operationKey: Option[String],
+    ) extends GrpcAdminCommand[
+          v30.ListPendingOperationsRequest,
+          v30.ListPendingOperationsResponse,
+          Seq[PendingOperationMetadata],
+        ] {
+
+      override type Svc = ParticipantRepairServiceStub
+
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        v30.ParticipantRepairServiceGrpc.stub(channel)
+
+      override protected def createRequest(): Either[String, v30.ListPendingOperationsRequest] =
+        Right(
+          v30.ListPendingOperationsRequest(
+            operationName,
+            synchronizerId.map(_.toProtoV30),
+            operationKey,
+          )
+        )
+
+      override protected def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: v30.ListPendingOperationsRequest,
+      ): Future[v30.ListPendingOperationsResponse] =
+        service.listPendingOperations(request)
+
+      override protected def handleResponse(
+          response: v30.ListPendingOperationsResponse
+      ): Either[String, Seq[PendingOperationMetadata]] =
+        response.pendingOperations
+          .traverse(PendingOperationMetadata.fromProtoV30)
+          .leftMap(_.toString)
+    }
 
     final case class ExportAcs(
         parties: Set[PartyId],

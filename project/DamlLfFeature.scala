@@ -181,6 +181,8 @@ object DamlLfFeature {
     "featureExternalCall" -> featureExternalCall,
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,
+    "featurePV34" -> featurePV34,
+    "featurePV35" -> featurePV35,
   )
 
   def generateFeaturesScala = Def.task {

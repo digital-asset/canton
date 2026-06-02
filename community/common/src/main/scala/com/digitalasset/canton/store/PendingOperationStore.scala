@@ -21,6 +21,8 @@ import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
 
+trait GenericPOStore {}
+
 /** @tparam Op
   *   A protobuf message that implements
   *   [[com.digitalasset.canton.version.HasProtocolVersionedWrapper]] that contains the relevant

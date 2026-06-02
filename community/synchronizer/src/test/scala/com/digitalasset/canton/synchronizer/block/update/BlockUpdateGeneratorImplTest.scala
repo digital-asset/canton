@@ -84,6 +84,8 @@ class BlockUpdateGeneratorImplTest
       }
     )
 
+  private val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
+
   "BlockUpdateGeneratorImpl.extractBlockEvents" should {
     "filter out events" when {
       "the sequencing time is before or at the minimum sequencing time" in {
@@ -113,7 +115,7 @@ class BlockUpdateGeneratorImplTest
             drSequencingTimeUpperBound = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
-            SequencerTestMetrics,
+            metrics,
             BatchingConfig(),
             consistencyChecks = true,
             memberValidatorMock,
@@ -230,7 +232,7 @@ class BlockUpdateGeneratorImplTest
             drSequencingTimeUpperBound = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
-            SequencerTestMetrics,
+            metrics,
             BatchingConfig(),
             consistencyChecks = true,
             memberValidatorMock,
@@ -285,7 +287,7 @@ class BlockUpdateGeneratorImplTest
             drSequencingTimeUpperBound = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
-            SequencerTestMetrics,
+            metrics,
             BatchingConfig(),
             consistencyChecks = true,
             mock[SequencerMemberValidator],
@@ -364,7 +366,7 @@ class BlockUpdateGeneratorImplTest
               drSequencingTimeUpperBound = None,
               getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
-              SequencerTestMetrics,
+              metrics,
               BatchingConfig(),
               consistencyChecks = true,
               mock[SequencerMemberValidator],
@@ -437,7 +439,7 @@ class BlockUpdateGeneratorImplTest
               drSequencingTimeUpperBound = None,
               getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
-              SequencerTestMetrics,
+              metrics,
               BatchingConfig(),
               consistencyChecks = true,
               mock[SequencerMemberValidator],

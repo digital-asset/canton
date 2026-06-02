@@ -52,15 +52,6 @@ class DynamicSynchronizerParametersLookup[P](
           .map(projector)
       )
 
-  /** Return the value of the topology snapshot approximation.
-    */
-  def getApproximate()(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[P]] =
-    topologyClient.currentSnapshotApproximation
-      .flatMap(
-        _.findDynamicSynchronizerParameters()
-          .map(_.map(p => projector(p.parameters)).toOption)
-      )
-
   /** Return the approximate latest validity/freshness. Returned value is the approximate timestamp
     * of the `TopologyClient`.
     */

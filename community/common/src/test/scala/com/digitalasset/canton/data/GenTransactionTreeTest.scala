@@ -164,7 +164,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          allLightTrees.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          allLightTrees.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           allTrees.map(withViewPositions),
           Seq.empty,
@@ -184,7 +185,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = true,
-          allLightTrees.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          allLightTrees.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(allTrees.map(withViewPositions), Seq.empty, Seq.empty)
       }
 
@@ -221,7 +223,8 @@ class GenTransactionTreeTest
             testedProtocolVersion,
             factory.cryptoOps,
             topLevelOnly = true,
-            allLightWeightForInf.map(withViewPosition),
+            // TODO(#32393): wire ciphertext ID
+            allLightWeightForInf.map(ltv => withViewPosition(ltv) -> None),
           ) shouldBe ToFullViewTreesResult(
             topLevelForInf.map(withViewPositions),
             Seq.empty,
@@ -257,7 +260,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          inputLightTrees.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          inputLightTrees.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           expectedFullTrees.map(withViewPositions),
           badLightTrees.map(withViewPosition),
@@ -277,7 +281,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          inputLightTrees1.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          inputLightTrees1.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           allFullTrees.map(withViewPositions),
           Seq.empty,
@@ -290,7 +295,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          inputLightTrees2.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          inputLightTrees2.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           allFullTrees.map(withViewPositions),
           Seq.empty,
@@ -310,7 +316,8 @@ class GenTransactionTreeTest
             testedProtocolVersion,
             factory.cryptoOps,
             topLevelOnly = false,
-            inputLightTrees.map(withViewPosition),
+            // TODO(#32393): wire ciphertext ID
+            inputLightTrees.map(ltv => withViewPosition(ltv) -> None),
           ) shouldBe ToFullViewTreesResult(
           allFullTrees.map(withViewPositions),
           Seq.empty,

@@ -75,11 +75,15 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   private val shortTime: PowerDistribution = PowerDistribution(0.milliseconds, 100.milliseconds)
   private val longTime: PowerDistribution = PowerDistribution(1.second, 5.seconds)
 
-  private def generateStage(segmentLength: SegmentLength): SimulationTestStageSettings = {
+  private def generateStage(
+      segmentLength: SegmentLength,
+      numberInitialNodes: Int,
+  ): SimulationTestStageSettings = {
     val numberOfNodesToOnboard = randomWeightedOneOf(
       10 -> 0,
       3 -> 1,
     )
+    val numberOfNodes = numberInitialNodes + numberOfNodesToOnboard
     SimulationTestStageSettings(
       simulationSettings = SimulationSettings(
         LocalSettings(
@@ -115,12 +119,14 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         ),
         phaseDurations = PhaseDurations(
           faulty = durationOfFirstPhaseWithFaults,
-          recovery =
+          recovery = (10 seconds).plus(
             if (numberOfNodesToOnboard > 0)
-              (segmentLength.length.value * 2) seconds
+              // We add some extra times if a node was onboarded
+              (segmentLength.length.value * numberOfNodes * 2) seconds
             else {
               0 seconds
-            },
+            }
+          ),
         ),
       ),
       TopologySettings(
@@ -148,13 +154,14 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         )
       )
     )
+    val numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5)
     SimulationTestSettings(
-      numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5),
+      numberOfInitialNodes = numberOfInitialNodes,
       segmentLength = segmentLength,
       stages = NonEmpty(
         Seq,
-        generateStage(segmentLength),
-        generateStage(segmentLength),
+        generateStage(segmentLength, numberOfInitialNodes),
+        generateStage(segmentLength, numberOfInitialNodes),
       ),
     )
   }

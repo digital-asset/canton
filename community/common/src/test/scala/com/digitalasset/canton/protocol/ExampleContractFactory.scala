@@ -7,9 +7,10 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Salt, TestHash, TestSalt}
 import com.digitalasset.canton.util.{LfTransactionBuilder, TestContractHasher}
 import com.digitalasset.canton.{LfPackageId, LfPartyId, protocol}
-import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.PackageName
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
+import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
@@ -18,7 +19,7 @@ import com.digitalasset.daml.lf.transaction.{
   SerializationVersion,
 }
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value.{ContractId, ValueInt64}
+import com.digitalasset.daml.lf.value.Value.{ContractId, ValueInt64, ValueUnit}
 import org.scalatest.EitherValues
 import org.scalatest.Inside.inside
 
@@ -130,13 +131,12 @@ object ExampleContractFactory extends EitherValues {
   def buildKeyWithMaintainers(
       templateId: Ref.Identifier = templateId,
       packageName: Ref.PackageName = packageName,
-      value: Value = ValueInt64(random.nextLong()),
       maintainers: Set[Ref.Party] = Set(signatory),
   ): GlobalKeyWithMaintainers =
     GlobalKeyWithMaintainers.assertBuild(
       templateId,
-      value,
-      crypto.Hash.assertHashContractKey(templateId, packageName, value),
+      ValueUnit,
+      SValueHash.assertHashContractKey(packageName, templateId.qualifiedName, SValue.SUnit),
       maintainers,
       packageName,
     )

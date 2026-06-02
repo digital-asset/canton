@@ -103,7 +103,7 @@ class DbOutputMetadataStore(
                  ${metadata.blockNumber},
                  ${metadata.blockBftTime}
                )
-               on conflict (block_number) do nothing"""
+               on conflict (epoch_number, block_number) do nothing"""
       case _: H2 =>
         sqlu"""merge into
                      ord_metadata_output_blocks using dual on (

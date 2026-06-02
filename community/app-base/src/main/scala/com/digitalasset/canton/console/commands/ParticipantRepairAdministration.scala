@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands
 import com.digitalasset.canton.admin.api.client.data.{
+  PendingOperationMetadata,
   SequencerConnectionValidation,
   SynchronizerConnectionConfig,
 }
@@ -32,7 +33,12 @@ import com.digitalasset.canton.participant.admin.data.{
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  PartyId,
+  PhysicalSynchronizerId,
+  Synchronizer,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -119,6 +125,36 @@ class ParticipantRepairAdministration(
         )
       }
     }
+
+  object pending_operations {
+    @Help.Summary("List all pending operation for the given operation name", FeatureFlag.Repair)
+    @Help.Description(
+      """Lists pending operations matching the provided filters.
+        |
+        |Parameters:
+        |- operationName: The operation type to list.
+        |- filterSynchronizer: Optional filter, restricts results to a specific synchronizer.
+        |- filterOperationKey: Optional filter, restricts results to a specific operation key.
+        |
+        |Returns:
+        |- A sequence of pending operation metadata entries.
+    """
+    )
+    def list(
+        operationName: String, // TODO(#32445): Make operation name optional.
+        filterSynchronizer: Option[Synchronizer] = None,
+        filterOperationKey: Option[String] = None,
+    ): Seq[PendingOperationMetadata] =
+      check(FeatureFlag.Repair) {
+        consoleEnvironment.run {
+          runner.adminCommand(
+            ParticipantAdminCommands.ParticipantRepairManagement
+              .ListPendingOperations(operationName, filterSynchronizer, filterOperationKey)
+          )
+        }
+      }
+
+  }
 
   @Help.Summary("Change assignation of contracts from one synchronizer to another")
   @Help.Description(

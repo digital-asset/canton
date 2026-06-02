@@ -19,8 +19,9 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-
 -
+- The concurrency limit interceptor `ActiveRequestInterceptor` now caches rejection responses instead of generating a new error (and thereby filling the stack trace) for each
+rejected response, once the concurrency limit is filled.
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
   of an onboarding party.
 - OpenAPI and AsyncAPI files are now included in the API archive, and the bundle is published as a Maven artifact on
@@ -42,6 +43,9 @@ Template for a bigger topic
 
 ## Bugfixes
 
+- Fixed a bug in the sequencer node bootstrap workflow method `initSequencerNodeServer` to ensure that `maxRequestSize` is
+computed and applied correctly during node initialization, based on the configuration or a topology transaction,
+with a fallback default value of 10 MB.
 - When the AcsCommitmentProcessor is initializing, read stakeholder groups from the snapshot in batches of size
   `canton.parameters.general.batching.max-stakeholder-groups-batch-size` (default 1000), rather than all at once.
   This allows early termination of this initialization if the node is shutting down.
@@ -64,6 +68,14 @@ Template for a bigger topic
 
 #### Recommendation
 
+## Deprecations
+
+### Reminder: Support for scope-based access tokens will be removed in version 3.7.
+- "Scope-based" access tokens, i.e. JWTs without any audience specified, have been deprecated in version 3.5.
+- Versions 3.5 and 3.6 allow configurations using the default or explicitly configured target audiences, and log a warning for non-compliant configurations.
+- In release 3.7, support for "scope-based" tokens will be removed entirely to enforce a valid `aud` field in every incoming JWT.
+  The `scope` field will be repurposed to serve exclusively as an additional, optional claim for fine-grained permissions.
+
 ## Compatibility
 
 The following Canton protocol versions are supported:
@@ -78,4 +90,3 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
-

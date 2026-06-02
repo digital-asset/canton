@@ -30,9 +30,12 @@ import java.util.UUID
   */
 object CantonRequireTypes {
 
-  final case class NonEmptyString private (private val str: String) {
+  final case class NonEmptyString private (private val str: String)
+      extends Ordered[NonEmptyString] {
     def unwrap: String = str
     require(str.nonEmpty, s"Unable to create a NonEmptyString as the empty string $str was given.")
+
+    override def compare(that: NonEmptyString): Int = this.str.compare(that.str)
   }
 
   object NonEmptyString {

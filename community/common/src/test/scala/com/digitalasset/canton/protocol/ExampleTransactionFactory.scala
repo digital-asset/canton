@@ -184,17 +184,17 @@ object ExampleTransactionFactory {
         templateId,
         packageName,
         value,
-        // This hash is wrong for PV35, but it doesn't matter if it's only used in serialization/deserialization tests.
-        // We need it to be that way however for `fromProtoV30` and `toProtoV30` to be consistent.
-        com.digitalasset.daml.lf.crypto.Hash.assertHashContractKey(templateId, packageName, value),
+        // This hash is wrong, but it doesn't matter if it's only used in serialization/deserialization tests.
+        com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey("bubu"),
       ),
     )
 
   def globalKeyWithMaintainers(
       key: LfGlobalKey = defaultGlobalKey,
       maintainers: Set[LfPartyId] = Set(signatory),
+      version: LfSerializationVersion = serializationVersion,
   ): Versioned[LfGlobalKeyWithMaintainers] =
-    LfVersioned(serializationVersion, LfGlobalKeyWithMaintainers(key, maintainers))
+    LfVersioned(version, LfGlobalKeyWithMaintainers(key, maintainers))
 
   def fetchNode(
       cid: LfContractId,

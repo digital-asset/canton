@@ -119,11 +119,6 @@ commands:
                     exit $((NUM_SUCCESSES < << parameters.min_successes >>))
                 name: Fail, if there are fewer than << parameters.min_successes >> successes
                 when: always
-    check_pr_compliance_labels:
-        steps:
-            - run:
-                command: scripts/ci/check-pr-compliance-labels.sh
-                name: Compliance labels check for PR
     check_pr_skip_ci:
         steps:
             - run:
@@ -2516,6 +2511,10 @@ jobs:
                 name: Check Protobuf Required/Optional requirements
             - run:
                 command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
+                name: Lint yaml files
+            - run:
+                command: |
                     echo "checking that the containers shell.nix matches the one in the repository".
                     echo "if this fails, you need to update our build image. have a look at .ci/README.md"
                     diff shell.nix /tmp/shell.nix || exit 1
@@ -2828,13 +2827,12 @@ jobs:
             - run_variations_tests:
                 exclude_unstable_tests: true
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-    verify_circleci_config_and_compliance_label:
+    verify_circleci_config:
         executor: canton-small-docker
         steps:
             - checkout:
                 method: blobless
             - check_pr_skip_ci
-            - check_pr_compliance_labels
             - run:
                 command: |
                     cd .circleci
@@ -2844,10 +2842,6 @@ jobs:
                       exit 1
                     fi
                 name: Generate and check circleci config with committed one
-            - run:
-                command: |
-                    nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
-                name: Lint yaml files
             - slack_red_main_with_volunteer
 orbs:
     slack: circleci/slack@3.3.0
@@ -2948,7 +2942,7 @@ workflows:
                         only: /^v.*/
                 requires:
                     - package_community
-            - verify_circleci_config_and_compliance_label:
+            - verify_circleci_config:
                 filters:
                     branches:
                         ignore:
@@ -3160,6 +3154,23 @@ workflows:
                         only:
                             - main
                             - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - protocol_continuity_test_latest:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - da-images
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - /^gh-readonly-queue\/main\/.*/
                     tags:
                         only: /^v.*/
                 requires:

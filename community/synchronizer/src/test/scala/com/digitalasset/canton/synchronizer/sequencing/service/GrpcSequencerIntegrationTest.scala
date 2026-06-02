@@ -202,16 +202,17 @@ class Env(
     override def maxSubscriptionsPerMember: PositiveInt = PositiveInt.three
     override def disableSubmissionChecksForTesting: Boolean = false
   }
+  private val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
   private val service =
     new GrpcSequencerService(
       sequencer,
-      SequencerTestMetrics,
+      metrics,
       loggerFactory,
       authenticationCheck,
       (_, _) => FutureUnlessShutdown.pure(true),
       new SubscriptionPool[GrpcManagedSubscription[?]](
         clock,
-        SequencerTestMetrics,
+        metrics,
         PositiveInt.three,
         timeouts,
         loggerFactory,
@@ -241,7 +242,7 @@ class Env(
     sanitizePublicErrorMessages = false,
     disableReleaseVersionHandshakeCheck = false,
     synchronizerTopologyManager = mockSynchronizerTopologyManager,
-    metrics = SequencerTestMetrics,
+    metrics = metrics,
     loggerFactory = loggerFactory,
   )
   private val connectService = makeConnectService(sequencerId)
@@ -527,16 +528,17 @@ class GrpcSequencerIntegrationTest
         val port2 = UniquePortGenerator.next
         val sequencerAlias2 = SequencerAlias.tryCreate("Sequencer2")
         val trafficStateRpcCalled = new AtomicInteger(0)
+        val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
         val service2 =
           new GrpcSequencerService(
             sequencer,
-            SequencerTestMetrics,
+            metrics,
             env.loggerFactory,
             authenticationCheck,
             (_, _) => FutureUnlessShutdown.pure(true),
             new SubscriptionPool[GrpcManagedSubscription[?]](
               clock,
-              SequencerTestMetrics,
+              metrics,
               PositiveInt.three,
               env.timeouts,
               env.loggerFactory,

@@ -14,6 +14,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 }
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.CantonBaseError
@@ -41,6 +42,7 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   PartyId,
   PhysicalSynchronizerId,
+  Synchronizer,
   SynchronizerId,
   UniqueIdentifier,
 }
@@ -661,6 +663,41 @@ final class GrpcParticipantRepairService(
 
     CantonGrpcUtil.mapErrNewEUS(ret.leftMap(_.toCantonRpcError))
   }
+
+  override def listPendingOperations(
+      request: ListPendingOperationsRequest
+  ): Future[ListPendingOperationsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val operationNameE: Either[ProtoDeserializationError, NonEmptyString] =
+      NonEmptyString
+        .create(request.operationName)
+        .leftMap(err =>
+          ProtoDeserializationError.InvariantViolation("operation_name", err.toString)
+        )
+
+    val result = for {
+      operationName <- wrapErrUS(operationNameE)
+      synchronizer <- wrapErrUS(request.filterSynchronizer.traverse(Synchronizer.fromProtoV30))
+
+      operationKey = request.filterOperationKey.flatMap(OptionUtil.emptyStringAsNone)
+      pendingOperations <- EitherT.right[RpcError](
+        sync.getPendingLsuOperations(operationName, synchronizer, operationKey)(traceContext)
+      )
+      sortedMetadata = pendingOperations.toSeq
+        .sortBy(op => (op.name, op.synchronizer, op.key))
+        .map(op =>
+          PendingOperationMetadata(
+            operationName = op.name.unwrap,
+            operationKey = op.key,
+            synchronizer = Some(op.synchronizer.toProtoV30),
+          )
+        )
+    } yield ListPendingOperationsResponse(pendingOperations = sortedMetadata)
+
+    CantonGrpcUtil.mapErrNewEUS(result)
+  }
+
 }
 
 object GrpcParticipantRepairService {

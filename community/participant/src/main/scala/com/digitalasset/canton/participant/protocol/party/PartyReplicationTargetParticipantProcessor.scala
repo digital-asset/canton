@@ -179,18 +179,27 @@ class PartyReplicationTargetParticipantProcessor(
     // Skip progress check if more than one other task is already queued that performs this same progress check or
     // is going to schedule a progress check.
     if (executionQueue.isAtMostOneTaskScheduled) {
-      executeAsync(s"Respond to source participant if needed")(
-        EitherTUtil.ifThenET(
-          isChannelOpenForCommunication &&
-            replicationProgressState
-              .getAcsReplicationProgress(requestId)
-              .exists(progress =>
-                testOnlyInterceptor.onTargetParticipantProgress(
-                  progress
-                ) == PartyReplicationTestInterceptor.Proceed
-              )
-        )(respondToSourceParticipant())
-      )
+      executeAsync(s"Respond to source participant if needed") {
+
+        val interceptorAction = Option
+          .when(isChannelOpenForCommunication)(requestId)
+          .flatMap(replicationProgressState.getAcsReplicationProgress)
+          .map(testOnlyInterceptor.onTargetParticipantProgress)
+
+        interceptorAction match {
+
+          case Some(PartyReplicationTestInterceptor.Proceed) =>
+            respondToSourceParticipant()
+
+          case Some(PartyReplicationTestInterceptor.Fail(reason)) =>
+            // Actively fail the asynchronous task and propagate the error
+            EitherT.leftT[FutureUnlessShutdown, Unit](reason)
+
+          case _ =>
+            // Covers Wait, None, or closed channel
+            EitherT.rightT[FutureUnlessShutdown, String](())
+        }
+      }
     }
 
   private def respondToSourceParticipant()(implicit

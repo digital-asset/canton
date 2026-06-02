@@ -59,7 +59,7 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
             None,
             BatchingConfig(),
             loggerFactory,
-            SequencerTestMetrics,
+            SequencerTestMetrics(this.getClass.getSimpleName),
             memberValidatorMock,
           )
 

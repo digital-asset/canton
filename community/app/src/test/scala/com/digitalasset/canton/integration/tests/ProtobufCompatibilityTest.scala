@@ -196,6 +196,13 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/synchronizer/v30/synchronizer.proto:Previously present field "3" with name "is_late_upgrade" on message "SynchronizerPredecessor" was deleted.""",
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "3" with name "version" on message "NotInitialized" was deleted.""",
       """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Previously present field "2" with name "epoch_number" on message "BatchRequest" was deleted.""",
+      // Added DABFT leaders and blacklisted nodes to `get_ordering_topology` console admin function's output
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "leader_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "6" with name "blacklisted_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
+      // Removal of LookupByKeyActionDescription
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "4" with name "lookup_by_key" on message "ActionDescription" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved name "lookup_by_key" on message "ActionDescription" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved range "[4]" on message "ActionDescription" is missing values: [4] were removed.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -208,6 +215,13 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Previously present field "2" with name "epoch_number" on message "BatchRequest" was deleted.""",
       // Backward compatibility
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/snapshot.proto" was deleted.""",
+      // Added DABFT leaders and blacklisted nodes to `get_ordering_topology` console admin function's output
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "leader_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "6" with name "blacklisted_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
+      // Removal of LookupByKeyActionDescription
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "4" with name "lookup_by_key" on message "ActionDescription" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved name "lookup_by_key" on message "ActionDescription" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved range "[4]" on message "ActionDescription" is missing values: [4] were removed.""",
     ),
   )
 

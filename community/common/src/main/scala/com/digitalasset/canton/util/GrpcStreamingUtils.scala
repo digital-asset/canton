@@ -7,6 +7,7 @@ import better.files.*
 import better.files.File.newTemporaryFile
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserverWithContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -77,30 +78,32 @@ object GrpcStreamingUtils {
     observer
   }
 
-  /** Streams requests of gzipped bytes from the client in multiple stages, allowing efficient
-    * memory usage.
+  /** Streams requests of gzipped bytes from the client in multiple stages, allowing for efficient
+    * memory usage and safe early termination.
     *
-    *   1. The first request can contain some context `RequestContext`, which is extracted with
-    *      `contextFromFirstElement` and passed along with the source.
-    *   1. The gzipped bytes from each request are extracted with `getGzippedBytes`.
-    *   1. Messages from the decompressed InputStream can be extracted via `parseMessage`.
+    *   1. The first request can contain some context `RequestContext`, which is extracted using
+    *      `contextFromFirstRequest` and passed along with the source.
+    *   1. The gzipped bytes from each request are extracted using `getGzippedBytes`.
+    *   1. Messages from the decompressed input stream are extracted via `parseMessage`.
     *   1. The source, which the caller uses for further processing, continually parses new messages
     *      from the decompressed input stream.
     *
     * @param responseObserver
-    *   the response observer to signal errors or completion to the client
+    *   The response observer used to signal errors or completion to the client.
     * @param responseIfNoRequests
-    *   the response if no requests were actually submitted.
+    *   The response to return if no requests were actually submitted.
     * @param getGzippedBytes
-    *   the extractor method to get a `ByteString` from the request `Req`
+    *   The extractor method used to get a `ByteString` from the request `Req`.
     * @param parseMessage
-    *   should return `None` if there is no more input to read, `Some(Right(_))` for a successful
-    *   parse, and `Some(Left(_))` if an error occurred during parsing. Any parsing errors bubbled
-    *   up and the processing is aborted.
+    *   A method that returns `None` if there is no more input to read, `Some(Right(_))` for a
+    *   successful parse, and `Some(Left(_))` if an error occurred during parsing. Any parsing
+    *   errors are bubbled up, and processing is aborted.
     * @param contextFromFirstRequest
-    *   extract context from the first request
+    *   The extractor method used to get the context from the first request.
     * @param action
-    *   the main processing pipeline
+    *   The main processing pipeline consuming the parsed messages. If the returned future fails
+    *   (for example, due to a validation failure or an intentional abort), the stream terminates
+    *   early and safely returns that exact application error to the client.
     */
   def streamGzippedChunksFromClient[Req, Resp, RequestContext, ParsedMessage](
       responseObserver: StreamObserver[Resp],
@@ -130,7 +133,19 @@ object GrpcStreamingUtils {
     def writeRequestBytes(request: Req): Unit = Try {
       // gRPC backpressure works by "blocking" the onNext call.
       blocking(getGzippedBytes(request).writeTo(output))
-    }.forFailed(reportError)
+    } forFailed {
+      case err: java.io.IOException
+          if err.getMessage != null && err.getMessage.contains("Pipe closed") =>
+        // Expected race condition during an early stream abort.
+        // If the downstream processing (`action`) fails with an application error (e.g., validation failure),
+        // it closes the `input` stream (`PipedInputStream`). If the client concurrently sends another chunk,
+        // writing to `output` (`PipedOutputStream`) throws this "Pipe closed" IOException.
+        // We safely swallow this to prevent a double `onError` call on the gRPC observer (`responseObserver.onError`),
+        // ensuring the client receives the actual application error instead of a broken pipe error.
+        Try(output.close()).discard
+      case err =>
+        reportError(err)
+    }
 
     new StreamObserver[Req] {
       override def onNext(value: Req): Unit =
