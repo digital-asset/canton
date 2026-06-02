@@ -1232,6 +1232,7 @@ object BuildCommon {
         DamlProjects.`test-evidence-generator` % "test->test",
         DamlProjects.`test-evidence-tag` % "test->test",
         `community-common` % "test->test",
+        `daml-tls` % "test->test",
         `ledger-json-api` % "compile->compile;test->test",
       )
       .enablePlugins(DamlPlugin)
