@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -13,8 +14,8 @@ import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.daml.lf.value.Value.ContractId
 
-class EventQueryServiceIT extends LedgerTestSuite {
-  import com.daml.ledger.api.testtool.suites.v2_2.CompanionImplicits.*
+class EventQueryServiceIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   // TODO(i16065): Re-enable getEventsByContractKey tests
 //  private def toOption(protoString: String): Option[String] = {

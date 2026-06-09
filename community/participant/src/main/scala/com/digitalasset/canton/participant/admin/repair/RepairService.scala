@@ -189,7 +189,7 @@ final class RepairService(
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
     logger.info(
       s"Purging ${contractIds.length} contracts from $synchronizerAlias with ignoreAlreadyPurged=$ignoreAlreadyPurged. " +
-        s"Mode: ${if (parameters.alphaMultiSynchronizerSupport) "Alpha Multi Synchronizer (Unassignment)"
+        s"Mode: ${if (parameters.enableAllLedgerApiReassignments) "Alpha Multi Synchronizer (Unassignment)"
           else "Standard (Archive Transaction)"}"
     )
 
@@ -233,7 +233,7 @@ final class RepairService(
           toc = repair.tryExactlyOneTimeOfRepair.toToc
 
           _ <-
-            if (parameters.alphaMultiSynchronizerSupport) {
+            if (parameters.enableAllLedgerApiReassignments) {
               for {
                 operationsE <- EitherT.fromEither[FutureUnlessShutdown](
                   contractIds
@@ -732,6 +732,7 @@ final class RepairService(
           assignmentExclusivity = None,
           reassignmentCounter = reassignmentCounter.unwrap,
           nodeId = nodeId,
+          keyOpt = c.metadata.maybeKeyWithMaintainers,
         )
       }
 

@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.getLsuSequencingTestMetricValues
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule
@@ -101,21 +102,45 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
         m.get(sequencer3.id).value should be > 0L
       }
 
-      sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
-      sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
-      eventually() {
-        getLsuSequencingTestMetricValues(mediator3).get(sequencer4.id).value shouldBe 2
-        getLsuSequencingTestMetricValues(mediator4).get(sequencer4.id).value shouldBe 2
-      }
+      mediator3.stop()
+      mediator3.start()
 
-      // Check whether the command behaves well with a restart
-      sequencer4.stop()
-      sequencer4.start()
-      sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
-      eventually() {
-        getLsuSequencingTestMetricValues(mediator3).get(sequencer4.id).value shouldBe 3
-        getLsuSequencingTestMetricValues(mediator4).get(sequencer4.id).value shouldBe 3
-      }
+      loggerFactory.assertLogsUnorderedOptional(
+        {
+          sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
+          sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
+          eventually() {
+            getLsuSequencingTestMetricValues(mediator3).get(sequencer4.id).value shouldBe 2
+            getLsuSequencingTestMetricValues(mediator4).get(sequencer4.id).value shouldBe 2
+          }
+
+          // Check whether the command behaves well with a restart
+          sequencer4.stop()
+          sequencer4.start()
+          sequencer4.setup.test_lsu_sequencing(NonNegativeInt.zero)
+          eventually() {
+            getLsuSequencingTestMetricValues(mediator3).get(sequencer4.id).value shouldBe 3
+            getLsuSequencingTestMetricValues(mediator4).get(sequencer4.id).value shouldBe 3
+          }
+        },
+        // can happen if one mediator tries to ack when sequencer4 is stopped
+        (
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should include("Failed to acknowledge clean timestamp"),
+        ),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should include(
+            "Is the server running? Did you configure the server address"
+          ),
+        ),
+        (
+          LogEntryOptionality.Optional,
+          _.warningMessage should include(
+            "shutdown did not complete gracefully in allotted 3 seconds"
+          ),
+        ),
+      )
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 

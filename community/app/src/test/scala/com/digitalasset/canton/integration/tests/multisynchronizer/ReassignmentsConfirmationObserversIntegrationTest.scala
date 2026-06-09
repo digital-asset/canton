@@ -85,7 +85,7 @@ sealed trait ReassignmentsConfirmationObserversIntegrationTest
       // We want to trigger time out
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

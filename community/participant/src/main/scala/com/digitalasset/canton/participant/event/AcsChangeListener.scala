@@ -10,7 +10,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   AcsChangeFactoryImpl,
   ContractStakeholdersAndReassignmentCounter,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,15 +29,18 @@ trait AcsChangeListener {
     *   active contract set change descriptor
     */
   def publish(toc: RecordTime, acsChange: AcsChange)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit
 
   def publish(acsChanges: NonEmpty[Seq[(RecordTime, AcsChange)]])(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit]
 
   def publish(toc: RecordTime, acsChangeFactoryO: Option[AcsChangeFactory])(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Unit
 
 }

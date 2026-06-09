@@ -255,6 +255,8 @@ final class StateTransferBehavior[E <: Env[E]](
           Consensus.Admin.GetOrderingTopologyResponse(
             epochState.epoch.info.number,
             activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.leaders,
+            activeTopologyInfo.currentMembership.blacklistedNodes,
             activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
           )
         )

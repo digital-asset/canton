@@ -333,6 +333,7 @@ object SequentialWriteDaoSpec {
     reassignment_id = None,
     reassignment_counter = None,
     notPersistedContractId = hashCid("24"),
+    notPersistedContractKey = None,
   )
 
   private val someEventDeactivate = DbDto.EventDeactivate(
@@ -369,6 +370,7 @@ object SequentialWriteDaoSpec {
     reassignment_counter = None,
     assignment_exclusivity = None,
     target_synchronizer_id = None,
+    notPersistedContractKey = None,
   )
 
   val singlePartyFixture: Option[Update.TopologyTransactionEffective] =

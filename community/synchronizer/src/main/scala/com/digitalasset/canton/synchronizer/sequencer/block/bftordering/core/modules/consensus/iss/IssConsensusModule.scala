@@ -347,6 +347,8 @@ final class IssConsensusModule[E <: Env[E]](
           GetOrderingTopologyResponse(
             epochState.epoch.info.number,
             activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.leaders,
+            activeTopologyInfo.currentMembership.blacklistedNodes,
             activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
           )
         )

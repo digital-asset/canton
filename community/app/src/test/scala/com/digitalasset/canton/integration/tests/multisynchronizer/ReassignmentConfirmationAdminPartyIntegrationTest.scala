@@ -69,7 +69,7 @@ sealed trait ReassignmentConfirmationAdminPartyIntegrationTest
         // Because we play with the simClock, ensure we have enough forward tolerance
         // on the target timestamp to not impact up unassigments.
         ConfigTransforms.updateTargetTimestampForwardTolerance(1.hours),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

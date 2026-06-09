@@ -12,7 +12,6 @@ import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.KeysPageQuery
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -59,43 +58,6 @@ private[dao] sealed class ContractsReader(
         },
     )
 
-  /** Lookup a contract key state at a specific ledger offset.
-    *
-    * @param key
-    *   the contract key
-    * @param notEarlierThanEventSeqId
-    *   the lower bound offset of the ledger for which to query for the key state
-    * @return
-    *   the key state.
-    */
-  override def lookupKeyState(key: Key, notEarlierThanEventSeqId: Long)(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[KeyState] =
-    Timed.future(
-      metrics.index.db.lookupKey,
-      contractLoader.keys
-        .load(
-          KeysPageQuery(
-            key = key,
-            validAtEventSeqId = notEarlierThanEventSeqId,
-            limit = 1,
-            nextPageToken = None,
-          )
-        )
-        .map {
-          case Some((contractIds, _)) =>
-            contractIds.headOption
-              .map(KeyAssigned.apply)
-              .getOrElse(KeyUnassigned)
-          case None =>
-            logger
-              .error(
-                s"Key $key resulted in an invalid empty load at offset $notEarlierThanEventSeqId"
-              )(loggingContext.traceContext)
-            KeyUnassigned
-        },
-    )
-
   override def lookupContractState(contractId: ContractId, notEarlierThanEventSeqId: Long)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ExistingContractStatus]] =
@@ -127,7 +89,7 @@ private[dao] sealed class ContractsReader(
       limit: Int,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[(Vector[ContractId], Option[Long])] =
+  ): Future[(Vector[(ContractId, Long)], Option[Long])] =
     Timed.future(
       metrics.index.db.lookupNonUniqueKey,
       contractLoader.keys

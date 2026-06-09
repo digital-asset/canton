@@ -24,6 +24,8 @@ trait ContractStore {
       loggingContext: LoggingContextWithTrace
   ): Future[Option[LfFatContractInst]]
 
+  // TODO(#31713) remove the old lookupContractKey and check if the prefetching of the contractState cache needs to be
+  //  ported to the latest method (lookupNonUniqueContractKey)
   def lookupContractKey(readers: Set[Ref.Party], key: GlobalKey)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractId]]

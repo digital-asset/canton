@@ -186,7 +186,7 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
           forAll(participants.local)(
             _.topology.lsu.sequencer_successors
               .list()
-              .filter(_.item.sequencerId == sequencer1.id)
+              .filter(_.item.sequencerId == sequencer2.id)
               .loneElement
           )
         }

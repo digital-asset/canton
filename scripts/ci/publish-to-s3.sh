@@ -42,7 +42,7 @@ run " copy scaladoc to s3" aws s3 cp --no-overwrite /tmp/workspace/scaladoc.tar.
 # run " copy test evidence to s3" aws s3 cp --no-overwrite /tmp/workspace/reliability-tests.csv "s3://canton-public-releases/releases/canton-reliability-tests-${RELEASE_SUFFIX}.csv"
 
 ls -all "/tmp/workspace/community/ledger-test-tool/target/scala-2.13"
-lapitt_filename="ledger-api-test-tool-2.2-$RELEASE_SUFFIX.jar"
+lapitt_filename="ledger-api-test-tool-2.3-$RELEASE_SUFFIX.jar"
 echo "Publishing $lapitt_filename"
 
 run " copy jar to s3" aws s3 cp --no-overwrite \

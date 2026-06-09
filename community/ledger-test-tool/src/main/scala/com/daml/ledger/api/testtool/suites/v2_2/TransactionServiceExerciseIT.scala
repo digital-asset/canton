@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -21,8 +22,8 @@ import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.platform.store.utils.EventOps.EventOps
 
-class TransactionServiceExerciseIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class TransactionServiceExerciseIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "TXUseCreateToExercise",
@@ -64,13 +65,13 @@ class TransactionServiceExerciseIT extends LedgerTestSuite {
       assertEquals(
         "Create should be of DummyWithParam",
         create.getTemplateId,
-        DummyWithParam.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+        dummyWithParamCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
       )
       val archive = assertSingleton("GetArchive", dummyFactory.flatMap(archivedEvents))
       assertEquals(
         "Archive should be of DummyFactory",
         archive.getTemplateId,
-        DummyFactory.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+        dummyFactoryCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
       )
       assertEquals(
         "Mismatching archived contract identifier",

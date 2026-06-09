@@ -311,10 +311,12 @@ object SyncServiceError extends SyncServiceErrorGroup {
     final case class Error(
         synchronizerAlias: SynchronizerAlias,
         inactive: Seq[(ConfiguredPhysicalSynchronizerId, SynchronizerConnectionConfigStore.Status)],
+        operation: String,
     )(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"$synchronizerAlias is not active and can therefore not be connected to."
+          cause =
+            s"$synchronizerAlias is not active which prevents operation `$operation` from being performed."
         )
         with SyncServiceError
   }

@@ -36,8 +36,6 @@ import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import monocle.macros.syntax.lens.*
 import org.scalatest.concurrent.PatienceConfiguration
 
-import scala.concurrent.duration.DurationInt
-
 trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
   protected def testedReleases: List[TestedRelease]
@@ -169,7 +167,7 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
   testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
     lazy val binDir = ReleaseUtils
       .retrieve(release)
-      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
+      .futureValue(PatienceConfiguration.Timeout(ReleaseUtils.DefaultReleaseDownloadTimeout))
     lazy val pv = protocolVersions.max1
 
     s"run conformance tests of shard $shard with release $release and protocol $pv" in {
@@ -245,7 +243,7 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
   testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
     lazy val binDir = ReleaseUtils
       .retrieve(release)
-      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
+      .futureValue(PatienceConfiguration.Timeout(ReleaseUtils.DefaultReleaseDownloadTimeout))
     lazy val pv = protocolVersions.max1
 
     s"run conformance tests of shard $shard with release $release and protocol $pv" in {
@@ -316,7 +314,7 @@ trait ProtocolContinuityConformanceTestPing extends ProtocolContinuityConformanc
   testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
     lazy val binDir = ReleaseUtils
       .retrieve(release)
-      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
+      .futureValue(PatienceConfiguration.Timeout(ReleaseUtils.DefaultReleaseDownloadTimeout))
     lazy val pv = protocolVersions.max1
 
     s"ping between current-branch participant and release $release participant (pv=$pv)" in {
@@ -436,11 +434,11 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.ledger-api.topology-aware-package-selection.max-passes-default",
         s"$base.ledger-api.topology-aware-package-selection.max-passes-limit",
         s"$base.ledger-api.update-service",
-        s"$base.parameters.alpha-multi-synchronizer-support",
         s"$base.parameters.caching.bft-ordering-batch-cache",
         s"$base.parameters.caching.sequencer-catchup-payload-cache",
         s"$base.parameters.commit-after-failed-activeness-check",
         s"$base.parameters.commitment-use-db-snapshot-for-participant-lookup",
+        s"$base.parameters.enable-all-ledger-api-reassignments",
         s"$base.parameters.validate-legacy-contracts-v-11",
         s"$base.parameters.ledger-api-server.indexer.achs-config",
         s"$base.parameters.ledger-api-server.indexer.postgres-data-source",

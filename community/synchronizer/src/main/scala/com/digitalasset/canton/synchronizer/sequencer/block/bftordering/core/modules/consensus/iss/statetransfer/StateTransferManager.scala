@@ -47,8 +47,9 @@ class StateTransferManager[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(
-    private val maybeCustomTimeoutManager: Option[TimeoutManager[E, Consensus.Message[E], String]] =
-      None
+    private val maybeCustomTimeoutManager: Option[
+      TimeoutManager[E, Consensus.Message[E], String]
+    ] = None
 )(implicit
     synchronizerProtocolVersion: ProtocolVersion,
     config: BftBlockOrdererConfig,
@@ -71,6 +72,7 @@ class StateTransferManager[E <: Env[E]](
       loggerFactory,
       config.epochStateTransferRetryTimeout,
       timeoutId = "state transfer",
+      timeoutMetric = None,
     )
   )
 

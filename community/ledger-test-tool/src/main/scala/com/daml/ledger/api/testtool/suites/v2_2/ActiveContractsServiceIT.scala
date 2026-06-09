@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
@@ -43,8 +44,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
-class ActiveContractsServiceIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "ACSemptyResponse",
@@ -165,7 +166,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
 
       assert(
         activeContracts.headOption.value.getTemplateId == Identifier.fromJavaProto(
-          Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toProto
+          dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toProto
         ),
         s"Received contract is not of type Dummy, but ${activeContracts.headOption.value.templateId}.",
       )
@@ -357,22 +358,47 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
         allContractsForAlice.sizeIs == 3,
         s"$alice expected 3 events, but received ${allContractsForAlice.size}.",
       )
-      assertTemplates(Seq(alice), allContractsForAlice, Dummy.TEMPLATE_ID_WITH_PACKAGE_ID, 1)
       assertTemplates(
         Seq(alice),
         allContractsForAlice,
-        DummyWithParam.TEMPLATE_ID_WITH_PACKAGE_ID,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
         1,
       )
-      assertTemplates(Seq(alice), allContractsForAlice, DummyFactory.TEMPLATE_ID_WITH_PACKAGE_ID, 1)
+      assertTemplates(
+        Seq(alice),
+        allContractsForAlice,
+        dummyWithParamCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
+        1,
+      )
+      assertTemplates(
+        Seq(alice),
+        allContractsForAlice,
+        dummyFactoryCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
+        1,
+      )
 
       assert(
         allContractsForBob.sizeIs == 3,
         s"$bob expected 3 events, but received ${allContractsForBob.size}.",
       )
-      assertTemplates(Seq(bob), allContractsForBob, Dummy.TEMPLATE_ID_WITH_PACKAGE_ID, 1)
-      assertTemplates(Seq(bob), allContractsForBob, DummyWithParam.TEMPLATE_ID_WITH_PACKAGE_ID, 1)
-      assertTemplates(Seq(bob), allContractsForBob, DummyFactory.TEMPLATE_ID_WITH_PACKAGE_ID, 1)
+      assertTemplates(
+        Seq(bob),
+        allContractsForBob,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
+        1,
+      )
+      assertTemplates(
+        Seq(bob),
+        allContractsForBob,
+        dummyWithParamCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
+        1,
+      )
+      assertTemplates(
+        Seq(bob),
+        allContractsForBob,
+        dummyFactoryCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
+        1,
+      )
 
       assert(
         allContractsForAliceAndBob.sizeIs == 6,
@@ -381,19 +407,19 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
       assertTemplates(
         Seq(alice, bob),
         allContractsForAliceAndBob,
-        Dummy.TEMPLATE_ID_WITH_PACKAGE_ID,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
         2,
       )
       assertTemplates(
         Seq(alice, bob),
         allContractsForAliceAndBob,
-        DummyWithParam.TEMPLATE_ID_WITH_PACKAGE_ID,
+        dummyWithParamCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
         2,
       )
       assertTemplates(
         Seq(alice, bob),
         allContractsForAliceAndBob,
-        DummyFactory.TEMPLATE_ID_WITH_PACKAGE_ID,
+        dummyFactoryCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
         2,
       )
 
@@ -408,7 +434,12 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
         dummyContractsForAlice.sizeIs == 1,
         s"$alice expected 1 event, but received ${dummyContractsForAlice.size}.",
       )
-      assertTemplates(Seq(alice), dummyContractsForAlice, Dummy.TEMPLATE_ID_WITH_PACKAGE_ID, 1)
+      assertTemplates(
+        Seq(alice),
+        dummyContractsForAlice,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
+        1,
+      )
 
       assert(
         dummyContractsForAliceAndBob.sizeIs == 2,
@@ -417,7 +448,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
       assertTemplates(
         Seq(alice, bob),
         dummyContractsForAliceAndBob,
-        Dummy.TEMPLATE_ID_WITH_PACKAGE_ID,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
         2,
       )
 

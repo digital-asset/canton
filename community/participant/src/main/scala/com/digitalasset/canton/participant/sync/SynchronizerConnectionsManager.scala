@@ -80,7 +80,6 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
-import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.Backoff
 import com.digitalasset.daml.lf.engine.Engine
 import com.google.common.collect.{BiMap, HashBiMap}
@@ -269,7 +268,7 @@ private[sync] class SynchronizerConnectionsManager(
     sequencerInfoLoader // TODO(i27622): use the connection pool to validate the config
       .validateSequencerConnection(
         config.synchronizerAlias,
-        config.synchronizerId,
+        config.psid,
         config.sequencerConnections,
         sequencerConnectionValidation,
       )
@@ -327,6 +326,7 @@ private[sync] class SynchronizerConnectionsManager(
             succeeded <- performSynchronizerConnectionOrHandshake(
               con,
               connectSynchronizer = ConnectSynchronizer.ReconnectSynchronizers,
+              skipStatusCheck = false,
             ).transform {
               case Left(SyncServiceFailedSynchronizerConnection(_, parent)) if ignoreFailures =>
                 // if the error is retryable, we'll reschedule an automatic retry so this synchronizer gets connected eventually
@@ -489,7 +489,11 @@ private[sync] class SynchronizerConnectionsManager(
 
     EitherT
       .fromEither[FutureUnlessShutdown](
-        getSynchronizerConnectionConfigForAlias(synchronizerAlias, onlyActive = true)
+        getSynchronizerConnectionConfigForAlias(
+          synchronizerAlias,
+          onlyActive = true,
+          operation = "connect",
+        )
       )
       .flatMap { _ =>
         val initial = if (keepRetrying) {
@@ -539,6 +543,7 @@ private[sync] class SynchronizerConnectionsManager(
         performSynchronizerConnectionOrHandshake(
           synchronizerAlias,
           connectSynchronizer,
+          skipStatusCheck = false,
         ).transform {
           case Left(SyncServiceError.SyncServiceFailedSynchronizerConnection(_, err))
               if keepRetrying && err.retryable.nonEmpty =>
@@ -618,7 +623,7 @@ private[sync] class SynchronizerConnectionsManager(
   /** Get the synchronizer connection corresponding to the alias. Fail if no connection can be
     * found. If `onlyActive` is true, enforces that exactly one active connection exists, otherwise
     * throws an invalid state exception. If `onlyActive` is false and multiple connections exist,
-    * takes the one with the highest PSID.
+    * takes the one with the highest psid.
     *
     * @param synchronizerAlias
     *   Synchronizer alias
@@ -628,6 +633,7 @@ private[sync] class SynchronizerConnectionsManager(
   def getSynchronizerConnectionConfigForAlias(
       synchronizerAlias: SynchronizerAlias,
       onlyActive: Boolean,
+      operation: String,
   )(implicit
       traceContext: TraceContext
   ): Either[SyncServiceError, StoredSynchronizerConnectionConfig] =
@@ -643,7 +649,11 @@ private[sync] class SynchronizerConnectionsManager(
             case Nil =>
               Left(
                 SyncServiceError.SyncServiceSynchronizerIsNotActive
-                  .Error(synchronizerAlias, inactive.map(c => (c.configuredPsid, c.status)))
+                  .Error(
+                    synchronizerAlias,
+                    inactive.map(c => (c.configuredPsid, c.status)),
+                    operation = operation,
+                  )
               )
             case single :: Nil =>
               Right(single)
@@ -659,11 +669,19 @@ private[sync] class SynchronizerConnectionsManager(
     }
 
   /** MUST be synchronized using the [[connectQueue]]
+    *
+    * @param synchronizerAlias
+    *   Alias of the synchronizer
+    * @param connectSynchronizer
+    *   Operation to be performed
+    * @param skipStatusCheck
+    *   If true, allows to connect/handshake with an inactive synchronizer. Should be false except
+    *   for Hard Domain Migration.
     */
   def performSynchronizerConnectionOrHandshake(
       synchronizerAlias: SynchronizerAlias,
       connectSynchronizer: ConnectSynchronizer,
-      skipStatusCheck: Boolean = false,
+      skipStatusCheck: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
@@ -719,6 +737,7 @@ private[sync] class SynchronizerConnectionsManager(
             getSynchronizerConnectionConfigForAlias(
               synchronizerAlias,
               onlyActive = !skipStatusCheck,
+              operation = "handshake",
             )
           )
           _ = logger.debug(
@@ -786,7 +805,10 @@ private[sync] class SynchronizerConnectionsManager(
               s"Performing handshake with synchronizer with id ${synchronizerConnectionConfig.configuredPsid} and config: ${synchronizerConnectionConfig.config}"
             )
             connectionInfo <- EitherT(
-              synchronizerRegistry.pureHandshake(synchronizerConnectionConfig)
+              synchronizerRegistry.pureHandshake(
+                synchronizerConnectionConfig,
+                lsuHandshakeConfig = Option.when(isLsu)(parameters.lsuConfig.handshake),
+              )
             )
               .leftMap[SyncServiceError](err =>
                 SyncServiceError.SyncServiceFailedSynchronizerConnection(
@@ -880,95 +902,96 @@ private[sync] class SynchronizerConnectionsManager(
     } yield logger.info(s"Successfully performed pending LSU operation for $successorPsid")
   }
 
-  /** Used to synchronize handshake loops per successor physical synchronizer id */
-  private val lsuHandshakeLoops = new TrieMap[PhysicalSynchronizerId, PromiseUnlessShutdown[
-    Either[SyncServiceError, Option[StaticSynchronizerParameters]]
-  ]]()
+  /** Used to chain handshakes per successor physical synchronizer id */
+  private val lsuHandshakesQueue =
+    new NonGarbageCollectedShardedSequentialProcessingQueue[PhysicalSynchronizerId](
+      name = "lsu-handshake-successor",
+      futureSupervisor = futureSupervisor,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+      logTaskTiming = false,
+      failureMode = FailureMode.ContinueAfterFailure,
+    )
 
   /** Performs handshake with the successor synchronizer. Retry until the handshake is successful.
     */
-  def performLsuHandshakeWithRetries(
+  private def performLsuHandshakeWithRetries(
       initialPendingOperation: PendingOperation[PendingLsuOperation, PhysicalSynchronizerId]
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[StaticSynchronizerParameters]] = {
     val successorPsid = initialPendingOperation.operation.successorPsid
 
-    syncPersistentStateManager.get(successorPsid) match {
-      case Some(state) =>
-        logger.info("Static synchronizer parameters found. Handshake is not needed.")
-        EitherT.pure(Some(state.staticSynchronizerParameters))
+    /*
+       Transform the result to abort if the operation is not needed anymore.
+       Recall that retries are stopped on a Right
+     */
+    def transformError(
+        error: SyncServiceError
+    ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[StaticSynchronizerParameters]] =
+      pendingLsuOperationsStore
+        .get(
+          initialPendingOperation.synchronizer,
+          initialPendingOperation.key,
+          initialPendingOperation.name,
+        )
+        .value
+        .map {
+          case Some(`initialPendingOperation`) =>
+            val isRetryable = error.retryable.isDefined
 
-      case None =>
-        val newPromise = PromiseUnlessShutdown
-          .unsupervised[Either[SyncServiceError, Option[StaticSynchronizerParameters]]]()
-        lsuHandshakeLoops.putIfAbsent(successorPsid, newPromise) match {
-          case Some(existingPromise) =>
-            EitherT(existingPromise.futureUS)
-
-          case None =>
-            Backoff
-              .fromConfig(
-                logger = logger,
-                hasSynchronizeWithClosing = this,
-                config = parameters.lsuConfig.handshakeRetry,
-                operationName = s"lsu-handshake-with-$successorPsid",
+            // e.g., transient network or pool errors
+            if (isRetryable) {
+              logger.info(
+                s"Unable to perform handshake with $successorPsid: $error. Will retry."
               )
-              .unlessShutdown(
-                performPureHandshake(successorPsid, isLsu = true)
-                  .map(Some(_))
-                  /*
-                  Transform the result to abort if the operation is not needed anymore.
-                  Recall that retries are stopped on a Right
-                   */
-                  .leftFlatMap { error =>
-                    pendingLsuOperationsStore
-                      .get(
-                        initialPendingOperation.synchronizer,
-                        initialPendingOperation.key,
-                        initialPendingOperation.name,
-                      )
-                      .value
-                      .map {
-                        case Some(`initialPendingOperation`) =>
-                          val isRetryable = error.retryable.isDefined
-
-                          // e.g., transient network or pool errors
-                          if (isRetryable) {
-                            logger.info(
-                              s"Unable to perform handshake with $successorPsid: $error. Will retry."
-                            )
-                            Left(error) // Retry
-                          } else {
-                            logger.warn(
-                              s"Unable to perform handshake with $successorPsid: $error. Error is not retryable."
-                            )
-                            Right(Option.empty[StaticSynchronizerParameters])
-                          }
-
-                        case Some(other) => // The pending operation is different. Possibly a cancellation followed by a new LSU.
-                          logger.info(
-                            s"Found $other pending LSU operation that is different from the initial $initialPendingOperation. Not retrying."
-                          )
-
-                          Right(Option.empty[StaticSynchronizerParameters])
-
-                        case None => // LSU was cancelled or the operation was completed elsewhere
-                          logger.info(
-                            s"No pending LSU operation found for ${initialPendingOperation.synchronizer}. Not retrying."
-                          )
-
-                          Right(Option.empty[StaticSynchronizerParameters])
-                      }
-                      .pipe(EitherT(_))
-                  }
-                  .value,
-                DbExceptionRetryPolicy,
+              Left(error) // Retry
+            } else {
+              logger.warn(
+                s"Unable to perform handshake with $successorPsid: $error. Error is not retryable."
               )
-              .pipe(EitherT(_))
-              .thereafter(_ => lsuHandshakeLoops.remove(successorPsid).discard)
+              Right(Option.empty[StaticSynchronizerParameters])
+            }
+
+          // The pending operation is different. Possibly a cancellation followed by a new LSU.
+          case Some(other) =>
+            logger.info(
+              s"Found $other pending LSU operation that is different from the initial $initialPendingOperation. Not retrying."
+            )
+
+            Right(Option.empty[StaticSynchronizerParameters])
+
+          case None => // LSU was cancelled or the operation was completed elsewhere
+            logger.info(
+              s"No pending LSU operation found for ${initialPendingOperation.synchronizer}. Not retrying."
+            )
+
+            Right(Option.empty[StaticSynchronizerParameters])
         }
-    }
+        .pipe(EitherT(_))
+
+    def task()
+        : EitherT[FutureUnlessShutdown, SyncServiceError, Option[StaticSynchronizerParameters]] =
+      Backoff
+        .fromConfig(
+          logger = logger,
+          hasSynchronizeWithClosing = this,
+          config = parameters.lsuConfig.handshake.retry,
+          operationName = s"lsu-handshake-with-$successorPsid",
+        )
+        .unlessShutdown(
+          performPureHandshake(successorPsid, isLsu = true)
+            .map(Some(_))
+            .leftFlatMap(transformError)
+            .value,
+          DbExceptionRetryPolicy,
+        )
+        .pipe(EitherT(_))
+
+    lsuHandshakesQueue.executeEUS(successorPsid)(
+      task(),
+      s"lsu-handshake-with-$successorPsid",
+    )
   }
 
   /** Connect the sync service to the given synchronizer. */
@@ -1017,6 +1040,7 @@ private[sync] class SynchronizerConnectionsManager(
             getSynchronizerConnectionConfigForAlias(
               synchronizerAlias,
               onlyActive = !skipStatusCheck,
+              operation = "connect",
             )
           )
           _ = logger.debug(
@@ -1530,6 +1554,7 @@ private[sync] class SynchronizerConnectionsManager(
       ephemeralHealth,
       sequencerClientHealth,
       acsCommitmentProcessorHealth,
+      lsuHandshakesQueue,
     )
 
     LifeCycle.close(instances*)(logger)

@@ -259,6 +259,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId3),
+      eventSequentialIds = Vector(5L),
       nextPageToken = Some(2L),
     )
 
@@ -273,6 +274,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId4),
+      eventSequentialIds = Vector(1L),
       nextPageToken = None,
     )
 
@@ -287,6 +289,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId3, internalContractId4),
+      eventSequentialIds = Vector(5L, 1L),
       nextPageToken = None,
     )
 
@@ -301,6 +304,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId3, internalContractId4),
+      eventSequentialIds = Vector(5L, 1L),
       nextPageToken = None,
     )
 
@@ -315,6 +319,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId3, internalContractId4),
+      eventSequentialIds = Vector(5L, 1L),
       nextPageToken = None,
     )
 
@@ -329,6 +334,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId4),
+      eventSequentialIds = Vector(1L),
       nextPageToken = None,
     )
 
@@ -343,6 +349,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId2, internalContractId4),
+      eventSequentialIds = Vector(3L, 1L),
       nextPageToken = None,
     )
 
@@ -357,6 +364,7 @@ private[backend] trait StorageBackendTestsContracts
       )
     ) shouldBe KeysPageResult(
       internalContractIds = Vector(internalContractId),
+      eventSequentialIds = Vector(2L),
       nextPageToken = None,
     )
   }
@@ -446,10 +454,12 @@ private[backend] trait StorageBackendTestsContracts
     batchResults should have size 2
     batchResults(0) shouldBe KeysPageResult(
       internalContractIds = Vector(iid4, iid1),
+      eventSequentialIds = Vector(5L, 1L),
       nextPageToken = None,
     )
     batchResults(1) shouldBe KeysPageResult(
       internalContractIds = Vector(iid2),
+      eventSequentialIds = Vector(2L),
       nextPageToken = None,
     )
 
@@ -463,6 +473,7 @@ private[backend] trait StorageBackendTestsContracts
     )
     pagedResult.loneElement shouldBe KeysPageResult(
       internalContractIds = Vector(iid4),
+      eventSequentialIds = Vector(5L),
       nextPageToken = Some(2L),
     )
 
@@ -477,6 +488,7 @@ private[backend] trait StorageBackendTestsContracts
     )
     nextPageResult.loneElement shouldBe KeysPageResult(
       internalContractIds = Vector(iid1),
+      eventSequentialIds = Vector(1L),
       nextPageToken = None,
     )
 
@@ -491,6 +503,7 @@ private[backend] trait StorageBackendTestsContracts
     )
     beforeArchive.loneElement shouldBe KeysPageResult(
       internalContractIds = Vector(iid3, iid1),
+      eventSequentialIds = Vector(3L, 1L),
       nextPageToken = None,
     )
 
@@ -508,11 +521,13 @@ private[backend] trait StorageBackendTestsContracts
     // key1 has 2 active contracts (iid4, iid1), limit=1 returns first and a nextPageToken
     mixedLimits(0) shouldBe KeysPageResult(
       internalContractIds = Vector(iid4),
+      eventSequentialIds = Vector(5L),
       nextPageToken = Some(2L),
     )
     // key2 has 1 active contract (iid2), limit=2 returns it with no next page
     mixedLimits(1) shouldBe KeysPageResult(
       internalContractIds = Vector(iid2),
+      eventSequentialIds = Vector(2L),
       nextPageToken = None,
     )
 
@@ -544,10 +559,12 @@ private[backend] trait StorageBackendTestsContracts
     identicalQueries should have size 3
     identicalQueries(0) shouldBe KeysPageResult(
       internalContractIds = Vector(iid4, iid1),
+      eventSequentialIds = Vector(5L, 1L),
       nextPageToken = None,
     )
     identicalQueries(1) shouldBe KeysPageResult(
       internalContractIds = Vector(iid2),
+      eventSequentialIds = Vector(2L),
       nextPageToken = None,
     )
     identicalQueries(2) shouldBe identicalQueries(0)
@@ -662,52 +679,136 @@ private[backend] trait StorageBackendTestsContracts
     executeSql(updateLedgerEnd(offset(24L), 24L))
 
     // create(1), unassign(2), assign(3), archive(4)
-    queryAt(1) shouldBe KeysPageResult(internalContractIds = Vector(iid00), nextPageToken = None)
-    queryAt(2) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
-    queryAt(3) shouldBe KeysPageResult(internalContractIds = Vector(iid01), nextPageToken = None)
-    queryAt(4) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
+    queryAt(1) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid00),
+      eventSequentialIds = Vector(1L),
+      nextPageToken = None,
+    )
+    queryAt(2) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
+    queryAt(3) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid01),
+      eventSequentialIds = Vector(3L),
+      nextPageToken = None,
+    )
+    queryAt(4) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
 
     // create(5), assign(6), unassign(7) the second contract, archive(8)
-    queryAt(5) shouldBe KeysPageResult(internalContractIds = Vector(iid10), nextPageToken = None)
+    queryAt(5) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid10),
+      eventSequentialIds = Vector(5L),
+      nextPageToken = None,
+    )
     queryAt(6) shouldBe KeysPageResult(
       internalContractIds = Vector(iid11, iid10),
+      eventSequentialIds = Vector(6L, 5L),
       nextPageToken = None,
     )
-    queryAt(7) shouldBe KeysPageResult(internalContractIds = Vector(iid10), nextPageToken = None)
-    queryAt(8) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
+    queryAt(7) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid10),
+      eventSequentialIds = Vector(5L),
+      nextPageToken = None,
+    )
+    queryAt(8) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
 
     // create(9), assign(10), archive(11), unassign(12)
-    queryAt(9) shouldBe KeysPageResult(internalContractIds = Vector(iid20), nextPageToken = None)
+    queryAt(9) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid20),
+      eventSequentialIds = Vector(9L),
+      nextPageToken = None,
+    )
     queryAt(10) shouldBe KeysPageResult(
       internalContractIds = Vector(iid21, iid20),
+      eventSequentialIds = Vector(10L, 9L),
       nextPageToken = None,
     )
-    queryAt(11) shouldBe KeysPageResult(internalContractIds = Vector(iid21), nextPageToken = None)
-    queryAt(12) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
+    queryAt(11) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid21),
+      eventSequentialIds = Vector(10L),
+      nextPageToken = None,
+    )
+    queryAt(12) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
 
     // assign(13), archive(14), create(15), unassign(16)
-    queryAt(13) shouldBe KeysPageResult(internalContractIds = Vector(iid30), nextPageToken = None)
-    queryAt(14) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
-    queryAt(15) shouldBe KeysPageResult(internalContractIds = Vector(iid31), nextPageToken = None)
-    queryAt(16) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
+    queryAt(13) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid30),
+      eventSequentialIds = Vector(13L),
+      nextPageToken = None,
+    )
+    queryAt(14) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
+    queryAt(15) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid31),
+      eventSequentialIds = Vector(15L),
+      nextPageToken = None,
+    )
+    queryAt(16) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
 
     // assign(17), create(18), archive(19), unassign(20)
-    queryAt(17) shouldBe KeysPageResult(internalContractIds = Vector(iid40), nextPageToken = None)
+    queryAt(17) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid40),
+      eventSequentialIds = Vector(17L),
+      nextPageToken = None,
+    )
     queryAt(18) shouldBe KeysPageResult(
       internalContractIds = Vector(iid41, iid40),
+      eventSequentialIds = Vector(18L, 17L),
       nextPageToken = None,
     )
-    queryAt(19) shouldBe KeysPageResult(internalContractIds = Vector(iid40), nextPageToken = None)
-    queryAt(20) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
+    queryAt(19) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid40),
+      eventSequentialIds = Vector(17L),
+      nextPageToken = None,
+    )
+    queryAt(20) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
 
     // assign(21), create(22), unassign(23) , archive(24)
-    queryAt(21) shouldBe KeysPageResult(internalContractIds = Vector(iid50), nextPageToken = None)
-    queryAt(22) shouldBe KeysPageResult(
-      internalContractIds = Vector(iid51, iid50),
+    queryAt(21) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid50),
+      eventSequentialIds = Vector(21L),
       nextPageToken = None,
     )
-    queryAt(23) shouldBe KeysPageResult(internalContractIds = Vector(iid51), nextPageToken = None)
-    queryAt(24) shouldBe KeysPageResult(internalContractIds = Vector.empty, nextPageToken = None)
+    queryAt(22) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid51, iid50),
+      eventSequentialIds = Vector(22L, 21L),
+      nextPageToken = None,
+    )
+    queryAt(23) shouldBe KeysPageResult(
+      internalContractIds = Vector(iid51),
+      eventSequentialIds = Vector(22L),
+      nextPageToken = None,
+    )
+    queryAt(24) shouldBe KeysPageResult(
+      internalContractIds = Vector.empty,
+      eventSequentialIds = Vector.empty,
+      nextPageToken = None,
+    )
   }
 
   it should "correctly find active contracts" in {

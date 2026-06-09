@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   TrafficControlParameters,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -1006,6 +1007,7 @@ trait TrafficControlTest
     )
 }
 
+@UnstableTest // TOOD(#31976)
 class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,
@@ -1018,6 +1020,7 @@ class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
+@UnstableTest // TOOD(#32073)
 class TrafficControlTestBftOrderingH2 extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,

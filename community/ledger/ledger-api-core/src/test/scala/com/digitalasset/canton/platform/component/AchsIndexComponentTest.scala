@@ -5,27 +5,20 @@ package com.digitalasset.canton.platform.component
 
 import anorm.SqlParser.long
 import com.daml.ledger.resources.ResourceContext
-import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
-import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
   IndexServiceConfig,
 }
-import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
-import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkRange
+import com.digitalasset.canton.platform.indexer.{IndexerConfig, IndexerParams}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.dao.events.ACSReader
-import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.util.PekkoUtil.{RecoveringFutureQueueImpl, RecoveringQueueMetrics}
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.{Sink, Source}
-import org.scalatest.concurrent.PatienceConfiguration
+import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.flatspec.AnyFlatSpec
 import org.slf4j.event.Level
 
@@ -662,116 +655,64 @@ class AchsIndexComponentTest
     )
   }
 
-  it should "shut down when ACHS initialization is in progress" in {
-    // Start with ACHS disabled so that restarting with ACHS enabled triggers a large initialization
+  it should "terminate ACHS initialization early when shutdown is invoked" in {
     restartIndexer(config = indexerConfig.copy(achsConfig = None))
 
-    val txsCreatedThenArchived = 5
-    val txsCreatedNotArchived = 1
-    val txSize = 3
-    val repetitions = 50
-
-    val allUpdates = (1 to repetitions).flatMap { _ =>
-      createsAndArchives(
-        nextRecordTime = nextRecordTime,
-        txSize = txSize,
-        txsCreatedThenArchived = txsCreatedThenArchived,
-        txsCreatedNotArchived = txsCreatedNotArchived,
-        createPayloadLength = 42,
-        archiveArgumentPayloadLengthFromTo = (10, 20),
-        archiveResultPayloadLengthFromTo = (10, 20),
-      )
-    }
-
-    val lastEventSeqIdBefore = getLastEventSeqId
+    // at least one update is needed to trigger ACHS initialization on the next restart
+    val allUpdates = createsAndArchives(
+      nextRecordTime = nextRecordTime,
+      txSize = 1,
+      txsCreatedThenArchived = 0,
+      txsCreatedNotArchived = 1,
+      createPayloadLength = 42,
+      archiveArgumentPayloadLengthFromTo = (10, 20),
+      archiveResultPayloadLengthFromTo = (10, 20),
+    )
     ingestUpdates(allUpdates*)
-
-    val lastEventSeqId =
-      lastEventSeqIdBefore + txSize * (txsCreatedThenArchived * 2 + txsCreatedNotArchived) * repetitions
-    eventually()(getLastEventSeqId shouldBe lastEventSeqId)
+    eventually()(getLastEventSeqId should be > 0L)
 
     getAchsSize shouldBe 0L
-    getAchsStateRowCount shouldBe 0
+    getAchsStateRowCount shouldBe 0L
 
+    // With initAggregationThreshold = 1, the stream emits one element at a time,
+    // and even if only one update exists the shutdown will be enabled.
     val initConfig = AchsConfig(
-      validAtDistanceTarget = NonNegativeLong.tryCreate(10L),
-      lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(10L),
+      validAtDistanceTarget = NonNegativeLong.tryCreate(0L),
+      lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(0L),
+      initAggregationThreshold = 1L,
     )
 
-    // the initialization stream never completes
-    val achsInitInterceptor: Source[AchsWorkRange, NotUsed] => Source[AchsWorkRange, NotUsed] =
-      _.concat(Source.never)
-
-    // Release the current resources first
+    // Acquire the indexer and invoke it directly with a shutdown signal.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     testServices.indexResource.release().futureValue
 
-    val shutdownMessage = "Shutting down ACHS initialization stream via kill switch"
+    val indexerResource = indexerResourceOwner(
+      config = indexerConfig.copy(achsConfig = Some(initConfig))
+    ).acquire()
+    val (indexerF, _) = indexerResource.asFuture.futureValue
+
+    val interruptedMessage = "ACHS snapshot initialization interrupted by shutdown request"
     loggerFactory.assertLogsSeq(
       SuppressionRule.LevelAndAbove(Level.INFO)
     )(
-      {
-        val indexerResource = indexerResourceOwner(
-          config = indexerConfig.copy(achsConfig = Some(initConfig)),
-          achsInitInterceptor = achsInitInterceptor,
-        ).acquire()(resourceContext)
-        val (indexerF, achsKillSwitch, coreDbSupport) =
-          indexerResource.asFuture.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
-
-        val coreDbMetrics = DatabaseMetrics.ForTesting("achs-kill-switch-test")
-        def queryAchsSize(): Long =
-          coreDbSupport.dbDispatcher
-            .executeSql(coreDbMetrics) { implicit connection =>
-              SQL"SELECT COUNT(event_sequential_id) AS count FROM lapi_filter_achs_stakeholder"
-                .as(long("count").single)
-            }
-            .futureValue
-
-        val consumerFactory: PekkoUtil.Commit => Future[PekkoUtil.FutureQueueConsumer[Update]] =
-          commit => Future(indexerF(false)(commit))(system.dispatcher).flatten
-
-        val rq = new RecoveringFutureQueueImpl[Update](
-          maxBlockedOffer = indexerConfig.queueMaxBlockedOffer,
-          bufferSize = indexerConfig.queueBufferSize,
-          loggerFactory = loggerFactory,
-          retryStategy = PekkoUtil.exponentialRetryWithCap(
-            minWait = 100L,
-            multiplier = 2,
-            cap = 5000L,
-          ),
-          retryAttemptWarnThreshold = 3,
-          retryAttemptErrorThreshold = 5,
-          uncommittedWarnTreshold = 1000,
-          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-          consumerFactory = consumerFactory,
-          initializationKillSwitch = achsKillSwitch,
+      indexerF(
+        IndexerParams(
+          repairMode = false,
+          commit = _ => (),
+          shutdownRequested = () => true,
         )
-
-        // Wait for ACHS initialization to actually start writing data before shutting down.
-        // The constructor returns immediately now (async consumer factory), so we poll the DB
-        // to confirm ACHS init is actively running.
-        eventually(timeUntilSuccess = 30.seconds) {
-          queryAchsSize() should be > 0L
-        }
-
-        // shut down while ACHS init is in progress
-        rq.shutdown()
-
-        rq.done.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
-
-        indexerResource.release().futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
-      },
+      ).futureValue.futureValue,
       logs => {
-        val killSwitchLogs = logs.filter(_.message.contains(shutdownMessage))
+        val shutdownLogs = logs.filter(_.message.contains(interruptedMessage))
         withClue(
-          s"Expected kill switch log '$shutdownMessage' not found. Captured logs:\n${logs.map(_.message).mkString("\n")}"
+          s"Expected log '$interruptedMessage' not found. Captured logs:\n${logs.map(_.message).mkString("\n")}"
         ) {
-          killSwitchLogs should not be empty
+          shutdownLogs should not be empty
         }
       },
     )
+    indexerResource.release().futureValue
 
-    // Restart with original config for the next tests
     acquireServices(
       config = indexerConfig,
       serviceConfig = indexServiceConfig,

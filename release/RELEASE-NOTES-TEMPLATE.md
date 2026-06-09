@@ -1,7 +1,6 @@
 # Release of Canton CANTON_VERSION
 
-Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
-Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
+Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 ## Summary
 

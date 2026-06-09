@@ -16,7 +16,7 @@ import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, TransactionFormat}
 import com.daml.ledger.api.v2.value.{Identifier, Record}
-import com.daml.ledger.javaapi
+import com.daml.ledger.javaapi.data.Identifier as JavaIdentifier
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.daml.ledger.test.java.semantic.interfaceviews.{
   I,
@@ -34,6 +34,7 @@ import com.daml.logging.LoggingContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
+import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import java.util.regex.Pattern
 import scala.concurrent.duration.*
@@ -58,6 +59,10 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       _ <- ledger.exercise(party, c3.exerciseArchive())
       _ <- ledger.exercise(party, c4.exerciseArchive())
     } yield ()
+
+  private val semanticTestsPackageId = testDars.SemanticTestDar.packageId
+  private val carbonv1TestsPackageId = testDars.Carbonv1TestDar.packageId
+  private val carbonv2TestsPackageId = testDars.Carbonv2TestDar.packageId
 
   implicit val t1Companion: ContractCompanion.WithoutKey[T1.Contract, T1.ContractId, T1] =
     T1.COMPANION
@@ -249,11 +254,11 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
     assertLength("Create event 1 has a view", 1, createdEvent1.interfaceViews).discard
     assertEquals(
       "Create event 1 template ID",
-      createdEvent1.templateId.value.toString,
-      T1.TEMPLATE_ID_WITH_PACKAGE_ID.toV1.toString,
+      createdEvent1.templateId.value,
+      T1.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1,
     )
     assertEquals("Create event 1 contract ID", createdEvent1.contractId, c1)
-    assertViewEquals(createdEvent1.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+    assertViewEquals(createdEvent1.interfaceViews, I.TEMPLATE_ID) { value =>
       assertLength("View1 has 2 fields", 2, value.fields).discard
       assertEquals("View1.a", value.fields(0).getValue.getInt64, 1)
       assertEquals("View1.b", value.fields(1).getValue.getBool, true)
@@ -271,7 +276,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       assertEquals(
         "Archive event 1 has correct implemented_interfaces",
         exercisedImplementedInterfaces(archivedEventIndexF(0)),
-        Seq(I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+        Seq(I.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1),
       )
     )
 
@@ -281,10 +286,10 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
     assertEquals(
       "Create event 2 template ID",
       createdEvent2.templateId.value.toString,
-      T2.TEMPLATE_ID_WITH_PACKAGE_ID.toV1.toString,
+      T2.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1.toString,
     )
     assertEquals("Create event 2 contract ID", createdEvent2.contractId, c2)
-    assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+    assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID) { value =>
       assertLength("View2 has 2 fields", 2, value.fields).discard
       assertEquals("View2.a", value.fields(0).getValue.getInt64, 2)
       assertEquals("View2.b", value.fields(1).getValue.getBool, false)
@@ -294,7 +299,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       assertEquals(
         "Archive event 2 has correct implemented_interfaces",
         exercisedImplementedInterfaces(archivedEventIndexF(1)),
-        Seq(I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+        Seq(I.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1),
       )
     )
 
@@ -304,16 +309,19 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
     assertEquals(
       "Create event 3 template ID",
       createdEvent3.templateId.value.toString,
-      T3.TEMPLATE_ID_WITH_PACKAGE_ID.toV1.toString,
+      T3.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1.toString,
     )
     assertEquals("Create event 3 contract ID", createdEvent3.contractId, c3)
-    assertViewFailed(createdEvent3.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1)
+    assertViewFailed(
+      createdEvent3.interfaceViews,
+      I.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1,
+    )
     checkArgumentsNonEmpty(createdEvent3, id = 3)
     exercisedImplementedInterfacesO.foreach(exercisedImplementedInterfaces =>
       assertEquals(
         "Archive event 3 has correct implemented_interfaces",
         exercisedImplementedInterfaces(archivedEventIndexF(2)),
-        Seq(I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+        Seq(I.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1),
       )
     )
 
@@ -360,12 +368,12 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       assertLength("single transaction found", 1, mergedTransactions).discard
       val createdEvent1 = createdEvents(mergedTransactions(0)).headOption.value
       assertEquals("Create event 1 contract ID", createdEvent1.contractId, c.contractId)
-      assertViewEquals(createdEvent1.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent1.interfaceViews, I.TEMPLATE_ID) { value =>
         assertLength("View1 has 2 fields", 2, value.fields).discard
         assertEquals("View1.a", value.fields(0).getValue.getInt64, 6)
         assertEquals("View1.b", value.fields(1).getValue.getBool, true)
       }
-      assertViewEquals(createdEvent1.interfaceViews, I2.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent1.interfaceViews, I2.TEMPLATE_ID) { value =>
         assertLength("View2 has 1 field", 1, value.fields).discard
         assertEquals("View2.c", value.fields(0).getValue.getInt64, 7)
       }
@@ -374,7 +382,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       val createdEvent2 = createdEvents(party1Transactions(0)).headOption.value
       assertEquals("Create event 1 contract ID", createdEvent2.contractId, c.contractId)
       assertLength("single view found", 1, createdEvent2.interfaceViews).discard
-      assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID) { value =>
         assertLength("View1 has 2 fields", 2, value.fields).discard
         assertEquals("View1.a", value.fields(0).getValue.getInt64, 6)
         assertEquals("View1.b", value.fields(1).getValue.getBool, true)
@@ -404,12 +412,12 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       val createdEvent = createdEvents(transactions(0)).headOption.value
       val archivedEvent = archivedEvents(transactions(1)).headOption.value
       assertEquals("Create event with correct contract ID", createdEvent.contractId, c.contractId)
-      assertViewEquals(createdEvent.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent.interfaceViews, I.TEMPLATE_ID) { value =>
         assertLength("View1 has 2 fields", 2, value.fields).discard
         assertEquals("View1.a", value.fields(0).getValue.getInt64, 31337)
         assertEquals("View1.b", value.fields(1).getValue.getBool, true)
       }
-      assertViewEquals(createdEvent.interfaceViews, I2.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent.interfaceViews, I2.TEMPLATE_ID) { value =>
         assertLength("View2 has 1 field", 1, value.fields).discard
         assertEquals("View2.c", value.fields(0).getValue.getInt64, 1)
       }
@@ -422,8 +430,8 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
         "Archive event has both implemented_interfaces",
         archivedEvent.implementedInterfaces.toSet,
         Set(
-          I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
-          I2.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+          I.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1,
+          I2.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1,
         ),
       )
     }
@@ -480,7 +488,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       assertEquals("Create event 2 contract ID", createdEvent2.contractId, c2.contractId)
       // Expect view to be delivered even though there is an ambiguous
       // includeInterfaceView flag set to true and false at the same time (true wins)
-      assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID) { value =>
         assertLength("View2 has 2 fields", 2, value.fields).discard
         assertEquals("View2.a", value.fields(0).getValue.getInt64, 2)
         assertEquals("View2.b", value.fields(1).getValue.getBool, false)
@@ -527,7 +535,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       assertEquals("Create event 2 contract ID", createdEvent2.contractId, c2.contractId)
       // Expect view to be delivered even though there is an ambiguous
       // includeInterfaceView flag set to true and false at the same time.
-      assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1) { value =>
+      assertViewEquals(createdEvent2.interfaceViews, I.TEMPLATE_ID) { value =>
         assertLength("View2 has 2 fields", 2, value.fields).discard
         assertEquals("View2.a", value.fields(0).getValue.getInt64, 2)
         assertEquals("View2.b", value.fields(1).getValue.getBool, false)
@@ -572,7 +580,7 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
       assertEquals(
         "Create event 1 template ID",
         createdEvent1.templateId.value.toString,
-        T1.TEMPLATE_ID_WITH_PACKAGE_ID.toV1.toString,
+        T1.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1.toString,
       )
       assertEquals("Create event 1 contract ID", createdEvent1.contractId, c1.contractId)
     }
@@ -656,10 +664,8 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val packageName = I.TEMPLATE_ID.getPackageId
     val moduleName = I.TEMPLATE_ID.getModuleName
-    val unknownTemplate =
-      new javaapi.data.Identifier(packageName, moduleName, "TemplateDoesNotExist")
-    val unknownInterface =
-      new javaapi.data.Identifier(packageName, moduleName, "InterfaceDoesNotExist")
+    val unknownTemplate = new JavaIdentifier(packageName, moduleName, "TemplateDoesNotExist")
+    val unknownInterface = new JavaIdentifier(packageName, moduleName, "InterfaceDoesNotExist")
     import ledger.*
     for {
       _ <- create(party, new T1(party, 1))
@@ -820,36 +826,28 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
 
       transactions <- transactionFuture
 
-    } yield assertSingleContractWithSimpleView(
-      transactions = transactions,
-      contractIdentifier = carbonv2.carbonv2.T.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
-      viewIdentifier = carbonv1.carbonv1.I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
-      contractId = contract.contractId,
-      viewValue = 21,
-    )
-  })
-
-  private def assertSingleContractWithSimpleView(
-      transactions: Vector[Transaction],
-      contractIdentifier: Identifier,
-      viewIdentifier: Identifier,
-      contractId: String,
-      viewValue: Long,
-  ): Unit = {
-    assertLength("transaction should be found", 1, transactions).discard
-    val createdEvent = createdEvents(transactions(0)).headOption.value
-    assertLength("Create event has a view", 1, createdEvent.interfaceViews).discard
-    assertEquals(
-      "Create event template ID",
-      createdEvent.templateId.value.toString,
-      contractIdentifier.toString,
-    )
-    assertEquals("Create event contract ID", createdEvent.contractId, contractId)
-    assertViewEquals(createdEvent.interfaceViews, viewIdentifier) { value =>
-      assertLength("View has 1 field", 1, value.fields).discard
-      assertEquals("View.value", value.fields(0).getValue.getInt64, viewValue)
+    } yield {
+      assertLength("transaction should be found", 1, transactions).discard
+      val createdEvent = createdEvents(transactions(0)).headOption.value
+      assertLength("Create event has a view", 1, createdEvent.interfaceViews).discard
+      val contractIdentifier = carbonv2.carbonv2.T.TEMPLATE_ID
+      val viewIdentifier = carbonv1.carbonv1.I.TEMPLATE_ID
+      assertEquals(
+        "Create event template ID",
+        createdEvent.templateId.value,
+        contractIdentifier.withPackageId(carbonv2TestsPackageId).toV1,
+      )
+      assertEquals("Create event contract ID", createdEvent.contractId, contract.contractId)
+      assertViewEquals(
+        createdEvent.interfaceViews,
+        viewIdentifier,
+        packageId = carbonv1TestsPackageId,
+      ) { value =>
+        assertLength("View has 1 field", 1, value.fields).discard
+        assertEquals("View.value", value.fields(0).getValue.getInt64, 21)
+      }
     }
-  }
+  })
 
   private def updateTransaction(
       emptyView: Boolean = false,
@@ -924,21 +922,30 @@ abstract class InterfaceSubscriptionsITBase(testDars: TestDars, prefix: String)
     assertEquals("Status must be invalid argument", status.code, 9)
   }
 
-  private def assertViewEquals(views: Seq[InterfaceView], interfaceId: Identifier)(
+  private def assertViewEquals(
+      views: Seq[InterfaceView],
+      interfaceId: JavaIdentifier,
+      packageId: PackageId = semanticTestsPackageId,
+  )(
       checkValue: Record => Unit
   ): Unit = {
-    val viewSearch = views.find(_.interfaceId.contains(interfaceId))
+    val interfaceIdWithPackageId = interfaceId.withPackageId(packageId).toV1
+    val viewSearch = views.find(_.interfaceId.contains(interfaceIdWithPackageId))
 
     val view = assertDefined(
       viewSearch,
       s"View could not be found, there are: ${views.map(_.interfaceId).mkString("[", ",", "]")}",
     )
 
-    val viewCount = views.count(_.interfaceId.contains(interfaceId))
-    assertEquals(s"Only one view of interfaceId=$interfaceId must be defined", viewCount, 1)
+    val viewCount = views.count(_.interfaceId.contains(interfaceIdWithPackageId))
+    assertEquals(
+      s"Only one view of interfaceId=$interfaceIdWithPackageId must be defined",
+      viewCount,
+      1,
+    )
 
     val actualInterfaceId = assertDefined(view.interfaceId, "Interface ID is not defined")
-    assertEquals("View has correct interface ID", actualInterfaceId, interfaceId)
+    assertEquals("View has correct interface ID", actualInterfaceId, interfaceIdWithPackageId)
 
     val status = assertDefined(view.viewStatus, "Status is not defined")
     assertEquals("Status must be successful", status.code, 0)

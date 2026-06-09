@@ -64,6 +64,8 @@ object Consensus {
     final case class GetOrderingTopologyResponse(
         epochNumber: EpochNumber,
         nodes: Set[BftNodeId],
+        leaders: Seq[BftNodeId],
+        blacklisted: Seq[BftNodeId],
         sequencingParameters: SequencingParameters,
     )
 

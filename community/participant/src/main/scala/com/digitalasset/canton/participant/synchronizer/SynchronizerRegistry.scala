@@ -15,6 +15,7 @@ import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
+import com.digitalasset.canton.participant.config.LsuHandshake
 import com.digitalasset.canton.participant.store.{
   StoredSynchronizerConnectionConfig,
   SyncPersistentState,
@@ -55,12 +56,16 @@ trait SynchronizerRegistry extends AutoCloseable {
 
   /** Performs the handshake with the synchronizer.
     *
+    * @param lsuHandshakeConfig
+    *   If the handshake is with the successor in the context of an LSU, config for the handshake.
+    *   None for regular handshake.
     * @return
     *   The aggregate information of the sequencers and the updated list of sequencer connections
     *   (with sequencer ids set).
     */
   def pureHandshake(
-      storedConfig: StoredSynchronizerConnectionConfig
+      storedConfig: StoredSynchronizerConnectionConfig,
+      lsuHandshakeConfig: Option[LsuHandshake],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[

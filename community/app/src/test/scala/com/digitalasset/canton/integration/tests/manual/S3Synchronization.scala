@@ -203,7 +203,7 @@ object S3Synchronization {
   final case class ContinuityDumpS3Ref(override val path: String) extends ContinuityDumpRef {
     lazy val localDownloadPath: File = {
       val syncCommand =
-        s"aws s3 sync s3://canton-public-releases/data-continuity-dumps/$path ${baseDbDumpPath.path}/$path --no-sign-request"
+        s"aws s3 sync s3://canton-public-releases/data-continuity-dumps/$path ${baseDbDumpPath.path}/$path --no-sign-request --quiet"
 
       val syncResult = runSynchronized(syncCommand)
       if (syncResult != 0) {

@@ -118,6 +118,7 @@ final case class UnassignmentValidationResult(
                 assignmentExclusivity = assignmentExclusivity.map(_.unwrap.toLf),
                 reassignmentCounter = reassign.counter.unwrap,
                 nodeId = idx,
+                keyOpt = reassign.contract.contractKeyWithMaintainers,
               )
             }),
           recordTime = recordTime,

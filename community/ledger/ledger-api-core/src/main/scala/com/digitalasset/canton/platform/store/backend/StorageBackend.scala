@@ -341,12 +341,18 @@ object ContractStorageBackend {
   /** @param internalContractIds
     *   in reverse event sequential ID order starting from nextPageToken (exclusive) or
     *   validAtEventSeqId (inclusive) from the KeysPageQuery
+    * @param eventSequentialIds
+    *   the event sequential IDs of the activation events for the corresponding
+    *   `internalContractIds`. Paired index-wise with `internalContractIds`.
     * @param nextPageToken
     *   If available, this is the event sequential ID of the last (earliest) contract If not
     *   available, this is the last page from the page-sequence
     */
+  // TODO(#31713) Consider replacing the two parallel vectors `internalContractIds` and
+  //  `eventSequentialIds` with a single vector of a case class holding the zipped pairs.
   final case class KeysPageResult(
       internalContractIds: Vector[Long],
+      eventSequentialIds: Vector[Long],
       nextPageToken: Option[Long],
   )
 }

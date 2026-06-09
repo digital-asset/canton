@@ -1785,62 +1785,63 @@ object BuildCommon {
               "carbonv1",
               "carbonv2",
               "upgrade_iface",
-            ).map(codegenTarget(_, "v22")) ++
-              Seq(codegenTarget("keys", "v23"), codegenTarget("experimental", "v2dev")) ++
+              "keys",
+            ).map(codegenTarget(_, "v23")) ++
+              Seq(codegenTarget("experimental", "v2dev")) ++
               Seq(
                 (
                   (Compile / damlSourceDirectory).value / "upgrade" / "1.0.0",
-                  (Compile / damlDarOutput).value / "upgrade-tests-1.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "upgrade-tests-1.0.0-v23.dar",
                   s"com.daml.ledger.test.java.upgrade_1_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "upgrade" / "2.0.0",
-                  (Compile / damlDarOutput).value / "upgrade-tests-2.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "upgrade-tests-2.0.0-v23.dar",
                   s"com.daml.ledger.test.java.upgrade_2_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "upgrade" / "3.0.0",
-                  (Compile / damlDarOutput).value / "upgrade-tests-3.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "upgrade-tests-3.0.0-v23.dar",
                   s"com.daml.ledger.test.java.upgrade_3_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "upgrade_fetch" / "1.0.0",
-                  (Compile / damlDarOutput).value / "upgrade-fetch-tests-1.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "upgrade-fetch-tests-1.0.0-v23.dar",
                   s"com.daml.ledger.test.java.upgrade_fetch_1_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "upgrade_fetch" / "2.0.0",
-                  (Compile / damlDarOutput).value / "upgrade-fetch-tests-2.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "upgrade-fetch-tests-2.0.0-v23.dar",
                   s"com.daml.ledger.test.java.upgrade_fetch_2_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "vetting_dep",
-                  (Compile / damlDarOutput).value / "vetting-dep-1.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "vetting-dep-1.0.0-v23.dar",
                   s"com.daml.ledger.test.java.vetting_dep",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "vetting_main" / "1.0.0",
-                  (Compile / damlDarOutput).value / "vetting-main-1.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "vetting-main-1.0.0-v23.dar",
                   s"com.daml.ledger.test.java.vetting_main_1_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "vetting_main" / "2.0.0",
-                  (Compile / damlDarOutput).value / "vetting-main-2.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "vetting-main-2.0.0-v23.dar",
                   s"com.daml.ledger.test.java.vetting_main_2_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "vetting_main" / "split-lineage-2.0.0",
-                  (Compile / damlDarOutput).value / "vetting-main-split-lineage-2.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "vetting-main-split-lineage-2.0.0-v23.dar",
                   s"com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "vetting_main" / "upgrade-incompatible-3.0.0",
-                  (Compile / damlDarOutput).value / "vetting-main-3.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "vetting-main-3.0.0-v23.dar",
                   s"com.daml.ledger.test.java.vetting_main_3_0_0",
                 ),
                 (
                   (Compile / damlSourceDirectory).value / "vetting_alt",
-                  (Compile / damlDarOutput).value / "vetting-alt-1.0.0-v22.dar",
+                  (Compile / damlDarOutput).value / "vetting-alt-1.0.0-v23.dar",
                   s"com.daml.ledger.test.java.vetting_alt",
                 ),
               )
@@ -2252,7 +2253,7 @@ object BuildCommon {
         // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
         assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
-        assembly / assemblyJarName := s"ledger-api-test-tool-2.2-${version.value}.jar",
+        assembly / assemblyJarName := s"ledger-api-test-tool-2.3-${version.value}.jar",
         assembly / assemblyMergeStrategy := {
           case PathList("logback.xml") => MergeStrategy.last
           case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last

@@ -516,7 +516,7 @@ final case class CantonConfig(
         commitmentUseDbSnapshotForParticipantLookup =
           participantParameters.commitmentUseDbSnapshotForParticipantLookup,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
-        alphaMultiSynchronizerSupport = participantParameters.alphaMultiSynchronizerSupport,
+        enableAllLedgerApiReassignments = participantParameters.enableAllLedgerApiReassignments,
         commitAfterFailedActivenessCheck = participantParameters.commitAfterFailedActivenessCheck,
         validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
       )
@@ -1301,7 +1301,20 @@ object CantonConfig {
         deriveReader[MediatorPruningConfig]
       implicit val deduplicationStoreConfigReader: ConfigReader[DeduplicationStoreConfig] =
         deriveReader[DeduplicationStoreConfig]
-      deriveReader[MediatorConfig]
+
+      implicit val deprecatedFields: DeprecatedFieldsFor[MediatorConfig] =
+        new DeprecatedFieldsFor[MediatorConfig] {
+
+          override def deprecatePath: List[DeprecatedConfigPath[?]] =
+            List(
+              DeprecatedConfigPath[Boolean](
+                "asynchronous-processing",
+                since = "3.5.1",
+              )
+            )
+        }
+
+      deriveReader[MediatorConfig].applyDeprecations
     }
     lazy implicit final val remoteMediatorConfigReader: ConfigReader[RemoteMediatorConfig] =
       deriveReader[RemoteMediatorConfig]
@@ -1469,6 +1482,11 @@ object CantonConfig {
               since = "3.5.0",
               to = Seq("alpha-online-party-replication-support"),
             ),
+            DeprecatedConfigUtils.MovedConfigPath(
+              "alpha-multi-synchronizer-support",
+              since = "3.5.4",
+              to = Seq("enable-all-ledger-api-reassignments"),
+            ),
           )
 
           override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
@@ -1525,7 +1543,20 @@ object CantonConfig {
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
         deriveReader[ReassignmentsConfig]
       implicit val purgeReader: ConfigReader[PurgeConfig] = deriveReader[PurgeConfig]
-      implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig]
+      implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
+
+      implicit val deprecatedFieldsLsuConfig: DeprecatedFieldsFor[LsuConfig] =
+        new DeprecatedFieldsFor[LsuConfig] {
+          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+            DeprecatedConfigUtils.MovedConfigPath(
+              "handshake-retry",
+              since = "3.5.1",
+              to = Seq("handshake.retry"),
+            )
+          )
+        }
+
+      implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig].applyDeprecations
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
     }
     lazy implicit final val timeTrackerConfigReader: ConfigReader[SynchronizerTimeTrackerConfig] = {
@@ -2241,6 +2272,7 @@ object CantonConfig {
       implicit val reassignmentsConfigWriter: ConfigWriter[ReassignmentsConfig] =
         deriveWriter[ReassignmentsConfig]
       implicit val purgeWriter: ConfigWriter[PurgeConfig] = deriveWriter[PurgeConfig]
+      implicit val lsuHandshakeWriter: ConfigWriter[LsuHandshake] = deriveWriter[LsuHandshake]
       implicit val lsuWriter: ConfigWriter[LsuConfig] = deriveWriter[LsuConfig]
       deriveWriter[ParticipantNodeParameterConfig]
     }

@@ -83,7 +83,7 @@ trait RepairServiceIntegrationTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
 
   override val defaultParticipant: String = "participant1"
@@ -858,7 +858,7 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
     import env.*
 
     // If multi-synchronizer support is enabled, the purge will be represented as an Unassigned event, otherwise as a synthetic Archive event
-    val multiSynchronizerSupport = participant1.config.parameters.alphaMultiSynchronizerSupport
+    val multiSynchronizerSupport = participant1.config.parameters.enableAllLedgerApiReassignments
 
     val eventFormat = EventFormat(
       filtersByParty =
@@ -1098,24 +1098,24 @@ sealed trait WithMultiSynchronizerSupport extends RepairServiceIntegrationTest {
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(true)
+          _.focus(_.parameters.enableAllLedgerApiReassignments).replace(true)
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
 }
 
-/** Contains tests that ONLY work when alphaMultiSynchronizerSupport = true */
+/** Contains tests that ONLY work when enableAllLedgerApiReassignments = true */
 sealed trait RepairServiceMultiSynchronizerTests extends RepairServiceIntegrationTest {
 
   "RepairServiceMultiSynchronizerTests" must {
 
-    "run test only with enabled `alphaMultiSynchronizerSupport`" in { implicit env =>
+    "run test only with enabled `enableAllLedgerApiReassignments`" in { implicit env =>
       import env.*
 
       participants.local.foreach { participant =>
         assert(
-          participant.config.parameters.alphaMultiSynchronizerSupport,
-          s"alphaMultiSynchronizerSupport must be true for ${participant.name} in this test suite",
+          participant.config.parameters.enableAllLedgerApiReassignments,
+          s"enableAllLedgerApiReassignments must be true for ${participant.name} in this test suite",
         )
       }
     }

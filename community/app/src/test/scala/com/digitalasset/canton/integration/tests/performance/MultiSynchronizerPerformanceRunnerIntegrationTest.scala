@@ -52,7 +52,7 @@ class MultiSynchronizerPerformanceRunnerIntegrationTest
             .ofMillis(sequencerClientAcknowledgementIntervalMs.toLong)
             .toInternal
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
