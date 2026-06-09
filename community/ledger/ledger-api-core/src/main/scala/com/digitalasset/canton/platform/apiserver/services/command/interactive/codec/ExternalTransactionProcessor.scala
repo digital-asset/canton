@@ -204,7 +204,6 @@ class ExternalTransactionProcessor(
         submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
         transactionMeta = commandExecutionResult.commandInterpretationResult.transactionMeta,
         transaction = SubmittedTransaction(enrichedTransaction),
-        globalKeyMapping = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
         inputContracts = inputContracts,
         synchronizer = psid.forExternalTransactionHashing,
         mediatorGroup = 0,

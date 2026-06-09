@@ -148,8 +148,7 @@ private[lf] object TypeIterable {
       case UpdateEmbedExpr(typ, body) =>
         Iterator(typ) ++
           iterator(body)
-      case UpdateGetTime | UpdateLedgerTimeLT(_) | UpdateFetchByKey(_) | UpdateLookupByKey(_) |
-          UpdateQueryNByKey(_) =>
+      case UpdateGetTime | UpdateLedgerTimeLT(_) | UpdateFetchByKey(_) | UpdateQueryNByKey(_) =>
         ExprIterable.iterator(update).flatMap(iterator(_))
       case UpdateTryCatchV1(typ, body, binder @ _, handler) =>
         Iterator(typ) ++

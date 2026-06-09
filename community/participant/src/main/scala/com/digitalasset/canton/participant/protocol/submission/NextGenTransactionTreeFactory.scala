@@ -70,7 +70,6 @@ class NextGenTransactionTreeFactory(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      legacyKeyResolver: LfGlobalKeyMapping,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -729,7 +728,6 @@ class NextGenTransactionTreeFactory(
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      legacyKeyResolver: LfGlobalKeyMapping,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,

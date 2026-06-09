@@ -12,14 +12,97 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
-import com.digitalasset.canton.store.db.DbPendingOperationsStore
-import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
+import com.digitalasset.canton.store.db.{
+  DbDeserializationException,
+  DbGenericPendingOperationStore,
+  DbPendingOperationsStore,
+}
+import com.digitalasset.canton.store.memory.{
+  InMemoryGenericPendingOperationStore,
+  InMemoryPendingOperationStore,
+}
 import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasProtocolVersionedWrapper, VersioningCompanion}
 import com.google.protobuf.ByteString
+import slick.jdbc.GetResult
 
 import scala.concurrent.ExecutionContext
+
+final case class PendingOperationMetadata(
+    name: NonEmptyString,
+    key: String,
+    synchronizer: Synchronizer,
+) {
+  private[store] def compositeKey: (Synchronizer, String, NonEmptyString) =
+    (synchronizer, key, name)
+}
+
+object PendingOperationMetadata {
+
+  private[store] def create(
+      name: String,
+      key: String,
+      synchronizer: Synchronizer,
+  ): Either[String, PendingOperationMetadata] =
+    NonEmptyString
+      .create(name)
+      .leftMap(_ => "Empty pending operation name")
+      .map(PendingOperationMetadata(_, key, synchronizer))
+
+  def tryGetPendingOperationMetadataResult(implicit
+      getSId: GetResult[Synchronizer]
+  ): GetResult[PendingOperationMetadata] =
+    GetResult { r =>
+      PendingOperationMetadata
+        .create(
+          name = r.<<[String],
+          key = r.<<[String],
+          synchronizer = r.<<[Synchronizer],
+        )
+        .valueOr(errorMessage => throw new DbDeserializationException(errorMessage))
+    }
+}
+
+trait GenericPendingOperationStore {
+
+  def isInMemoryStore(): Boolean
+
+  /** Fetches all pending operations matching the given criteria.
+    *
+    * @param operationName
+    *   Optional the name of the operation to filter by.
+    * @param synchronizerId
+    *   Optional synchronizerId to filter by. If Logical synchronizer id is used, it will return all
+    *   operations with logical synchonizer as well as for all physical synchronizers under the
+    *   logical synchronizer. If physical synchronizer id is used, it will return only operations
+    *   for that physical synchronizer.
+    * @param operationKey
+    *   Optional operation key to filter by.
+    * @return
+    *   A future that completes with `Set(operation metadata)` of operations metadata matching the
+    *   above criteria, fails with a `DbDeserializationException` if the stored data is corrupt.
+    */
+  def getAllMetadata(
+      operationName: Option[NonEmptyString] = None,
+      synchronizerId: Option[Synchronizer] = None,
+      operationKey: Option[String] = None,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PendingOperationMetadata]]
+}
+
+object GenericPendingOperationStore {
+  def apply(
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): GenericPendingOperationStore =
+    storage match {
+      case _: MemoryStorage =>
+        new InMemoryGenericPendingOperationStore(loggerFactory)
+      case jdbc: DbStorage =>
+        new DbGenericPendingOperationStore(jdbc, timeouts, loggerFactory)
+    }
+}
 
 /** @tparam Op
   *   A protobuf message that implements
@@ -27,7 +110,8 @@ import scala.concurrent.ExecutionContext
   *   data for executing the pending operation.
   */
 trait PendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer]
-    extends AutoCloseable {
+    extends AutoCloseable
+    with GenericPendingOperationStore {
 
   protected def opCompanion: VersioningCompanion[Op]
 
@@ -168,6 +252,9 @@ final case class PendingOperation[Op <: HasProtocolVersionedWrapper[Op], SId <: 
 ) {
   private[store] def compositeKey: (SId, String, NonEmptyString) =
     (synchronizer, key, name)
+
+  def toMetadata(): PendingOperationMetadata =
+    PendingOperationMetadata(name, key, synchronizer)
 }
 
 object PendingOperation {

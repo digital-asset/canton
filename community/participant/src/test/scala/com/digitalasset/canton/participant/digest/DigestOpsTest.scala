@@ -76,9 +76,9 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
         participant1,
         AcsUpdate(
           stakeholders = Map(
-            party1 -> Seq(),
-            party2 -> Seq(participant2),
-            party3 -> Seq(participant2),
+            party1 -> Seq(participant1),
+            party2 -> Seq(participant1, participant2),
+            party3 -> Seq(participant1, participant2),
           ),
           locallyHostedStakeholders = Seq(party1, party2, party3),
           cid = contractId1,
@@ -143,6 +143,25 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
           operation = DigestOperation.Add,
         ),
         DigestDelta.Participant(
+          participantId = participant1,
+          digest = makeExpectedDigest(
+            contractId = contractId1,
+            partyPairs = Set(
+              party1 -> party1,
+              party1 -> party2,
+              party1 -> party3,
+              party2 -> party1,
+              party2 -> party2,
+              party2 -> party3,
+              party3 -> party1,
+              party3 -> party2,
+              party3 -> party3,
+            ),
+            reassignmentCounter = reassignmentCounter,
+          ),
+          operation = Add,
+        ),
+        DigestDelta.Participant(
           participantId = participant2,
           digest = makeExpectedDigest(
             contractId = contractId1,
@@ -172,7 +191,7 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
         participant2,
         AcsUpdate(
           stakeholders = Map(
-            party3 -> Seq(participant1, participant3),
+            party3 -> Seq(participant1, participant2, participant3),
             party4 -> Seq(participant1, participant3),
           ),
           locallyHostedStakeholders = Seq(party3),
@@ -229,6 +248,15 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
           operation = DigestOperation.Remove,
         ),
         DigestDelta.Participant(
+          participantId = participant2,
+          digest = makeExpectedDigest(
+            contractId = contractId2,
+            partyPairs = Set(party3 -> party3),
+            reassignmentCounter = reassignmentCounter,
+          ),
+          operation = DigestOperation.Remove,
+        ),
+        DigestDelta.Participant(
           participantId = participant1,
           digest = makeExpectedDigest(
             contractId = contractId2,
@@ -250,9 +278,9 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
           participant1,
           AcsUpdate(
             stakeholders = Map(
-              party1 -> Seq(),
-              party2 -> Seq(participant2),
-              party3 -> Seq(participant2),
+              party1 -> Seq(participant1),
+              party2 -> Seq(participant1, participant2),
+              party3 -> Seq(participant1, participant2),
             ),
             locallyHostedStakeholders = Seq(party1, party2, party3),
             cid = contractId1,
@@ -270,8 +298,8 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
           AcsUpdate(
             stakeholders = Map(
               party1 -> Seq(participant1),
-              party2 -> Seq(participant1),
-              party3 -> Seq(participant1),
+              party2 -> Seq(participant1, participant2),
+              party3 -> Seq(participant1, participant2),
             ),
             locallyHostedStakeholders = Seq(party2, party3),
             cid = contractId1,

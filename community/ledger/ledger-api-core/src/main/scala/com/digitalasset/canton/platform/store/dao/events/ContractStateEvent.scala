@@ -8,14 +8,16 @@ import com.digitalasset.canton.platform.*
 sealed trait ContractStateEvent extends Product with Serializable
 
 object ContractStateEvent {
-  final case class Created(
+  final case class Activated(
       contractId: ContractId,
       globalKey: Option[Key],
+      eventSequentialId: Long,
+      isInitial: Boolean, // distinguish between initial activation (created) and re-activation (assigned)
   ) extends ContractStateEvent
-  final case class Archived(
+  final case class Deactivated(
       contractId: ContractId,
       globalKey: Option[Key],
+      deactivatedEventSequentialId: Long, // event sequential ID of the activated event
+      isFinal: Boolean, // distinguish between final deactivation (archived) and non-final deactivation (unassigned)
   ) extends ContractStateEvent
-  // This is merely a placeholder for now, sole purpose is to tick the StateCaches internal index
-  case object ReassignmentAccepted extends ContractStateEvent
 }

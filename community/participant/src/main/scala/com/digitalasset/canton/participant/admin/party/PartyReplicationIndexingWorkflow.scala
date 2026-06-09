@@ -317,6 +317,7 @@ class PartyReplicationIndexingWorkflow(
                 assignmentExclusivity = None,
                 reassignmentCounter = reassignmentCounter.v,
                 nodeId = idx,
+                keyOpt = contract.contractKeyWithMaintainers,
               )
           }
         ),

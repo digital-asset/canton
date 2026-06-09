@@ -12,19 +12,25 @@ import com.digitalasset.canton.{InternedPartyId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.ParticipantId
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import slick.jdbc.GetResult
 
 import scala.collection.immutable
+import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
 
 trait AcsDigestStore {
 
   import AcsDigestStore.*
 
+  protected implicit def executionContext: ExecutionContext
+
   /** Stores running digests per party and order as sparse journal for a given synchronizer */
-  def party: DigestJournal[PartyAndOrder[InternedPartyId], RawDigest]
+  def party: DigestJournal[PartyAndOrder[InternedPartyId], RawDigest] = party_
+  protected def party_ : AcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest]
 
   /** Stores running digests per counterparticipant as sparse journal for a given synchronizer */
-  def participant: DigestJournal[InternedParticipantId, (RawDigest, HashedDigest)]
+  def participant: DigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] = participant_
+  protected def participant_ : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)]
 
   /** Inserts the given record time as a checkpoint time.
     *
@@ -41,7 +47,18 @@ trait AcsDigestStore {
     * all digest entries from [[party]] and [[participant]] whose record time is higher than
     * `fromExclusive`.
     */
-  def deleteAfter(fromExclusive: RecordTime)(implicit
+  final def deleteAfter(fromExclusive: RecordTime)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = for {
+    _ <- deleteCheckpointsAfter(fromExclusive)
+    _ <- party_.deleteAfter(fromExclusive)
+    _ <- participant_.deleteAfter(fromExclusive)
+  } yield ()
+
+  /** Deletes the checkpoint markers after `fromExclusive` as part of the crash recovery sequence in
+    * [[deleteAfter]].
+    */
+  protected def deleteCheckpointsAfter(fromExclusive: RecordTime)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -55,7 +72,18 @@ trait AcsDigestStore {
     *   - The entry's [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigest.digestO]]
     *     is [[scala.None$]].
     */
-  def deleteUpTo(toExclusive: RecordTime)(implicit
+  final def deleteUpTo(toExclusive: RecordTime)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = for {
+    _ <- deleteCheckpointsUpTo(toExclusive)
+    _ <- party_.deleteUpTo(toExclusive)
+    _ <- participant_.deleteUpTo(toExclusive)
+  } yield ()
+
+  /** Deletes the checkpoint markers up to `toExclusive` as part of the pruning sequence in
+    * [[deleteUpTo]].
+    */
+  protected def deleteCheckpointsUpTo(toExclusive: RecordTime)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -77,9 +105,17 @@ trait AcsDigestStore {
     *   com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal.checkReplacesInvariant
     */
   @VisibleForTesting
-  def checkReplacesInvariant()(implicit
+  final def checkReplacesInvariant()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
+  ): FutureUnlessShutdown[Unit] = for {
+    lastCheckpointO <- latestCheckpointUpTo(RecordTime.MaxValue)
+    _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit)(lastCheckpointInclusive =>
+      for {
+        _ <- party.checkReplacesInvariant(lastCheckpointInclusive)
+        _ <- participant.checkReplacesInvariant(lastCheckpointInclusive)
+      } yield ()
+    )
+  } yield ()
 }
 
 object AcsDigestStore {
@@ -222,6 +258,15 @@ object AcsDigestStore {
     def map[L](f: K => L): AcsDigest[L, V] = copy(key = f(key))
   }
 
+  object AcsDigest {
+    implicit def getAcsDigest[K: GetResult, V](implicit
+        vO: GetResult[Option[V]]
+    ): GetResult[AcsDigestStore.AcsDigest[K, V]] = GetResult { pr =>
+      val (key, recordTime, digest) = (pr.<<[K], pr.<<[RecordTime], pr.<<[Option[V]])
+      AcsDigestStore.AcsDigest(key, digest, recordTime)
+    }
+  }
+
   /** Represents an update to the running digest of the shared active contract for a key at a given
     * record time, together with a by-record-time reference to the entry it replaces, if any.
     */
@@ -230,6 +275,18 @@ object AcsDigestStore {
       replacesRecordTime: Option[RecordTime],
   ) {
     def map[L](f: K => L): AcsDigestUpdate[L, V] = copy(digestUpdate = digestUpdate.map(f))
+  }
+
+  object AcsDigestUpdate {
+    implicit def getAcsDigestUpdate[K: GetResult, V](implicit
+        vO: GetResult[Option[V]]
+    ): GetResult[AcsDigestStore.AcsDigestUpdate[K, V]] = GetResult { pr =>
+      AcsDigestStore.AcsDigestUpdate(
+        digestUpdate = AcsDigest.getAcsDigest[K, V].apply(pr), // this uses pr in order
+        replacesRecordTime =
+          pr.<<[Option[RecordTime]], // thus we cannot move this before getAcsDigest call
+      )
+    }
   }
 
   /** Must always be 2048 long as long as we use [[com.digitalasset.canton.crypto.LtHash16]].

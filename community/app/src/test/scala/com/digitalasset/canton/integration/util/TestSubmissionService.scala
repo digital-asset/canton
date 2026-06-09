@@ -142,14 +142,13 @@ class TestSubmissionService(
       commands: CommandsWithMetadata,
       transaction: SubmittedTransaction,
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
-      globalKeyInputs: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[Completion] = {
     val submitterInfo = commands.submitterInfo(maxDeduplicationDuration.duration)
     val meta = commands.transactionMeta(transaction, nodeSeeds)
     waitForCompletion(
       submittingParticipant,
       commands,
-      submitTransaction_(submitterInfo, meta, transaction, globalKeyInputs),
+      submitTransaction_(submitterInfo, meta, transaction),
     )
   }
 
@@ -221,7 +220,6 @@ class TestSubmissionService(
           submitterInfo,
           meta,
           transaction,
-          metadata.globalKeyMapping,
         )
       )
     } yield result
@@ -230,9 +228,8 @@ class TestSubmissionService(
       submitterInfo: SubmitterInfo,
       meta: TransactionMeta,
       transaction: SubmittedTransaction,
-      keyMapping: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[Unit] =
-    submitTransaction(submitterInfo, meta, transaction, keyMapping).map {
+    submitTransaction(submitterInfo, meta, transaction).map {
       case SubmissionResult.Acknowledged => ()
       case error: SubmissionResult.SynchronousError => throw error.exception
     }
@@ -241,7 +238,6 @@ class TestSubmissionService(
       submitterInfo: SubmitterInfo,
       meta: TransactionMeta,
       transaction: SubmittedTransaction,
-      keyMapping: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[SubmissionResult] =
     for {
       routingSynchronizerState <- syncService.getRoutingSynchronizerState
@@ -267,7 +263,6 @@ class TestSubmissionService(
           transactionMeta = meta,
           transaction = transaction,
           _estimatedInterpretationCost = 0,
-          keyResolver = keyMapping,
           processedDisclosedContracts = ImmArray.Empty, // TODO(#9795) wire proper value
         )
     } yield submissionResult

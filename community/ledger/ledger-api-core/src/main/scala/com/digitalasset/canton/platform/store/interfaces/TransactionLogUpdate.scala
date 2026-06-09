@@ -147,6 +147,7 @@ object TransactionLogUpdate {
       packageVersion: Option[Ref.PackageVersion],
       commandId: String,
       workflowId: String,
+      // TODO(#31713) flatten key related optionals
       contractKey: Option[LfValue.VersionedValue],
       treeEventWitnesses: Set[Party],
       flatEventWitnesses: Set[Party],

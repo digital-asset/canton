@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin.data
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.admin.participant.v30
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -21,7 +21,6 @@ import scala.annotation.unused
   */
 final case class PartyReplicationStatus(
     parameters: ReplicationParameters,
-    agreementO: Option[SequencerChannelAgreement],
     authorizationO: Option[PartyReplicationAuthorization],
     replicationO: Option[AcsReplicationProgress],
     indexingO: Option[AcsIndexingProgress.type],
@@ -34,20 +33,18 @@ final case class PartyReplicationStatus(
     s"cannot begin indexing $indexingO before replication has started",
   )
 
-  def toProtoV30: v30.PartyReplicationStatus = v30.PartyReplicationStatus(
-    Some(parameters.toProtoV30),
-    agreementO.map(_.toProtoV30),
-    authorizationO.map(_.toProtoV30),
-    replicationO.map(_.toProtoV30),
-    indexingO.map(_.toProtoV30),
+  def toLapiProto: LapiPartyReplicationStatus = LapiPartyReplicationStatus(
+    Some(parameters.toLapiProto),
+    authorizationO.map(_.toLapiProto),
+    replicationO.map(_.toLapiProto),
+    indexingO.map(_.toLapiProto),
     hasCompleted = hasCompleted,
-    errorO.map(_.toProtoV30),
+    errorO.map(_.toLapiProto),
   )
 
   override protected def pretty: Pretty[PartyReplicationStatus] =
     prettyOfClass(
       param("parameters", _.parameters),
-      paramIfDefined("agreement", _.agreementO),
       paramIfDefined("authorization", _.authorizationO),
       paramIfDefined("replication", _.replicationO),
       paramIfDefined("indexing", _.indexingO),
@@ -63,7 +60,7 @@ object PartyReplicationStatus {
     // in a backward compatible way.
     case InternalStatus(
           params,
-          agreementO,
+          _agreementO,
           authorizationO,
           replicationO,
           indexingO,
@@ -72,7 +69,6 @@ object PartyReplicationStatus {
         ) =>
       PartyReplicationStatus(
         ReplicationParameters.fromInternal(params),
-        agreementO.map(SequencerChannelAgreement.fromInternal),
         authorizationO.map(PartyReplicationAuthorization.fromInternal),
         replicationO.map(AcsReplicationProgress.fromInternal),
         indexingO.map(AcsIndexingProgress.fromInternal),
@@ -81,19 +77,17 @@ object PartyReplicationStatus {
       )
   }
 
-  def fromProtoV30(proto: v30.PartyReplicationStatus): ParsingResult[PartyReplicationStatus] =
+  def fromLapiProto(proto: LapiPartyReplicationStatus): ParsingResult[PartyReplicationStatus] =
     for {
       paramsP <- ProtoConverter.required("parameters", proto.parameters)
-      params <- ReplicationParameters.fromProtoV30(paramsP)
-      agreementO <- proto.agreement.traverse(SequencerChannelAgreement.fromProtoV30)
-      authorizationO <- proto.authorization.traverse(PartyReplicationAuthorization.fromProtoV30)
-      replicationO <- proto.replication.traverse(AcsReplicationProgress.fromProtoV30)
-      indexingO <- proto.indexing.traverse(AcsIndexingProgress.fromProtoV30)
+      params <- ReplicationParameters.fromLapiProto(paramsP)
+      authorizationO <- proto.authorization.traverse(PartyReplicationAuthorization.fromLapiProto)
+      replicationO <- proto.replication.traverse(AcsReplicationProgress.fromLapiProto)
+      indexingO <- proto.indexing.traverse(AcsIndexingProgress.fromLapiProto)
       hasCompleted = proto.hasCompleted
-      errorO <- proto.errorMessage.traverse(PartyReplicationError.fromProtoV30)
+      errorO <- proto.errorMessage.traverse(PartyReplicationError.fromLapiProto)
     } yield PartyReplicationStatus(
       params,
-      agreementO,
       authorizationO,
       replicationO,
       indexingO,
@@ -109,8 +103,9 @@ object PartyReplicationStatus {
       targetParticipantId: ParticipantId,
       serial: PositiveInt,
   ) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.ReplicationParameters =
-      v30.PartyReplicationStatus.ReplicationParameters(
+
+    def toLapiProto: LapiPartyReplicationStatus.ReplicationParameters =
+      LapiPartyReplicationStatus.ReplicationParameters(
         requestId,
         partyId.toProtoPrimitive,
         synchronizerId.uid.toProtoPrimitive,
@@ -152,8 +147,8 @@ object PartyReplicationStatus {
         )
     }
 
-    def fromProtoV30(
-        proto: v30.PartyReplicationStatus.ReplicationParameters
+    def fromLapiProto(
+        proto: LapiPartyReplicationStatus.ReplicationParameters
     ): ParsingResult[ReplicationParameters] = for {
       partyId <- PartyId.fromProtoPrimitive(proto.partyId, "party_id")
       synchronizerId <- SynchronizerId.fromProtoPrimitive(
@@ -186,37 +181,13 @@ object PartyReplicationStatus {
     )
   }
 
-  final case class SequencerChannelAgreement(sequencerId: SequencerId) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.SequencerChannelAgreement =
-      v30.PartyReplicationStatus.SequencerChannelAgreement(sequencerId.uid.toProtoPrimitive)
-
-    override protected def pretty: Pretty[SequencerChannelAgreement] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(param("sequencer", _.sequencerId))
-    }
-  }
-  private object SequencerChannelAgreement {
-    def fromInternal: InternalStatus.SequencerChannelAgreement => SequencerChannelAgreement = {
-      case InternalStatus.SequencerChannelAgreement(_contractId, sequencerId) =>
-        SequencerChannelAgreement(sequencerId)
-    }
-
-    def fromProtoV30(
-        proto: v30.PartyReplicationStatus.SequencerChannelAgreement
-    ): ParsingResult[SequencerChannelAgreement] =
-      for {
-        sequencerId <- UniqueIdentifier
-          .fromProtoPrimitive(proto.sequencerUid, "sequencer_uid")
-          .map(SequencerId(_))
-      } yield SequencerChannelAgreement(sequencerId)
-  }
-
   final case class PartyReplicationAuthorization(
       onboardingAt: CantonTimestamp,
       isOnboardingFlagCleared: Boolean,
   ) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.PartyReplicationAuthorization =
-      v30.PartyReplicationStatus.PartyReplicationAuthorization(
+
+    def toLapiProto: LapiPartyReplicationStatus.PartyReplicationAuthorization =
+      LapiPartyReplicationStatus.PartyReplicationAuthorization(
         Some(onboardingAt.toProtoTimestamp),
         isOnboardingFlagCleared,
       )
@@ -236,8 +207,8 @@ object PartyReplicationStatus {
         PartyReplicationAuthorization(onboardingAt.value, isOnboardingFlagCleared)
     }
 
-    def fromProtoV30(
-        proto: v30.PartyReplicationStatus.PartyReplicationAuthorization
+    def fromLapiProto(
+        proto: LapiPartyReplicationStatus.PartyReplicationAuthorization
     ): ParsingResult[PartyReplicationAuthorization] = for {
       onboardingAtP <- ProtoConverter.required("onboarding_at", proto.onboardingAt)
       onboardingAt <- CantonTimestamp.fromProtoTimestamp(onboardingAtP)
@@ -248,8 +219,9 @@ object PartyReplicationStatus {
       processedContractCount: NonNegativeLong,
       fullyProcessedAcs: Boolean,
   ) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.AcsReplicationProgress =
-      v30.PartyReplicationStatus.AcsReplicationProgress(
+
+    def toLapiProto: LapiPartyReplicationStatus.AcsReplicationProgress =
+      LapiPartyReplicationStatus.AcsReplicationProgress(
         processedContractCount.unwrap,
         fullyProcessedAcs,
       )
@@ -273,8 +245,8 @@ object PartyReplicationStatus {
       AcsReplicationProgress(processedContractCount, fullyProcessedAcs)
     }
 
-    def fromProtoV30(
-        proto: v30.PartyReplicationStatus.AcsReplicationProgress
+    def fromLapiProto(
+        proto: LapiPartyReplicationStatus.AcsReplicationProgress
     ): ParsingResult[AcsReplicationProgress] = for {
       replicatedContractCount <- ProtoConverter.parseNonNegativeLong(
         "replicated_contract_count",
@@ -292,26 +264,28 @@ object PartyReplicationStatus {
         AcsIndexingProgress
     }
 
-    def toProtoV30: v30.PartyReplicationStatus.AcsIndexingProgress =
-      v30.PartyReplicationStatus.AcsIndexingProgress()
+    def toLapiProto: LapiPartyReplicationStatus.AcsIndexingProgress =
+      LapiPartyReplicationStatus.AcsIndexingProgress()
 
-    def fromProtoV30(
+    def fromLapiProto(
         @unused
-        _proto: v30.PartyReplicationStatus.AcsIndexingProgress
+        _proto: LapiPartyReplicationStatus.AcsIndexingProgress
     ): ParsingResult[AcsIndexingProgress.type] = Right(AcsIndexingProgress)
   }
 
   final case class PartyReplicationError(message: String) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.PartyReplicationError =
-      v30.PartyReplicationStatus.PartyReplicationError(message)
+
+    def toLapiProto: LapiPartyReplicationStatus.PartyReplicationError =
+      LapiPartyReplicationStatus.PartyReplicationError(message)
+
     override protected def pretty: Pretty[PartyReplicationError] = prettyOfString(_.message)
   }
   private object PartyReplicationError {
     def fromInternal: InternalStatus.PartyReplicationError => PartyReplicationError = err =>
       PartyReplicationError(err.message)
 
-    def fromProtoV30(
-        proto: v30.PartyReplicationStatus.PartyReplicationError
+    def fromLapiProto(
+        proto: LapiPartyReplicationStatus.PartyReplicationError
     ): ParsingResult[PartyReplicationError] = Right(PartyReplicationError(proto.errorMessage))
   }
 }

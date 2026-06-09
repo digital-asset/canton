@@ -326,7 +326,13 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                       decisionTime,
                     )
                   _ <- mediatorState.add(
-                    FinalizedResponse(requestId, request, requestId.unwrap, verdict)(traceContext)
+                    FinalizedResponse(
+                      requestId,
+                      request,
+                      requestId.unwrap,
+                      verdict,
+                      firstResponseReceived = None,
+                    )(traceContext)
                   )
                 } yield UnthrottledAsync.immediate // Already persisted above; nothing more to wait for
 

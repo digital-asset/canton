@@ -32,6 +32,7 @@ final class PruningModule[E <: Env[E]](
     clock: Clock,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
+    partitionPruner: Option[PartitionManager.PartitionPruner[E]] = None,
 )(implicit metricsContext: MetricsContext)
     extends Pruning[E] {
 
@@ -47,10 +48,15 @@ final class PruningModule[E <: Env[E]](
   )(implicit context: E#ActorContextT[Pruning.Message], traceContext: TraceContext): Unit =
     message match {
       case Pruning.Start =>
-        pipeToSelfOpt(stores.outputStore.getLowerBound()) {
-          case Success(Some(lowerBound)) =>
-            Some(Pruning.PerformPruning(lowerBound.epochNumber))
-          case Success(None) =>
+        pipeToSelfOpt(
+          context.zipFuture(
+            stores.outputStore.getLowerBound(),
+            stores.outputStore.getLastNonSequentialBlockMetadataStored,
+          )
+        ) {
+          case Success((Some(lowerBound), Some(lastBlock))) =>
+            Some(Pruning.PerformPruning(lowerBound.epochNumber, lastBlock.epochNumber))
+          case Success(_) =>
             None
           case Failure(exception) =>
             Some(
@@ -107,7 +113,7 @@ final class PruningModule[E <: Env[E]](
             result match {
               case (Some(block1), Some(block2)) =>
                 val epoch = EpochNumber(Math.min(block1.epochNumber, block2.epochNumber))
-                Some(Pruning.SaveNewLowerBound(epoch))
+                Some(Pruning.SaveNewLowerBound(epoch, latestBlock.epochNumber))
               case (Some(_), None) =>
                 // Pruning cannot be performed in this case, otherwise we would end up with
                 // fewer blocks than the minimum number of blocks to keep.
@@ -136,10 +142,10 @@ final class PruningModule[E <: Env[E]](
               )
             )
         }
-      case Pruning.SaveNewLowerBound(epochNumber) =>
+      case Pruning.SaveNewLowerBound(epochNumber, latestOngoingEpoch) =>
         logger.debug(s"Saving new lower bound $epochNumber")
         pipeToSelfOpt(stores.outputStore.saveLowerBound(epochNumber)) {
-          case Success(Right(())) => Some(Pruning.PerformPruning(epochNumber))
+          case Success(Right(())) => Some(Pruning.PerformPruning(epochNumber, latestOngoingEpoch))
           case Success(Left(error)) =>
             val msg = s"Failed to save new pruning lower bound: $error"
             logger.error(msg)
@@ -152,29 +158,53 @@ final class PruningModule[E <: Env[E]](
               )
             )
         }
-      case Pruning.PerformPruning(epochNumber) =>
+      case Pruning.PerformPruning(epochNumber, latestOngoingEpoch) =>
         logger.info(s"Pruning at epoch $epochNumber starting")
-        val pruneFuture =
-          context.zipFuture3(
-            stores.outputStore.prune(epochNumber),
-            stores.epochStore.prune(epochNumber),
-            stores.availabilityStore.prune(
-              EpochNumber(epochNumber - OrderingRequestBatch.BatchValidityDurationEpochs + 1L)
-            ),
-            orderingStage = Some("pruning-prune"),
-          )
-        pipeToSelfOpt(pruneFuture) {
-          case Success(
-                (outputStorePrunedRecords, epochStorePrunedRecords, availabilityStorePrunedRecords)
-              ) =>
-            val msg = s"""|Pruning at epoch $epochNumber complete.
-                          |EpochStore: pruned ${epochStorePrunedRecords.epochs} epochs, ${epochStorePrunedRecords.pbftMessagesCompleted} pbft messages.
-                          |OutputStore: pruned ${outputStorePrunedRecords.epochs} epochs and ${outputStorePrunedRecords.blocks} blocks.
-                          |AvailabilityStore: pruned ${availabilityStorePrunedRecords.batches} batches.""".stripMargin
-            logger.info(msg)
-            completePruningOperation(msg)
-          case Failure(exception) =>
-            Some(Pruning.FailedDatabaseOperation("Failed to perform pruning", exception))
+        partitionPruner match {
+          // The partition pruner is only present if using Postgres.
+          // In that case, tables uses partitions and pruning is done by dropping partitions.
+          case Some(partitionPruner) =>
+            // We subtract 1 from the pruning epoch to turn the exclusive epoch number into inclusive.
+            // We subtract 1 from the latest ongoing epoch to turn it into the latest completed epoch
+            context.pipeToSelf(
+              partitionPruner
+                .prune(EpochNumber(epochNumber - 1L), EpochNumber(latestOngoingEpoch - 1L))
+            ) {
+              case Success(msg) =>
+                logger.info(msg)
+                completePruningOperation(msg)
+              case Failure(exception) =>
+                Some(Pruning.FailedDatabaseOperation("Failed to perform pruning", exception))
+            }
+          // If using H2 or in memory storage, we default to the old behavior of pruning each store separately
+          // by deleting all records before the given epoch number.
+          case _ =>
+            val pruneFuture =
+              context.zipFuture3(
+                stores.outputStore.prune(epochNumber),
+                stores.epochStore.prune(epochNumber),
+                stores.availabilityStore.prune(
+                  EpochNumber(epochNumber - OrderingRequestBatch.BatchValidityDurationEpochs + 1L)
+                ),
+                orderingStage = Some("pruning-prune"),
+              )
+            pipeToSelfOpt(pruneFuture) {
+              case Success(
+                    (
+                      outputStorePrunedRecords,
+                      epochStorePrunedRecords,
+                      availabilityStorePrunedRecords,
+                    )
+                  ) =>
+                val msg = s"""|Pruning at epoch $epochNumber complete.
+                              |EpochStore: pruned ${epochStorePrunedRecords.epochs} epochs, ${epochStorePrunedRecords.pbftMessagesCompleted} pbft messages.
+                              |OutputStore: pruned ${outputStorePrunedRecords.epochs} epochs and ${outputStorePrunedRecords.blocks} blocks.
+                              |AvailabilityStore: pruned ${availabilityStorePrunedRecords.batches} batches.""".stripMargin
+                logger.info(msg)
+                completePruningOperation(msg)
+              case Failure(exception) =>
+                Some(Pruning.FailedDatabaseOperation("Failed to perform pruning", exception))
+            }
         }
       case Pruning.FailedDatabaseOperation(msg, exception) =>
         logger.error(msg, exception)

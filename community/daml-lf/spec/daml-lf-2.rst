@@ -729,7 +729,6 @@ Then we can define our kinds, types, and expressions::
        |  'exercise_interface' @Mod:I Ch e₁ e₂ e₃   -- UpdateExerciseInterface [Daml-LF ≥ 1.15]
        |  'get_time'                                -- UpdateGetTime
        |  'fetch_by_key' @τ e                       -- UpdateFecthByKey
-       |  'lookup_by_key' @τ e                      -- UpdateLookUpByKey
        |  'embed_expr' @τ e                         -- UpdateEmbedExpr
        |  'try' @τ e₁ 'catch' x. e₂                 -- UpdateTryCatch [Daml-LF ≥ 1.14]
 
@@ -1397,13 +1396,6 @@ Then we define *well-formed expressions*. ::
           'contract' : Mod:T
         ⟩
 
-      'tpl' (x : T)  ↦ { …, 'key' τ …, … } ∈ 〚Ξ〛Mod
-      Γ  ⊢  e : τ
-    ——————————————————————————————————————————————————————————————— UpdLookupByKey
-      Γ  ⊢  'lookup_by_key' @Mod:T e
-              :
-	    'Update' ('Optional' (ContractId Mod:T))
-
       τ  ↠  τ'     Γ  ⊢  e  :  'Update' τ'
     ——————————————————————————————————————————————————————————————— UpdEmbedExpr
       Γ  ⊢  'embed_expr' @τ e  :  'Update' τ'
@@ -2012,7 +2004,6 @@ need to be evaluated further. ::
          | 'exercise' @Mod:T Ch v₁ v₂                -- ValUpdateExercise
          | 'exercise_by_key' @Mod:T Ch v₁ v₂         -- ValUpdateExerciseByKey
          | 'fetch_by_key' @Mod:T v                   -- ValUpdateFetchByKey
-         | 'lookup_by_key' @Mod:T v                  -- ValUpdateLookupByKey
          | 'embed_expr' @τ e                         -- ValUpdateEmbedExpr
          | 'try' @τ e₁ 'catch' x. e₂                 -- ValUpdateTryCatch
 
@@ -2314,7 +2305,6 @@ grammar below. ::
         |  'exercise_interface' @Mod:I Ch v₁ E₂ e₃
         |  'exercise_interface' @Mod:I Ch v₁ v₂ E₃
         |  'fetch_by_key' @τ E
-        |  'lookup_by_key' @τ E
 
 In the semantics rules below, these evaluation contexts appear as ``E[e]``,
 meaning the hole ``[ ]`` inside ``E`` is replaced with the expression ``e``,
@@ -3416,38 +3406,6 @@ as described by the ledger model::
      'fetch_by_key' @Mod:T vₖ ‖ (st; keys)
         ⇓ᵤ
      (Ok ⟨'contractId': cid, 'contract': vₜ⟩, ε) ‖ (st; keys)
-
-     'tpl' (x : T) ↦ { …, 'key' @σ eₖ eₘ }  ∈  〚Ξ〛Mod
-     (eₘ vₖ)  ⇓  Err err
-   —————————————————————————————————————————————————————————————————————— EvUpdLookupByKeyErr
-     'lookup_by_key' @Mod:T vₖ ‖ (st; keys)  ⇓ᵤ  (Err err, ε)
-
-     'tpl' (x : T) ↦ { …, 'key' @σ eₖ eₘ }  ∈  〚Ξ〛Mod
-     (eₘ vₖ)  ⇓  vₘ
-     |vₖ| ≤ 100
-   —————————————————————————————————————————————————————————————————————— EvUpdLookupByKeyNestingErr
-     'lookup_by_key' @Mod:T vₖ ‖ (st; keys)
-       ⇓ᵤ
-     (Err (Fatal "Value exceeds maximum nesting value"), ε)
-
-     'tpl' (x : T) ↦ { …, 'key' @σ eₖ eₘ }  ∈  〚Ξ〛Mod
-     (eₘ vₖ)  ⇓  vₘ
-     |vₖ| ≤ 100
-     (Mod:T, vₖ) ∉ dom(keys)
-   —————————————————————————————————————————————————————————————————————— EvUpdLookupByKeyNotFound
-     'lookup_by_key' @Mod:T vₖ ‖ (st; keys)
-       ⇓ᵤ
-     (Ok ('None' @('ContractId' Mod:T)), ε) ‖ (st; keys)
-
-     'tpl' (x : T) ↦ { …, 'key' @σ eₖ eₘ }  ∈  〚Ξ〛Mod
-     (eₘ vₖ)  ⇓  vₘ
-     |vₖ| ≤ 100
-     (Mod:T, vₖ) ∈ dom(keys)
-     cid = keys((Mod:T, v))
-   —————————————————————————————————————————————————————————————————————— EvUpdLookupByKeyFound
-     'lookup_by_key' @Mod:T vₖ ‖ (st; keys)
-       ⇓ᵤ
-     (Ok ('Some' @('ContractId' Mod:T) cid), ε) ‖ (st; keys)
 
      'tpl' (x : T) ↦ { …, 'key' @σ eₖ eₘ }  ∈ 〚Ξ〛Mod
      'fetch_by_key' @Mod:T vₖ ‖ (st; keys)  ⇓ᵤ  (Err err, tr)

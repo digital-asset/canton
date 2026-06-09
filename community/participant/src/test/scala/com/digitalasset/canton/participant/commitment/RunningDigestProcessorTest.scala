@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   Onboarding,
@@ -42,6 +42,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   LfPartyId,
   ReassignmentCounter,
+  ReassignmentDiscriminator,
 }
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
@@ -379,10 +380,165 @@ class RunningDigestProcessorTest
         }
       }
     }
+
+    "reinitializing" should {
+      val topologySnapshot = TestingTopology(topology =
+        Map(
+          partyHosting(alice)(p1, p2),
+          partyHosting(bob)(p2, p3),
+          partyHosting(charlie)(p1, p3, p4),
+        )
+      ).build().topologySnapshot()
+
+      "handle a simple case of a few ACS updates" in {
+        val rdp = mkRunningDigestProcessor(
+          acsLookup = mkAcsLookup(
+            (rt(1), cid(1), Seq(party(alice), party(bob))),
+            (rt(2), cid(2), Seq(party(alice), party(bob), party(charlie))),
+          )
+        )
+
+        val acsUpdates = rdp
+          .reinitializationAcsUpdates(rt(3), topologySnapshot)
+          .runWith(Sink.seq)
+          .futureValue
+
+        acsUpdates shouldBe Seq(
+          ProcessingContext(
+            rt(3),
+            NotCheckpointFence(
+              topologySnapshot,
+              AcsUpdate(
+                stakeholders = Map(
+                  alice -> Seq(p1.toLf, p2.toLf),
+                  bob -> Seq(p2.toLf, p3.toLf),
+                ),
+                locallyHostedStakeholders = Seq(alice),
+                cid = cid(1),
+                rc = rc,
+                isActivation = true,
+              ),
+            ),
+          ),
+          ProcessingContext(
+            rt(3),
+            NotCheckpointFence(
+              topologySnapshot,
+              AcsUpdate(
+                stakeholders = Map(
+                  alice -> Seq(p1.toLf, p2.toLf),
+                  bob -> Seq(p2.toLf, p3.toLf),
+                  charlie -> Seq(p1.toLf, p3.toLf, p4.toLf),
+                ),
+                locallyHostedStakeholders = Seq(alice, charlie),
+                cid = cid(2),
+                rc = rc,
+                isActivation = true,
+              ),
+            ),
+          ),
+          ProcessingContext(
+            rt(3),
+            CheckpointFence,
+          ),
+        )
+      }
+
+      "handle grouping and filtering by record time" in {
+        val before = rt(1)
+        val requestedTime = rt(2)
+        val after = rt(3)
+
+        val rdp = mkRunningDigestProcessor(
+          acsLookup = mkAcsLookup(
+            (before, cid(1), Seq(party(alice), party(bob))),
+            (before, cid(2), Seq(party(alice), party(bob), party(charlie))),
+            (requestedTime, cid(3), Seq(party(alice), party(bob))),
+            (after, cid(4), Seq(party(alice), party(charlie))), // Should be filtered out
+          ),
+          counterpartyBatchSize = 2,
+        )
+
+        val acsUpdates = rdp
+          .reinitializationAcsUpdates(requestedTime, topologySnapshot)
+          .runWith(Sink.seq)
+          .futureValue
+
+        acsUpdates shouldBe Seq(
+          ProcessingContext(
+            requestedTime,
+            NotCheckpointFence(
+              topologySnapshot,
+              AcsUpdate(
+                stakeholders = Map(
+                  alice -> Seq(p1.toLf, p2.toLf),
+                  bob -> Seq(p2.toLf, p3.toLf),
+                ),
+                locallyHostedStakeholders = Seq(alice),
+                cid = cid(1),
+                rc = rc,
+                isActivation = true,
+              ),
+            ),
+          ),
+          ProcessingContext(
+            requestedTime,
+            NotCheckpointFence(
+              topologySnapshot,
+              AcsUpdate(
+                stakeholders = Map(
+                  alice -> Seq(p1.toLf, p2.toLf),
+                  bob -> Seq(p2.toLf, p3.toLf),
+                ),
+                locallyHostedStakeholders = Seq(alice, charlie),
+                cid = cid(2),
+                rc = rc,
+                isActivation = true,
+              ),
+            ),
+          ),
+          ProcessingContext(
+            requestedTime,
+            NotCheckpointFence(
+              topologySnapshot,
+              AcsUpdate(
+                stakeholders = Map(
+                  alice -> Seq(p1.toLf, p2.toLf),
+                  bob -> Seq(p2.toLf, p3.toLf),
+                ),
+                locallyHostedStakeholders = Seq(alice),
+                cid = cid(3),
+                rc = rc,
+                isActivation = true,
+              ),
+            ),
+          ),
+          ProcessingContext(
+            requestedTime,
+            NotCheckpointFence(
+              topologySnapshot,
+              AcsUpdate(
+                stakeholders = Map(
+                  charlie -> Seq(p1.toLf, p3.toLf, p4.toLf)
+                ),
+                locallyHostedStakeholders = Seq(alice, charlie),
+                cid = cid(2),
+                rc = rc,
+                isActivation = true,
+              ),
+            ),
+          ),
+          ProcessingContext(
+            requestedTime,
+            CheckpointFence,
+          ),
+        )
+      }
+    }
   }
 }
 object RunningDigestProcessorTest {
-  val rc = ReassignmentCounter.MinValue
+  private val rc: Counter[ReassignmentDiscriminator] = ReassignmentCounter.Genesis
 
   implicit def toAcsChangeData(
       parties: Set[LfPartyId]
@@ -404,7 +560,7 @@ object RunningDigestProcessorTest {
     val acs = for {
       (recordTime, cid, rawStakeholders) <- contractsWithStakeholders
       stakeholders = rawStakeholders.map(LfPartyId.assertFromString)
-      activeContract = AcsActiveContract(cid, ReassignmentCounter.MinValue, stakeholders)
+      activeContract = AcsActiveContract(cid, rc, stakeholders)
       stakeholder <- stakeholders
     } yield {
       stakeholder -> (recordTime, activeContract)
@@ -415,12 +571,19 @@ object RunningDigestProcessorTest {
       override def activeContracts(parties: Set[LfPartyId], asOfInclusive: RecordTime)(implicit
           traceContext: TraceContext
       ): Source[AcsActiveContract, NotUsed] = {
-        val result = parties
-          .flatMap(party =>
-            partyToContracts.get(party).collect {
+        val result =
+          if (parties.nonEmpty)
+            parties
+              .flatMap(party =>
+                partyToContracts.get(party).collect {
+                  case (rt, contract) if rt <= asOfInclusive => contract
+                }
+              )
+          else
+            partyToContracts.values.collect {
               case (rt, contract) if rt <= asOfInclusive => contract
-            }
-          )
+            }.toSet
+
         Source(result)
       }
     }

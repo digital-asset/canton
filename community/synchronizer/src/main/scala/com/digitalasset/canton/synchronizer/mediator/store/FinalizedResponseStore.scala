@@ -387,7 +387,13 @@ private[mediator] class DbFinalizedResponseStore(
                       verdict,
                       requestTraceContext,
                     ) =>
-                  FinalizedResponse(reqId, mediatorConfirmationRequest, finalizationTime, verdict)(
+                  FinalizedResponse(
+                    reqId,
+                    mediatorConfirmationRequest,
+                    finalizationTime,
+                    verdict,
+                    firstResponseReceived = None,
+                  )(
                     requestTraceContext.unwrap
                   )
               }
@@ -442,7 +448,13 @@ private[mediator] class DbFinalizedResponseStore(
                     verdict,
                     requestTraceContext,
                   ) =>
-                FinalizedResponse(reqId, mediatorConfirmationRequest, finalization_time, verdict)(
+                FinalizedResponse(
+                  reqId,
+                  mediatorConfirmationRequest,
+                  finalization_time,
+                  verdict,
+                  firstResponseReceived = None,
+                )(
                   requestTraceContext.unwrap
                 )
             }

@@ -18,6 +18,7 @@ import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApiParticipantProvider}
@@ -103,8 +104,12 @@ import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
-import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
+import com.digitalasset.canton.store.{
+  GenericPendingOperationStore,
+  PendingOperationMetadata,
+  PendingOperationStore,
+}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -185,13 +190,20 @@ class CantonSyncService(
     with HasCloseContext
     with InternalIndexServiceProviderImpl {
 
-  private val pendingLsuOperationsStore: PendingLsuOperation.Store =
+  private[canton] val pendingLsuOperationsStore: PendingLsuOperation.Store =
     PendingOperationStore(
       syncPersistentStateManager.storage,
       timeouts,
       loggerFactory,
       PendingLsuOperation,
       PhysicalSynchronizerId.fromString,
+    )
+
+  private[canton] val genericPendingOperationStore: GenericPendingOperationStore =
+    GenericPendingOperationStore(
+      syncPersistentStateManager.storage,
+      timeouts,
+      loggerFactory,
     )
 
   private val connectionsManager = new SynchronizerConnectionsManager(
@@ -461,7 +473,6 @@ class CantonSyncService(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       _estimatedInterpretationCost: Long,
-      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -477,7 +488,6 @@ class CantonSyncService(
         transaction = transaction,
         submitterInfo = submitterInfo,
         transactionMeta = transactionMeta,
-        keyResolver = keyResolver,
         explicitlyDisclosedContracts = processedDisclosedContracts,
       )
     }.map(result =>
@@ -562,7 +572,6 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       explicitlyDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -629,7 +638,6 @@ class CantonSyncService(
           synchronizerState = routingSynchronizerState,
           wfTransaction = wfTransaction,
           transactionMeta = transactionMeta,
-          keyResolver = keyResolver,
           explicitlyDisclosedContracts = explicitlyDisclosedContracts,
         )
       } yield submitted
@@ -1013,7 +1021,7 @@ class CantonSyncService(
                 SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId(psid)
               )
             _ <- Either.cond(
-              configForPsid.status != Active,
+              configForPsid.status == Active,
               (),
               SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(
                 configForPsid.config.synchronizerAlias,
@@ -1203,6 +1211,16 @@ class CantonSyncService(
       upgrader.finishUpgradeWithoutChecks()
     }
   }
+
+  /** Lists pending operations matching the provided metadata filters. */
+  def getPendingOperations(
+      operationName: Option[NonEmptyString],
+      synchronizerId: Option[Synchronizer],
+      operationKey: Option[String],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PendingOperationMetadata]] =
+    genericPendingOperationStore.getAllMetadata(operationName, synchronizerId, operationKey)
 
   /** All pending LSU operations (handshake and/or topology copy) are resumed. They are done in
     * parallel, and we don't wait on the result.
@@ -1820,7 +1838,6 @@ class CantonSyncService(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -1835,7 +1852,6 @@ class CantonSyncService(
         transaction,
         transactionMeta,
         submitterInfo,
-        keyResolver,
         disclosedContracts,
         costHints,
       )

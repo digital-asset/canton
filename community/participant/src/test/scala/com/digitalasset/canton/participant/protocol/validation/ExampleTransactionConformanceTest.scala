@@ -136,7 +136,6 @@ class ExampleTransactionConformanceTest
           ReInterpretationResult(
             reinterpretedTx,
             metadata,
-            keyResolver,
             UsedPackages(Set.empty, Set.empty),
             timeBoundaries,
           )
@@ -180,7 +179,6 @@ class ExampleTransactionConformanceTest
           ReInterpretationResult(
             transaction.unwrap,
             transaction.metadata,
-            example.keyResolver,
             UsedPackages(Set.empty, Set.empty),
             LedgerTimeBoundaries.unconstrained,
           )
@@ -417,7 +415,6 @@ class ExampleTransactionConformanceTest
           transactionUuid = factory.transactionUuid,
           topologySnapshot = factory.topologySnapshot,
           contractOfId = contractOfId,
-          legacyKeyResolver = example.keyResolver,
           maxSequencingTime = factory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
         )

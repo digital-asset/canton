@@ -549,6 +549,7 @@ abstract class CantonNodeBootstrapImpl[
               adminApiConfig.jwtTimestampLeeway,
               adminApiConfig.adminTokenConfig,
               adminApiConfig.jwksCacheConfig,
+              arguments.testingConfig.warnOnJwtScopeUsage,
             )
           ),
         )

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.testtool.infrastructure.TransactionOps.*
@@ -10,8 +11,8 @@ import com.daml.ledger.test.java.model.test.{Divulgence1, Divulgence2}
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.platform.store.utils.EventOps.EventOps
 
-final class DivulgenceIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+final class DivulgenceIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "DivulgenceTx",

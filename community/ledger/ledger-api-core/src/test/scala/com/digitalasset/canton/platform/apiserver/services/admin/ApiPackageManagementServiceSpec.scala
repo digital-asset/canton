@@ -54,7 +54,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.{BaseTest, LfGlobalKeyMapping, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, Party, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
@@ -180,7 +180,6 @@ object ApiPackageManagementServiceSpec {
         transactionMeta: TransactionMeta,
         // Currently, the estimated interpretation cost is not used
         _estimatedInterpretationCost: Long,
-        keyResolver: LfGlobalKeyMapping,
         processedDisclosedContracts: ImmArray[LfFatContractInst],
     )(implicit
         traceContext: TraceContext
@@ -257,7 +256,6 @@ object ApiPackageManagementServiceSpec {
         transaction: LfVersionedTransaction,
         transactionMetadata: TransactionMeta,
         submitterInfo: SubmitterInfo,
-        keyResolver: LfGlobalKeyMapping,
         disclosedContracts: Map[LfContractId, LfFatContractInst],
         costHints: CostEstimationHints,
     )(implicit

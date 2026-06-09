@@ -1329,11 +1329,6 @@ private[validation] object Typing {
           keyType ->:
             TUpdate(TTuple2(TContractId(TTyCon(templateId)), TTyCon(templateId)))
         )
-      case UpdateLookupByKey(templateId) =>
-        val keyType = handleLookup(ctx, pkgInterface.lookupTemplateKey(templateId)).typ
-        Ret(
-          keyType ->: TUpdate(TOptional(TContractId(TTyCon(templateId))))
-        )
       case UpdateQueryNByKey(templateId) =>
         val keyType = handleLookup(ctx, pkgInterface.lookupTemplateKey(templateId)).typ
         Ret(

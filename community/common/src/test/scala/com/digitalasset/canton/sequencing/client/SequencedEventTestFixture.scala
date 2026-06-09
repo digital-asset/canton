@@ -70,6 +70,9 @@ class SequencedEventTestFixture(
   val sequencerCarlos: SequencerId = SequencerId(
     UniqueIdentifier.tryCreate("da3", namespace)
   )
+  val sequencerDave: SequencerId = SequencerId(
+    UniqueIdentifier.tryCreate("da4", namespace)
+  )
   implicit val actorSystem: ActorSystem = ActorSystem(
     classOf[SequencedEventTestFixture].getSimpleName
   )
@@ -119,7 +122,11 @@ class SequencedEventTestFixture(
 
   def mkAggregator(
       useNewAggregator: Boolean,
-      config: MessageAggregationConfig = MessageAggregationConfig(PositiveInt.tryCreate(1)),
+      config: MessageAggregationConfig = MessageAggregationConfig(
+        sequencerTrustThreshold = PositiveInt.tryCreate(1),
+        maxNbOfContributions = PositiveInt.tryCreate(1),
+      ),
+      pastEventCacheSize: PositiveInt = PositiveInt.tryCreate(100),
   ) = {
     val postAggregationHandler = new PostAggregationHandler {
       override def handlerIsIdleF: Future[Unit] = Future.unit
@@ -133,6 +140,7 @@ class SequencedEventTestFixture(
       postAggregationHandler = postAggregationHandler,
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
       eventInboxSize = PositiveInt.tryCreate(2),
+      pastEventsCacheSize = pastEventCacheSize,
       loggerFactory = loggerFactory,
       initialConfig = config,
       updateSendTracker = _ => (),
@@ -141,8 +149,15 @@ class SequencedEventTestFixture(
     )
   }
 
-  def config(sequencerTrustThreshold: Int = 1): MessageAggregationConfig =
-    MessageAggregationConfig(PositiveInt.tryCreate(sequencerTrustThreshold))
+  def config(
+      sequencerTrustThreshold: Int = 1,
+      overrideMaxNbOfContributionsO: Option[Int] = None,
+  ): MessageAggregationConfig =
+    MessageAggregationConfig(
+      sequencerTrustThreshold = PositiveInt.tryCreate(sequencerTrustThreshold),
+      maxNbOfContributions =
+        PositiveInt.tryCreate(overrideMaxNbOfContributionsO.getOrElse(sequencerTrustThreshold)),
+    )
 
   def mkValidator(
       syncCryptoApi: SynchronizerCryptoClient = subscriberCryptoApi

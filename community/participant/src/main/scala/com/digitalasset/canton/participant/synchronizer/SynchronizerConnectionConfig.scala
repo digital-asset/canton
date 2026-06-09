@@ -31,7 +31,7 @@ import monocle.syntax.all.*
   *   could be provided for each individual sequencer.
   * @param manualConnect
   *   if set to true (default false), the synchronizer is not connected automatically on startup.
-  * @param synchronizerId
+  * @param psid
   *   if the synchronizer id is known, then it can be passed as an argument. during the handshake,
   *   the participant will check that the synchronizer id on the remote port is indeed the one given
   *   in the configuration. the synchronizer id can not be faked by a synchronizer. therefore, this
@@ -57,7 +57,7 @@ final case class SynchronizerConnectionConfig(
     sequencerConnections: SequencerConnections,
     manualConnect: Boolean = false,
     // TODO(#26021) Consider accepting both lsid and psid
-    synchronizerId: Option[PhysicalSynchronizerId] = None,
+    psid: Option[PhysicalSynchronizerId] = None,
     priority: Int = 0,
     initialRetryDelay: Option[NonNegativeFiniteDuration] = None,
     maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
@@ -104,7 +104,7 @@ final case class SynchronizerConnectionConfig(
         val unknownAliases =
           otherAliasToConnection.keySet.diff(sequencerConnections.aliasToConnection.keySet)
         for {
-          updatedSynchronizerId <- mergeOrRequireEqual(synchronizerId, otherSynchronizerId)
+          updatedSynchronizerId <- mergeOrRequireEqual(psid, otherSynchronizerId)
           _ <- Either.cond(
             unknownAliases.isEmpty,
             (),
@@ -157,7 +157,7 @@ final case class SynchronizerConnectionConfig(
             sequencerConnections.sequencerConnectionPoolDelays,
           )
         } yield this.copy(
-          synchronizerId = updatedSynchronizerId,
+          psid = updatedSynchronizerId,
           sequencerConnections = updatedSequencerConnections,
         )
       case _ =>
@@ -178,9 +178,9 @@ final case class SynchronizerConnectionConfig(
   override protected def pretty: Pretty[SynchronizerConnectionConfig] =
     prettyOfClass(
       param("synchronizer", _.synchronizerAlias),
+      paramIfDefined("physicalSynchronizerId", _.psid),
       param("sequencerConnections", _.sequencerConnections),
       param("manualConnect", _.manualConnect),
-      paramIfDefined("physicalSynchronizerId", _.synchronizerId),
       paramIfDefined("priority", x => Option.when(x.priority != 0)(x.priority)),
       paramIfDefined("initialRetryDelay", _.initialRetryDelay),
       paramIfDefined("maxRetryDelay", _.maxRetryDelay),
@@ -197,7 +197,7 @@ final case class SynchronizerConnectionConfig(
       synchronizerAlias = synchronizerAlias.unwrap,
       sequencerConnections = sequencerConnections.toProtoV30.some,
       manualConnect = manualConnect,
-      physicalSynchronizerId = synchronizerId.fold("")(_.toProtoPrimitive),
+      physicalSynchronizerId = psid.fold("")(_.toProtoPrimitive),
       priority = priority,
       initialRetryDelay = initialRetryDelay.map(_.toProtoPrimitive),
       maxRetryDelay = maxRetryDelay.map(_.toProtoPrimitive),
@@ -240,7 +240,7 @@ object SynchronizerConnectionConfig
       sequencerConnections <- ProtoConverter
         .required("sequencerConnections", sequencerConnectionsPO)
         .flatMap(SequencerConnections.fromProtoV30)
-      synchronizerId <- OptionUtil
+      psidO <- OptionUtil
         .emptyStringAsNone(synchronizerId)
         .traverse(PhysicalSynchronizerId.fromProtoPrimitive(_, "physical_synchronizer_id"))
       initialRetryDelay <- initialRetryDelayP.traverse(
@@ -258,7 +258,7 @@ object SynchronizerConnectionConfig
       alias,
       sequencerConnections,
       manualConnect,
-      synchronizerId,
+      psidO,
       priority,
       initialRetryDelay,
       maxRetryDelay,

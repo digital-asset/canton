@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
@@ -24,7 +25,9 @@ import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffe
 import scala.concurrent.{ExecutionContext, Future}
 
 // Allows using deprecated Protobuf fields for testing
-class TransactionServiceFiltersIT extends LedgerTestSuite {
+class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.dummyCompanion
+  private val semanticTestsPackageId = testDars.SemanticTestDar.packageId
 
   test(
     "TSFInterfaceTemplatePlainFilters",
@@ -510,7 +513,7 @@ class TransactionServiceFiltersIT extends LedgerTestSuite {
       assertEquals(
         "Exercised event of Dummy template ID",
         event.templateId.value,
-        Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
       )
     }
   }
@@ -531,7 +534,7 @@ class TransactionServiceFiltersIT extends LedgerTestSuite {
     assertEquals(
       "Create event 1 template ID",
       createdEvent1.templateId.value,
-      T5.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+      T5.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1,
     )
     assertEquals("Create event 1 contract ID", createdEvent1.contractId, c1).discard
     assertLength("Create event 1 has a view", 1, createdEvent1.interfaceViews).discard
@@ -551,7 +554,7 @@ class TransactionServiceFiltersIT extends LedgerTestSuite {
     assertEquals(
       "Create event 2 template ID",
       createdEvent2.templateId.value,
-      T6.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+      T6.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1,
     )
     assertEquals("Create event 2 contract ID", createdEvent2.contractId, c2)
     assertLength("Create event 2 has a view", 1, createdEvent2.interfaceViews).discard
@@ -572,7 +575,7 @@ class TransactionServiceFiltersIT extends LedgerTestSuite {
     assertEquals(
       "Create event 3 template ID",
       createdEvent3.templateId.value.toString,
-      T3.TEMPLATE_ID_WITH_PACKAGE_ID.toV1.toString,
+      T3.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1.toString,
     )
     assertEquals("Create event 3 contract ID", createdEvent3.contractId, c3)
     assertLength("Create event 3 has no view", 0, createdEvent3.interfaceViews).discard

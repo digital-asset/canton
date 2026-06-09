@@ -251,7 +251,6 @@ object Profile {
       implicit val fetchInterfaceDefRef: Allowed[FetchInterfaceDefRef] = allowAll
       implicit val choiceByKeyDefRef: Allowed[ChoiceByKeyDefRef] = allowAll
       implicit val fetchByKeyDefRef: Allowed[FetchByKeyDefRef] = allowAll
-      implicit val lookupByKeyDefRef: Allowed[LookupByKeyDefRef] = allowAll
       implicit val queryNByKeyDefRef: Allowed[QueryNByKeyDefRef] = allowAll
 
       implicit val contractKeyWithMaintainersDefRef: Allowed[ContractKeyWithMaintainersDefRef] =
@@ -290,7 +289,6 @@ object Profile {
           case ChoiceByKeyDefRef(tmplRef, name) =>
             s"exerciseByKey @${tmplRef.qualifiedName} ${name}"
           case FetchByKeyDefRef(tmplRef) => s"fetchByKey @${tmplRef.qualifiedName}"
-          case LookupByKeyDefRef(tmplRef) => s"lookupByKey @${tmplRef.qualifiedName}"
           case QueryNByKeyDefRef(tmplRef) => s"queryNByKey @${tmplRef.qualifiedName}"
           case CreateAndExerciseLabel(tmplRef, name) =>
             s"createAndExercise @${tmplRef.qualifiedName} ${name}"

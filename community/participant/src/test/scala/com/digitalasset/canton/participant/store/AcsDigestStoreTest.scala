@@ -12,7 +12,13 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.{BaseTest, InUS, InternedPartyId, LfPartyId}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{
+  BaseTest,
+  InternedPartyId,
+  LfPartyId,
+  ProtocolVersionChecksAsyncWordSpec,
+}
 import com.digitalasset.daml.lf.data.Ref.IdString
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpecLike
@@ -20,7 +26,7 @@ import org.scalatest.wordspec.AsyncWordSpecLike
 import scala.concurrent.ExecutionContext
 import scala.util.ChainingSyntax
 
-trait AcsDigestStoreTest extends ChainingSyntax with InUS {
+trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncWordSpec {
   this: AsyncWordSpecLike & BaseTest =>
 
   protected val rawDigestByteSize = 2048
@@ -75,7 +81,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       tRangeEnd: RecordTime,
   ): Unit = {
 
-    "pointwise 'lookup' calls should yield None" inUS {
+    "pointwise 'lookup' calls should yield None" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val emptyJournal = mkJournal()
       val firstSampleKey =
         sampleKeys.headOption.getOrElse(fail("sampleKeys shouldn't be empty"))
@@ -85,7 +91,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield result shouldBe Option.empty
     }
 
-    "batch 'bulkLookup' calls must return an empty map" inUS {
+    "batch 'bulkLookup' calls must return an empty map" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -93,7 +99,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield result shouldBe Map.empty
     }
 
-    "batch 'bulkLookup' with huge key spaces should execute without structural failure" inUS {
+    "batch 'bulkLookup' with large key set should execute without failure" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -101,7 +107,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield result shouldBe Map.empty
     }
 
-    "requesting a pagination 'snapshot' should return empty page" inUS {
+    "requesting a pagination 'snapshot' should return empty page" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -115,7 +121,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "querying state 'changesBetween' ranges should yield completely empty page" inUS {
+    "querying state 'changesBetween' ranges should yield completely empty page" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -134,7 +140,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "verifying chain consistency via 'checkReplacesInvariant' must pass safely" inUS {
+    "verifying chain consistency via 'checkReplacesInvariant' must pass safely" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -143,8 +149,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
     }
   }
 
-  /** Reusable operational verification suite covering record lifecycle transitions on a concrete
-    * journal.
+  /** Reusable operational verification covering record lifecycle transitions on a concrete journal.
     */
   private def functionalDigestJournalTests[K, V](
       mkJournal: () => AcsDigestStore.DigestJournal[K, V],
@@ -183,11 +188,11 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       _ <- journal.checkReplacesInvariant(t2)
     } yield succeed
 
-    "allow standard batch item insertion with upsertDigestUpdates" inUS {
+    "allow batch item insertion with upsertDigestUpdates" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       upsertUpdatesIn(mkJournal())
     }
 
-    "return precise historical states on pointwise lookup entries" inUS {
+    "return precise historical states on pointwise lookup" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
 
       val tMin = RecordTime.MinValue
@@ -238,7 +243,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "after updating an entry, pointwise lookup still works well" inUS {
+    "after updating an entry, pointwise lookup still works well" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
 
       for {
@@ -254,7 +259,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "batch 'bulkLookup' call with empty keys return an empty map" inUS {
+    "batch 'bulkLookup' call with empty keys return an empty map" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
 
       for {
@@ -263,7 +268,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield result shouldBe Map.empty
     }
 
-    "evaluate range snapshots using pagination (2 digests on 1 page)" inUS {
+    "evaluate range snapshots using pagination (2 digests on 1 page)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -280,7 +285,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "evaluate range snapshots using pagination (1 digest on 2 pages)" inUS {
+    "evaluate range snapshots using pagination (1 digest on 2 pages)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -305,7 +310,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "isolate range updates using changesBetween boundaries (1 page)" inUS {
+    "isolate range updates using changesBetween boundaries (1 page)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -329,7 +334,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "isolate range updates using changesBetween boundaries (2 pages)" inUS {
+    "isolate range updates using changesBetween boundaries (2 pages)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -357,7 +362,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "catch future link during checkReplacesInvariant invocation" inUS {
+    "catch 'future' link during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       // Intentionally insert a broken link at T2 that claims to replace an imaginary T99
       val testJournal = mkJournal()
       val rt99 = rt(99)
@@ -375,7 +380,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield succeed
     }
 
-    "catch empty link during checkReplacesInvariant invocation" inUS {
+    "catch empty link during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
       val update1_K1T1 =
         AcsDigestUpdate(AcsDigest(key1, Some(digest1), t1), replacesRecordTime = None)
@@ -393,7 +398,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield succeed
     }
 
-    "catch invalid past reference during checkReplacesInvariant invocation" inUS {
+    "catch invalid past reference during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testJournal = mkJournal()
       val update1_K1T0 =
         AcsDigestUpdate(AcsDigest(key1, Some(digest1), t0), replacesRecordTime = None)
@@ -471,7 +476,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield ()
     }
 
-    s"properly retain data on 'deleteAfter' when there is data at the boundary" inUS {
+    s"properly retain data on 'deleteAfter' when there is data at the boundary" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val store = mkStore()
 
       // key1 local order
@@ -519,7 +524,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    s"properly retain data on 'deleteUpTo' when there is no precedent data" inUS {
+    s"properly retain data on 'deleteUpTo' when there is one update per key in the past" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val store = mkStore()
 
       // key1 local order
@@ -567,7 +572,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    s"properly execute global node boundaries across sub-journals" inUS {
+    s"properly execute global node boundaries across sub-journals" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val pruningStore = mkStore()
 
       // key1 local order
@@ -587,7 +592,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield remainingParty shouldBe Some(partyUpdate1AtT0)
     }
 
-    s"'checkReplacesInvariant' check is successful when there is no broken reference in the journals" inUS {
+    s"'checkReplacesInvariant' check is successful when there is no broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val store = mkStore()
 
       val participantUpdate1AtT2 = AcsDigestUpdate(
@@ -606,7 +611,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield result shouldBe ()
     }
 
-    s"'checkReplacesInvariant' check is successful when the first few updates has dangling reference (after pruning)" inUS {
+    s"'checkReplacesInvariant' check is successful when the first few updates has dangling reference (after pruning)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val store = mkStore()
 
       // key1 local order
@@ -644,12 +649,12 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield result shouldBe ()
     }
 
-    s"'checkReplacesInvariant' check fails when there is a broken reference in the journals" inUS {
+    s"'checkReplacesInvariant' check fails when there is a broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val store = mkStore()
 
       val brokenParticipantUpdate1AtT2 = AcsDigestUpdate(
         digestUpdate = AcsDigest(participantId1, None, t2),
-        // broken, should point back to t1
+        // broken, should point back to t1 (see the earlier entries in checkReplacesIntervalCommonUpserts)
         replacesRecordTime = None,
       )
 
@@ -657,7 +662,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
         // Inserting all entries except the last one
         _ <- checkReplacesIntervalCommonUpserts(store)
 
-        // Last insertion is the updatw with broken link
+        // Last insertion is the update with broken link
         _ <- store.participant.upsertDigestUpdates(List(brokenParticipantUpdate1AtT2))
 
         // it checks until the last checkpoint T2
@@ -772,7 +777,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       _ <- testStore.checkReplacesInvariant()
     } yield succeed
 
-    "upsert -> insert checkpoints -> pointwise lookup verification" inUS {
+    "upsert -> insert checkpoints -> pointwise lookup verification" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -791,7 +796,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "upsert -> insert checkpoints -> bulk lookup verification" inUS {
+    "upsert -> insert checkpoints -> bulk lookup verification" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -806,7 +811,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       )
     }
 
-    "crash recovery (deleteAfter) rolling back to the middle checkpoint" inUS {
+    "crash recovery (deleteAfter) rolling back to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -836,7 +841,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "pruning (deleteUpTo) safely scrubbing historical state up to the middle checkpoint" inUS {
+    "pruning (deleteUpTo) safely scrubbing historical state up to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -877,7 +882,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       }
     }
 
-    "pruning (deleteUpTo) deletes last updates if they are tombstones" inUS {
+    "pruning (deleteUpTo) deletes last updates if they are tombstones" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -945,7 +950,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       (11_000 to 12_000).toList
 
     "an empty store" should {
-      "checkpointing: firstCheckpointAfter and latestCheckpointsUpTo calls yields None" inUS {
+      "checkpointing: firstCheckpointAfter and latestCheckpointsUpTo calls yields None" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
         val emptyStore = mkStore(executionContext)
 
         for {
@@ -980,7 +985,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
     }
 
     "a non empty store with only checkpointing" should {
-      "correctly index, retrieve boundaries, and return None when out of bounds" inUS {
+      "correctly index, retrieve boundaries, and return None when out of bounds" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
         val store = mkStore(executionContext)
 
         for {
@@ -1173,7 +1178,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
       } yield succeed
 
     "a multi-synchronizer isolation" should {
-      "ensure checkpointing works properly" inUS {
+      "ensure checkpointing works properly" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)
@@ -1208,7 +1213,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
         }
       }
 
-      "ensure pagination works on range queries (snapshot, changesBetween)" inUS {
+      "ensure pagination works on range queries (snapshot, changesBetween)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)
@@ -1233,7 +1238,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
         }
       }
 
-      "ensure crash recovery works across synchronizer boundaries" inUS {
+      "ensure crash recovery works across synchronizer boundaries" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)
@@ -1271,7 +1276,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with InUS {
         }
       }
 
-      "ensure pruning works across synchronizer boundaries" inUS {
+      "ensure pruning works across synchronizer boundaries" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)

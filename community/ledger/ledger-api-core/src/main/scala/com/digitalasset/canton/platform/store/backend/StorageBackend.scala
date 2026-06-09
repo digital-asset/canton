@@ -318,37 +318,50 @@ trait ContractStorageBackend {
   /** Returns true if the batch lookup is implemented */
   def supportsBatchKeyStateLookups: Boolean
 
-  def contractKey(keyPageQuery: ContractStorageBackend.KeysPageQuery)(
+  def contractKey(keyPageQuery: ContractStorageBackend.KeyLookupPageQuery)(
       connection: Connection
-  ): ContractStorageBackend.KeysPageResult
+  ): ContractStorageBackend.KeyLookupPageResult
 
   def contractKeysPlain(
-      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      keyPageQueries: Seq[ContractStorageBackend.KeyLookupPageQuery],
       validAtEventSeqId: Long,
   )(
       connection: Connection
-  ): Seq[ContractStorageBackend.KeysPageResult]
+  ): Seq[ContractStorageBackend.KeyLookupPageResult]
 }
 
 object ContractStorageBackend {
-  final case class KeysPageQuery(
+  final case class KeyLookupPageQuery(
       key: Key,
       limit: Int,
       nextPageToken: Option[Long],
       validAtEventSeqId: Long,
   )
 
-  /** @param internalContractIds
-    *   in reverse event sequential ID order starting from nextPageToken (exclusive) or
-    *   validAtEventSeqId (inclusive) from the KeysPageQuery
-    * @param nextPageToken
-    *   If available, this is the event sequential ID of the last (earliest) contract If not
-    *   available, this is the last page from the page-sequence
+  /** @param internalContractId
+    *   the internal contract ID of an activation event
+    * @param eventSequentialId
+    *   the event sequential ID of the activation event
     */
-  final case class KeysPageResult(
-      internalContractIds: Vector[Long],
-      nextPageToken: Option[Long],
+  final case class ContractRef(
+      internalContractId: Long,
+      eventSequentialId: Long,
   )
+
+  /** @param contractRefs
+    *   contract activations in reverse event sequential ID order starting from nextPageToken
+    *   (exclusive) or validAtEventSeqId (inclusive) from the KeyLookupPageQuery
+    * @param nextPageToken
+    *   If available, this is the event sequential ID of the last (earliest) contract. If not
+    *   available, this is the last page from the page-sequence.
+    */
+  final case class KeyLookupPageResult(
+      contractRefs: Vector[ContractRef],
+      nextPageToken: Option[Long],
+  ) {
+    def internalContractIds: Vector[Long] = contractRefs.map(_.internalContractId)
+    def eventSequentialIds: Vector[Long] = contractRefs.map(_.eventSequentialId)
+  }
 }
 
 trait EventStorageBackend {

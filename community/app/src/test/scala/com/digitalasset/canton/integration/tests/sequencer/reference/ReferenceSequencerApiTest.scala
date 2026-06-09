@@ -52,7 +52,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         testedProtocolVersion,
         sequencerId,
         params,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         loggerFactory,
       )
 

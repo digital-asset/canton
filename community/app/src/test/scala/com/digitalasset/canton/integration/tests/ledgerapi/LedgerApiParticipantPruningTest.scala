@@ -550,10 +550,8 @@ trait LedgerApiParticipantPruningTest
     val pruningOffset = pruningOffsetO.getOrElse(participant.ledger_api.state.end()): @unchecked
 
     // Produce more create and archive events to have events for ledger api requests to be able to access after pruning.
-    val daFs = Seq.range(0, 2).map(_ => Future(createAndExerciseContract(participant, daId)))
-    val acmeFs = Seq.range(0, 2).map(_ => Future(createAndExerciseContract(participant, acmeId)))
-    daFs.foreach(_.futureValue)
-    acmeFs.foreach(_.futureValue)
+    Seq.range(0, 2).map(_ => createAndExerciseContract(participant, daId))
+    Seq.range(0, 2).map(_ => createAndExerciseContract(participant, acmeId))
 
     // Advance clock long enough to be sure that the last event to be pruned is followed by an acs commitment. Only then
     // invoke pruning.
@@ -563,10 +561,8 @@ trait LedgerApiParticipantPruningTest
       // ensure participants have observed the new advanced time
       participants.local.foreach(_.testing.fetch_synchronizer_times())
 
-      val daF = Future(createAndExerciseContract(participant, daId))
-      val acmeF = Future(createAndExerciseContract(participant, acmeId))
-      daF.futureValue
-      acmeF.futureValue
+      createAndExerciseContract(participant, daId)
+      createAndExerciseContract(participant, acmeId)
 
       val timeToPruneUpTo = clock.now
       // user-manual-entry-begin: ManualPruneParticipantNodeSafeOffsetLookup

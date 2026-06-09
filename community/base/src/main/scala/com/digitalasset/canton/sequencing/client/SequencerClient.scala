@@ -1475,8 +1475,9 @@ class RichSequencerClientImpl(
           postAggregationHandler,
           syncCryptoClient.pureCrypto,
           config.eventInboxSize,
+          config.pastEventsCacheSize,
           loggerFactory,
-          MessageAggregationConfig(sequencerTransports.sequencerTrustThreshold),
+          MessageAggregationConfig.fromSequencerTransports(sequencerTransports),
           updateSendTracker = sendTracker.update,
           timeouts,
           futureSupervisor,
@@ -1646,7 +1647,7 @@ class RichSequencerClientImpl(
             //   the application handler.
             // - Ongoing invocations of this method are not affected by clearing the queue,
             //   because the events processed by the ongoing invocation have been drained from the queue before clearing.
-            sequencerAggregatorRef.get.foreach(_.eventQueue.clear())
+            sequencerAggregatorRef.get.foreach(_.clearEventQueue())
             failure
           }
 
@@ -1746,7 +1747,7 @@ class RichSequencerClientImpl(
       }
       sequencerAggregatorRef.get.foreach(
         _.changeMessageAggregationConfig(
-          MessageAggregationConfig(sequencerTransports.sequencerTrustThreshold)
+          MessageAggregationConfig.fromSequencerTransports(sequencerTransports)
         )
       )
       sequencersTransportState.changeTransport(sequencerTransports)

@@ -160,7 +160,7 @@ class BftOrderingBenchmark
     PositiveInt.tryCreate(
       Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.num-db-connections-per-node"))
         .map(_.toInt)
-        .getOrElse(5)
+        .getOrElse(12)
     )
 
   /** Tracing options. Disabled by default. */
@@ -230,14 +230,14 @@ class BftOrderingBenchmark
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.sequencer-db-latency-millis"))
       .map(_.toLong)
 
-  /** Whether DB replication (`DbMultiStorage`) is enabled. Disabled if [[Some(false)]] (default).
-    * Disabling it explicitly yields significantly faster DABFT DB insertions and, as a result,
-    * lower ordering latency.
+  /** Whether DB replication (`DbMultiStorage`) is enabled. Default is [[Some(true)]]. To disable,
+    * set to [[Some(false)]]. Note that `DbMultiStorage` uses a separate connection pool, reserving
+    * roughly half of the total DB connections available in the [[num-db-connections-per-node]].
     */
   private val dbReplicationEnabled: Option[Boolean] =
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.db-replication-enabled"))
       .map(_.toBoolean)
-      .orElse(Some(false))
+      .orElse(Some(true))
 
   private val testCatchupConfig: BftBenchmarkConfig.TestCatchup =
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-catchup"))

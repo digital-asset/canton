@@ -31,6 +31,9 @@ object BaseCantonConfig {
     lazy implicit final val connectionAllocationReader: ConfigReader[ConnectionAllocation] =
       deriveReader[ConnectionAllocation]
 
+    lazy implicit final val partitionConfigReader: ConfigReader[PartitionConfig] =
+      deriveReader[PartitionConfig]
+
     lazy implicit final val dbParamsReader: ConfigReader[DbParametersConfig] =
       deriveReader[DbParametersConfig]
 
@@ -56,6 +59,9 @@ object BaseCantonConfig {
 
     lazy implicit final val connectionAllocationWriter: ConfigWriter[ConnectionAllocation] =
       deriveWriter[ConnectionAllocation]
+
+    lazy implicit final val partitionConfigWriter: ConfigWriter[PartitionConfig] =
+      deriveWriter[PartitionConfig]
 
     lazy implicit final val dbParamsWriter: ConfigWriter[DbParametersConfig] =
       deriveWriter[DbParametersConfig]

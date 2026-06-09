@@ -14,6 +14,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 }
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.CantonBaseError
@@ -41,6 +42,7 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   PartyId,
   PhysicalSynchronizerId,
+  Synchronizer,
   SynchronizerId,
   UniqueIdentifier,
 }
@@ -660,6 +662,48 @@ final class GrpcParticipantRepairService(
     } yield DeleteSynchronizerConnectionConfigResponse()
 
     CantonGrpcUtil.mapErrNewEUS(ret.leftMap(_.toCantonRpcError))
+  }
+
+  override def listPendingOperations(
+      request: ListPendingOperationsRequest
+  ): Future[ListPendingOperationsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    if (sync.genericPendingOperationStore.isInMemoryStore()) {
+      Future.failed(
+        io.grpc.Status.UNIMPLEMENTED
+          .withDescription(
+            "listPendingOperations is not supported with an in-memory pending operation store"
+          )
+          .asRuntimeException()
+      )
+    } else {
+
+      val operationNameE: Either[ProtoDeserializationError, Option[NonEmptyString]] =
+        request.operationName
+          .traverse(str => NonEmptyString.fromProtoPrimitive(str, "operation_name"))
+
+      val result = for {
+        operationName <- wrapErrUS(operationNameE)
+        synchronizer <- wrapErrUS(request.filterSynchronizer.traverse(Synchronizer.fromProtoV30))
+
+        operationKey = request.filterOperationKey.flatMap(OptionUtil.emptyStringAsNone)
+        pendingOperations <- EitherT.right[RpcError](
+          sync.getPendingOperations(operationName, synchronizer, operationKey)(traceContext)
+        )
+        sortedMetadata = pendingOperations.toSeq
+          .sortBy(op => (op.name, op.synchronizer.toString, op.key))
+          .map(op =>
+            PendingOperationMetadata(
+              operationName = op.name.unwrap,
+              operationKey = op.key,
+              synchronizer = Some(op.synchronizer.toProtoV30),
+            )
+          )
+      } yield ListPendingOperationsResponse(pendingOperations = sortedMetadata)
+
+      CantonGrpcUtil.mapErrNewEUS(result)
+    }
   }
 }
 

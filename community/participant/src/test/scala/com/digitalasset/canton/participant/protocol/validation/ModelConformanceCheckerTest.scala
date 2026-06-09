@@ -56,7 +56,6 @@ import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
   HasExecutionContext,
-  LfGlobalKeyMapping,
   LfPackageId,
   LfPartyId,
   LfVersioned,
@@ -89,7 +88,6 @@ class ModelConformanceCheckerTest
 
   import ModelConformanceCheckerTest.*
 
-  private val keyResolver: LfGlobalKeyMapping = Map.empty
   private val getEngineAbortStatus: GetEngineAbortStatus = () => EngineAbortStatus.notAborted
   private val symbolicCrypto =
     SymbolicCrypto.create(testedReleaseProtocolVersion, ProcessingTimeout(), loggerFactory)
@@ -787,7 +785,6 @@ class ModelConformanceCheckerTest
           transactionUuid = seedGenerator.generateUuid(),
           topologySnapshot = topologySnapshot,
           contractOfId = contractOfId,
-          legacyKeyResolver = keyResolver,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
         )

@@ -150,7 +150,6 @@ class TransactionConfirmationRequestFactoryTest
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: ContractInstanceOfId,
-          legacyKeyResolver: LfGlobalKeyMapping,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
       )(implicit
@@ -185,7 +184,6 @@ class TransactionConfirmationRequestFactoryTest
           topologySnapshot: TopologySnapshot,
           contractOfId: ContractInstanceOfId,
           _rbContext: RollbackContext,
-          legacyKeyResolver: LfGlobalKeyMapping,
           _absolutizer: ContractIdAbsolutizer,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
@@ -482,7 +480,6 @@ class TransactionConfirmationRequestFactoryTest
                 example.wellFormedUnsuffixedTransaction,
                 submitterInfo,
                 workflowId,
-                example.keyResolver,
                 mediator,
                 newCryptoSnapshot,
                 wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -511,7 +508,6 @@ class TransactionConfirmationRequestFactoryTest
             multipleRoots.wellFormedUnsuffixedTransaction,
             submitterInfo,
             workflowId,
-            multipleRoots.keyResolver,
             mediator,
             newCryptoSnapshot,
             wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -545,7 +541,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               cryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -610,7 +605,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               emptyCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -654,7 +648,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               confirmationOnlyCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -695,7 +688,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               newCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -733,7 +725,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               submitterOnlyCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled

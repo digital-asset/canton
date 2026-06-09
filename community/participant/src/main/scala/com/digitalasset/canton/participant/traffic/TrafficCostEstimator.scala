@@ -82,7 +82,7 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HashingSchemeVersion.V2
-import com.digitalasset.canton.{LedgerSubmissionId, LfGlobalKeyMapping, WorkflowId}
+import com.digitalasset.canton.{LedgerSubmissionId, WorkflowId}
 import com.google.protobuf.ByteString
 
 import java.security.{GeneralSecurityException, KeyPairGenerator}
@@ -117,7 +117,6 @@ class TrafficCostEstimator(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -167,7 +166,6 @@ class TrafficCostEstimator(
         client,
         snapshot,
         wfTransaction,
-        keyResolver,
         costHints,
         disclosedContractInstances,
       )
@@ -215,7 +213,6 @@ class TrafficCostEstimator(
       client: SynchronizerSnapshotSyncCryptoApi,
       snapshot: TopologySnapshot,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      keyResolver: LfGlobalKeyMapping,
       costHints: CostEstimationHints,
       disclosedContracts: Map[LfContractId, ContractInstance],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] = {
@@ -276,7 +273,6 @@ class TrafficCostEstimator(
           Option.when(!hasExternalSignatures)(
             WorkflowId.assertFromString(UUID.randomUUID().toString)
           ),
-          keyResolver,
           mediatorGroupRecipient,
           client,
           now,

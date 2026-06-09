@@ -433,9 +433,7 @@ final case class ParticipantNodeParameterConfig(
   *   Whether to automatically perform LSU. Default is true.
   * @param lsuRetry
   *   Config for the retries of the LSU operation. Retries are done aggressively.
-  * @param handshakeRetry
-  *   Config for the retries of the handshake prior to LSU. Retries are infrequent since the
-  *   handshake runs as a non-urgent background task.
+  *
   * @param sequencerIdsRetrievalRetry
   *   Config for the retries of the task that fetches the sequencer ids.
   * @param purgeObsoleteTopology
@@ -450,17 +448,39 @@ final case class LsuConfig(
       maxDelay = config.NonNegativeDuration.ofSeconds(5),
       maxRetries = Int.MaxValue,
     ),
-    handshakeRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
-      initialDelay = config.NonNegativeFiniteDuration.ofMinutes(1),
-      maxDelay = config.NonNegativeDuration.ofMinutes(5),
-      maxRetries = Int.MaxValue,
-    ),
+    handshake: LsuHandshake = LsuHandshake(),
     sequencerIdsRetrievalRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
       initialDelay = config.NonNegativeFiniteDuration.ofSeconds(10),
       maxDelay = config.NonNegativeDuration.ofSeconds(30),
       maxRetries = Int.MaxValue,
     ),
     purgeObsoleteTopology: Option[PurgeConfig] = None,
+)
+
+/** Config for the handshake with the successor.
+  *
+  * @param retry
+  *   Config for the retries of the handshake prior to LSU. Retries are infrequent since the
+  *   handshake runs as a non-urgent background task.
+  * @param minimumDuration
+  *   If defined: after a successful handshake, will continue to perform handshake with the
+  *   sequencers for the specified duration. Should not be too big (in the order of a few seconds).
+  * @param periodicCheck
+  *   Duration between two checks whether the wait should be interrupted. Has an impact only if the
+  *   following two conditions hold:
+  *   - minimumDuration is non-empty
+  *   - is smaller than minimumDuration
+  */
+final case class LsuHandshake(
+    retry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofMinutes(1),
+      maxDelay = config.NonNegativeDuration.ofMinutes(5),
+      maxRetries = Int.MaxValue,
+    ),
+    minimumDuration: Option[config.NonNegativeFiniteDuration] = Some(
+      config.NonNegativeFiniteDuration.ofSeconds(5)
+    ),
+    periodicCheck: config.NonNegativeFiniteDuration = config.NonNegativeFiniteDuration.ofSeconds(1),
 )
 
 /** Control incremental purges

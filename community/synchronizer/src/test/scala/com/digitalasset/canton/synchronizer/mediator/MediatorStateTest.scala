@@ -140,12 +140,14 @@ class MediatorStateTest
         )(traceContext, executorService)
         .futureValueUS // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
 
+    val metrics = MediatorTestMetrics(this.getClass.getSimpleName)
+
     def mediatorState: MediatorState = {
       val sut = new MediatorState(
         new InMemoryFinalizedResponseStore(loggerFactory),
         new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
         mock[Clock],
-        MediatorTestMetrics,
+        metrics,
         testedProtocolVersion,
         timeouts,
         loggerFactory,
@@ -201,7 +203,7 @@ class MediatorStateTest
           new InMemoryFinalizedResponseStore(loggerFactory),
           new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
           mock[Clock],
-          MediatorTestMetrics,
+          metrics,
           testedProtocolVersion,
           timeouts,
           loggerFactory,

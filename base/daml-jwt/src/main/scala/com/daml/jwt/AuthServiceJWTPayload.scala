@@ -8,6 +8,7 @@ import io.circe.parser.*
 import org.slf4j.{Logger, LoggerFactory}
 
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.{Failure, Success, Try}
 
 /** All the JWT payloads that can be used with the JWT auth service. */
@@ -356,7 +357,36 @@ object AuthServiceJWTCodec {
   // ------------------------------------------------------------------------------------------------------------------
   // Implicits that can be imported to write JSON
   // ------------------------------------------------------------------------------------------------------------------
+
+  private[this] lazy val sharedWarningCodec = new JsonImplicitsWithWarning()
+
+  def jsonImplicits(warnOnJwtScopeUsage: Boolean): AuthServiceJWTPayloadCodec = if (
+    warnOnJwtScopeUsage
+  )
+    sharedWarningCodec
+  else
+    JsonImplicits
+
   object JsonImplicits extends AuthServiceJWTPayloadCodec(writePayload, readPayload)
+
+  private class JsonImplicitsWithWarning(
+      private val firstRead: AtomicBoolean = new AtomicBoolean(true)
+  ) extends AuthServiceJWTPayloadCodec(
+        writePayload,
+        json => {
+          val decoded = readPayload(json)
+          decoded.foreach {
+            case payload: StandardJWTPayload if payload.format == StandardJWTTokenFormat.Scope =>
+              if (firstRead.getAndSet(false)) {
+                logger.warn(
+                  "Received scope-based token. Scope-based tokens are deprecated and will be removed from use in Canton release 3.7. Please migrate to audience-based tokens."
+                )
+              }
+            case _ =>
+          }
+          decoded
+        },
+      )
 
   object AudienceBasedTokenJsonImplicits
       extends AuthServiceJWTPayloadCodec(writeAudienceBasedPayload, readAudienceBasedToken)

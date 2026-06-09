@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.{
   assertErrorCode,
@@ -12,7 +13,6 @@ import com.daml.ledger.api.testtool.infrastructure.Assertions.{
 import com.daml.ledger.api.testtool.infrastructure.participant.{Features, ParticipantTestContext}
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
 import com.daml.ledger.api.testtool.suites.v2_3.ContractKeysContractIdIT.*
-import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.daml.ledger.javaapi.data.{ContractId, DamlRecord}
 import com.daml.ledger.test.java.keys.contractidtests.{Contract, ContractRef}
 import com.digitalasset.base.error.ErrorCode
@@ -31,16 +31,8 @@ import scala.util.{Failure, Success, Try}
 // Check the Ledger API accepts or rejects non-suffixed contract ID.
 // - Central committer ledger implementations (sandboxes, KV...) may accept non-suffixed CID
 // - Distributed ledger implementations (e.g. Canton) must reject non-suffixed CID
-final class ContractKeysContractIdIT extends LedgerTestSuite {
-  implicit val contractCompanion
-      : ContractCompanion.WithoutKey[Contract.Contract$, Contract.ContractId, Contract] =
-    Contract.COMPANION
-  implicit val contractRefCompanion: ContractCompanion.WithKey[
-    ContractRef.Contract,
-    ContractRef.ContractId,
-    ContractRef,
-    String,
-  ] = ContractRef.COMPANION
+final class ContractKeysContractIdIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.contractKeysCompanionImplicits.*
 
   List(
     TestConfiguration(
@@ -180,7 +172,7 @@ final class ContractKeysContractIdIT extends LedgerTestSuite {
           result <- alpha
             .exerciseByKey(
               party,
-              ContractRef.TEMPLATE_ID_WITH_PACKAGE_ID,
+              contractRefCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
               party,
               "Change",
               new DamlRecord(

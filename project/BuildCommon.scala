@@ -1135,6 +1135,7 @@ object BuildCommon {
         DamlProjects.`testing-utils` % Test,
         blake2b,
         `community-base`,
+        `community-admin-api`,
         `wartremover-annotations`,
         `community-testing` % Test,
         `wartremover-extension` % "test->test",
@@ -1306,7 +1307,8 @@ object BuildCommon {
         // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
         Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
-            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto"
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto",
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/topology/admin/scalapb/package.proto",
           ),
         addProtobufFilesToHeaderCheck(Compile),
       )
@@ -1356,7 +1358,7 @@ object BuildCommon {
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
         libraryDependencies ++= Seq(
           testcontainers,
           testcontainers_postgresql,
@@ -1395,7 +1397,7 @@ object BuildCommon {
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
       )
 
     lazy val microbench = project
@@ -1407,7 +1409,7 @@ object BuildCommon {
         // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
         // by ensuring this task never runs in assembly plugin in debug mode.
         assembly / logLevel := Level.Info,
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
         Compile / compile / wartremoverErrors ~= (_.filterNot(
           _.clazz == "com.digitalasset.canton.EnforceVisibleForTesting"
         )),
@@ -2272,7 +2274,7 @@ object BuildCommon {
         // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
         assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
-        assembly / assemblyJarName := s"ledger-api-test-tool-2.2-${version.value}.jar",
+        assembly / assemblyJarName := s"ledger-api-test-tool-2.3-${version.value}.jar",
         assembly / assemblyMergeStrategy := {
           case PathList("logback.xml") => MergeStrategy.last
           case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last

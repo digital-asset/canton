@@ -230,7 +230,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
       RequestSigner(synchronizerCryptoClient, extendedLoggerFactory),
       synchronizerCryptoClient.currentSnapshotApproximation.futureValueUS,
       clock,
-      SequencerTestMetrics.sequencerClient,
+      SequencerTestMetrics(this.getClass.getSimpleName).sequencerClient,
       timeouts,
       extendedLoggerFactory,
     )

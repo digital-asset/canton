@@ -17,7 +17,6 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable
@@ -33,7 +32,6 @@ class InMemoryAcsDigestJournal[K, V](
     with NamedLogging {
   import InMemoryAcsDigestJournal.*
 
-  @VisibleForTesting
   private val journal = TrieMap[K, TreeMap[RecordTime, AcsDigestUpdate[K, V]]]()
 
   override def upsertDigestUpdates(digests: immutable.Iterable[AcsDigestUpdate[K, V]])(implicit

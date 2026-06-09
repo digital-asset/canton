@@ -10,6 +10,10 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.RejectionReasonTemplate
+import com.digitalasset.canton.ledger.participant.state.Update.EmptyAcsPublicationRequired.{
+  param,
+  prettyOfClass,
+}
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.participant.store.PersistedContractInstance
@@ -27,6 +31,7 @@ import com.digitalasset.daml.lf.transaction.{
   TransactionNodeStatistics,
 }
 import com.digitalasset.daml.lf.value.Value
+import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as RpcStatus
 
 import java.util.UUID
@@ -688,6 +693,31 @@ object Update {
     override protected def pretty: Pretty[CommitRepair] = prettyOfClass()
   }
 
+  final case class ReceivedAcsCommitment(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+      payload: ByteString,
+  )(implicit override val traceContext: TraceContext)
+      extends SequencedUpdate {
+
+    override protected def pretty: Pretty[ReceivedAcsCommitment] = ReceivedAcsCommitment.pretty
+  }
+
+  object ReceivedAcsCommitment {
+    implicit val `ReceivedAcsCommitment to LoggingValue`: ToLoggingValue[ReceivedAcsCommitment] =
+      receivedAcsCommitment =>
+        LoggingValue.Nested.fromEntries(
+          Logging.synchronizerId(receivedAcsCommitment.synchronizerId),
+          "sequencerTimestamp" -> receivedAcsCommitment.recordTime.toInstant,
+        )
+
+    val pretty: Pretty[ReceivedAcsCommitment] =
+      prettyOfClass(
+        param("synchronizerId", _.synchronizerId.uid),
+        param("sequencerTimestamp", _.recordTime),
+      )
+  }
+
   implicit val `Update to LoggingValue`: ToLoggingValue[Update] = {
     case update: TopologyTransactionEffective =>
       TopologyTransactionEffective.`TopologyTransactionEffective to LoggingValue`.toLoggingValue(
@@ -712,6 +742,8 @@ object Update {
       SequencerIndexMoved.`SequencerIndexMoved to LoggingValue`.toLoggingValue(update)
     case _: CommitRepair =>
       LoggingValue.Empty
+    case update: ReceivedAcsCommitment =>
+      ReceivedAcsCommitment.`ReceivedAcsCommitment to LoggingValue`.toLoggingValue(update)
   }
 
   private object Logging {

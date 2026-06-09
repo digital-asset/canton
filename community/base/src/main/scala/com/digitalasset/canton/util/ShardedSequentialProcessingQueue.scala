@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.Nested
+import cats.data.{EitherT, Nested}
 import cats.syntax.functor.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -37,6 +37,10 @@ sealed trait ShardedSequentialProcessingQueue[Ident] {
   def executeUS[A](id: Ident)(action: => FutureUnlessShutdown[A], taskName: String)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[A]
+
+  def executeEUS[A, B](id: Ident)(action: => EitherT[FutureUnlessShutdown, A, B], taskName: String)(
+      implicit traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, A, B] = EitherT(executeUS(id)(action.value, taskName))
 
   @VisibleForTesting
   def isQueueEmpty(id: Ident): Boolean

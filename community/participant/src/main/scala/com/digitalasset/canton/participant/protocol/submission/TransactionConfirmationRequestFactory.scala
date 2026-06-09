@@ -76,7 +76,7 @@ class TransactionConfirmationRequestFactory(
     executionContext: ExecutionContext
 ) extends NamedLogging {
 
-  /** Creates a confirmation request from a wellformed transaction.
+  /** Creates a confirmation request from a well-formed transaction.
     *
     * @param cryptoSnapshot
     *   used to determine participants of parties and for signing and encryption
@@ -90,7 +90,6 @@ class TransactionConfirmationRequestFactory(
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       submitterInfo: SubmitterInfo,
       workflowId: Option[WorkflowId],
-      keyResolver: LfGlobalKeyMapping,
       mediator: MediatorGroupRecipient,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
       approximateTimestampForSigning: CantonTimestamp,
@@ -130,7 +129,6 @@ class TransactionConfirmationRequestFactory(
           transactionUuid,
           cryptoSnapshot.ipsSnapshot,
           contractInstanceOfId,
-          keyResolver,
           maxSequencingTime,
           validatePackageVettings = true,
         )

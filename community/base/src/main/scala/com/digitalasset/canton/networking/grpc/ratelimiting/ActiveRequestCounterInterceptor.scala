@@ -5,7 +5,6 @@ package com.digitalasset.canton.networking.grpc.ratelimiting
 
 import com.daml.metrics.api.MetricHandle.Gauge
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -20,6 +19,7 @@ import io.grpc.*
 import io.grpc.ForwardingServerCallListener.SimpleForwardingServerCallListener
 import org.slf4j.LoggerFactory
 
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 
 /** Count and enforce limit for selected endpoints
@@ -44,7 +44,9 @@ class ActiveRequestCounterInterceptor(
 
   private val notified = new AtomicReference[Set[FullMethodName]](Set.empty)
   private val limits = new AtomicReference[Map[FullMethodName, Limited]](Map.empty)
-
+  // Cache to hold the static, pre-calculated (Status, Metadata) pair for each method
+  private val cachedRejectionResponses =
+    new ConcurrentHashMap[FullMethodName, (io.grpc.Status, io.grpc.Metadata)]()
   initialLimits.foreach { case (method, limit) =>
     updateLimits(method, Some(limit))
   }
@@ -94,7 +96,7 @@ class ActiveRequestCounterInterceptor(
           )
         } catch {
           case ex: Throwable =>
-            // decrement if we failed to construct the listener
+            // decrement if we failed to construct the listener because next.startCall failed
             limit.adjust(-1).discard
             throw ex
         }
@@ -103,12 +105,34 @@ class ActiveRequestCounterInterceptor(
         // Note: ip may contain a leading '/' if extracted from a direct gRPC connection,
         // because of the behaviour of java.net.INetSocketAddress.toString
         val ip = GrpcAddressHelper.extractClientIP(call, headers)
-        val error = errorFactory(fullMethodName, ip)(
+
+        // Trigger the server-side logging with the correct ip address
+        errorFactory(fullMethodName, ip)(
           TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
         )
+        // increment the rejections
         metrics.rejections.inc()(limit.metricsContext)
-        val statusRuntimeException = error.asGrpcError
-        call.close(statusRuntimeException.getStatus, statusRuntimeException.getTrailers)
+
+        // Retrieve (or, if first time, compute) the cached rejection error
+        val (grpcStatus, trailers) = cachedRejectionResponses.computeIfAbsent(
+          fullMethodName,
+          { _ =>
+            implicit val traceContext: TraceContext =
+              TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
+            // we create a dummy error with "redacted-ip" ip address.
+            // We use the very first `error` object we see so that the stack
+            // trace is filled exactly once and not for every request.
+            // With this trick, we avoid expensive stack trace filling operations caused by
+            // ErrorCode.asGrpcError which calls StatusProto.toStatusRuntimeException(status).
+            val sanitizedError = CantonGrpcUtil.GrpcErrors.Overloaded
+              .TooManyConcurrentRequests(fullMethodName, "redacted-ip")
+              .toCantonRpcError
+
+            val ex = sanitizedError.asGrpcError
+            (ex.getStatus, ex.getTrailers)
+          },
+        )
+        call.close(grpcStatus, trailers)
         new ServerCall.Listener[ReqT]() {}
     }
 
@@ -122,7 +146,7 @@ class ActiveRequestCounterInterceptor(
   // Implements a Leaky Bucket algorithm for log suppression.
   private def errorFactory(methodName: FullMethodName, ip: String)(implicit
       traceContext: TraceContext
-  ): RpcError = {
+  ): Unit = {
     val err = CantonGrpcUtil.GrpcErrors.Overloaded
       .TooManyConcurrentRequests(methodName, ip)
     val (count, _) = logFrequency.updateAndGet { case (count, lastLogged) =>
@@ -157,7 +181,6 @@ class ActiveRequestCounterInterceptor(
       logSuspended.set(false)
       err.log()
     }
-    err.toCantonRpcError
   }
 
   /** check if limit has been reached for the given method

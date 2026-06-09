@@ -165,16 +165,10 @@ class ReplayCommandPreprocessorSpec
         "Mod:Record",
         valueParties,
       )
-      // TEST_EVIDENCE: Integrity: well formed lookup replay command is accepted
-      val validLookup = ReplayCommand.LookupByKey(
-        "Mod:Record",
-        valueParties,
-      )
       val noErrorTestCases = Table[ReplayCommand](
         "command",
         validFetch,
         validFetchByKey,
-        validLookup,
       )
       val errorTestCases = Table[ReplayCommand, ResultOfATypeInvocation[_]](
         ("command", "error"),
@@ -185,11 +179,6 @@ class ReplayCommandPreprocessorSpec
         validFetchByKey.copy(templateId = "Mod:Undefined") ->
           a[Error.Preprocessing.Lookup],
         validFetchByKey.copy(key = ValueList(FrontStack(ValueInt64(42)))) ->
-          a[Error.Preprocessing.TypeMismatch],
-        // TEST_EVIDENCE: Integrity: ill-formed lookup command is rejected
-        validLookup.copy(templateId = "Mod:Undefined") ->
-          a[Error.Preprocessing.Lookup],
-        validLookup.copy(contractKey = ValueList(FrontStack(ValueInt64(42)))) ->
           a[Error.Preprocessing.TypeMismatch],
       )
 

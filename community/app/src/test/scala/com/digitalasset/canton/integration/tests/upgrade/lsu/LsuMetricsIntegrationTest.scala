@@ -85,7 +85,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       .addConfigTransform(
         // We want to retry more aggressively in the test
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.lsu.handshakeRetry)
+          _.focus(_.parameters.lsu.handshake.retry)
             .replace(
               ExponentialBackoffConfig(
                 initialDelay = config.NonNegativeFiniteDuration.ofMillis(100),

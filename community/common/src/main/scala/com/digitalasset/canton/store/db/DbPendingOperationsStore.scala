@@ -13,7 +13,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
-import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
+import com.digitalasset.canton.store.{
+  GenericPendingOperationStore,
+  PendingOperation,
+  PendingOperationMetadata,
+  PendingOperationStore,
+}
 import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasProtocolVersionedWrapper, VersioningCompanion}
@@ -23,14 +28,61 @@ import slick.jdbc.{GetResult, SetParameter, TransactionIsolation}
 import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 
+class DbGenericPendingOperationStore(
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit val executionContext: ExecutionContext)
+    extends DbStore
+    with GenericPendingOperationStore
+    with NamedLogging {
+  import storage.api.*
+
+  private implicit val getResultSId: GetResult[Synchronizer] = Synchronizer.getResultSId
+
+  implicit val tryPendingOperationMetadataGetResult: GetResult[PendingOperationMetadata] =
+    PendingOperationMetadata.tryGetPendingOperationMetadataResult
+
+  override def isInMemoryStore(): Boolean = false
+
+  override def getAllMetadata(
+      operationName: Option[NonEmptyString] = None,
+      synchronizer: Option[Synchronizer] = None,
+      operationKey: Option[String] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PendingOperationMetadata]] = {
+
+    import com.digitalasset.canton.resource.DbStorage.Implicits.BuilderChain.*
+
+    val baseQuery =
+      sql"""
+      select operation_name, operation_key, synchronizer_id
+      from common_pending_operations
+      where 1 = 1
+    """
+
+    val nameFilter = operationName.fold(sql"")(name => sql" and operation_name = ${name.unwrap}")
+    val syncFilter = synchronizer.fold(sql"")(sync =>
+      sql" and synchronizer_id like ${sync.toProtoPrimitive + "%"}"
+    )
+    val keyFilter = operationKey.fold(sql"")(key => sql" and operation_key = $key")
+
+    val selectAction =
+      (baseQuery ++ nameFilter ++ syncFilter ++ keyFilter).as[PendingOperationMetadata]
+    storage.query(selectAction, functionFullName).map(_.toSet)
+  }
+}
+
 class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val opCompanion: VersioningCompanion[Op],
     sidParser: String => Either[String, SId],
-)(implicit val executionContext: ExecutionContext)
-    extends DbStore
+)(override implicit val executionContext: ExecutionContext)
+    extends DbGenericPendingOperationStore(storage, timeouts, loggerFactory)
+    with DbStore
     with PendingOperationStore[Op, SId]
     with NamedLogging {
 

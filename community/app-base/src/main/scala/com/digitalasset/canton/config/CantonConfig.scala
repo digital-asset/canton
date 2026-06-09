@@ -1538,7 +1538,20 @@ object CantonConfig {
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
         deriveReader[ReassignmentsConfig]
       implicit val purgeReader: ConfigReader[PurgeConfig] = deriveReader[PurgeConfig]
-      implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig]
+      implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
+
+      implicit val deprecatedFieldsLsuConfig: DeprecatedFieldsFor[LsuConfig] =
+        new DeprecatedFieldsFor[LsuConfig] {
+          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+            DeprecatedConfigUtils.MovedConfigPath(
+              "handshake-retry",
+              since = "3.5.1",
+              to = Seq("handshake.retry"),
+            )
+          )
+        }
+
+      implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig].applyDeprecations
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
     }
     lazy implicit final val timeTrackerConfigReader: ConfigReader[SynchronizerTimeTrackerConfig] = {
@@ -2254,6 +2267,7 @@ object CantonConfig {
       implicit val reassignmentsConfigWriter: ConfigWriter[ReassignmentsConfig] =
         deriveWriter[ReassignmentsConfig]
       implicit val purgeWriter: ConfigWriter[PurgeConfig] = deriveWriter[PurgeConfig]
+      implicit val lsuHandshakeWriter: ConfigWriter[LsuHandshake] = deriveWriter[LsuHandshake]
       implicit val lsuWriter: ConfigWriter[LsuConfig] = deriveWriter[LsuConfig]
       deriveWriter[ParticipantNodeParameterConfig]
     }

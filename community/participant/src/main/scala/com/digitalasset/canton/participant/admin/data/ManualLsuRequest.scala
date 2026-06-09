@@ -113,9 +113,9 @@ object ManualLsuRequest {
       case _: SequencerSuccessors => ().asRight
       case NewConfig(config) =>
         Either.cond(
-          config.synchronizerId.forall(_ == successorPsid),
+          config.psid.forall(_ == successorPsid),
           (),
-          s"successor_psid ($successorPsid) differs from the one in the new synchronizer config (${config.synchronizerId})",
+          s"successor_psid ($successorPsid) differs from the one in the new synchronizer config (${config.psid})",
         )
     }
   } yield ()

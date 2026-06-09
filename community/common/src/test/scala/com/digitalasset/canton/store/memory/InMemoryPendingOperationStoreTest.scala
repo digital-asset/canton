@@ -45,4 +45,13 @@ class InMemoryPendingOperationStoreTest
       new InMemoryPendingOperationStore(TestPendingOperationMessage, loggerFactory)
     )
   }
+
+  "InMemoryGenericPendingOperationStore" should {
+    behave like genericPendingOperationStoreFail(() =>
+      (
+        new InMemoryGenericPendingOperationStore(loggerFactory),
+        new InMemoryPendingOperationStore(TestPendingOperationMessage, loggerFactory),
+      )
+    )
+  }
 }

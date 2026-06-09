@@ -386,7 +386,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
   )(implicit
       loggingContext: ErrorLoggingContext
   ): Either[SynchronizerIdMismatch.Error, Unit] =
-    config.synchronizerId match {
+    config.psid match {
       case None => Either.unit
       case Some(configuredSynchronizerId) =>
         Either.cond(
@@ -526,19 +526,12 @@ object SynchronizerRegistryHelpers {
             shouldCopyTopology = !isTopologyInitialized && !predecessor.isLateUpgrade
             _ <-
               if (shouldCopyTopology) {
-                loggingContext.info(
-                  s"LSU to ${persistentState.psid.suffix}: About to copy topology"
-                )
-
                 for {
                   _ <- persistentState.topologyStore
                     .copyFromPredecessorSynchronizerStore(
                       predecessorSyncState.topologyStore
                     )
 
-                  _ = loggingContext.info(
-                    s"LSU to ${persistentState.psid.suffix}: Done copying topology"
-                  )
                   _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
                 } yield ()
               } else {

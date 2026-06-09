@@ -85,12 +85,6 @@ object DamlLfFeature {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
-  val featureLegacyLookupByKey = DamlLfFeature(
-    name = "Lookup by key (legacy, UCK variant)",
-    cppFlag = "DAML_LEGACY_LOOKUP_BY_KEY",
-    versionRange = VersionRange.Empty(),
-  )
-
   val featureNUCK = DamlLfFeature(
     name = "Non-unique contract keys",
     cppFlag = "DAML_NUCK",
@@ -171,7 +165,6 @@ object DamlLfFeature {
     "featureChoiceFuncs" -> featureChoiceFuncs,
     "featureTemplateTypeRepToText" -> featureTemplateTypeRepToText,
     "featureNUCK" -> featureNUCK,
-    "featureLegacyLookupByKey" -> featureLegacyLookupByKey,
     "featureContractKeys" -> featureContractKeys,
     "featureFlatArchive" -> featureFlatArchive,
     "featurePackageImports" -> featurePackageImports,
@@ -181,6 +174,8 @@ object DamlLfFeature {
     "featureExternalCall" -> featureExternalCall,
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,
+    "featurePV34" -> featurePV34,
+    "featurePV35" -> featurePV35,
   )
 
   def generateFeaturesScala = Def.task {

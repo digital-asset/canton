@@ -15,12 +15,15 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.*
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.KeyState
+import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.resolveFromCache
+import com.digitalasset.canton.platform.store.interfaces.{
+  KeyLookupPageResult,
+  LedgerDaoContractsReader,
+}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.GlobalKey
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 private[platform] class MutableCacheBackedContractStore(
     contractsReader: LedgerDaoContractsReader,
@@ -65,11 +68,9 @@ private[platform] class MutableCacheBackedContractStore(
   override def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractId]] =
-    contractStateCaches.keyState
-      .get(key)
-      .map(Future.successful)
-      .getOrElse(readThroughKeyCache(key))
-      .flatMap(keyStateToResponse(_, readers))
+    lookupNonUniqueContractKey(readers = readers, key = key, pageToken = None, limit = 1).map(
+      _.contracts.headOption.map(_.contractId)
+    )
 
   override def lookupNonUniqueContractKey(
       readers: Set[Ref.Party],
@@ -83,20 +84,30 @@ private[platform] class MutableCacheBackedContractStore(
       )
       maxLookupLimit
     } else limit
-    for {
-      (contractIds, nextPageToken) <- contractsReader.lookupNonUniqueKey(
-        key = key,
-        notEarlierThanEventSeqId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L),
-        nextPageToken = pageToken,
-        limit = cappedLimit,
-      )
-      contracts <- Future.sequence(contractIds.map(contractStore.lookupPersisted))
-      filteredContracts = contracts.view.flatten.map(_.inst).filter(visibleFor(readers)).toVector
-    } yield ContractKeyPage(
-      contracts = filteredContracts,
-      nextPageToken = nextPageToken,
-    )
+
+    contractStateCaches.keyState
+      .get(key)
+      .flatMap(resolveFromCache(_, pageToken))
+      .map(Future.successful)
+      .getOrElse(readThroughKeyCache(key, pageToken, cappedLimit))
+      .flatMap { case (contractIds, nextPageToken) =>
+        toContractKeyPage(contractIds, readers, nextPageToken)
+      }
   }
+
+  private def toContractKeyPage(
+      contractIds: Vector[ContractId],
+      readers: Set[Ref.Party],
+      nextPageToken: Option[Long],
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
+    Future
+      .sequence(contractIds.map(contractStore.lookupPersisted))
+      .map { contracts =>
+        ContractKeyPage(
+          contracts = contracts.view.flatten.map(_.inst).filter(visibleFor(readers)).toVector,
+          nextPageToken = nextPageToken,
+        )
+      }
 
   private def readThroughContractsCache(contractId: ContractId)(implicit
       loggingContext: LoggingContextWithTrace
@@ -106,18 +117,6 @@ private[platform] class MutableCacheBackedContractStore(
         contractId,
         contractsReader.lookupContractState(contractId, _).map(toContractCacheValue),
       )
-
-  private def keyStateToResponse(
-      value: ContractKeyStateValue,
-      readers: Set[Party],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[ContractId]] = value match {
-    case Assigned(contractId) =>
-      lookupContractState(contractId).map(
-        contractStateToFatContract(readers)(_).map(_.contractId)
-      )
-
-    case _: Assigned | Unassigned => Future.successful(None)
-  }
 
   private def contractStateToFatContract(readers: Set[Party])(
       value: index.ContractState
@@ -131,30 +130,93 @@ private[platform] class MutableCacheBackedContractStore(
   private val toContractCacheValue: Option[ExistingContractStatus] => ContractStateStatus =
     _.getOrElse(ContractStateStatus.NotFound)
 
-  private val toKeyCacheValue: KeyState => ContractKeyStateValue = {
-    case LedgerDaoContractsReader.KeyAssigned(contractId) =>
-      Assigned(contractId)
-    case LedgerDaoContractsReader.KeyUnassigned =>
-      Unassigned
-  }
-
   private def readThroughKeyCache(
-      key: GlobalKey
-  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyStateValue] =
-    // Even if we have a contract id, we do not automatically trigger the loading of the contract here.
-    // For prefetching at the start of command interpretation, this is done explicitly there.
-    // For contract key lookups during interpretation, there is no benefit in doing so,
-    // because contract prefetching blocks in the current architecture.
-    // So when Daml engine does not need the contract after all, we avoid loading it.
-    // Conversely, when Daml engine does need the contract, then this will trigger the loading of the contract
-    // with the same parallelization and batching opportunities.
-    contractStateCaches.keyState
-      .putAsync(
-        key,
-        contractsReader.lookupKeyState(key, _).map(toKeyCacheValue),
-      )
+      key: GlobalKey,
+      pageToken: Option[Long],
+      limit: Int,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[(Vector[ContractId], Option[Long])] =
+    if (pageToken.isEmpty) {
+      // We capture the full DB result in a Promise because putAsync only returns the cache value which may be a subset
+      // of the response.
+      val fullResultPromise = Promise[(Vector[ContractId], Option[Long])]()
+      contractStateCaches.keyState
+        .putAsync(
+          key,
+          validAtEventSeqId =>
+            contractsReader
+              .lookupNonUniqueKey(
+                key = key,
+                notEarlierThanEventSeqId = validAtEventSeqId,
+                nextPageToken = pageToken,
+                limit = limit,
+              )
+              .map { case KeyLookupPageResult(contractIdsWithSeqIds, nextPageToken) =>
+                fullResultPromise.success((contractIdsWithSeqIds.map(_.contractId), nextPageToken))
+                contractIdsWithSeqIds.headOption.fold[ContractKeyStateValue](Empty) { contractRef =>
+                  Last(
+                    contractId = contractRef.contractId,
+                    eventSequentialId = contractRef.eventSequentialId,
+                    thereMightBeMore = contractIdsWithSeqIds.sizeIs > 1 || nextPageToken.isDefined,
+                  )
+                }
+              },
+        )
+        .flatMap(_ => fullResultPromise.future)
+    } else {
+      // No read-through: just query DB
+      val validAtEventSeqId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L)
+      contractsReader
+        .lookupNonUniqueKey(
+          key = key,
+          notEarlierThanEventSeqId = validAtEventSeqId,
+          nextPageToken = pageToken,
+          limit = limit,
+        )
+        .map { page =>
+          (page.contracts.map(_.contractId), page.nextPageToken)
+        }
+    }
 }
 
 private[platform] object MutableCacheBackedContractStore {
   type EventSequentialId = Long
+
+  def resolveFromCache(
+      value: ContractKeyStateValue,
+      pageToken: Option[Long],
+  ): Option[(Vector[ContractId], Option[Long])] =
+    value match {
+      // The cache knows the key has no contracts: return an empty page and no
+      // continuation token, regardless of any incoming `pageToken`.
+      case Empty => Some((Vector.empty, None))
+      case Last(cid, seqId, thereMightBeMore) =>
+        pageToken match {
+          case None =>
+            // First page request: return the single cached contract.
+            // If more contracts may exist return a meaningful token, so that the caller can request the next page from the DB,
+            // otherwise return no token.
+            val nextPageToken = if (thereMightBeMore) Some(seqId) else None
+            Some((Vector(cid), nextPageToken))
+          case Some(token) =>
+            if (seqId < token) {
+              // The cached contract is older than the page boundary, return the single cached contract.
+              // Same nextPageToken handling as for the first page.
+              val nextPageToken = if (thereMightBeMore) Some(seqId) else None
+              Some((Vector(cid), nextPageToken))
+            } else {
+              // The cached contract is newer than or at the (exclusive) page boundary.
+              if (thereMightBeMore) {
+                // The cache cannot tell whether older contracts exist for this key; fall through
+                // to the DB.
+                None
+              } else {
+                // The cache is knows that nothing older than the cached contract exists,
+                // so the page returned is empty and there is no continuation.
+                Some((Vector.empty, None))
+              }
+            }
+        }
+    }
 }

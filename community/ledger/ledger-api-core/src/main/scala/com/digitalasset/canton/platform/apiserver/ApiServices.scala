@@ -101,6 +101,7 @@ object ApiServices {
       commandProgressTracker: CommandProgressTracker,
       commandConfig: CommandServiceConfig,
       optTimeServiceBackend: Option[TimeServiceBackend],
+      partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
       queryExecutionContext: ExecutionContext,
       commandExecutionContext: ExecutionContext,
       metrics: LedgerApiServerMetrics,
@@ -340,6 +341,10 @@ object ApiServices {
           ApiPartyManagementService.CreateSubmissionId.forParticipant(participantId),
         loggerFactory = loggerFactory,
       )
+      val apiPartyManagementAlphaServiceO =
+        partyReplicationEndpointsO.map(partyReplicationEndpoints =>
+          ApiPartyManagementAlphaService.createApiService(partyReplicationEndpoints)
+        )
 
       val apiPackageManagementService =
         ApiPackageManagementService.createApiService(
@@ -422,7 +427,9 @@ object ApiServices {
         new PackageManagementServiceAuthorization(apiPackageManagementService, authorizer),
         new ParticipantPruningServiceAuthorization(participantPruningService, authorizer),
         new InteractiveSubmissionServiceAuthorization(apiInteractiveSubmissionService, authorizer),
-      )
+      ) ++ apiPartyManagementAlphaServiceO
+        .map(new PartyManagementAlphaServiceAuthorization(_, authorizer))
+        .toList
     }
 
     logger.info(engine.info.toString)

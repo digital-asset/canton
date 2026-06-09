@@ -12,7 +12,7 @@ import com.daml.test.evidence.tag.Reliability.{
   Remediation,
 }
 import com.daml.test.evidence.tag.Security.{Attack, HappyCase, HappyOrAttack, SecurityTest}
-import com.github.tototoshi.csv.{CSVWriter, defaultCSVFormat}
+import com.github.tototoshi.csv.CSVWriter
 
 object TestEntryCsvEncoder {
 
@@ -62,7 +62,7 @@ object TestEntryCsvEncoder {
               description,
               SecurityTest(property, asset, scenario, unimplemented, file @ _, line @ _),
               ignored,
-              suite @ _,
+              _,
             ) =>
           val (attacker, threat, mitigation) = getAttackerThreatMitigation(scenario)
           SecurityTestEntryCsv(
@@ -113,7 +113,7 @@ object TestEntryCsvEncoder {
                 line @ _,
               ),
               ignored,
-              suite @ _,
+              _,
             ) =>
           ReliabilityTestEntryCsv(
             testSuiteName = suiteName,

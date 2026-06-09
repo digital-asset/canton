@@ -390,7 +390,6 @@ private[lf] final class Compiler(
       tmpl.key.foreach { tmplKey =>
         addDef(compileContractKeyWithMaintainers(tmplId, tmpl, tmplKey))
         addDef(compileFetchByKey(tmplId, tmplKey))
-        addDef(compileLookupByKey(tmplId, tmplKey))
         addDef(compileQueryNByKey(tmplId, tmplKey))
         tmpl.choices.values.foreach { x =>
           addDef(compileChoiceByKey(tmplId, tmpl, tmplKey, x))
@@ -950,24 +949,6 @@ private[lf] final class Compiler(
       }
     }
 
-  private[this] def compileLookupByKey(
-      tmplId: Identifier,
-      tmplKey: TemplateKey,
-  ): (t.SDefinitionRef, SDefinition) =
-    // compile a template with key into
-    // LookupByKeyDefRef(tmplId) = \ <key> <token> ->
-    //    let <keyWithM> = { key = <key> ; maintainers = [tmplKey.maintainers] <key> }
-    //        <mbCid> = $lookupKey(tmplId) <keyWithM>
-    //    in <mbCid>
-    topLevelFunction2(t.LookupByKeyDefRef(tmplId)) { (keyPos, _, env) =>
-      let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
-        (keyWithMPos, env) =>
-          let(env, SBULookupKey(tmplId)(env.toSEVar(keyWithMPos))) { (maybeCidPos, env) =>
-            env.toSEVar(maybeCidPos)
-          }
-      }
-    }
-
   private[this] def compileQueryNByKey(
       tmplId: Identifier,
       tmplKey: TemplateKey,
@@ -1050,8 +1031,6 @@ private[lf] final class Compiler(
           choice,
           choiceArg,
         )
-      case Command.LookupByKey(templateId, contractKey) =>
-        t.LookupByKeyDefRef(templateId)(s.SEValue(contractKey))
     }
     SBUSetLastCommand(cmd)(body)
   }

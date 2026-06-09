@@ -285,7 +285,7 @@ class ConfirmationRequestAndResponseProcessorTest
       new InMemoryFinalizedResponseStore(loggerFactory),
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
       mock[Clock],
-      MediatorTestMetrics,
+      MediatorTestMetrics(this.getClass.getSimpleName),
       testedProtocolVersion,
       timeouts,
       loggerFactory,
@@ -1044,6 +1044,7 @@ class ConfirmationRequestAndResponseProcessorTest
                     actualVersion,
                     Right(_states),
                     _,
+                    _,
                   )
                 ) =>
               actualRequestId shouldBe requestId
@@ -1071,6 +1072,7 @@ class ConfirmationRequestAndResponseProcessorTest
             _,
             `ts1`,
             Right(states),
+            _,
             _,
           ) = updatedState.value
           assert(
@@ -1157,7 +1159,7 @@ class ConfirmationRequestAndResponseProcessorTest
           .value
       } yield {
         inside(finalState) {
-          case Some(FinalizedResponse(`requestId`, `informeeMessage`, `ts2`, verdict)) =>
+          case Some(FinalizedResponse(`requestId`, `informeeMessage`, `ts2`, verdict, _)) =>
             assert(verdict === Approve(testedProtocolVersion))
         }
       }
@@ -1309,6 +1311,7 @@ class ConfirmationRequestAndResponseProcessorTest
                   _request,
                   _version,
                   Verdict.ParticipantReject(reasons),
+                  _,
                 )
               ) =>
             // TODO(#5337) These are only the rejections for the first view because this view happens to be finalized first.
@@ -1467,6 +1470,7 @@ class ConfirmationRequestAndResponseProcessorTest
                   _request,
                   _version,
                   Verdict.ParticipantReject(reasons),
+                  _,
                 )
               ) =>
             reasons.length shouldEqual 1
@@ -1589,6 +1593,7 @@ class ConfirmationRequestAndResponseProcessorTest
                   _request,
                   _version,
                   Verdict.ParticipantReject(reasons),
+                  _,
                 )
               ) =>
             reasons.length shouldEqual 2

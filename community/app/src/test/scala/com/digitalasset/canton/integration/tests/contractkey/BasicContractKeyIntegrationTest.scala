@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.integration.tests.modelbased
+package com.digitalasset.canton.integration.tests.contractkey
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.integration.{
@@ -24,7 +24,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import java.util as ju
 import scala.jdk.CollectionConverters.*
 
-class BasicNuckIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
+class BasicContractKeyIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
   private var alice: Party = _
 

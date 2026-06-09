@@ -55,6 +55,15 @@ object Debug {
       case Descriptor.Date => buf.append("date")
       case Descriptor.Party => buf.append("party")
       case ContractId(value) => buf.append("contractId("); go(value); buf.append(")")
+      case Unknown(id, args) =>
+        buf.append(s"<unknown ${id.show}>"): Unit
+        if args.nonEmpty then
+          buf.append("("): Unit
+          args.zipWithIndex.foreach { (arg, ix) =>
+            go(arg)
+            if ix < args.length - 1 then buf.append(", ")
+          }
+          buf.append(")")
 
     buf.append("--- Dictionary ---").append(System.lineSeparator()): Unit
     buf
@@ -123,6 +132,6 @@ object Debug {
     buf.toSeq.sortBy(x => (x._1.packageName, x._1.moduleName, x._1.entityName)).map(_._2)
 
   extension (id: Identifier)
-    private def show: String =
+    def show: String =
       s"${id.packageName}:${id.moduleName}:${id.entityName}#${id.packageVersion}/${id.packageId}"
 }

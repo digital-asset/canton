@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.admin.party
 
+import com.daml.ledger.api.v2.state_service.ParticipantPermission as LapiParticipantPermission
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -22,6 +23,18 @@ object PartyParticipantPermission {
       v30.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION
     case topology.transaction.ParticipantPermission.Observation =>
       v30.ParticipantPermission.PARTICIPANT_PERMISSION_OBSERVATION
+  }
+
+  // Conversion to proto is public for use by canton console client lapi commands.
+  def toLapiProtoPrimitive(
+      participantPermission: topology.transaction.ParticipantPermission
+  ): LapiParticipantPermission = participantPermission match {
+    case topology.transaction.ParticipantPermission.Submission =>
+      LapiParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION
+    case topology.transaction.ParticipantPermission.Confirmation =>
+      LapiParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION
+    case topology.transaction.ParticipantPermission.Observation =>
+      LapiParticipantPermission.PARTICIPANT_PERMISSION_OBSERVATION
   }
 
   private[admin] def fromProtoV30(

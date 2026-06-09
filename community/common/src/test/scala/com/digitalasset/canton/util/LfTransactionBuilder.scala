@@ -7,10 +7,11 @@ import cats.Monad
 import cats.data.StateT
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfInterfaceId, LfPackageId}
-import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.value.Value
 
 import scala.collection.immutable.HashMap
@@ -37,7 +38,8 @@ object LfTransactionBuilder {
     defaultTemplateId,
     defaultPackageName,
     Value.ValueUnit,
-    crypto.Hash.assertHashContractKey(defaultTemplateId, defaultPackageName, Value.ValueUnit),
+    SValueHash
+      .assertHashContractKey(defaultPackageName, defaultTemplateId.qualifiedName, SValue.SUnit),
   )
 
   def allocateNodeId[M[_]](implicit monadInstance: Monad[M]): StateT[M, NodeIdState, LfNodeId] =

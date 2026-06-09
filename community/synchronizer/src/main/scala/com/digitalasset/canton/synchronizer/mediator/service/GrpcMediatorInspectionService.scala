@@ -273,6 +273,7 @@ class GrpcMediatorInspectionService(
             request @ InformeeMessage(fullInformeeTree, _),
             finalizationTime,
             verdict,
+            _,
           ) =>
         val (flattened, rootNodes) = flattenForrest[TransactionView, mediatorV30.TransactionView](
           fullInformeeTree.tree.rootViews.unblindedElements,

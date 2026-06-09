@@ -243,11 +243,13 @@ object SequencerClientFactory {
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
           trafficInitTimestampO = latestSequencedTimestampO
-            .orElse(
-              synchronizerPredecessor.map(
-                _.upgradeTime
-              )
-            )
+            .orElse(synchronizerPredecessor.map(_.upgradeTime))
+            /*
+            Mediator nodes don't expose traffic.
+            This also prevent them from connecting to the sequencer during LSU before upgrade time, which
+            is needed for the test sequencing messages.
+             */
+            .filter(_ => member.code != MediatorId.Code)
 
           _ = logger.info(
             s"Initializing traffic state at timestamp: $trafficInitTimestampO"

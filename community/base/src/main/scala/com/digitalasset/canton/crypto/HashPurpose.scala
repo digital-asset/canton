@@ -113,6 +113,7 @@ object HashPurpose {
   val LsuSequencingTestMessageContent = HashPurpose(62, "LsuSequencingTestMessageContent")
   val UpdatesPageToken = HashPurpose(63, "UpdatesPageToken")
   val CiphertextId = HashPurpose(64, "CiphertextId")
+  val SequencerAggregatorAggregation = HashPurpose(65, "SequencerAggregatorAggregation")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

@@ -261,6 +261,7 @@ protocol_continuity_test_latest:
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   steps:
+    - use_new_sequencer_aggregator
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
@@ -478,6 +479,7 @@ benchmark_transaction_snapshot:
         destination: log
         name: Store log directory as artifacts (if any)
         path: log
+    - post_transaction_snapshot_metrics
     - slack_red_main_with_volunteer:
         fixed_volunteer: U03K3A3UAGY # Carl
 

@@ -10,6 +10,7 @@ let
 in
 pkgs.mkShell {
   packages = with pkgs; [
+    actionlint
     (ammonite_2_13.override { inherit jre; })
     awscli2
     azure-storage-azcopy

@@ -137,7 +137,7 @@ class TestEngine(
             case Some(contractInstance) =>
               Response.ContractFound(
                 contractInstance,
-                Hash.HashingMethod.UpgradeFriendly,
+                Hash.HashingMethod.UpgradeFriendlyUnsafe,
                 _ => true,
               )
             case None =>

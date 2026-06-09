@@ -149,7 +149,6 @@ class TransactionProcessor(
   def submit(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,
@@ -162,13 +161,8 @@ class TransactionProcessor(
   ] =
     this
       .submit(
-        TransactionProcessingSteps.SubmissionParam(
-          submitterInfo,
-          transactionMeta,
-          keyResolver,
-          transaction,
-          disclosedContracts,
-        ),
+        TransactionProcessingSteps
+          .SubmissionParam(submitterInfo, transactionMeta, transaction, disclosedContracts),
         topologySnapshot,
       )
       .map { futRes =>

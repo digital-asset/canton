@@ -433,7 +433,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   "cancel a timeout" when {
     "an epoch is transferred" in {
       val timeoutManager = mock[
-        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[ProgrammableUnitTestEnv], String]
+        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], String]
       ]
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](

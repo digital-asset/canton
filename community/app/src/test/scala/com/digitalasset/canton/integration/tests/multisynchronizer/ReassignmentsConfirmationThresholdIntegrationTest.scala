@@ -422,7 +422,10 @@ final class ReassignmentsConfirmationThresholdIntegrationTest
 
             environment.simClock.value.advance(decisionTimeout.asJava)
 
-            participant3.testing.fetch_synchronizer_times()
+            // Issue pings on the synchronizers to ensure that P3 times out its
+            // dropped unassignment and assignment confirmations (#32994).
+            participant3.health.ping(participant3, synchronizerId = Some(daId))
+            participant3.health.ping(participant3, synchronizerId = Some(acmeId))
           },
           _.warningMessage should include regex "Response message for request .* timed out",
           _.warningMessage should include regex "Response message for request .* timed out",

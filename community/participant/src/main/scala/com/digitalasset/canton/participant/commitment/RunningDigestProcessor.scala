@@ -206,6 +206,83 @@ class RunningDigestProcessor(
       }
       .flatten
 
+  def reinitializationAcsUpdates(
+      recordTime: RecordTime,
+      topologySnapshot: TopologySnapshot,
+  ): Source[ProcessingContext[CheckpointFenceOr[AcsUpdate]], NotUsed] = {
+    val parties: Source[LfPartyId, NotUsed] =
+      acsLookup
+        .activeContracts(Set.empty, recordTime)
+        .statefulMapConcat(extractPartiesFromContracts())
+
+    val groupedParties: Source[Seq[LfPartyId], NotUsed] =
+      parties.grouped(counterpartyBatchSize.unwrap)
+
+    val acsUpdates: Source[ProcessingContext[CheckpointFenceOr[AcsUpdate]], NotUsed] =
+      groupedParties
+        .flatMap { counterparties =>
+          val counterpartiesSet = counterparties.toSet
+
+          acsLookup
+            .activeContracts(counterparties.toSet, recordTime)
+            .mapAsyncAndDrainUS(1) { activeContractOfCounterparty =>
+              val stakeholdersOfContract = activeContractOfCounterparty.stakeholders
+
+              for {
+                partyToParticipant <- getOnboardedParticipantsOfParties(
+                  topologySnapshot,
+                  stakeholdersOfContract,
+                )
+              } yield {
+                val stakeholdersToHostingParticipants = stakeholdersOfContract.view
+                  .filter(counterpartiesSet.contains)
+                  .map { sh =>
+                    sh -> partyToParticipant
+                      .getOrElse(sh, Set.empty)
+                      .toSeq
+                  }
+                  .toMap
+
+                val thisParticipantStakeholders = partyToParticipant.collect {
+                  case (party, hostingParticipants)
+                      if hostingParticipants.contains(thisLfParticipant) =>
+                    party
+                }
+
+                val acsUpdate = AcsUpdate(
+                  stakeholdersToHostingParticipants,
+                  thisParticipantStakeholders.toSeq,
+                  activeContractOfCounterparty.cid,
+                  activeContractOfCounterparty.reassignmentCounter,
+                  isActivation = true,
+                )
+
+                ProcessingContext(recordTime, NotCheckpointFence(topologySnapshot, acsUpdate))
+              }
+            }
+
+        }
+
+    acsUpdates.concat(Source.single(ProcessingContext(recordTime, CheckpointFence)))
+  }
+
+  private def extractPartiesFromContracts(): () => AcsActiveContract => Seq[LfPartyId] = { () =>
+    // keep track of the already processed counterparties
+    // TODO(#33084) it would be better to use interned party ids instead of the full party strings
+    val alreadyVisitedCounterParties = mutable.Set.empty[LfPartyId]
+
+    activeContract => {
+      val notYetProcessedCounterparties =
+        activeContract.stakeholders.filter(!alreadyVisitedCounterParties.contains(_))
+
+      if (notYetProcessedCounterparties.nonEmpty)
+        alreadyVisitedCounterParties.addAll(notYetProcessedCounterparties)
+
+      // emit the counterparties that haven't been processed yet
+      notYetProcessedCounterparties
+    }
+  }
+
   /** Determines the required digests that need to be updated by:
     *   1. loading the ACS of `locallyOnboardedParty` to find all counterparties
     *   1. loading the ACS for batches of counterparties, discarding contracts that are not shared
@@ -226,22 +303,7 @@ class RunningDigestProcessor(
     val acsUpdates = acsLookup
       // load the ACS of the party to determine the counterparties that need to have their digest updated
       .activeContracts(Set(locallyOnboardedParty), recordTime)
-      .statefulMapConcat { () =>
-        // keep track of the already processed counterparties
-        // TODO(#33084) it would be better to use interned party ids instead of the full party strings
-        val alreadyVisitedCounterParties = mutable.Set.empty[LfPartyId]
-
-        activeContract => {
-          val notYetProcessedCounterparties =
-            activeContract.stakeholders.filter(!alreadyVisitedCounterParties.contains(_))
-
-          if (notYetProcessedCounterparties.nonEmpty)
-            alreadyVisitedCounterParties.addAll(notYetProcessedCounterparties)
-
-          // emit the counterparties that haven't been processed yet
-          notYetProcessedCounterparties
-        }
-      }
+      .statefulMapConcat(extractPartiesFromContracts())
       .grouped(counterpartyBatchSize.unwrap)
       .flatMapConcat { counterparties =>
         val counterpartiesSet = counterparties.toSet

@@ -12,6 +12,7 @@ import com.digitalasset.canton.data.LightTransactionViewTree.{
   ToFullViewTreesResult,
 }
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
+import com.digitalasset.canton.data.TransactionView.ValidateKeys
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
@@ -39,6 +40,8 @@ class GenTransactionTreeTest
     with FailOnShutdown {
 
   val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
+
+  private val validateKeys = ValidateKeys(testedProtocolVersion)
 
   private def generateRandomKeysForSubviewHashes(
       subviewHashes: Seq[ViewHash],
@@ -164,7 +167,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          allLightTrees.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          allLightTrees.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           allTrees.map(withViewPositions),
           Seq.empty,
@@ -184,7 +188,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = true,
-          allLightTrees.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          allLightTrees.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(allTrees.map(withViewPositions), Seq.empty, Seq.empty)
       }
 
@@ -221,7 +226,8 @@ class GenTransactionTreeTest
             testedProtocolVersion,
             factory.cryptoOps,
             topLevelOnly = true,
-            allLightWeightForInf.map(withViewPosition),
+            // TODO(#32393): wire ciphertext ID
+            allLightWeightForInf.map(ltv => withViewPosition(ltv) -> None),
           ) shouldBe ToFullViewTreesResult(
             topLevelForInf.map(withViewPositions),
             Seq.empty,
@@ -257,7 +263,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          inputLightTrees.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          inputLightTrees.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           expectedFullTrees.map(withViewPositions),
           badLightTrees.map(withViewPosition),
@@ -277,7 +284,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          inputLightTrees1.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          inputLightTrees1.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           allFullTrees.map(withViewPositions),
           Seq.empty,
@@ -290,7 +298,8 @@ class GenTransactionTreeTest
           testedProtocolVersion,
           factory.cryptoOps,
           topLevelOnly = false,
-          inputLightTrees2.map(withViewPosition),
+          // TODO(#32393): wire ciphertext ID
+          inputLightTrees2.map(ltv => withViewPosition(ltv) -> None),
         ) shouldBe ToFullViewTreesResult(
           allFullTrees.map(withViewPositions),
           Seq.empty,
@@ -310,7 +319,8 @@ class GenTransactionTreeTest
             testedProtocolVersion,
             factory.cryptoOps,
             topLevelOnly = false,
-            inputLightTrees.map(withViewPosition),
+            // TODO(#32393): wire ciphertext ID
+            inputLightTrees.map(ltv => withViewPosition(ltv) -> None),
           ) shouldBe ToFullViewTreesResult(
           allFullTrees.map(withViewPositions),
           Seq.empty,
@@ -354,11 +364,19 @@ class GenTransactionTreeTest
 
     "a view and a subview have the same hash" must {
       "prevent creation" in {
+
+        val singleExerciseView =
+          factory.SingleExercise(ExampleTransactionFactory.lfHash(0)).rootViews.headOption.value
+
         val childViewCommonData =
-          singleCreateView.viewCommonData.tryUnwrap.copy(salt = factory.commonDataSalt(1))
-        val childView = singleCreateView.tryCopy(viewCommonData = childViewCommonData)
+          singleExerciseView.viewCommonData.tryUnwrap.copy(salt = factory.commonDataSalt(1))
+        val childView = singleExerciseView.tryCopy(
+          validateKeys = validateKeys,
+          viewCommonData = childViewCommonData,
+        )
         val subviews = TransactionSubviews(Seq(childView))(testedProtocolVersion, factory.cryptoOps)
-        val parentView = singleCreateView.tryCopy(subviews = subviews)
+        val parentView =
+          singleExerciseView.tryCopy(validateKeys = validateKeys, subviews = subviews)
 
         GenTransactionTree.create(factory.cryptoOps)(
           factory.submitterMetadata,
@@ -493,9 +511,12 @@ class GenTransactionTreeTest
     val example = factory.ViewInterleavings
 
     forEvery(example.transactionViewTrees.zipWithIndex) { case (tvt, index) =>
-      val viewWithBlindedSubviews = tvt.view.tryCopy(subviews = tvt.view.subviews.blindFully)
+      val viewWithBlindedSubviews =
+        tvt.view.tryCopy(validateKeys = validateKeys, subviews = tvt.view.subviews.blindFully)
       val genTransactionTree =
-        tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, viewWithBlindedSubviews))
+        tvt.tree.mapUnblindedRootViews(
+          _.replace(tvt.viewHash, viewWithBlindedSubviews, validateKeys)
+        )
 
       val dummyViewHash = ViewHash(
         factory.cryptoOps.build(HashPurpose.MerkleTreeInnerNode).addString("hummous").finish()
@@ -576,7 +597,10 @@ class GenTransactionTreeTest
         val Seq(_, view1) = informeeTree.rootViews.unblindedElements
 
         val view1WithParticipantDataUnblinded =
-          view1.tryCopy(viewParticipantData = view1Unblinded.viewParticipantData)
+          view1.tryCopy(
+            validateKeys = validateKeys,
+            viewParticipantData = view1Unblinded.viewParticipantData,
+          )
         val rootViews = MerkleSeq.fromSeq(factory.cryptoOps, testedProtocolVersion)(
           Seq(view1WithParticipantDataUnblinded)
         )
@@ -631,7 +655,10 @@ class GenTransactionTreeTest
 
         val rootViewsWithCommonDataBlinded =
           rootViews.map(view =>
-            view.tryCopy(viewCommonData = ExampleTransactionFactory.blinded(view.viewCommonData))
+            view.tryCopy(
+              validateKeys = validateKeys,
+              viewCommonData = ExampleTransactionFactory.blinded(view.viewCommonData),
+            )
           )
 
         val viewCommonDataBlinded =

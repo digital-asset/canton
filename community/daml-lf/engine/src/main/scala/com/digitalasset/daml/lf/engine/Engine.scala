@@ -965,13 +965,13 @@ class Engine(
     hashingMethod match {
       case Hash.HashingMethod.Legacy =>
         Hash
-          .hashContractInstance(templateId, createArg, packageName, upgradeFriendly = false)
+          .hashContractInstance(templateId, createArg, packageName, upgradeFriendlyUnsafe = false)
           .left
           .map(mkHashingError)
           .toResult
-      case Hash.HashingMethod.UpgradeFriendly =>
+      case Hash.HashingMethod.UpgradeFriendlyUnsafe =>
         Hash
-          .hashContractInstance(templateId, createArg, packageName, upgradeFriendly = true)
+          .hashContractInstance(templateId, createArg, packageName, upgradeFriendlyUnsafe = true)
           .left
           .map(mkHashingError)
           .toResult

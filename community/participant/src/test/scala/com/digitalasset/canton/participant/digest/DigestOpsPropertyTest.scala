@@ -53,7 +53,7 @@ class DigestOpsPropertyTest
   property("consistency between counter-participants") {
     forAll(consistencyTestInputs) { input =>
       val updateOnParticipant = AcsUpdate(
-        stakeholders = input.stakeholdersExcludingParticipant(input.participant),
+        stakeholders = input.stakeholders,
         locallyHostedStakeholders = input.locallyHostedStakeholders(input.participant),
         cid = contractId,
         rc = ReassignmentCounter.Genesis,
@@ -61,7 +61,7 @@ class DigestOpsPropertyTest
       )
 
       val updateOnCounterParticipant = AcsUpdate(
-        stakeholders = input.stakeholdersExcludingParticipant(input.counterParticipant),
+        stakeholders = input.stakeholders,
         locallyHostedStakeholders = input.locallyHostedStakeholders(input.counterParticipant),
         cid = contractId,
         rc = ReassignmentCounter.Genesis,
@@ -105,12 +105,6 @@ object DigestOpsPropertyTest {
       participant: LedgerParticipantId,
       counterParticipant: LedgerParticipantId,
   ) {
-    def stakeholdersExcludingParticipant(
-        participant: LedgerParticipantId
-    ): Map[LfPartyId, Seq[LedgerParticipantId]] = stakeholders.map { case (party, participants) =>
-      party -> participants.filterNot(_ == participant)
-    }
-
     def locallyHostedStakeholders(participant: LedgerParticipantId): Seq[LfPartyId] =
       stakeholders.collect {
         case (party, participants) if participants.contains(participant) =>

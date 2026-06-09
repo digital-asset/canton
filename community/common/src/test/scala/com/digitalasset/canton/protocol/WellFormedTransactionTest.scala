@@ -9,6 +9,7 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageName, Lf
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{NodeId, SerializationVersion}
+import com.digitalasset.daml.lf.value.Value.VersionedValue
 import org.scalatest.prop.{TableFor3, TableFor4}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -18,18 +19,18 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
 
   val lfAbs: LfContractId = suffixedId(0, 0)
 
-  val contractInst: LfThinContractInst = contractInstance()
+  val contractArg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue
 
   def createNode(
       cid: LfContractId,
-      contractInstance: LfThinContractInst = ExampleTransactionFactory.contractInstance(),
+      arg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue,
       signatories: Set[LfPartyId] = Set(signatory),
       key: Option[LfGlobalKeyWithMaintainers] = None,
   ): LfNodeCreate =
     ExampleTransactionFactory.createNode(
       cid,
       signatories = signatories,
-      contractInstance = contractInstance,
+      arg = arg,
       key = key,
     )
 
@@ -169,7 +170,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         "Failure to serialize - depth limit exceeded",
         factory.versionedTransactionWithSeeds(
           Seq(0, 1),
-          createNode(unsuffixedId(0), contractInstance = veryDeepContractInstance),
+          createNode(unsuffixedId(0), arg = ExampleTransactionFactory.veryDeepVersionedValue),
           LfNodeExercises(
             targetCoid = suffixedId(2, -1),
             packageName = packageName,
@@ -214,8 +215,8 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
               LfGlobalKeyWithMaintainers
                 .assertBuild(
                   templateId,
-                  contractInst.unversioned.arg,
-                  crypto.Hash.hashPrivateKey(contractInst.unversioned.arg.toString),
+                  contractArg.unversioned,
+                  crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),
                   Set.empty,
                   LfPackageName.assertFromString("package-name"),
                 )
@@ -228,8 +229,8 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             key = Some(
               LfGlobalKeyWithMaintainers.assertBuild(
                 templateId,
-                contractInst.unversioned.arg,
-                crypto.Hash.hashPrivateKey(contractInst.unversioned.arg.toString),
+                contractArg.unversioned,
+                crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),
                 Set.empty,
                 packageName,
               )

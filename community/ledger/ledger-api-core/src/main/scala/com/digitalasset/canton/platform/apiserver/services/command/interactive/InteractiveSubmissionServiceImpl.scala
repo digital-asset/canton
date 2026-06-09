@@ -258,7 +258,6 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
             transactionMetadata =
               commandExecutionResult.commandInterpretationResult.transactionMeta,
             submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
-            keyResolver = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
             disclosedContracts =
               commandExecutionResult.commandInterpretationResult.processedDisclosedContracts
                 .map(contract => contract.contractId -> contract)
@@ -311,7 +310,6 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         result.commandInterpretationResult.submitterInfo,
         result.commandInterpretationResult.transactionMeta,
         result.commandInterpretationResult.interpretationTimeNanos,
-        result.commandInterpretationResult.globalKeyMapping,
         result.commandInterpretationResult.processedDisclosedContracts,
       )
   }

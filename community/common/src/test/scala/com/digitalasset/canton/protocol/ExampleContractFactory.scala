@@ -7,29 +7,27 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Salt, TestHash, TestSalt}
 import com.digitalasset.canton.util.{LfTransactionBuilder, TestContractHasher}
 import com.digitalasset.canton.{LfPackageId, LfPartyId, protocol}
-import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.crypto.SValueHash.assertHashContractKey
 import com.digitalasset.daml.lf.data.Ref.PackageName
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
-import com.digitalasset.daml.lf.transaction.{
-  CreationTime,
-  FatContractInstance,
-  GlobalKeyWithMaintainers,
-  Node,
-  SerializationVersion,
-}
+import com.digitalasset.daml.lf.speedy.SValue
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueInt64}
 import org.scalatest.EitherValues
 import org.scalatest.Inside.inside
 
-import scala.util.Random
+import java.util.concurrent.atomic.AtomicLong
 
 object ExampleContractFactory extends EitherValues {
 
-  private val random = new Random(0)
+  private val atomic = new AtomicLong(10)
+  private def nextInt64(): Long = atomic.getAndIncrement()
+  private def nextInt(): Int = (nextInt64() % Int.MaxValue).toInt
+
   private val unicumGenerator = new UnicumGenerator(new SymbolicPureCrypto())
 
-  def lfHash(index: Int = random.nextInt()): LfHash =
+  def lfHash(index: Int = nextInt()): LfHash =
     LfHash.assertFromBytes(
       Bytes.assertFromString(f"$index%04x".padTo(LfHash.underlyingHashLength * 2, '0'))
     )
@@ -45,9 +43,9 @@ object ExampleContractFactory extends EitherValues {
   def build[Time <: CreationTime](
       templateId: Ref.Identifier = templateId,
       packageName: Ref.PackageName = packageName,
-      argument: Value = ValueInt64(random.nextLong()),
+      argument: Value = ValueInt64(nextInt64()),
       createdAt: Time = CreationTime.CreatedAt(Time.Timestamp.now()),
-      salt: Salt = TestSalt.generateSalt(random.nextInt()),
+      salt: Salt = TestSalt.generateSalt(nextInt()),
       signatories: Set[Ref.Party] = Set(signatory),
       stakeholders: Set[Ref.Party] = Set(signatory, observer, extra),
       keyOpt: Option[GlobalKeyWithMaintainers] = None,
@@ -87,7 +85,7 @@ object ExampleContractFactory extends EitherValues {
   private def fromCreateInternal[Time <: CreationTime](
       create: protocol.LfNodeCreate,
       createdAt: Time,
-      salt: Salt = TestSalt.generateSalt(random.nextInt()),
+      salt: Salt = TestSalt.generateSalt(nextInt()),
       cantonContractIdVersion: CantonContractIdV1Version,
       overrideContractId: Option[ContractId] = None,
   ): GenContractInstance { type InstCreatedAtTime <: Time } = {
@@ -122,7 +120,7 @@ object ExampleContractFactory extends EitherValues {
   }
 
   def buildContractId(
-      index: Int = random.nextInt(),
+      index: Int = nextInt(),
       cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
   ): ContractId =
     cantonContractIdVersion.fromDiscriminator(lfHash(index), Unicum(TestHash.digest(index)))
@@ -130,15 +128,16 @@ object ExampleContractFactory extends EitherValues {
   def buildKeyWithMaintainers(
       templateId: Ref.Identifier = templateId,
       packageName: Ref.PackageName = packageName,
-      value: Value = ValueInt64(random.nextLong()),
       maintainers: Set[Ref.Party] = Set(signatory),
+      value: Long = nextInt64(),
   ): GlobalKeyWithMaintainers =
     GlobalKeyWithMaintainers.assertBuild(
-      templateId,
-      value,
-      crypto.Hash.assertHashContractKey(templateId, packageName, value),
-      maintainers,
-      packageName,
+      templateId = templateId,
+      value = Value.ValueInt64(value),
+      valueHash =
+        assertHashContractKey(packageName, templateId.qualifiedName, SValue.SInt64(value)),
+      maintainers = maintainers,
+      packageName = packageName,
     )
 
   def modify[Time <: CreationTime](

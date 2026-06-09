@@ -726,6 +726,7 @@ final class RepairService(
           assignmentExclusivity = None,
           reassignmentCounter = reassignmentCounter.unwrap,
           nodeId = nodeId,
+          keyOpt = c.metadata.maybeKeyWithMaintainers,
         )
       }
 

@@ -1,8 +1,8 @@
 // Linting plugins
-addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
+addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.1")
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.0")
 addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.5.6")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.3")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.4")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
@@ -35,7 +35,7 @@ libraryDependencies += "com.esotericsoftware.yamlbeans" % "yamlbeans" % "1.13"
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.3.1")
 
 // Need better files for building the config file when doing the 'did we break Protobuf compatibility?' check
-libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.8.0"
+libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.9.2"
 
 // enable dependency tree plugin (now native as of sbt 1.4.x)
 addDependencyTreePlugin
@@ -54,13 +54,13 @@ libraryDependencies ++= Seq(
 // JMH for benchmarking purposes
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.3")
 
-addSbtPlugin("org.jetbrains.scala" % "sbt-ide-settings" % "1.1.2")
+addSbtPlugin("org.jetbrains.scala" % "sbt-ide-settings" % "1.1.4")
 
 //For easy tar.gz archiving
 libraryDependencies += "org.apache.commons" % "commons-compress" % "1.27.1"
 
 // For testing openapi mapping
-addSbtPlugin("org.openapitools" % "sbt-openapi-generator" % "7.12.0")
+addSbtPlugin("org.openapitools" % "sbt-openapi-generator" % "7.22.0")
 
 // To publish JARs to Google Artifact Registry
 addSbtPlugin("org.latestbit" % "sbt-gcs-plugin" % "1.16.1")

@@ -168,6 +168,14 @@ object FatContractInstance {
             .asInstanceOf[FatContractInstanceImpl[inst.CreatedAtTime]]
             .copy(createArg = newCreateArg)
       )
+
+    val versionUnsafe: Lens[FatContractInstance, SerializationVersion] =
+      Lens[FatContractInstance, SerializationVersion](_.version)(newVersion =>
+        inst =>
+          inst
+            .asInstanceOf[FatContractInstanceImpl[inst.CreatedAtTime]]
+            .copy(version = newVersion)
+      )
   }
 }
 

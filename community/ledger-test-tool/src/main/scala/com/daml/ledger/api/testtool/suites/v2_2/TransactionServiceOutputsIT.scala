@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
@@ -21,9 +22,9 @@ import java.util.Optional
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.OptionConverters.*
 
-class TransactionServiceOutputsIT extends LedgerTestSuite {
+class TransactionServiceOutputsIT(testDars: TestDars) extends LedgerTestSuite {
   import ClearIdsImplicits.*
-  import CompanionImplicits.*
+  import testDars.companionImplicits.*
   import com.daml.ledger.api.testtool.infrastructure.RemoveTrailingNone.Implicits
 
   test(

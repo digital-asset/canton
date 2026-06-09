@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
@@ -21,8 +22,8 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 
 import scala.jdk.CollectionConverters.*
 
-class TransactionServiceAuthorizationIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class TransactionServiceAuthorizationIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "TXRequireAuthorization",

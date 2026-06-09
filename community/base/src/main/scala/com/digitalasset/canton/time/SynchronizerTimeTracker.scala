@@ -15,6 +15,7 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   LifeCycle,
   UnlessShutdown,
 }
@@ -71,7 +72,8 @@ class SynchronizerTimeTracker(
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
-    with HasFlushFuture {
+    with HasFlushFuture
+    with HasCloseContext {
 
   /** Timestamps that we are waiting to observe held in ascending order. Queue access must be made
     * while holding the [[lock]].
@@ -517,7 +519,14 @@ class SynchronizerTimeTracker(
           val latestTimestamp = timestampRef.get().latest.fold(clock.now)(_.receivedAt)
           val expectUpdateBy = latestTimestamp.add(minObservationDuration).immediateSuccessor
 
-          val _ = clock.scheduleAt(performUpdate, expectUpdateBy)
+          clock
+            .scheduleAtCancelledOnShutdown(
+              action = performUpdate,
+              taskName = "min-observation",
+              expectUpdateBy,
+            )
+            .discard
+
         }.onShutdown(())
 
       scheduleNextUpdate()

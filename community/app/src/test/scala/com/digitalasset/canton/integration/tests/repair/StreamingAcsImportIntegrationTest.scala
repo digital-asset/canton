@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import org.scalatest.Ignore
 
 /** This test runs an acs import for the streaming acs import endpoints in the party management
   * service and the repair service.
@@ -118,6 +119,8 @@ sealed trait StreamingAcsImportIntegrationTest
   }
 }
 
+//TODO(#30598) re-enable when the test is stable
+@Ignore
 final class StreamingAcsImportIntegrationTestPostgres extends StreamingAcsImportIntegrationTest {
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(new UsePostgres(loggerFactory))

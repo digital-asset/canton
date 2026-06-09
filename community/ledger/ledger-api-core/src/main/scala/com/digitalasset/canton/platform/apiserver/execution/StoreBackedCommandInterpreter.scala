@@ -192,7 +192,6 @@ final class StoreBackedCommandInterpreter(
           transaction = updateTx,
           dependsOnLedgerTime = meta.dependsOnTime,
           interpretationTimeNanos = interpretationTimeNanos,
-          globalKeyMapping = meta.globalKeyMapping,
           processedDisclosedContracts = usedDisclosedContracts.map(_.fatContractInstance),
         )
       }

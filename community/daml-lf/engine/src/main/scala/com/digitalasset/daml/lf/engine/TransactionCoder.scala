@@ -7,8 +7,8 @@ package engine
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.{Name, Party}
 import com.digitalasset.daml.lf.data.{BackStack, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.transaction.TransactionOuterClass.Node.NodeTypeCase
 import com.digitalasset.daml.lf.transaction.{
-  ensuresNoUnknownFieldsThenDecode,
   ContractInstanceCoder,
   CreationTime,
   ExternalCallResult,
@@ -17,19 +17,19 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   Node,
   NodeId,
-  sequence,
   SerializationVersion,
-  TransactionOuterClass => proto,
   VersionedTransaction,
+  ensuresNoUnknownFieldsThenDecode,
+  sequence,
+  TransactionOuterClass as proto,
 }
-import com.digitalasset.daml.lf.transaction.TransactionOuterClass.Node.NodeTypeCase
 import com.digitalasset.daml.lf.value.{DecodeError, EncodeError, Value}
 import com.digitalasset.daml.lf.{crypto, data, value}
 import com.google.protobuf.{ByteString, ProtocolStringList}
 
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.collection.immutable.{HashMap, TreeSet}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object TransactionCoder extends TransactionCoder(allowNullCharacters = false)
 
@@ -41,23 +41,30 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     allowNullCharacters = allowNullCharacters
   )
 
-  /** Reads a [[com.digitalasset.daml.lf.transaction.VersionedTransaction]] from protobuf and checks if
-    * [[com.digitalasset.daml.lf.transaction.SerializationVersion]] passed in the protobuf is currently supported.
+  /** Reads a [[com.digitalasset.daml.lf.transaction.VersionedTransaction]] from protobuf and checks
+    * if [[com.digitalasset.daml.lf.transaction.SerializationVersion]] passed in the protobuf is
+    * currently supported.
     *
-    * Supported serialization versions configured in [[com.digitalasset.daml.lf.transaction.SerializationVersion]].
+    * Supported serialization versions configured in
+    * [[com.digitalasset.daml.lf.transaction.SerializationVersion]].
     *
-    * @param protoTx protobuf encoded transaction
-    * @return decoded transaction
+    * @param protoTx
+    *   protobuf encoded transaction
+    * @return
+    *   decoded transaction
     */
   private[lf] def decodeTransaction(
       protoTx: proto.Transaction
   ): Either[DecodeError, VersionedTransaction] =
     ensuresNoUnknownFieldsThenDecode(protoTx)(internal.decodeTransaction)
 
-  /** Encode a [[com.digitalasset.daml.lf.transaction.Transaction]] to protobuf using [[com.digitalasset.daml.lf.transaction.SerializationVersion]] provided by the libary.
+  /** Encode a [[com.digitalasset.daml.lf.transaction.Transaction]] to protobuf using
+    * [[com.digitalasset.daml.lf.transaction.SerializationVersion]] provided by the libary.
     *
-    * @param tx the transaction to be encoded
-    * @return protobuf encoded transaction
+    * @param tx
+    *   the transaction to be encoded
+    * @return
+    *   protobuf encoded transaction
     */
   private[engine] def encodeTransaction(
       tx: VersionedTransaction
@@ -137,10 +144,14 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     /** encodes a [[Node]] to protocol buffer
       *
-      * @param enclosingVersion the version of the transaction
-      * @param nodeId           node id of the node to be encoded
-      * @param node             the node to be encoded
-      * @return protocol buffer format node
+      * @param enclosingVersion
+      *   the version of the transaction
+      * @param nodeId
+      *   node id of the node to be encoded
+      * @param node
+      *   the node to be encoded
+      * @return
+      *   protocol buffer format node
       */
     private[engine] def encodeNode(
         enclosingVersion: SerializationVersion,
@@ -338,43 +349,27 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         templateId: Ref.TypeConId,
         packageName: Ref.PackageName,
         msg: proto.KeyWithMaintainers,
-    ): Either[DecodeError, GlobalKeyWithMaintainers] = {
+    ): Either[DecodeError, GlobalKeyWithMaintainers] =
       for {
         maintainers <- toPartySet(msg.getMaintainersList)
         // Contracts written with SerializationVersion.V1 should never contain a key, because canton >=3.5 uses
-        // V2 for contracts with keys, and canton <3.5 doesn't support keys. However, the decoding of keys was
-        // present without a serialization version check in canton <3.5, and we preserve that behavior in order for
-        // all canton versions to fail consistently with an upgrade error when receiving a V1 fat contract instance
-        // with a key, rather than failing with a deserialization error in canton >=3.5 and an upgrade error in
-        // canton <3.5.
+        // V2 for contracts with keys, and canton <3.5 doesn't support keys.
+        // Therefore, we fail deserialization, if a key is found with version < SerializationVersin.V2.
+        _ <- Either.cond(
+          version >= SerializationVersion.V2,
+          (),
+          DecodeError(s"unexpected contract key encountered at transaction version $version"),
+        )
         keyValue <- ValueCoder.decodeValue(version, msg.getKey)
-        hash <-
-          if (version >= SerializationVersion.V2)
-            crypto.Hash
-              .fromBytes(data.Bytes.fromByteString(msg.getHash))
-              .left
-              .map(DecodeError(_))
-          else
-            Either
-              .cond(
-                msg.getHash.isEmpty,
-                (),
-                DecodeError(s"unexpected hash field in KeyWithMaintainers for version $version"),
-              )
-              .flatMap(_ =>
-                // In canton <3.5, this legacy hash function was used when constructing a GlobalKey, so we preserve
-                // that behavior fot the reasons state above.
-                crypto.Hash
-                  .hashContractKey(templateId, packageName, keyValue)
-                  .left
-                  .map(hashErr => DecodeError(hashErr.msg))
-              )
+        hash <- crypto.Hash
+          .fromBytes(data.Bytes.fromByteString(msg.getHash))
+          .left
+          .map(DecodeError(_))
         gkey <- GlobalKey
           .build(templateId, packageName, keyValue, hash)
           .left
           .map(hashErr => DecodeError(hashErr.msg))
       } yield GlobalKeyWithMaintainers(gkey, maintainers)
-    }
 
     // package private for test, do not use outside TransactionCoder
     private[this] def decodeValue(
@@ -394,8 +389,10 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     /** read a [[Node]] from protobuf
       *
-      * @param protoNode protobuf encoded node
-      * @return decoded GenNode
+      * @param protoNode
+      *   protobuf encoded node
+      * @return
+      *   decoded GenNode
       */
     private[this] def decodeVersionedNode(
         serializationVersion: SerializationVersion,
@@ -462,7 +459,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         txVersion: SerializationVersion,
         nodeVersionStr: String,
         msg: proto.Node.Fetch,
-    ): Either[DecodeError, Node.Fetch] = {
+    ): Either[DecodeError, Node.Fetch] =
       for {
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
         cid <- ValueCoder.decodeCoid(msg.getContractId)
@@ -511,7 +508,6 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         version = nodeVersion,
         interfaceId = interfaceId,
       )
-    }
 
     private[this] def decodeExternalCallResult(
         resultProto: proto.ExternalCallResult
@@ -528,7 +524,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         txVersion: SerializationVersion,
         nodeVersionStr: String,
         msg: proto.Node.Exercise,
-    ): Either[DecodeError, Node.Exercise] = {
+    ): Either[DecodeError, Node.Exercise] =
       for {
         fetch <- decodeFetch(txVersion, nodeVersionStr, msg.getFetch)
         nodeVersion = fetch.version
@@ -585,7 +581,6 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         externalCallResults = externalCallResults,
         version = fetch.version,
       )
-    }
 
     private[this] def decodeQueryByKey(
         txVersion: SerializationVersion,
@@ -625,14 +620,13 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def decodeChildren(
         strList: ProtocolStringList
-    ): Either[DecodeError, ImmArray[NodeId]] = {
+    ): Either[DecodeError, ImmArray[NodeId]] =
       strList.asScala
         .foldLeft[Either[DecodeError, BackStack[NodeId]]](Right(BackStack.empty)) {
           case (Left(e), _) => Left(e)
           case (Right(ids), s) => decodeNodeId(s).map(ids :+ _)
         }
         .map(_.toImmArray)
-    }
 
     private[TransactionCoder] def encodeTransaction(
         transaction: VersionedTransaction

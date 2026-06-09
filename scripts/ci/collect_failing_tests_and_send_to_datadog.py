@@ -7,6 +7,7 @@ import sys
 import subprocess
 import datetime
 import time
+from itertools import groupby
 from pathlib import Path
 import json
 import urllib.request
@@ -465,6 +466,7 @@ def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
         ["api", f"repos/DACH-NY/canton/commits/{newer_hash}", "--jq", ".parents[].sha"]
     )
     if result.returncode != 0:
+        print(f"are_consecutive_commits: gh api failed for {newer_hash[:8]}: {result.stderr.strip()}")
         return False
     return older_hash in result.stdout.splitlines()
 
@@ -480,12 +482,14 @@ def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, st
     consecutive_streak = False
 
     if commit_hash != 'unknown':
-        existing_commits = extract_commit_hashes_from_body(body)
-        recent = existing_commits[-(threshold - 1):]
-        if len(recent) >= threshold - 1:
-            all_commits = recent + [commit_hash]
-            if all(are_consecutive_commits(a, b) for a, b in zip(all_commits, all_commits[1:])):
-                consecutive_streak = True
+        # Collapse consecutive same-commit entries (multi-shard / retries) so they
+        # don't shadow the check: are_consecutive_commits(X, X) is always False.
+        distinct = [c for c, _ in groupby(extract_commit_hashes_from_body(body) + [commit_hash])]
+        recent = distinct[-threshold:]
+        if len(recent) >= threshold and all(
+            are_consecutive_commits(a, b) for a, b in zip(recent, recent[1:])
+        ):
+            consecutive_streak = True
 
     new_body = f"{body}\n{create_issue_table_row()}"
     gh_issue_edit_cmd(idx, title, new_body)
@@ -508,6 +512,7 @@ def self_test():
     test_update_issue_new_format()
     test_update_issue_returns_consecutive_streak_info('test_job', CONSECUTIVE_FAILURES_THRESHOLD)
     test_update_issue_returns_consecutive_streak_info('unstable_test', CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE)
+    test_update_issue_dedupes_shard_duplicates()
     test_report_issue_skips_slack_if_assignee()
     print("All self-checks passed")
 
@@ -765,6 +770,39 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
          patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None for non-consecutive commits (GHA)"
+
+
+def test_update_issue_dedupes_shard_duplicates():
+    # Repeated same-commit rows (multi-shard failures or manual retries) must not
+    # shadow the streak check. are_consecutive_commits(X, X) is always False, so
+    # before the dedup fix the streak silently never fired for any multi-shard job.
+    threshold = CONSECUTIVE_FAILURES_THRESHOLD
+    commits = [format(i, '040x') for i in range(threshold)]
+    current = commits[-1]
+    # Each prior commit has 5 shard failure entries already in the body.
+    rows = "\n".join(
+        f"| 2026-04-{20 + i} | test | {i % 5} | [{i}](url) | [{c[:8]}](https://github.com/DACH-NY/canton/commit/{c}) |"
+        for i, c in enumerate(c for c in commits[:-1] for _ in range(5))
+    )
+    body = (
+        "This issue was created automatically.\n\n"
+        "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|\n" + rows
+    )
+    consecutive_pairs = set(zip(commits, commits[1:]))
+    env = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs):
+        result = update_issue("42", "Flaky test", body)
+        assert result is not None, "Expected streak to fire after deduping shard-duplicate rows"
+        assert result[2] == current
 
 
 def test_report_issue_skips_slack_if_assignee():

@@ -9,7 +9,6 @@ import com.digitalasset.canton.admin.sequencer.v30.SequencerStatusServiceGrpc
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.AdminTokenConfig
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto, SynchronizerCryptoClient}
@@ -31,6 +30,7 @@ import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHan
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
 import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParameters,
   DynamicSynchronizerParametersLookup,
   StaticSynchronizerParameters,
   SynchronizerParametersLookup,
@@ -267,13 +267,18 @@ class SequencerNodeBootstrap(
       */
     private def initSequencerNodeServer(): Unit =
       if (nonInitializedSequencerNodeServer.get().isEmpty) {
+        // Check if the node operator explicitly set an override.
+        // If no override exists, fall back to the default.
+        val safeMaxRequestSize = config.publicApi.overrideMaxRequestSize
+          .map(MaxRequestSize.apply)
+          .getOrElse(DynamicSynchronizerParameters.defaultMaxRequestSize)
+
         // the sequential initialisation queue ensures that this is thread safe
         nonInitializedSequencerNodeServer
           .set(
             Some(
               makeDynamicGrpcServer(
-                // We use max value for the request size here as this is the default for a non initialized sequencer
-                MaxRequestSize(NonNegativeInt.maxValue),
+                safeMaxRequestSize,
                 healthReporter,
               )
             )
@@ -1031,16 +1036,28 @@ class SequencerNodeBootstrap(
   ): EitherT[FutureUnlessShutdown, String, DynamicGrpcServer] = {
     runtime.registerAdminGrpcServices(service => adminServerRegistry.addServiceU(service))
     for {
-      maxRequestSize <- EitherT
-        .right(synchronizerParamsLookup.getApproximate())
-        .map(paramsO =>
-          paramsO.map(_.maxRequestSize).getOrElse(MaxRequestSize(NonNegativeInt.maxValue))
-        )
+      synchronizerParameters <- EitherT.right[String](
+        // capture the limit from the topology transactions if available
+        // otherwise, use the configured default
+        synchronizerParamsLookup.getApproximateOrDefaultValue()
+      )
+
+      maxRequestSize = synchronizerParameters.maxRequestSize
+
+      // Note: limits obtained from the topology transactions are active
+      // on Netty only after a node restart, since it is not possible
+      // to change the configured maxRequestSize on a running instance
+      // of Netty. However, the application-layer size checks
+      // (in GrpcSequencerService) are immediately active after an update.
+
+      // Thus, in combination, decreased limits are immediately
+      // enforced, but increased limits require a node restart to update.
       sequencerNodeServer = server
         .getOrElse(
           makeDynamicGrpcServer(maxRequestSize, healthReporter)
         )
         .initialize(runtime)
+
       // wait for the server to be initialized before reporting a serving health state
       _ = sequencerHealth.set(runtime.sequencer)
     } yield sequencerNodeServer

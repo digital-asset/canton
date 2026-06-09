@@ -353,6 +353,9 @@ class SymbolicPureCrypto extends CryptoPureApi {
       .map(key => PasswordBasedEncryptionKey(key, salt))
   }
 
+  override def toJwk(publicKey: SigningPublicKey): Either[JwksError, Jwk] =
+    ???
+
   val cryptoMetrics: CryptoMetrics = CommonMockMetrics.cryptoMetrics
 
   override def signingMetrics: SigningMetrics = cryptoMetrics.signingMetrics

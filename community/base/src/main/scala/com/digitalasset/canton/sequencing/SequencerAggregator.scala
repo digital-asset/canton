@@ -26,6 +26,7 @@ import com.digitalasset.canton.sequencing.SequencerAggregator.{
   MessageAggregationConfig,
   SequencerAggregatorError,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
@@ -44,21 +45,6 @@ import scala.concurrent.{ExecutionContext, blocking}
 
 trait SequencerAggregator extends FlagCloseable with NamedLogging with SubscriptionStartProvider {
 
-  /** Queue containing received and not yet handled events. Used for batched processing. */
-  def eventQueue: BlockingQueue[SequencedSerializedEvent]
-
-  /** Update the configuration of the SequencerAggregator.
-    *
-    * May trigger the processing of the current event if the new configuration has a lower threshold
-    * which is already reached.
-    */
-  def changeMessageAggregationConfig(newConfig: MessageAggregationConfig): Unit
-
-  @VisibleForTesting
-  def combine(
-      messages: NonEmpty[Seq[SequencedSerializedEvent]]
-  ): Either[SequencerAggregatorError, SequencedSerializedEvent]
-
   /** Provide a new event for aggregation. The returned `Future` will complete when the
     * SequencerAggregator has reached a decision regarding this event.
     *
@@ -70,6 +56,28 @@ trait SequencerAggregator extends FlagCloseable with NamedLogging with Subscript
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Either[SequencerAggregatorError, Unit]]
+
+  /** Update the configuration of the SequencerAggregator.
+    *
+    * May trigger the current event to be emitted to the application handler if the new
+    * configuration has a lower threshold which is already reached, or the current event to be
+    * aborted with an error if the new configuration makes the threshold unreachable.
+    */
+  def changeMessageAggregationConfig(newConfig: MessageAggregationConfig)(implicit
+      traceContext: TraceContext
+  ): Unit
+
+  /** Clear the event queue. */
+  def clearEventQueue(): Unit
+
+  /** Queue containing received and not yet handled events. Used for batched processing. */
+  @VisibleForTesting
+  def eventQueue: BlockingQueue[SequencedSerializedEvent]
+
+  @VisibleForTesting
+  def combine(
+      messages: NonEmpty[Seq[SequencedSerializedEvent]]
+  ): Either[SequencerAggregatorError, SequencedSerializedEvent]
 }
 
 class SequencerAggregatorImpl(
@@ -120,7 +128,10 @@ class SequencerAggregatorImpl(
   override def getLatestProcessedEventO: Option[SequencedSerializedEvent] =
     latestAggregatedEventRef.get
 
+  @VisibleForTesting
   override val eventQueue: BlockingQueue[SequencedSerializedEvent] = receivedEvents
+
+  override def clearEventQueue(): Unit = receivedEvents.clear()
 
   private def hash(message: SequencedSerializedEvent) =
     SignedContent.hashContent(
@@ -129,7 +140,6 @@ class SequencerAggregatorImpl(
       HashPurpose.SequencedEventSignature,
     )
 
-  @VisibleForTesting
   override def combine(
       messages: NonEmpty[Seq[SequencedSerializedEvent]]
   ): Either[SequencerAggregatorError, SequencedSerializedEvent] = {
@@ -255,7 +265,9 @@ class SequencerAggregatorImpl(
     data.copy(eventBySequencer = data.eventBySequencer.updated(sequencerId, message))
   }
 
-  override def changeMessageAggregationConfig(newConfig: MessageAggregationConfig): Unit =
+  override def changeMessageAggregationConfig(
+      newConfig: MessageAggregationConfig
+  )(implicit traceContext: TraceContext): Unit =
     lock.exclusive {
       configRef.set(newConfig)
       sequenceData.headOption.foreach { case (nextMinimumTimestamp, nextData) =>
@@ -268,7 +280,28 @@ class SequencerAggregatorImpl(
 }
 
 object SequencerAggregator {
-  final case class MessageAggregationConfig(sequencerTrustThreshold: PositiveInt)
+
+  /** @param maxNbOfContributions
+    *   Maximum number of contributions that the aggregator can receive for a given event. Used to
+    *   detect if the trust threshold can no longer be reached.
+    */
+  final case class MessageAggregationConfig(
+      sequencerTrustThreshold: PositiveInt,
+      maxNbOfContributions: PositiveInt,
+  ) {
+    require(maxNbOfContributions >= sequencerTrustThreshold)
+  }
+
+  object MessageAggregationConfig {
+    def fromSequencerTransports(
+        sequencerTransports: SequencerTransports
+    ): MessageAggregationConfig =
+      MessageAggregationConfig(
+        sequencerTrustThreshold = sequencerTransports.sequencerTrustThreshold,
+        maxNbOfContributions =
+          sequencerTransports.sequencerTrustThreshold + sequencerTransports.sequencerLivenessMargin,
+      )
+  }
 
   sealed trait SequencerAggregatorError extends Product with Serializable with PrettyPrinting
 
@@ -278,6 +311,50 @@ object SequencerAggregator {
       override protected def pretty: Pretty[NotTheSameContentHash] =
         prettyOfClass(param("hashes", _.hashes))
     }
+
+    /** Indicates an event rejected by the [[SequencerAggregator]], either because it was in the
+      * minority when a threshold was reached for a given timestamp, or because it was provided late
+      * (after successive events have already been aggregated) but does not match the accepted past
+      * events.
+      *
+      * @param sequencerId
+      *   Identifies the sequencer that provided the bogus event
+      * @param event
+      *   The rejected event
+      */
+    final case class BogusEvent(sequencerId: SequencerId, event: SequencedSerializedEvent)
+        extends SequencerAggregatorError {
+      override protected def pretty: Pretty[BogusEvent] =
+        prettyOfClass(param("sequencerId", _.sequencerId), param("event", _.event))
+    }
+
+    /** Indicates that the SequencerAggregator has determined that it cannot reach a threshold on
+      * the current event given the disparate contributions received and the maximum number of
+      * contributions expected.
+      *
+      * @param decided
+      *   The number of contributions already received
+      * @param undecided
+      *   The number of contributions not yet received
+      * @param largestGroup
+      *   The largest group of agreeing contributions
+      * @param threshold
+      *   The trust threshold configured at the moment the error was raised
+      */
+    final case class ThresholdUnreachable(
+        decided: Int,
+        undecided: Int,
+        largestGroup: Int,
+        threshold: Int,
+    ) extends SequencerAggregatorError {
+      override protected def pretty: Pretty[ThresholdUnreachable] =
+        prettyOfClass(
+          param("decided", _.decided),
+          param("undecided", _.undecided),
+          param("largestGroup", _.largestGroup),
+          param("threshold", _.threshold),
+        )
+    }
   }
 
   def create(
@@ -285,24 +362,28 @@ object SequencerAggregator {
       postAggregationHandler: PostAggregationHandler,
       cryptoPureApi: CryptoPureApi,
       eventInboxSize: PositiveInt,
+      pastEventsCacheSize: PositiveInt,
       loggerFactory: NamedLoggerFactory,
       initialConfig: MessageAggregationConfig,
       updateSendTracker: Seq[SequencedEventWithTraceContext[?]] => Unit,
       timeouts: ProcessingTimeout,
       futureSupervisor: FutureSupervisor,
-  ): SequencerAggregator =
-    if (useNewAggregator)
+  )(implicit traceContext: TraceContext): SequencerAggregator =
+    if (useNewAggregator) {
+      loggerFactory.getTracedLogger(this.getClass).debug("Using new sequencer aggregator")
       new SequencerAggregatorXImpl(
         postAggregationHandler,
         cryptoPureApi,
         eventInboxSize,
+        pastEventsCacheSize,
         loggerFactory,
         initialConfig,
         updateSendTracker,
         timeouts,
         futureSupervisor,
       )
-    else
+    } else {
+      loggerFactory.getTracedLogger(this.getClass).debug("Using old sequencer aggregator")
       new SequencerAggregatorImpl(
         postAggregationHandler,
         cryptoPureApi,
@@ -313,6 +394,7 @@ object SequencerAggregator {
         timeouts,
         futureSupervisor,
       )
+    }
 
   def aggregateHealthResult(
       healthResult: Map[SequencerId, ComponentHealthState],

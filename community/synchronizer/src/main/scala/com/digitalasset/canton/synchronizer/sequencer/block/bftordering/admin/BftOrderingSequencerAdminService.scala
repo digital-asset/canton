@@ -132,6 +132,8 @@ final class BftOrderingSequencerAdminService(
         response.nodes.toSeq.sorted,
         GetOrderingTopologyResponse.DynamicSequencingParameters
           .DynamicSequencingParametersPayload31(response.sequencingParameters.toProto31),
+        response.leaders,
+        response.blacklisted,
       )
     }
   }

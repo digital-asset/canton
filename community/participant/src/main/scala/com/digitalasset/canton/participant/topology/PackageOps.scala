@@ -42,7 +42,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ContinueAfterFailure, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{FailureMode, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -132,7 +132,7 @@ class PackageOpsImpl(
     timeouts,
     loggerFactory,
     logTaskTiming = false,
-    failureMode = ContinueAfterFailure,
+    failureMode = FailureMode.ContinueAfterFailure,
   )
 
   override def checkPackageUnused(packageId: PackageId)(implicit

@@ -54,7 +54,14 @@ message DynamicSynchronizerParameters {
   google.protobuf.Duration reconciliation_interval = 6;
   google.protobuf.Duration mediator_deduplication_timeout = 7;
 
-  // when updated, the new value is effective only after a restart
+  // Note: limits obtained from the topology transactions are active
+  // on Netty only after a node restart, since it is not possible
+  // to change the configured maxRequestSize on a running instance
+  // of Netty. However, the application-layer size checks
+  // (in GrpcSequencerService) are immediately active after an update.
+
+  // Thus, in combination, decreased limits are immediately
+  // enforced, but increased limits require a node restart to update.
   uint32 max_request_size = 8;
 
   // topology related validation parameters

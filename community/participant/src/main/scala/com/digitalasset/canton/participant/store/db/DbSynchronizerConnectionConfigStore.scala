@@ -225,7 +225,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
               if existingConfigs.exists(c =>
                 c.config == config && c.configuredPsid.isDefined && c.predecessor == synchronizerPredecessor && c.status == status
               ) =>
-            logger.debug(
+            logger.info(
               s"Not adding connection for ($synchronizerAlias, $configuredPsid) to the store because ($synchronizerAlias, ${existingConfigs
                   .map(_.configuredPsid)}) already exists"
             )
@@ -391,8 +391,8 @@ class DbSynchronizerConnectionConfigStore private[store] (
     val alias = config.synchronizerAlias
     val id = ConfigIdentifier.WithAlias(config.synchronizerAlias, configuredPsid)
 
-    logger.debug(
-      s"Inserting connection for ($alias, $configuredPsid) into the store"
+    logger.info(
+      s"Inserting connection for ($alias, $configuredPsid) into the DB"
     )
 
     lazy val insertAction: DbAction.WriteOnly[Int] =
@@ -479,7 +479,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   ): EitherT[FutureUnlessShutdown, Error, Unit] = {
     val alias = config.synchronizerAlias
 
-    logger.debug(s"Inserting connection for ($alias, $configuredPsid) into the store")
+    logger.info(s"Inserting connection for ($alias, $configuredPsid) into the store: $config")
 
     val queries = putInternalQuery(config, status, configuredPsid, synchronizerPredecessor)
 
@@ -511,7 +511,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   ): EitherT[FutureUnlessShutdown, MissingConfigForSynchronizer, Unit] = {
     val synchronizerAlias = config.synchronizerAlias
 
-    logger.debug(s"Replacing configuration for ($synchronizerAlias, $configuredPsid)")
+    logger.info(s"Replacing configuration for ($synchronizerAlias, $configuredPsid) with $config")
 
     val updateAction = configuredPsid.toOption match {
       case Some(psid) =>
@@ -556,8 +556,8 @@ class DbSynchronizerConnectionConfigStore private[store] (
 
     val data = Map(
       "insert data" -> insert.toString,
-      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
       "overridePredecessor" -> overridePredecessor.toString,
+      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
     )
     logger.info(s"Upserting connection config for synchronizer $psid, with data $data")
 
@@ -570,7 +570,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
             .modify(value => overrideSequencerConnections.getOrElse(value))
             .focus(_.predecessor)
             .modify(value => overridePredecessor.fold(value)(Some(_)))
-            .focus(_.config.synchronizerId)
+            .focus(_.config.psid)
             .replace(Some(psid))
 
           if (updatedStoredConfig != storedConfig)
@@ -726,7 +726,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Unit] = {
 
-    logger.debug(s"Setting status of ($alias, $configuredPsid) to $status")
+    logger.info(s"Setting status of ($alias, $configuredPsid) to $status")
 
     val updateAction = for {
       _ <- checkStatusConsistent(configuredPsid, alias, status)
@@ -763,7 +763,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Unit] = {
-    logger.debug(s"Set physical synchronizer id for $alias to $psid")
+    logger.info(s"Set physical synchronizer id for $alias to $psid")
 
     val queries: EitherT[dbio.DBIO, Error, Unit] = for {
       storedConfigToUpdateO <- getRowToSetPsid(alias, psid)
@@ -779,7 +779,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
         case Some(_) => setPsidInternal(alias, psid)
 
         case None =>
-          logger.debug(
+          logger.info(
             s"Physical synchronizer id for $alias is already set to $psid"
           )
           EitherT.pure[DBIO, Error](())

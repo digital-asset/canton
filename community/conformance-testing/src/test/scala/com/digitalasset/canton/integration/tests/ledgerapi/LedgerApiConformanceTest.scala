@@ -24,7 +24,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.admin.ResourceLimits
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event
@@ -149,22 +148,12 @@ class LedgerApiConformanceMultiSynchronizerTest
   )
 
   "Ledger API test tool on a multi-synchronizer setup" can {
-    "pass multi-synchronizer related conformance tests" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        ledgerApiTestToolPlugin.runSuites(
-          suites = LedgerApiConformanceBase.multiSynchronizerTests.mkString(","),
-          exclude = Nil,
-          concurrency = 2,
-        )
-    }
-    "pass fewer multi-synchronizer related conformance tests for LF 2.2 " onlyRunWithOrLessThan ProtocolVersion.v34 in {
-      implicit env =>
-        ledgerApiTestToolPlugin.runSuites(
-          suites = LedgerApiConformanceBase.multiSynchronizerTests.mkString(","),
-          exclude =
-            excludedTestsFor34.filter(LedgerApiConformanceBase.multiSynchronizerTests.contains),
-          concurrency = 2,
-        )
+    "pass multi-synchronizer related conformance tests" in { implicit env =>
+      ledgerApiTestToolPlugin.runSuites(
+        suites = LedgerApiConformanceBase.multiSynchronizerTests.mkString(","),
+        exclude = Nil,
+        concurrency = 2,
+      )
     }
   }
 }
@@ -223,67 +212,6 @@ object LedgerApiConformanceBase {
     "RaceConditionIT:WWDoubleNonTransientCreate",
     "RaceConditionIT:RWTransientCreateVsNonTransientCreate",
   )
-  val excludedTestsFor34 = Seq(
-    "ActiveContractsServiceIT:ACSfilterContracts",
-    "ActiveContractsServiceIT:ACSmultiParty",
-    "CommandServiceIT:CSCreateAndExercise",
-    "CommandServiceIT:CSSubmitAndWaitForTransactionFilterTemplate",
-    "CommandServiceIT:CSsubmitAndWaitForTransactionBasic",
-    "CommandServiceIT:CSsubmitAndWaitForTransactionLedgerEffectsBasic",
-    "InteractiveSubmissionServiceIT:ISSExecuteAndWaitForTransactionBasic",
-    "InteractiveSubmissionServiceIT:ISSExecuteAndWaitForTransactionNoFilter",
-    "InteractiveSubmissionServiceIT:ISSExecuteSubmissionAndWaitForTransactionFilterByTemplateId",
-    "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionKnown",
-    "InteractiveSubmissionServiceIT:ISSPreferredPackagesKnown",
-    "InterfaceIT:ExerciseInterfaceSuccess",
-    "InterfaceSubscriptionsIT:ISAcsBasic",
-    "InterfaceSubscriptionsIT:ISMultipleViews",
-    "InterfaceSubscriptionsIT:ISMultipleWitness",
-    "InterfaceSubscriptionsIT:ISTransactionLedgerEffectsBasic",
-    "InterfaceSubscriptionsIT:ISTransactionsBasic",
-    "InterfaceSubscriptionsIT:ISTransactionsDuplicateInterfaceFilters",
-    "InterfaceSubscriptionsIT:ISTransactionsDuplicateTemplateFilters",
-    "InterfaceSubscriptionsIT:ISTransactionsNoIncludedView",
-    "InterfaceSubscriptionsIT:ISTransactionsSubscribeBeforeTemplateCreated",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPAcsBasic",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPMultipleViews",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPMultipleWitness",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPTransactionLedgerEffectsBasic",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPTransactionsBasic",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPTransactionsDuplicateInterfaceFilters",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPTransactionsDuplicateTemplateFilters",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPTransactionsNoIncludedView",
-    "InterfaceSubscriptionsWithEventBlobsIT:ISWPTransactionsSubscribeBeforeTemplateCreated",
-    "PrefetchContractKeysIT:CSprefetchContractKeysPrepareEndpointBasic",
-    "SemanticTests:SemanticPaintCounterOffer",
-    "SemanticTests:SemanticPaintOffer",
-    "SemanticTests:SemanticPrivacyProjections",
-    "TransactionServiceExerciseIT:TXContractIdFromExerciseWhenFilter",
-    "TransactionServiceFiltersIT:TSFExercisedTemplateFilters",
-    "TransactionServiceFiltersIT:TSFInterfaceTemplateFiltersWithEventBlobs",
-    "TransactionServiceFiltersIT:TSFInterfaceTemplatePlainFilters",
-    "TransactionServiceFiltersIT:TSFInterfaceWithEventBlobsTemplateFiltersWithEventBlobs",
-    "TransactionServiceFiltersIT:TSFInterfaceWithEventBlobsTemplatePlainFilters",
-    "UpdateServiceStreamsIT:TXFilterByInterface",
-    "UpdateServiceStreamsIT:TXFilterByTemplate",
-    "UpgradingIT:UChoicePackageId",
-    "UpgradingIT:UDynamicSubscriptions",
-    "UpgradingIT:URepresentativePackageIdInEvents",
-    "VettingIT:PVCheckUnvettedPackagesExceptWithForceFlag",
-    "VettingIT:PVCheckUpgradeInvariantsExceptWithForceFlag",
-    "VettingIT:PVDryRun",
-    "VettingIT:PVListVettedPackagesBasic",
-    "VettingIT:PVListVettedPackagesPagination",
-    "VettingIT:PVListVettedPackagesMultiSynchronizer",
-    "VettingIT:PVUnvetPackageWithActiveContracts",
-    "VettingIT:PVUpdateUnvetV2Succeeds",
-    "VettingIT:PVUpdateVetByIdAndNameAndVersion",
-    "VettingIT:PVUpdateVetByNameAndVersion",
-    "VettingIT:PVUpdateVetDepThenV2Succeeds",
-    "VettingIT:PVUpdateVetTwoPackagesAtATimeSucceeds",
-    "VettingIT:PVUploadDarFileBasic",
-    "VettingIT:PVWritingAndOverwritingBounds",
-  )
 }
 
 abstract class LedgerApiShardedConformanceBase(shard: Int)
@@ -303,24 +231,11 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "Ledger Api Test Tool" can {
-    s"pass semantic tests block $shard" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        // suppress warnings for UserManagementServiceIT
-        loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-          runShardedTests(shard, numShards)(env)
-        }
-    }
-    s"pass smaller semantic tests block for LF 2.2 $shard" onlyRunWithOrLessThan ProtocolVersion.v34 in {
-      implicit env =>
-        // suppress warnings for UserManagementServiceIT
-        loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-          ledgerApiTestToolPlugin.runShardedSuites(
-            shard = shard,
-            numShards = numShards,
-            exclude = excludedTests ++ excludedTestsFor34,
-            useJson = false,
-          )
-        }
+    s"pass semantic tests block $shard" in { implicit env =>
+      // suppress warnings for UserManagementServiceIT
+      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
+        runShardedTests(shard, numShards)(env)
+      }
     }
   }
 }

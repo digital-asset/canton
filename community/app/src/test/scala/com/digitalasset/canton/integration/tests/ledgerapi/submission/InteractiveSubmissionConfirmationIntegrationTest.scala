@@ -444,7 +444,6 @@ final class InteractiveSubmissionConfirmationIntegrationTest
               submitterInfo,
               deserialized.transactionMeta,
               _estimatedInterpretationCost = 0L,
-              deserialized.globalKeyMapping,
               ImmArray.empty,
             )
             .futureValue

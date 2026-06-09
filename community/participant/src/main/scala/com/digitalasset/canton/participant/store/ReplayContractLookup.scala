@@ -28,14 +28,15 @@ class ReplayContractLookup(
 
     val orderedContracts = for {
       cid <- orderedCids
-      // TODO(#31527): SPM fail if contract not present
       contract <- contracts.get(cid)
     } yield contract.inst
 
     val observed = orderedCids.toSet
 
-    // TODO(#31527): SPM either remove the need for these or improve performance to O(N log N).
-    // Other contracts are not directly used by key based operations but currently need to be added to ensure consistency
+    // TODO(#32184): Once completed otherContracts (and the performance hit building) can be removed as
+    // it will not long be mandated that all contracts using the key must be included (only ones
+    // required for resolution, included in keys above, are required).
+    // If this is not done then the performance of this code should be made O(N log N).
     val otherContracts = contracts.values
       .filter(_.inst.contractKeyWithMaintainers.exists(_.globalKey == key))
       .collect {

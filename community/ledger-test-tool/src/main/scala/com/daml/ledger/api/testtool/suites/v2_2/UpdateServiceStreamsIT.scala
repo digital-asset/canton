@@ -25,7 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
 class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
-  import CompanionImplicits.*
+  import testDars.companionImplicits.*
 
   private[this] val testPackageResourcePath = testDars.OngoingStreamPackageUploadTestDar.path
 
@@ -388,7 +388,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       assertEquals(
         "FilterByTemplate",
         contract.getTemplateId,
-        Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+        dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
       )
       assertEquals(
         "FilterByTemplate transactions for party-wildcard should match the specific party",
@@ -423,10 +423,11 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       assertEquals(
         "FilterByInterface",
         created.getTemplateId,
-        Iou.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+        iouCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
       )
 
-      val view = IIou.INTERFACE.fromCreatedEvent(fromProto(toJavaProto(created)))
+      val interfaceCompanion = IIou.INTERFACE.withPackageId(testDars.ModelTestDar.packageId)
+      val view = interfaceCompanion.fromCreatedEvent(fromProto(toJavaProto(created)))
       assertEquals(view.data.icurrency, "USD")
     }
   })

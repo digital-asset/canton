@@ -711,9 +711,12 @@ class DeclarativeParticipantApi(
       )
 
     def fetchConnections(): Either[String, Seq[(SynchronizerAlias, DeclarativeConnectionConfig)]] =
-      queryAdminApi(ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers)
-        .map(_.map { case (synchronizerConnectionConfig, _, _) => synchronizerConnectionConfig }
-          .map(toDeclarative))
+      queryAdminApi(
+        ParticipantAdminCommands.SynchronizerConnectivity.ListActiveRegisteredSynchronizers
+      )
+        .map(_.map { case (synchronizerConnectionConfig, _, _) =>
+          toDeclarative(synchronizerConnectionConfig.toInternal)
+        })
 
     def getConnection(
         alias: SynchronizerAlias
@@ -726,7 +729,7 @@ class DeclarativeParticipantApi(
       // cannot really remove connections for now, just disconnect and disable
       for {
         currentO <- queryAdminApi(
-          ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers
+          ParticipantAdminCommands.SynchronizerConnectivity.ListActiveRegisteredSynchronizers
         ).map(_.collectFirst {
           case (config, psidO, _) if config.synchronizerAlias == synchronizerAlias =>
             (config, psidO)
@@ -741,7 +744,7 @@ class DeclarativeParticipantApi(
         (currentConfig, psidO) = current
         _ <- queryAdminApi(
           ParticipantAdminCommands.SynchronizerConnectivity.ModifySynchronizerConnection(
-            config = currentConfig.copy(manualConnect = true),
+            config = currentConfig.copy(manualConnect = true).toInternal,
             synchronizerId = psidO.toOption,
             sequencerConnectionValidation = SequencerConnectionValidation.Disabled,
           )

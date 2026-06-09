@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.console.commands
 
+import better.files.File
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.jwt.{AuthServiceJWTCodec, JwksUrl, Jwt, JwtDecoder, StandardJWTPayload}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.ExportPartyAcsResponse
 import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyResponse
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
 import com.daml.ledger.api.v2.completion.Completion
@@ -91,6 +93,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.NamedLogging
@@ -99,9 +102,11 @@ import com.digitalasset.canton.networking.grpc.{
   GrpcError,
   RecordingStreamObserver,
 }
+import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
   ExternalParty,
@@ -115,8 +120,8 @@ import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.field_mask.FieldMask
-import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
+import io.grpc.{Context, StatusRuntimeException}
 
 import java.time.Instant
 import java.util.UUID
@@ -2297,6 +2302,133 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         )
       }
 
+      @Help.Summary(
+        "Export active contracts for a given party to replicate it"
+      )
+      @Help.Description(
+        """This command exports the current Active Contract Set (ACS) for a given party to
+          |facilitate its replication from this source participant to a target participant.
+          |
+          |It uses the party's most recent activation on the target participant to determine the
+          |precise historical state of the ACS to export from the source participant.
+          |
+          |"Activation" on the target participant means the new hosting arrangement has been
+          |authorized by both the party itself and the target participant via the
+          |party-to-participant topology transaction that specifies the party as onboarding on
+          |the target participant.
+          |
+          |This command will fail if the party has not yet been activated on the target participant.
+          |
+          |Upon successful completion, the command writes a GZIP-compressed ACS snapshot file. This
+          |file should then be imported into the target participant's ACS using the
+          |`add_party_with_acs` command.
+          |
+          |Parameters:
+          |- party: The party being replicated, it must already be active on the target participant.
+          |- synchronizerId: Restricts the export to the given synchronizer.
+          |- targetParticipantId: Unique identifier of the target participant where the party will
+          |  be replicated.
+          |- beginOffsetExclusive: Exclusive ledger offset used as starting point fo find the
+          |  party's activation on the target participant.
+          |- exportFilePath: The path denoting the file where the ACS snapshot will be stored.
+          |- waitForActivationTimeout: The maximum duration the service will wait to find the
+          |  topology transaction that activates the party on the target participant.
+          |- timeout: A timeout for this operation to complete.
+          """
+      )
+      def export_party_acs(
+          party: PartyId,
+          synchronizerId: SynchronizerId,
+          targetParticipantId: ParticipantId,
+          beginOffsetExclusive: Long,
+          exportFilePath: String = "canton-acs-export.gz",
+          waitForActivationTimeout: Option[config.NonNegativeFiniteDuration] = Some(
+            config.NonNegativeFiniteDuration.ofMinutes(2)
+          ),
+          timeout: config.NonNegativeDuration = timeouts.unbounded,
+      ): Unit =
+        consoleEnvironment.run {
+          val file = File(exportFilePath)
+          val responseObserver = new OutputFileStreamObserver[ExportPartyAcsResponse](file, _.chunk)
+
+          def call: ConsoleCommandResult[Context.CancellableContext] =
+            ledgerApiCommand(
+              LedgerApiCommands.PartyManagementAlphaService.ExportPartyAcs(
+                party,
+                synchronizerId,
+                targetParticipantId,
+                beginOffsetExclusive,
+                waitForActivationTimeout,
+                responseObserver,
+              )
+            )
+
+          processResult(
+            call,
+            responseObserver.result,
+            timeout,
+            request = "exporting party acs",
+            cleanupOnError = () => file.delete(),
+          )
+        }
+
+      @Help.Summary(
+        "Add an already hosted party to the participant using an ACS snapshot file",
+        FeatureFlag.Preview,
+      )
+      @Help.Description(
+        """Add a party that is already hosted on other participants to this participant on the
+          |specified synchronizer using the Active Contract Set (ACS) provided in the specified
+          |file.
+          |
+          |Performs some checks and imports the ACS synchronously and then completes party
+          |replication asynchronously. The returned `addPartyRequestId` parameter allows tracking
+          |progress or identifying errors and is stable across each retry with the same request
+          |parameters.
+          |
+          |This operation assumes full trust in the source participant to provide a complete and
+          |untampered state. Because the target participant cannot independently verify
+          |the historical provenance of the imported contracts,
+          |validation is performed on a best-effort basis.
+          |Use only when the source participant is a known, trusted authority.
+          """
+      )
+      def add_party_with_acs(
+          importFilePath: String = "canton-acs-export.gz",
+          party: PartyId,
+          synchronizerId: SynchronizerId,
+          sourceParticipant: ParticipantId,
+          serial: PositiveInt,
+          participantPermission: ParticipantPermission,
+      ): String = check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementAlphaService.AddPartyWithAcs(
+              new java.io.File(importFilePath),
+              party,
+              synchronizerId,
+              sourceParticipant,
+              serial,
+              participantPermission,
+            )
+          )
+        }
+      }
+
+      @Help.Summary("Obtain status on a pending `add_party_with_acs` call", FeatureFlag.Preview)
+      @Help.Description(
+        """Retrieve status information on a party previously added via the `add_party_with_acs`
+          |endpoint by specifying the previously returned `addPartyRequestId` parameter.
+          """
+      )
+      def get_add_party_status(addPartyRequestId: String): PartyReplicationStatus =
+        check(FeatureFlag.Preview) {
+          consoleEnvironment.run {
+            ledgerApiCommand(
+              LedgerApiCommands.PartyManagementAlphaService.GetAddPartyStatus(addPartyRequestId)
+            )
+          }
+        }
     }
 
     @Help.Summary("Manage packages")

@@ -110,6 +110,7 @@ trait FinalizedResponseStoreTest {
         )
       )
       .toVerdict(testedProtocolVersion),
+    firstResponseReceived = None,
   )(TraceContext.empty)
 
   private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {

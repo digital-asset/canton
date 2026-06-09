@@ -248,7 +248,6 @@ class ConnectedSynchronizer(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -258,7 +257,6 @@ class ConnectedSynchronizer(
       transaction,
       transactionMeta,
       submitterInfo,
-      keyResolver,
       disclosedContracts,
       costHints,
     )
@@ -1041,7 +1039,6 @@ class ConnectedSynchronizer(
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,
@@ -1059,7 +1056,6 @@ class ConnectedSynchronizer(
         .submit(
           submitterInfo,
           transactionMeta,
-          keyResolver,
           transaction,
           disclosedContracts,
           topologySnapshot,
@@ -1167,6 +1163,7 @@ class ConnectedSynchronizer(
           assignmentProcessor,
           badRootHashMessagesRequestProcessor,
           topologyProcessor,
+          topologyClient,
           topologyManager,
           ephemeral.timeTracker, // need to close time tracker before synchronizer handle, as it might otherwise send messages
           synchronizerHandle,

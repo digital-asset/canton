@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.{
   Participant,
   Participants,
@@ -29,9 +30,9 @@ object PrefetchContractKeysIT {
   }
 }
 
-class PrefetchContractKeysIT extends LedgerTestSuite {
-  import ContractKeysCompanionImplicits.*
+class PrefetchContractKeysIT(testDars: TestDars) extends LedgerTestSuite {
   import PrefetchContractKeysIT.*
+  import testDars.contractKeysCompanionImplicits.*
 
   test(
     "CSprefetchContractKeysBasic",
@@ -48,7 +49,7 @@ class PrefetchContractKeysIT extends LedgerTestSuite {
     } yield {
       assert(active.sizeIs == 1)
       val dummyTemplateId = active.flatMap(_.templateId.toList).headOption.value
-      assert(dummyTemplateId == WithKey.TEMPLATE_ID_WITH_PACKAGE_ID.toV1)
+      assert(dummyTemplateId == withKeyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1)
     }
   })
 

@@ -45,7 +45,7 @@ trait DbTest
   protected def cleanDb(storage: DbStorage)(implicit tc: TraceContext): FutureUnlessShutdown[?]
 
   @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
-  private var setup: DbStorageSetup = _
+  protected var setup: DbStorageSetup = _
 
   /** Stores the db storage implementation. Will throw if accessed before the test has started */
   protected lazy val storage: DbStorageIdempotency = {

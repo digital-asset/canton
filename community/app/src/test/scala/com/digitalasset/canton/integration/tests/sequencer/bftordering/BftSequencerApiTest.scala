@@ -76,7 +76,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         testedProtocolVersion,
         sequencerId,
         params,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         new ExecutorServiceMetrics(NoOpMetricsFactory),
         loggerFactory,
         None,

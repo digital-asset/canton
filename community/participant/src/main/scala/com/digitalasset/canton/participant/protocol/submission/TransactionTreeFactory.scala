@@ -46,9 +46,6 @@ trait TransactionTreeFactory {
   def cantonContractIdVersion: CantonContractIdVersion
 
   /** Converts a `transaction: LfTransaction` to the corresponding transaction tree, if possible.
-    *
-    * @param legacyKeyResolver
-    *   The key resolutions recorded while interpreting the transaction.
     * @see
     *   TransactionTreeConversionError for error cases
     */
@@ -61,8 +58,6 @@ trait TransactionTreeFactory {
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      // TODO(#31527): SPM always empty in 3.4, not used in 3.5 => to remove
-      legacyKeyResolver: LfGlobalKeyMapping,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -71,9 +66,6 @@ trait TransactionTreeFactory {
 
   /** Reconstructs a transaction view from a reinterpreted action description, using the supplied
     * salts.
-    *
-    * @param legacyKeyResolver
-    *   The key resolutions recorded while re-interpreting the transaction.
     * @throws java.lang.IllegalArgumentException
     *   if `transaction` does not contain exactly one root node
     */
@@ -87,8 +79,6 @@ trait TransactionTreeFactory {
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      // TODO(#31527): SPM always empty in 3.4, not used in 3.5 => to remove
-      legacyKeyResolver: LfGlobalKeyMapping,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,

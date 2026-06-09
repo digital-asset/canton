@@ -23,7 +23,6 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Time}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
@@ -50,7 +49,6 @@ final class GeneratorsInteractiveSubmission(
     generatorsTopology: GeneratorsTopology,
     exclusiveMaxSerializationVersion: LfSerializationVersion,
 ) {
-  import com.digitalasset.canton.Generators.*
   import generatorsLf.*
   import generatorsTopology.*
 
@@ -238,9 +236,6 @@ final class GeneratorsInteractiveSubmission(
     optByKeyNodeO,
   )
 
-  private val globalKeyMappingGen: Gen[Map[GlobalKey, Vector[Value.ContractId]]] =
-    boundedMapGen[GlobalKey, Option[Value.ContractId]].map(_.transform((_, v) => v.asCidVector))
-
   private def inputContractsGen(overrideCid: Value.ContractId): Gen[LfFatContractInst] = for {
     version <- ValueGenerators.SerializationVersionGen(maxVersion =
       Some(exclusiveMaxSerializationVersion)
@@ -261,7 +256,6 @@ final class GeneratorsInteractiveSubmission(
     synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
     transaction <- versionedTransactionGenerator.map(SubmittedTransaction(_))
     transactionMeta <- transactionMetaGen(transaction)
-    globalKeyMapping <- globalKeyMappingGen
     // Use the contract IDs actually referenced by the transaction (fetch/exercise nodes),
     // because the decoder validates that input contracts match the transaction's inputs.
     coids = transaction.inputContracts.toList
@@ -281,7 +275,6 @@ final class GeneratorsInteractiveSubmission(
     submitterInfo,
     transactionMeta,
     transaction,
-    globalKeyMapping,
     inputContracts.asScala
       .zip(enrichedInputContracts.asScala)
       .map { case (originalFci, enrichedFci) =>

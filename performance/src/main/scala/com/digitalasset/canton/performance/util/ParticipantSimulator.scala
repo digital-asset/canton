@@ -510,6 +510,7 @@ class ParticipantSimulator(
       NamedLoggingContext(loggerFactoryForParticipant, traceContext)
 
     val sequencerTrustThreshold = PositiveInt.tryCreate(sequencersToConnectTo.size)
+    val sequencerLivenessMargin = NonNegativeInt.zero
     val (pool, _) = awaitEU(
       GrpcSequencerConnectionService
         .waitUntilSequencerConnectionIsValidWithPool(
@@ -522,7 +523,7 @@ class ParticipantSimulator(
                 sequencersToConnectTo.forgetNE
                   .map(_.sequencerConnection.toInternal),
                 sequencerTrustThreshold = sequencerTrustThreshold,
-                sequencerLivenessMargin = NonNegativeInt.zero,
+                sequencerLivenessMargin = sequencerLivenessMargin,
                 submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
                 sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
               )
@@ -564,8 +565,12 @@ class ParticipantSimulator(
       aggregationHandler,
       crypto.pureCrypto,
       nodeParameters.sequencerClient.eventInboxSize,
+      nodeParameters.sequencerClient.pastEventsCacheSize,
       loggerFactoryForParticipant,
-      MessageAggregationConfig(sequencerTrustThreshold),
+      MessageAggregationConfig(
+        sequencerTrustThreshold = sequencerTrustThreshold,
+        maxNbOfContributions = sequencerTrustThreshold + sequencerLivenessMargin,
+      ),
       _ => (),
       env.environment.config.parameters.timeouts.processing,
       environment.futureSupervisor,

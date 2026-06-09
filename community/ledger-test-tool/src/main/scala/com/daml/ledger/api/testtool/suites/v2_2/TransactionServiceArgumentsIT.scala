@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -24,9 +25,9 @@ import java.util.List as JList
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
-class TransactionServiceArgumentsIT extends LedgerTestSuite {
+class TransactionServiceArgumentsIT(testDars: TestDars) extends LedgerTestSuite {
   import ClearIdsImplicits.*
-  import CompanionImplicits.*
+  import testDars.companionImplicits.*
 
   test(
     "TXCreateWithAnyType",

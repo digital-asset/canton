@@ -30,6 +30,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.transaction.NodeId
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
+import com.digitalasset.daml.lf.value.Value.VersionedValue
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Tests WellFormedTransaction.merge particularly with respect to handling of top-level rollback
@@ -282,7 +283,7 @@ class WellFormedTransactionMergeTest
 
       def mkInput(
           cid: LfContractId,
-          contractInst: LfThinContractInst,
+          contractArg: VersionedValue,
       ): WithRollbackScope[WellFormedTransaction[WithAbsoluteSuffixes.type]] =
         WithRollbackScope(
           RollbackScope.empty,
@@ -290,7 +291,7 @@ class WellFormedTransactionMergeTest
             .check(
               transaction(
                 Seq(0),
-                createNode(cid, contractInst, Set(signatory)),
+                createNode(cid, contractArg, Set(signatory)),
               ),
               factory.mkMetadata(Map(NodeId(0) -> lfHash(0))),
               WithAbsoluteSuffixes,
@@ -301,8 +302,11 @@ class WellFormedTransactionMergeTest
       val transactions =
         NonEmpty(
           Seq,
-          mkInput(newLfContractId(), contractInstance(Seq(capturedCid))),
-          mkInput(capturedCid, contractInstance()),
+          mkInput(
+            newLfContractId(),
+            versionedValueCapturing(Seq(capturedCid)),
+          ),
+          mkInput(capturedCid, defaultVersionedValue),
         )
 
       val (_, errorO) = WellFormedTransaction.merge(transactions)

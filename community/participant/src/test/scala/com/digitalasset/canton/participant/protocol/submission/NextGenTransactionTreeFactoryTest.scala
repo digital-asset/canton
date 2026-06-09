@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.GenTransactionTree
@@ -30,8 +29,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.CantonOnly
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
-import com.digitalasset.daml.lf.transaction.{ExternalCallResult, LegacyContractStateMachine}
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -144,7 +142,6 @@ final class NextGenTransactionTreeFactoryTest
           treeFactory: TransactionTreeFactory,
           transaction: WellFormedTransaction[WithoutSuffixes],
           contractInstanceOfId: ContractInstanceOfId,
-          keyResolver: LegacyContractStateMachine.KeyResolver,
           actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
           snapshot: TopologySnapshot = factory.topologySnapshot,
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -159,7 +156,6 @@ final class NextGenTransactionTreeFactoryTest
             transactionUuid = factory.transactionUuid,
             topologySnapshot = snapshot,
             contractOfId = contractInstanceOfId,
-            legacyKeyResolver = keyResolver.fmap(_.toList.toVector),
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
           )
@@ -177,7 +173,6 @@ final class NextGenTransactionTreeFactoryTest
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
               ).value.flatMap(_ should equal(Right(example.transactionTree)))
             }
           }
@@ -200,7 +195,6 @@ final class NextGenTransactionTreeFactoryTest
                 ),
               ),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               tree.rootViews.unblindedElements should have size 2
@@ -245,7 +239,6 @@ final class NextGenTransactionTreeFactoryTest
                 ImmArray(externalCallResult, externalCallResult),
               ),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               val view1 = tree.rootViews.unblindedElements.drop(1).headOption.value
@@ -273,7 +266,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               withExternalCallResults(example, externalCallNodeId, ImmArray(externalCallResult)),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               tree.rootViews.unblindedElements should have size 3
@@ -307,7 +299,6 @@ final class NextGenTransactionTreeFactoryTest
                 ),
               ),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               tree.rootViews.unblindedElements should have size 2
@@ -341,7 +332,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult)),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               val view = tree.rootViews.unblindedElements.loneElement
@@ -375,7 +365,6 @@ final class NextGenTransactionTreeFactoryTest
               submittingTreeFactory,
               transaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.flatMap { result =>
               val tree = result.value
               val submittedView = tree.rootViews.unblindedElements.drop(1).headOption.value
@@ -391,7 +380,6 @@ final class NextGenTransactionTreeFactoryTest
                   topologySnapshot = factory.topologySnapshot,
                   contractOfId = successfulLookup(example),
                   rbContext = RollbackContext.empty,
-                  legacyKeyResolver = reinterpretedKeyResolver,
                   absolutizer = factory.absolutizer(tree.updateId),
                 )
                 .failOnShutdown
@@ -422,7 +410,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               failedLookup(errorMessage),
-              example.keyResolver.asCidOptionMap,
             ).value.flatMap(
               _ shouldEqual Left(
                 ContractLookupError(example.absolutizedContractId, errorMessage)
@@ -440,7 +427,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               actAs = List.empty,
             ).value
               .flatMap(
@@ -457,7 +443,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               snapshot = defaultTestingTopology.withPackages(Map.empty).build().topologySnapshot(),
             ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
           }
@@ -468,7 +453,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               snapshot = defaultTestingIdentityFactory.topologySnapshot(
                 packageDependencyResolver = TestPackageDependencyResolver
               ),
@@ -482,7 +466,6 @@ final class NextGenTransactionTreeFactoryTest
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
                 snapshot = defaultTestingIdentityFactory.topologySnapshot(
                   packageDependencyResolver = MisconfiguredPackageDependencyResolver
                 ),
