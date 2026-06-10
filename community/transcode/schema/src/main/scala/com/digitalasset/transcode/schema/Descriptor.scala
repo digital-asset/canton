@@ -183,6 +183,11 @@ object Descriptor:
   final case class Variable private[Descriptor] (name: TypeVarName) extends Descriptor
   def variable(name: String): Variable = Variable(TypeVarName(name))
 
+  final case class Unknown private[Descriptor] (id: Identifier, args: SList[Descriptor])
+      extends Descriptor
+  def unknown(id: Identifier, args: Seq[Descriptor]) = Unknown(id, args.toList)
+  def unknown(id: Identifier): Unknown = Unknown(id, SList.empty)
+
   /** Utility to handle cyclic references */
   private object Lazy:
     private[Descriptor] def apply(compute: => Adt) = new Lazy(compute)
@@ -215,6 +220,7 @@ object Descriptor:
           case TextMap(value) => queue.addOne(value)
           case GenMap(key, value) => queue.addOne(key); queue.addOne(value)
           case ContractId(value) => queue.addOne(value)
+          case Unknown(id, args) => queue.addAll(args)
           case _ => // do nothing
     result.toSeq
 

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.backend.postgresql
 
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.ContractRef
 import com.digitalasset.canton.platform.store.backend.common.{
   ContractStorageBackendTemplate,
   QueryStrategy,
@@ -73,9 +74,9 @@ class PostgresContractStorageBackend(
   override final def supportsBatchKeyStateLookups: Boolean = true
 
   override def contractKeysPlain(
-      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      keyPageQueries: Seq[ContractStorageBackend.KeyLookupPageQuery],
       validAtEventSeqId: Long,
-  )(connection: Connection): Seq[ContractStorageBackend.KeysPageResult] =
+  )(connection: Connection): Seq[ContractStorageBackend.KeyLookupPageResult] =
     if (keyPageQueries.isEmpty) Seq.empty
     else {
       val queriesWithIndex = keyPageQueries.zipWithIndex
@@ -125,17 +126,20 @@ class PostgresContractStorageBackend(
         )
       )(connection)
 
-      val groupedResults: Map[Int, Vector[(Long, Long)]] =
-        results.groupBy(_._1).view.mapValues(_.map(t => (t._2, t._3))).toMap
+      val groupedResults: Map[Int, Vector[ContractRef]] =
+        results
+          .groupBy(_._1)
+          .view
+          .mapValues(_.map(t => ContractRef(internalContractId = t._3, eventSequentialId = t._2)))
+          .toMap
 
       queriesWithIndex.map { case (query, index) =>
-        val rows = groupedResults.getOrElse(index, Vector.empty)
-        val (eventSeqIds, internalContractIds) = rows.unzip
-        ContractStorageBackend.KeysPageResult(
-          internalContractIds = internalContractIds.take(query.limit),
+        val contractRefs = groupedResults.getOrElse(index, Vector.empty)
+        ContractStorageBackend.KeyLookupPageResult(
+          contractRefs = contractRefs.take(query.limit),
           nextPageToken = Option
-            .when(eventSeqIds.sizeIs == query.limit + 1)(
-              eventSeqIds.lastOption.map(_ + 1)
+            .when(contractRefs.sizeIs == query.limit + 1)(
+              contractRefs.lastOption.map(_.eventSequentialId + 1)
             )
             .flatten,
         )

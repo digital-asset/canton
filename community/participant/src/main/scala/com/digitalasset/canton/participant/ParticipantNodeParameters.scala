@@ -41,7 +41,7 @@ final case class ParticipantNodeParameters(
     commitmentReduceParallelism: NonNegativeInt,
     commitmentUseDbSnapshotForParticipantLookup: Boolean,
     autoSyncProtocolFeatureFlags: Boolean,
-    alphaMultiSynchronizerSupport: Boolean,
+    enableAllLedgerApiReassignments: Boolean,
     commitAfterFailedActivenessCheck: Boolean,
     validateLegacyContractsV11: Boolean,
 ) extends CantonNodeParameters
@@ -109,7 +109,7 @@ object ParticipantNodeParameters {
     commitmentReduceParallelism = NonNegativeInt.zero,
     commitmentUseDbSnapshotForParticipantLookup = false,
     autoSyncProtocolFeatureFlags = true,
-    alphaMultiSynchronizerSupport = false,
+    enableAllLedgerApiReassignments = false,
     commitAfterFailedActivenessCheck = false,
     validateLegacyContractsV11 = true,
   )

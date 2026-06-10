@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.synchronizer.grpc
 
+import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -17,10 +18,11 @@ import com.digitalasset.canton.crypto.{
   SyncCryptoApiParticipantProvider,
   SynchronizerCryptoClient,
 }
-import com.digitalasset.canton.data.SynchronizerPredecessor
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.LsuHandshake
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.store.{
@@ -46,12 +48,12 @@ import com.digitalasset.canton.sequencing.client.{
   ReplayConfig,
   RichSequencerClient,
 }
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, WallClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -95,6 +97,9 @@ class GrpcSynchronizerRegistry(
     with FlagCloseable
     with HasFutureSupervision
     with NamedLogging {
+
+  // Used to control the retry loop/timeout for handshake
+  private val wallClock = new WallClock(timeouts, loggerFactory)
 
   override protected def timeouts: ProcessingTimeout = participantNodeParameters.processingTimeouts
 
@@ -235,7 +240,7 @@ class GrpcSynchronizerRegistry(
     connectionPoolFactory
       .createFromOldConfig(
         sequencerConnections = storedConfig.config.sequencerConnections,
-        expectedPsidO = storedConfig.config.synchronizerId,
+        expectedPsidO = storedConfig.config.psid,
         tracingConfig = participantNodeParameters.tracing,
         name = "main",
       )
@@ -360,20 +365,65 @@ class GrpcSynchronizerRegistry(
     } yield info
 
   override def pureHandshake(
-      storedConfig: StoredSynchronizerConnectionConfig
+      storedConfig: StoredSynchronizerConnectionConfig,
+      lsuHandshakeConfig: Option[LsuHandshake],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
     Either[SynchronizerRegistryError, SequencerAggregatedInfo]
   ] = {
+    val expectedSequencers = storedConfig.config.sequencerConnections.aliasToConnection.keySet
+
     val connectionPoolE = getConnectionPool(storedConfig)
 
-    connectHandshakeGeneric(
-      connectionPoolE,
-      storedConfig.config,
-      storedConfig.predecessor,
-    ).thereafter { _ =>
-      connectionPoolE.foreach(_.close())
-    }.value
+    /*
+    Wait until one of the following conditions is met:
+    - all sequencers in the config observed in the pool
+    - waitUntil time is reached
+    - service is closing
+     */
+    def waiter(
+        connectionPool: SequencerConnectionPool,
+        waitUntil: CantonTimestamp,
+        step: config.NonNegativeFiniteDuration,
+    ): FutureUnlessShutdown[Unit] = {
+      val sequencersInPool = connectionPool.getAllSequencerIds.keySet
+
+      def check(): Either[Unit, Unit] =
+        if (expectedSequencers.subsetOf(sequencersInPool))
+          logger.debug(s"Stopping the wait: all $expectedSequencers found in the pool").asRight
+        else if (wallClock.now >= waitUntil)
+          logger.debug("Stopping the wait because max waiting time is reached.").asRight
+        else if (isClosing)
+          logger.debug("Stopping the wait because of shutdown.").asRight
+        else ().asLeft
+
+      Monad[FutureUnlessShutdown].tailRecM[Unit, Unit](()) { _ =>
+        wallClock.scheduleAfter(_ => check(), step.asJava)
+      }
+    }
+
+    (for {
+      connectionPool <- connectionPoolE.toEitherT[FutureUnlessShutdown]
+
+      res <- connectHandshakeGeneric(
+        connectionPoolE,
+        storedConfig.config,
+        storedConfig.predecessor,
+      )
+
+      _ <- lsuHandshakeConfig match {
+        case Some(LsuHandshake(_, Some(minimumDuration), periodicCheck)) =>
+          val waitUntil = wallClock.now.plus(minimumDuration.asJava)
+
+          logger.debug(s"Handshake was successful. Starting to wait until $waitUntil")
+          EitherT.right[SynchronizerRegistryError](
+            waiter(connectionPool, waitUntil, step = periodicCheck)
+          )
+
+        case _ => EitherTUtil.unitUS[SynchronizerRegistryError]
+      }
+
+    } yield res).thereafter(_ => connectionPoolE.foreach(_.close())).value
   }
 }

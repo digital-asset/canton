@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -13,8 +14,8 @@ import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffe
 import scala.collection.immutable.Seq
 import scala.jdk.CollectionConverters.*
 
-class TransactionServiceStakeholdersIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class TransactionServiceStakeholdersIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test("TXStakeholders", "Expose the correct stakeholders", allocate(SingleParty, SingleParty))(
     implicit ec => {

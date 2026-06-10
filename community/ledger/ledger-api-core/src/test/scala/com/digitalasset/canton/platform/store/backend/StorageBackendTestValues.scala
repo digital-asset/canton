@@ -34,6 +34,8 @@ import com.digitalasset.daml.lf.data.Ref.{
 }
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
+import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import org.scalatest.OptionValues
@@ -71,6 +73,12 @@ private[store] object StorageBackendTestValues extends OptionValues {
   val someRepresentativePackageId: Ref.PackageId =
     Ref.PackageId.assertFromString("representative-pkg")
   val someTemplateId2: NameTypeConRef = NameTypeConRef.assertFromString("#pkg-name:Mod:Template2")
+  val someContractKey: GlobalKey = GlobalKey.assertBuild(
+    templateId = someTemplateIdFull.toIdentifier,
+    packageName = Ref.PackageName.assertFromString("pkg-name"),
+    key = Value.ValueUnit,
+    keyHash = Hash.hashPrivateKey("someKey"),
+  )
   val someIdentityParams: ParameterStorageBackend.IdentityParams =
     ParameterStorageBackend.IdentityParams(someParticipantId)
   val someChoice: Ref.ChoiceName = Ref.ChoiceName.assertFromString("choice")
@@ -147,7 +155,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
       // contract related columns
       notPersistedContractId: ContractId = hashCid("c1"),
       internal_contract_id: Long = 10,
-      create_key_hash: Option[String] = Some("keyhash"),
+      create_key_hash: Option[String] = Some(someContractKey.hash.toHexString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   )(
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
       template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
@@ -170,6 +179,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       notPersistedContractId = notPersistedContractId,
       internal_contract_id = internal_contract_id,
       create_key_hash = create_key_hash,
+      notPersistedContractKey = notPersistedContractKey,
     )(
       stakeholders = stakeholders,
       template_id = template_id,
@@ -199,7 +209,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
       // contract related columns
       notPersistedContractId: ContractId = hashCid("c1"),
       internal_contract_id: Long = 10,
-      create_key_hash: Option[String] = Some("keyhash"),
+      create_key_hash: Option[String] = Some(someContractKey.hash.toHexString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   )(
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
       template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
@@ -223,6 +234,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       notPersistedContractId = notPersistedContractId,
       internal_contract_id = internal_contract_id,
       create_key_hash = create_key_hash,
+      notPersistedContractKey = notPersistedContractKey,
     )(
       stakeholders = stakeholders,
       template_id = template_id,
@@ -267,6 +279,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       package_id: PackageId = PackageId.assertFromString("package"),
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
       ledger_effective_time: Long = 123456,
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   ): Seq[DbDto] = DbDto
     .consumingExerciseDbDtos(
       event_offset = event_offset,
@@ -297,6 +310,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       package_id = package_id,
       stakeholders = stakeholders,
       ledger_effective_time = ledger_effective_time,
+      notPersistedContractKey = notPersistedContractKey,
     )
     .toSeq
 
@@ -327,6 +341,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
       package_id: PackageId = PackageId.assertFromString("package"),
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   ): Seq[DbDto] = DbDto
     .unassignDbDtos(
       event_offset = event_offset,
@@ -350,6 +365,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       template_id = template_id,
       package_id = package_id,
       stakeholders = stakeholders,
+      notPersistedContractKey = notPersistedContractKey,
     )
     .toSeq
 

@@ -27,7 +27,7 @@ object DivulgenceIntegrationTestHelpers {
   case object NonConsumed extends EventType
 
   implicit class ParticipantSimpleStreamHelper(val participant: LocalParticipantReference)(implicit
-      val alphaMultiSynchronizerSupport: Boolean = false
+      val enableAllLedgerApiReassignments: Boolean = false
   ) {
 
     def acs(party: Party): Seq[OffsetCid] =
@@ -111,7 +111,7 @@ object DivulgenceIntegrationTestHelpers {
         parties: Seq[PartyId],
         beginOffsetExclusive: Long,
     ): Seq[UpdateService.UpdateWrapper] = {
-      val reassignmentsFilter = if (alphaMultiSynchronizerSupport) {
+      val reassignmentsFilter = if (enableAllLedgerApiReassignments) {
         Some(
           EventFormat(
             filtersByParty = parties.map(party => party.toLf -> Filters(Nil)).toMap,

@@ -729,11 +729,13 @@ class Engine(
                   n,
                   callerToken,
                   {
-                    (
-                        callerContracts: Vector[FatContractInstance],
-                        callerHasStarted: NeedKeyProgression.HasStarted,
-                    ) =>
-                      val (enginePage, engineRest) = callerContracts.splitAt(n)
+                    case ResultNeedKey.Response(callerContracts, callerHasStarted) =>
+                      // TODO(#32184): handle UnsupportedContractIdVersion entries and retain and use the authentication
+                      //  callback to authenticate these contracts
+                      val callerFcis = callerContracts.collect {
+                        case a: ResultNeedKey.Response.AuthenticableFatContractInstance => a.contractInstance
+                      }
+                      val (enginePage, engineRest) = callerFcis.splitAt(n)
                       callback(enginePage, wrapHasStarted(engineRest, callerHasStarted))
                       interpretLoop(machine, time, submissionInfo)
                   },

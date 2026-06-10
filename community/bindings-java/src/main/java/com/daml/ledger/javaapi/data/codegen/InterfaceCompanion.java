@@ -7,6 +7,7 @@ import com.daml.ledger.javaapi.data.*;
 import com.daml.ledger.javaapi.data.DamlRecord;
 import com.daml.ledger.javaapi.data.Identifier;
 import com.daml.ledger.javaapi.data.codegen.json.JsonLfDecoder;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,7 +22,7 @@ import java.util.function.Function;
  * @param <View> The {@link DamlRecord} subclass representing the interface view, as may be
  *     retrieved from the ACS or transaction stream.
  */
-public abstract class InterfaceCompanion<I, Id, View>
+public class InterfaceCompanion<I, Id, View>
     extends ContractTypeCompanion<Contract<Id, View>, Id, I, View> {
 
   public final ValueDecoder<View> valueDecoder;
@@ -103,5 +104,25 @@ public abstract class InterfaceCompanion<I, Id, View>
         event.getSignatories(),
         event.getObservers(),
         policy);
+  }
+
+  @Override
+  /**
+   * <strong>INTERNAL API</strong>: this is meant for use by <a
+   * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+   * and <em>should not be referenced directly</em>.
+   *
+   * @hidden
+   */
+  public InterfaceCompanion<I, Id, View> withPackageId(String packageId) {
+    var packageInfo = new ContractTypeCompanion.Package(packageId, PACKAGE_NAME, PACKAGE_VERSION);
+    return new InterfaceCompanion(
+        packageInfo,
+        TEMPLATE_CLASS_NAME,
+        TEMPLATE_ID,
+        newContractId,
+        valueDecoder,
+        fromJson,
+        new ArrayList<>(choices.values()));
   }
 }

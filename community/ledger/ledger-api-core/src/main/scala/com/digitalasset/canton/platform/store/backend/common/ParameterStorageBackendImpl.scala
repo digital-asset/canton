@@ -336,7 +336,7 @@ private[backend] class ParameterStorageBackendImpl(
       )(connection)
       .flatten
 
-  def fetchACHSState(connection: Connection): Option[AchsState] =
+  override def fetchAchsState(connection: Connection): Option[AchsState] =
     SQL"select valid_at, last_removed, last_populated from lapi_achs_state"
       .asSingleOpt(
         for {
@@ -352,7 +352,7 @@ private[backend] class ParameterStorageBackendImpl(
         )
       )(connection)
 
-  def insertACHSState(achsState: AchsState)(
+  override def insertAchsState(achsState: AchsState)(
       connection: Connection
   ): Unit =
     discard(
@@ -366,7 +366,7 @@ private[backend] class ParameterStorageBackendImpl(
           """.execute()(connection)
     )
 
-  def updateACHSValidAt(validAt: Long)(
+  override def updateAchsValidAt(validAt: Long)(
       connection: Connection
   ): Unit = {
     val updatedRows =
@@ -377,7 +377,7 @@ private[backend] class ParameterStorageBackendImpl(
     }
   }
 
-  def updateACHSLastPointers(pointers: AchsLastPointers)(
+  override def updateAchsLastPointers(pointers: AchsLastPointers)(
       connection: Connection
   ): Unit = {
     val updatedRows =
@@ -388,13 +388,9 @@ private[backend] class ParameterStorageBackendImpl(
       throw new IllegalStateException("Failed to update lapi_achs_state table.")
     }
   }
-  def clearACHSState(connection: Connection): Unit =
-    discard(
-      SQL"truncate table lapi_achs_state".execute()(connection)
-    )
 
-  def clearAchsData(connection: Connection): Unit = {
-    clearACHSState(connection)
+  override def clearAchsStateAndData(connection: Connection): Unit = {
+    discard(SQL"truncate table lapi_achs_state".execute()(connection))
     discard(SQL"truncate table lapi_filter_achs_stakeholder".execute()(connection))
   }
 

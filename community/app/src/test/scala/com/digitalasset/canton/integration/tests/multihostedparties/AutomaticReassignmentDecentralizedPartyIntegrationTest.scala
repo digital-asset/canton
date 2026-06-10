@@ -48,7 +48,7 @@ class AutomaticReassignmentDecentralizedPartyIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*

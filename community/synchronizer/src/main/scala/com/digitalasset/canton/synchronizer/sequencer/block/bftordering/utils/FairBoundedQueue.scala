@@ -137,18 +137,19 @@ class FairBoundedQueue[ItemType](
   def dequeueAll(
       predicate: ItemType => Boolean
   )(implicit metricsContext: MetricsContext): Seq[ItemType] = {
-    val (dequeuedItems, remainingNodesToItems) =
-      arrivalOrder.foldLeft((Seq[ItemType](), Seq[(BftNodeId, ItemType)]())) {
-        case (dequeuedItems -> remainingNodesToItems, nodeId -> enqueuedAt) =>
-          val item = nodeQueues(nodeId).dequeue()
-          if (predicate(item)) {
-            sizeGauge.foreach(_.updateValue(size - 1))
-            emitOrderingStageLatency(enqueuedAt)
-            (dequeuedItems :+ item, remainingNodesToItems)
-          } else {
-            (dequeuedItems, remainingNodesToItems :+ (nodeId -> item))
-          }
+
+    val dequeuedItems = mutable.Buffer[ItemType]()
+    val remainingNodesToItems = mutable.Buffer[(BftNodeId, ItemType)]()
+    arrivalOrder.foreach { case (nodeId -> enqueuedAt) =>
+      val item = nodeQueues(nodeId).dequeue()
+      if (predicate(item)) {
+        sizeGauge.foreach(_.updateValue(size - 1))
+        emitOrderingStageLatency(enqueuedAt)
+        dequeuedItems.append(item)
+      } else {
+        remainingNodesToItems.append(nodeId -> item)
       }
+    }
 
     // Rebuild the underlying structures.
     arrivalOrder.clear()
@@ -156,7 +157,7 @@ class FairBoundedQueue[ItemType](
       enqueue(nodeId, item).discard
     }
 
-    dequeuedItems
+    dequeuedItems.toSeq
   }
 
   def size: Int = arrivalOrder.size

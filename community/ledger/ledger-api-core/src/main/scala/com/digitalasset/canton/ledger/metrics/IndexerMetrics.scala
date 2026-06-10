@@ -73,6 +73,8 @@ class IndexerMetrics(
 
   val initialization = new DatabaseMetrics(prefix :+ "initialization", factory)
 
+  val achsStateInitialization = new DatabaseMetrics(prefix :+ "achs_state_initialization", factory)
+
   // Number of state updates persisted to the database
   // (after the effect of the corresponding Update is persisted into the database,
   // and before this effect is visible via moving the ledger end forward)

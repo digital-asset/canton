@@ -153,6 +153,7 @@ object AuthServiceConfig {
       override val privileged: Boolean = false,
       accessLevel: AccessLevel = AccessLevel.Wildcard,
       override val users: Seq[AuthorizedUser] = Seq.empty,
+      override val maxTokenLife: config.NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ) extends AuthServiceConfig {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     private def verifier(
@@ -198,6 +199,7 @@ object AuthServiceConfig {
       override val privileged: Boolean = false,
       accessLevel: AccessLevel = AccessLevel.Wildcard,
       override val users: Seq[AuthorizedUser] = Seq.empty,
+      override val maxTokenLife: config.NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ) extends AuthServiceConfig {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     private def verifier(
@@ -243,6 +245,7 @@ object AuthServiceConfig {
       override val privileged: Boolean = false,
       accessLevel: AccessLevel = AccessLevel.Wildcard,
       override val users: Seq[AuthorizedUser] = Seq.empty,
+      override val maxTokenLife: config.NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ) extends AuthServiceConfig {
     private def verifier(
         jwksCacheConfig: JwksCacheConfig,

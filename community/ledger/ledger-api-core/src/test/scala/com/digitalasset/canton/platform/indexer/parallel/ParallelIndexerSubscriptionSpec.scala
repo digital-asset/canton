@@ -46,10 +46,12 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.Le
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   ParameterStorageBackend,
+  PersistentEventType,
   ScalatestEqualityHelpers,
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,
@@ -66,12 +68,13 @@ import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Ref, Time}
-import com.digitalasset.daml.lf.transaction.CommittedTransaction
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
   TransactionBuilder,
 }
+import com.digitalasset.daml.lf.transaction.{CommittedTransaction, GlobalKey}
+import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -176,6 +179,7 @@ class ParallelIndexerSubscriptionSpec
     internal_contract_id = 1,
     create_key_hash = None,
     traffic_cost = someTrafficCost,
+    notPersistedContractKey = None,
   )
 
   private val someEventDeactivate = DbDto.EventDeactivate(
@@ -212,6 +216,7 @@ class ParallelIndexerSubscriptionSpec
     stakeholders = Set.empty,
     ledger_effective_time = None,
     traffic_cost = someTrafficCost,
+    notPersistedContractKey = None,
   )
 
   private val someEventWitnessed = DbDto.EventVariousWitnessed(
@@ -329,6 +334,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Vector("1", "2"),
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     )
     actual.copy(batchTraceContext = TraceContext.empty) shouldBe expected
   }
@@ -354,6 +360,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     )
   }
 
@@ -368,6 +375,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     )
   }
 
@@ -501,6 +509,7 @@ class ParallelIndexerSubscriptionSpec
         eventCount = 0L,
         distinctRawStrings = Vector("1", "2"),
         usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
       ),
     )
     import scala.util.chaining.*
@@ -607,6 +616,7 @@ class ParallelIndexerSubscriptionSpec
         eventCount = 0L,
         distinctRawStrings = Nil,
         usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
       ),
     )
     result.ledgerEnd.lastEventSeqId shouldBe 15
@@ -654,6 +664,7 @@ class ParallelIndexerSubscriptionSpec
             eventCount = 0L,
             distinctRawStrings = Nil,
             usedInternalContractIds = Set.empty,
+            contractStateEvents = Vector.empty,
           ),
         )
         .ledgerEnd
@@ -692,6 +703,7 @@ class ParallelIndexerSubscriptionSpec
           eventCount = 0L,
           distinctRawStrings = Nil,
           usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
         ),
       )
     activeContracts shouldBe Map(
@@ -746,6 +758,7 @@ class ParallelIndexerSubscriptionSpec
             eventCount = 0L,
             distinctRawStrings = Nil,
             usedInternalContractIds = Set.empty,
+            contractStateEvents = Vector.empty,
           ),
         ),
       _.warningMessage should include(
@@ -809,6 +822,7 @@ class ParallelIndexerSubscriptionSpec
           eventCount = 0L,
           distinctRawStrings = Nil,
           usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
         ),
       )
     activeContracts shouldBe Map.empty
@@ -891,6 +905,7 @@ class ParallelIndexerSubscriptionSpec
           eventCount = 0L,
           distinctRawStrings = Nil,
           usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
         ),
       )
     activeContracts shouldBe Map(
@@ -955,6 +970,7 @@ class ParallelIndexerSubscriptionSpec
           eventCount = 0L,
           distinctRawStrings = Nil,
           usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
         ),
       )
     activeContracts shouldBe Map(
@@ -1047,6 +1063,7 @@ class ParallelIndexerSubscriptionSpec
           batchTraceContext = TraceContext.empty,
           distinctRawStrings = Nil,
           usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
         )
       )
       .batch should contain theSameElementsInOrderAs Vector(
@@ -1103,6 +1120,7 @@ class ParallelIndexerSubscriptionSpec
             batchTraceContext = TraceContext.empty,
             distinctRawStrings = Nil,
             usedInternalContractIds = Set.empty,
+            contractStateEvents = Vector.empty,
           )
         )
         .batch should contain theSameElementsInOrderAs Vector(
@@ -1145,6 +1163,7 @@ class ParallelIndexerSubscriptionSpec
           batchTraceContext = TraceContext.empty,
           distinctRawStrings = Nil,
           usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
         )
       ),
       _.getMessage should include(
@@ -1194,6 +1213,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     )
 
     val outBatchF = ParallelIndexerSubscription.dbPrepare(
@@ -1220,6 +1240,7 @@ class ParallelIndexerSubscriptionSpec
         eventCount = 0L,
         distinctRawStrings = Nil,
         usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
       )
   }
 
@@ -1246,6 +1267,7 @@ class ParallelIndexerSubscriptionSpec
         eventCount = 0L,
         distinctRawStrings = Nil,
         usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
       )
     )
     result shouldBe Batch(
@@ -1258,6 +1280,178 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
+    )
+  }
+
+  it should "build contractStateEvents from the batched DbDtos" in {
+    val key1 = GlobalKey.assertBuild(
+      templateId = Ref.Identifier.assertFromString("p:m:t"),
+      packageName = Ref.PackageName.assertFromString("pkg-name"),
+      key = Value.ValueInt64(10),
+      keyHash = crypto.Hash.hashPrivateKey("k1"),
+    )
+    val key2 = GlobalKey.assertBuild(
+      templateId = Ref.Identifier.assertFromString("p:m:t"),
+      packageName = Ref.PackageName.assertFromString("pkg-name"),
+      key = Value.ValueInt64(20),
+      keyHash = crypto.Hash.hashPrivateKey("k2"),
+    )
+    val createActivate = someEventActivate.copy(
+      event_type = PersistentEventType.Create.asInt,
+      event_sequential_id = 10L,
+      notPersistedContractId = hashCid("create"),
+      notPersistedContractKey = Some(key1),
+    )
+    val assignActivate = someEventActivate.copy(
+      event_type = PersistentEventType.Assign.asInt,
+      event_sequential_id = 11L,
+      notPersistedContractId = hashCid("assign"),
+      notPersistedContractKey = None,
+    )
+    val consumingDeactivate = someEventDeactivate.copy(
+      event_type = PersistentEventType.ConsumingExercise.asInt,
+      event_sequential_id = 12L,
+      deactivated_event_sequential_id = Some(7L),
+      contract_id = hashCid("consume"),
+      notPersistedContractKey = Some(key2),
+    )
+    val unassignDeactivate = someEventDeactivate.copy(
+      event_type = PersistentEventType.Unassign.asInt,
+      event_sequential_id = 13L,
+      deactivated_event_sequential_id = Some(8L),
+      contract_id = hashCid("unassign"),
+      notPersistedContractKey = None,
+    )
+    // unrelated DbDto: skipped
+    val unrelated = someParty
+
+    val result = ParallelIndexerSubscription.batcher(
+      batchF = _ => "ignored",
+      logger = logger,
+      metrics = LedgerApiServerMetrics.ForTesting,
+    )(
+      Batch(
+        ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
+        batchTraceContext = TraceContext.empty,
+        batch = Vector(
+          createActivate,
+          assignActivate,
+          unrelated,
+          consumingDeactivate,
+          unassignDeactivate,
+        ),
+        batchSize = 5,
+        offsetsUpdates = offsetsAndUpdates,
+        missingDeactivatedActivations = Map.empty,
+        eventCount = 0L,
+        distinctRawStrings = Nil,
+        usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
+      )
+    )
+
+    result.contractStateEvents shouldBe Vector(
+      ContractStateEvent.Activated(
+        contractId = createActivate.notPersistedContractId,
+        globalKey = Some(key1),
+        eventSequentialId = createActivate.event_sequential_id,
+        isInitial = true,
+      ),
+      ContractStateEvent.Activated(
+        contractId = assignActivate.notPersistedContractId,
+        globalKey = None,
+        eventSequentialId = assignActivate.event_sequential_id,
+        isInitial = false,
+      ),
+      ContractStateEvent.Deactivated(
+        contractId = consumingDeactivate.contract_id,
+        globalKey = Some(key2),
+        deactivatedEventSequentialId = 7L,
+        isFinal = true,
+      ),
+      ContractStateEvent.Deactivated(
+        contractId = unassignDeactivate.contract_id,
+        globalKey = None,
+        deactivatedEventSequentialId = 8L,
+        isFinal = false,
+      ),
+    )
+  }
+
+  it should "produce an empty contractStateEvents vector when there are no activate/deactivate DbDtos" in {
+    val result = ParallelIndexerSubscription.batcher(
+      batchF = _ => "ignored",
+      logger = logger,
+      metrics = LedgerApiServerMetrics.ForTesting,
+    )(
+      Batch(
+        ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
+        batchTraceContext = TraceContext.empty,
+        batch = Vector(someParty, someParty),
+        batchSize = 2,
+        offsetsUpdates = offsetsAndUpdates,
+        missingDeactivatedActivations = Map.empty,
+        eventCount = 0L,
+        distinctRawStrings = Nil,
+        usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
+      )
+    )
+
+    result.contractStateEvents shouldBe Vector.empty
+  }
+
+  it should "skip deactivations that, after refillMissingDeactivatedActivations, still have no deactivated_event_sequential_id" in {
+    // A deactivation that arrived without an activation ref AND whose lookup was registered as
+    // "no activation found" (Some(None)) is refilled to keep deactivated_event_sequential_id = None.
+    // buildContractStateEvents must skip such deactivations.
+    val skippedContractId = hashCid("skipped-no-ref")
+    val deactivateWithoutRef = someEventDeactivate.copy(
+      event_type = PersistentEventType.ConsumingExercise.asInt,
+      event_sequential_id = 20L,
+      deactivated_event_sequential_id = None,
+      contract_id = skippedContractId,
+    )
+    val createActivate = someEventActivate.copy(
+      event_type = PersistentEventType.Create.asInt,
+      event_sequential_id = 21L,
+      notPersistedContractId = hashCid("create"),
+      notPersistedContractKey = None,
+    )
+
+    val result = loggerFactory.assertLogs(
+      ParallelIndexerSubscription.batcher(
+        batchF = _ => "ignored",
+        logger = logger,
+        metrics = LedgerApiServerMetrics.ForTesting,
+      )(
+        Batch(
+          ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
+          batchTraceContext = TraceContext.empty,
+          batch = Vector(deactivateWithoutRef, createActivate),
+          batchSize = 2,
+          offsetsUpdates = offsetsAndUpdates,
+          missingDeactivatedActivations = Map(
+            SynCon(deactivateWithoutRef.synchronizer_id, skippedContractId) -> None
+          ),
+          eventCount = 0L,
+          distinctRawStrings = Nil,
+          usedInternalContractIds = Set.empty,
+          contractStateEvents = Vector.empty,
+        )
+      ),
+      _.warningMessage should include("Activation is missing for a deactivation"),
+    )
+
+    // Only the activation produces a ContractStateEvent; the deactivation is skipped.
+    result.contractStateEvents shouldBe Vector(
+      ContractStateEvent.Activated(
+        contractId = createActivate.notPersistedContractId,
+        globalKey = None,
+        eventSequentialId = createActivate.event_sequential_id,
+        isInitial = true,
+      )
     )
   }
 
@@ -1289,6 +1483,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     )
 
     val persistedTransferOffsets = new AtomicBoolean(false)
@@ -1326,6 +1521,7 @@ class ParallelIndexerSubscriptionSpec
         eventCount = 0L,
         distinctRawStrings = Nil,
         usedInternalContractIds = Set.empty,
+        contractStateEvents = Vector.empty,
       )
     persistedTransferOffsets.get() shouldBe true
   }
@@ -1362,6 +1558,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     )
 
     val batchOfBatches = Vector(
@@ -1523,6 +1720,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     ),
     Batch(
       ledgerEnd = LedgerEnd(
@@ -1550,6 +1748,7 @@ class ParallelIndexerSubscriptionSpec
       eventCount = 0L,
       distinctRawStrings = Nil,
       usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
     ),
   )
 
@@ -1634,6 +1833,7 @@ class ParallelIndexerSubscriptionSpec
     eventCount = 0L,
     distinctRawStrings = Nil,
     usedInternalContractIds = Set.empty,
+    contractStateEvents = Vector.empty,
   )
 
   it should "trigger storing ledger-end on CommitRepair" in {

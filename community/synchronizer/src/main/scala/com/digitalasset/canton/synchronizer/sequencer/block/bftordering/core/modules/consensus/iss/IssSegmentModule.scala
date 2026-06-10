@@ -47,7 +47,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.{Span, Tracer}
 
-import java.time.Instant
+import java.time.{Duration, Instant}
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success, Try}
@@ -80,11 +80,27 @@ class IssSegmentModule[E <: Env[E]](
 
   private val thisNode = epoch.currentMembership.myId
 
+  private case class ViewChangeMetric() extends TimeoutManager.TimeoutMetric {
+
+    private val metricsContextForThisSegment: MetricsContext = metricsContext.withExtraLabels(
+      metrics.consensus.labels.Leader -> segmentState.leader
+    )
+
+    override def scheduleChangedAfter(
+        duration: Duration
+    ): Unit =
+      BftOrderingMetrics.updateTimer(
+        metrics.consensus.viewChangeProgressLatency,
+        duration,
+      )(metricsContextForThisSegment)
+  }
+
   private val viewChangeTimeoutManager =
     new TimeoutManager[E, ConsensusSegment.Message, BlockNumber](
       loggerFactory,
       segmentState.epoch.currentMembership.orderingTopology.sequencingParameters.pbftViewChangeTimeout.toScala,
       segmentState.segment.firstBlockNumber,
+      Some(ViewChangeMetric()),
     )
 
   private val blockStartTimeoutManager =
@@ -92,6 +108,7 @@ class IssSegmentModule[E <: Env[E]](
       loggerFactory,
       emptyBlockCreationTimeout,
       segmentState.segment.firstBlockNumber,
+      None,
     )
 
   private val rehydrationMessages =
@@ -707,9 +724,7 @@ class IssSegmentModule[E <: Env[E]](
     logger.debug(s"Consensus requesting a new proposal for block $forBlock from local availability")
     maybeOriginalLeaderSegmentState.foreach(_.startWaitingForAvailabilityResponse())
     waitingForProposalSince = Some(Instant.now())
-    blockStartTimeoutManager.scheduleTimeout(
-      ConsensusSegment.Internal.BlockInactivityTimeout
-    )
+    blockStartTimeoutManager.scheduleTimeout(ConsensusSegment.Internal.BlockInactivityTimeout)
     availability.asyncSend(
       Availability.Consensus.CreateProposal(
         forBlock,

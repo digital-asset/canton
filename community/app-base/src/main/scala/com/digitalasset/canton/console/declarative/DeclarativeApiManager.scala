@@ -100,6 +100,7 @@ object DeclarativeApiManager {
           traceContext: TraceContext,
       ): EitherT[Future, String, DeclarativeApiHandle[ParticipantNodeConfig]] = {
         val myLoggerFactory = loggerFactory.append("participant", name)
+
         val api = new DeclarativeParticipantApi(
           name,
           initialConfig.ledgerApi.clientConfig,

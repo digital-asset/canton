@@ -7,6 +7,7 @@ package com.digitalasset.canton.admin.participant.v30;
 
 import "com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto";
 import "com/digitalasset/canton/admin/time/v30/time_tracker_config.proto";
+import "com/digitalasset/canton/admin/topology/v30/common.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -123,13 +124,44 @@ message ModifySynchronizerRequest {
 
 message ModifySynchronizerResponse {}
 
-message ListRegisteredSynchronizersRequest {}
+message ListRegisteredSynchronizersRequest {
+  // If false (default) returns only active synchronizers. Otherwise, return all synchronizers.
+  bool all_statuses = 1;
+}
 
 message ListRegisteredSynchronizersResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+
+    // The node can connect to the synchronizer.
+    // At most one connection per alias/synchronizer id can be active.
+    STATUS_ACTIVE = 1;
+
+    // Source and target synchronizer in the context of hard domain migration.
+    // The node will refuse to connect to a synchronizer with these statuses.
+    STATUS_HARD_MIGRATING_SOURCE = 2;
+    STATUS_HARD_MIGRATING_TARGET = 3;
+
+    // Around LSU, the connection of the successor is initially stored with status LSU target.
+    // When upgrade time is reached and the participant node performs the LSU, then:
+    //   1. The status of the current synchronizer is changed from Active to LSU source.
+    //   2. The status of the successor is changes from LSU target to Active.
+    // The node will refuse to connect to a synchronizer with these statuses.
+    STATUS_LSU_SOURCE = 4;
+    STATUS_LSU_TARGET = 5;
+
+    // Currently only used in the context of hard domain migration.
+    // The old synchronizer connection is marked as Inactive at the end of the migration.
+    // The node will refuse to connect to a synchronizer with this status.
+    STATUS_INACTIVE = 6;
+  }
+
   message Result {
     SynchronizerConnectionConfig config = 1;
     bool connected = 2;
     optional string physical_synchronizer_id = 3;
+    Status status = 4;
+    optional com.digitalasset.canton.admin.topology.v30.SynchronizerPredecessor synchronizer_predecessor = 5;
   }
   repeated Result results = 1;
 }

@@ -40,4 +40,5 @@ object DescriptorVisitor extends SchemaVisitor {
       args: Seq[Descriptor],
   ): Descriptor =
     Descriptor.application(ctor.asInstanceOf[Descriptor.Constructor], args)
+  def unknown(id: Identifier, args: Seq[Descriptor]): Descriptor = Descriptor.unknown(id, args)
 }

@@ -227,7 +227,7 @@ private[backend] trait StorageBackendTestsParameters
   }
 
   it should "fetch and update AchsState correctly" in {
-    executeSql(backend.parameter.fetchACHSState) shouldBe None
+    executeSql(backend.parameter.fetchAchsState) shouldBe None
 
     val achsState0 = AchsState(
       validAt = 1000L,
@@ -237,36 +237,36 @@ private[backend] trait StorageBackendTestsParameters
       ),
     )
     // check insertion to empty state
-    executeSql(backend.parameter.insertACHSState(achsState0))
-    executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState0)
+    executeSql(backend.parameter.insertAchsState(achsState0))
+    executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState0)
 
     // check updates of validAt
-    executeSql(backend.parameter.updateACHSValidAt(validAt = 2000L))
+    executeSql(backend.parameter.updateAchsValidAt(validAt = 2000L))
     val achsState1 = achsState0.copy(validAt = 2000L)
-    executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState1)
+    executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState1)
 
     // check updates of lastRemoved and lastPopulated
     executeSql(
-      backend.parameter.updateACHSLastPointers(
+      backend.parameter.updateAchsLastPointers(
         AchsLastPointers(lastRemoved = 200L, lastPopulated = 20L)
       )
     )
     val achsState2 =
       achsState1.copy(lastPointers = AchsLastPointers(lastRemoved = 200L, lastPopulated = 20L))
-    executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState2)
+    executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState2)
 
     // clear the state
-    executeSql(backend.parameter.clearACHSState)
-    executeSql(backend.parameter.fetchACHSState) shouldBe None
+    executeSql(backend.parameter.clearAchsStateAndData)
+    executeSql(backend.parameter.fetchAchsState) shouldBe None
 
     // updating a non-existing state with validAt fails
     an[IllegalStateException] should be thrownBy executeSql(
-      backend.parameter.updateACHSValidAt(validAt = 3000L)
+      backend.parameter.updateAchsValidAt(validAt = 3000L)
     )
 
     // updating a non-existing state with lastRemoved and lastPopulated fails
     an[IllegalStateException] should be thrownBy executeSql(
-      backend.parameter.updateACHSLastPointers(
+      backend.parameter.updateAchsLastPointers(
         AchsLastPointers(lastRemoved = 300L, lastPopulated = 30L)
       )
     )

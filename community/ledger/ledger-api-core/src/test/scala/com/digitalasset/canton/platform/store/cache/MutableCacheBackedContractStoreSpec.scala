@@ -8,7 +8,11 @@ import com.daml.ledger.resources.Resource
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.ExistingContractStatus
-import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStateStatus}
+import com.digitalasset.canton.ledger.participant.state.index.{
+  ContractKeyPage,
+  ContractState,
+  ContractStateStatus,
+}
 import com.digitalasset.canton.logging.{
   LoggingContextWithTrace,
   NamedLoggerFactory,
@@ -17,12 +21,14 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.Last
+import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.resolveFromCache
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreSpec.*
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
-  KeyAssigned,
-  KeyUnassigned,
+import com.digitalasset.canton.platform.store.interfaces.{
+  ContractRef,
+  KeyLookupPageResult,
+  LedgerDaoContractsReader,
 }
 import com.digitalasset.canton.platform.store.{LedgerApiContractStore, LedgerApiContractStoreImpl}
 import com.digitalasset.canton.protocol.ExampleContractFactory
@@ -62,9 +68,11 @@ class MutableCacheBackedContractStoreSpec
         maxLookupLimit = 10,
       )
 
-      val event1 = ContractStateEvent.Archived(
+      val event1 = ContractStateEvent.Deactivated(
         contractId = ContractId.V1(Hash.hashPrivateKey("cid")),
         globalKey = None,
+        deactivatedEventSequentialId = 1L,
+        isFinal = true,
       )
       val event2 = event1
       val updateBatch = NonEmptyVector.of(event1, event2)
@@ -90,7 +98,7 @@ class MutableCacheBackedContractStoreSpec
         )
       ).thenReturn(
         Future.successful(
-          (Vector.empty[ContractId], Option.empty[Long])
+          KeyLookupPageResult(contracts = Vector.empty, nextPageToken = None)
         )
       )
 
@@ -101,9 +109,22 @@ class MutableCacheBackedContractStoreSpec
       )
         .thenReturn(Future.successful(Map.empty[Long, ContractId]))
 
+      val mockKeyStateCache = mock[StateCache[Key, ContractKeyStateValue]]
+      when(mockKeyStateCache.get(any[Key])(any[TraceContext])).thenReturn(None)
+      when(
+        mockKeyStateCache.putAsync(any[Key], any[Long => Future[ContractKeyStateValue]])(
+          any[TraceContext]
+        )
+      )
+        .thenAnswer((_: Key, fetchAsync: Long => Future[ContractKeyStateValue], _: TraceContext) =>
+          fetchAsync(0L)
+        )
+      val mockContractStateCaches = mock[ContractStateCaches]
+      when(mockContractStateCaches.keyState).thenReturn(mockKeyStateCache)
+
       val store = new MutableCacheBackedContractStore(
         contractsReader = contractsReader,
-        contractStateCaches = mock[ContractStateCaches],
+        contractStateCaches = mockContractStateCaches,
         loggerFactory = loggerFactory,
         contractStore = mockContractStore,
         ledgerEndCache = ledgerEndCache,
@@ -135,6 +156,444 @@ class MutableCacheBackedContractStoreSpec
       succeed
     }
 
+    "return empty result when cache has Unassigned" in {
+      for {
+        store <- contractStore(cachesSize = 1L, loggerFactory).asFuture
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId2,
+          Map(someKey -> ContractKeyStateValue.Empty),
+        )
+        result <- store.lookupNonUniqueContractKey(Set(alice), someKey, pageToken = None, limit = 1)
+        resultLimit10 <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          someKey,
+          pageToken = None,
+          limit = 10,
+        )
+      } yield {
+        result shouldBe ContractKeyPage(contracts = Vector.empty, nextPageToken = None)
+        resultLimit10 shouldBe result
+      }
+    }
+
+    "return single page when cache has Last(_, _, false) and no token" in {
+      for {
+        store <- contractStore(cachesSize = 1L, loggerFactory).asFuture
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId2,
+          Map(
+            someKey -> ContractKeyStateValue.Last(cId_1, eventSeqId1, thereMightBeMore = false)
+          ),
+        )
+        result <- store.lookupNonUniqueContractKey(Set(alice), someKey, pageToken = None, limit = 1)
+        resultLimit10 <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          someKey,
+          pageToken = None,
+          limit = 10,
+        )
+      } yield {
+        result.contracts.map(_.templateId) shouldBe Vector(contract1.inst.templateId)
+        result.nextPageToken shouldBe None
+        resultLimit10 shouldBe result
+      }
+    }
+
+    "return contract when cache has Last(_, seqId, false) and token > seqId" in {
+      for {
+        store <- contractStore(cachesSize = 1L, loggerFactory).asFuture
+        // Cache: Assigned at seqId=2 (eventSeqId1), token=3 (eventSeqId2) means seqId < token, so contract should be returned
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId3,
+          Map(
+            someKey -> ContractKeyStateValue.Last(cId_1, eventSeqId1, thereMightBeMore = false)
+          ),
+        )
+        result <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          someKey,
+          pageToken = Some(eventSeqId2),
+          limit = 1,
+        )
+      } yield {
+        result.contracts.map(_.templateId) shouldBe Vector(contract1.inst.templateId)
+        result.nextPageToken shouldBe None
+      }
+    }
+
+    "return empty when cache has Last(_, seqId, false) and token <= seqId" in {
+      for {
+        store <- contractStore(cachesSize = 10L, loggerFactory).asFuture
+        // Cache: Assigned at seqId=3 (eventSeqId2), token=2 (eventSeqId1) means seqId >= token, so contract already seen
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId3,
+          Map(
+            someKey -> ContractKeyStateValue.Last(cId_1, eventSeqId2, thereMightBeMore = false)
+          ),
+        )
+        result <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          someKey,
+          pageToken = Some(eventSeqId1),
+          limit = 1,
+        )
+        resultLimit10 <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          someKey,
+          pageToken = Some(eventSeqId1),
+          limit = 10,
+        )
+      } yield {
+        result shouldBe ContractKeyPage(contracts = Vector.empty, nextPageToken = None)
+        resultLimit10 shouldBe result
+      }
+    }
+
+    "serve from cache when cache has Last(_, _, true) and no token" in {
+      val nuckKey = globalKey("nuck-key")
+      val spyContractsReader = spy(ContractsReaderFixtureWithNuck(nuckKey))
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId2,
+          Map(
+            nuckKey -> ContractKeyStateValue.Last(cId_1, eventSeqId1, thereMightBeMore = true)
+          ),
+        )
+        result <- store.lookupNonUniqueContractKey(Set(alice), nuckKey, pageToken = None, limit = 1)
+      } yield {
+        verify(spyContractsReader, never).lookupNonUniqueKey(
+          any[Key],
+          any[Long],
+          any[Option[Long]],
+          any[Int],
+        )(any[LoggingContextWithTrace])
+        result.contracts.map(_.contractId) shouldBe Vector(cId_1)
+        result.nextPageToken shouldBe Some(eventSeqId1)
+      }
+    }
+
+    "serve from cache when cache has Last(_, _, true) and token > seqId" in {
+      val nuckKey = globalKey("nuck-key2")
+      val spyContractsReader = spy(ContractsReaderFixtureWithNuck(nuckKey))
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId3,
+          Map(
+            nuckKey -> ContractKeyStateValue.Last(cId_1, eventSeqId1, thereMightBeMore = true)
+          ),
+        )
+        result <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          nuckKey,
+          pageToken = Some(eventSeqId2),
+          limit = 1,
+        )
+      } yield {
+        verify(spyContractsReader, never).lookupNonUniqueKey(
+          any[Key],
+          any[Long],
+          any[Option[Long]],
+          any[Int],
+        )(any[LoggingContextWithTrace])
+        result.contracts.map(_.contractId) shouldBe Vector(cId_1)
+        result.nextPageToken shouldBe Some(eventSeqId1)
+      }
+    }
+
+    "fall through to DB when cache has Last(_, _, true) and token < seqId" in {
+      val nuckKey = globalKey("nuck-key3")
+      val spyContractsReader = spy(ContractsReaderFixtureWithNuck(nuckKey))
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyContractsReader,
+        ).asFuture
+        _ = store.contractStateCaches.keyState.putBatch(
+          eventSeqId3,
+          Map(
+            nuckKey -> ContractKeyStateValue.Last(cId_1, eventSeqId2, thereMightBeMore = true)
+          ),
+        )
+        result <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          nuckKey,
+          pageToken = Some(eventSeqId1),
+          limit = 1,
+        )
+      } yield {
+        verify(spyContractsReader, atLeastOnce).lookupNonUniqueKey(
+          key = nuckKey,
+          validAtEventSeqId = 0L,
+          nextPageToken = Some(eventSeqId1),
+          limit = 1,
+        )
+        succeed
+      }
+    }
+  }
+
+  "readThroughKeyCache" should {
+    "read-through and populate the cache via putAsync when pageToken is None" in {
+      val key = globalKey("read-through-key")
+      // DB returns a single contract and no continuation: cache should be populated with Last(_, _, false).
+      val spyReader =
+        spy(
+          ConfigurableContractsReaderFixture(
+            KeyLookupPageResult(
+              Vector(ContractRef(contractId = cId_1, eventSequentialId = eventSeqId1)),
+              None,
+            )
+          )
+        )
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyReader,
+        ).asFuture
+        // Sanity check: nothing cached yet for this key.
+        _ = store.contractStateCaches.keyState.get(key) shouldBe None
+        result <- store.lookupNonUniqueContractKey(Set(alice), key, pageToken = None, limit = 10)
+      } yield {
+        // The DB was queried.
+        verify(spyReader, atLeastOnce).lookupNonUniqueKey(
+          key = key,
+          notEarlierThanEventSeqId = eventSeqId0,
+          nextPageToken = None,
+          limit = 10,
+        )
+        // The cache has been populated.
+        store.contractStateCaches.keyState.get(key) shouldBe Some(
+          Last(cId_1, eventSeqId1, thereMightBeMore = false)
+        )
+        result.contracts.map(_.contractId) shouldBe Vector(cId_1)
+        result.nextPageToken shouldBe None
+      }
+    }
+
+    "query the DB directly without populating the cache when pageToken is Some(...)" in {
+      val key = globalKey("no-read-through-key")
+      val spyReader =
+        spy(
+          ConfigurableContractsReaderFixture(
+            KeyLookupPageResult(
+              Vector(ContractRef(contractId = cId_2, eventSequentialId = eventSeqId3)),
+              None,
+            )
+          )
+        )
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyReader,
+        ).asFuture
+        result <- store.lookupNonUniqueContractKey(
+          Set(alice),
+          key,
+          pageToken = Some(eventSeqId2),
+          limit = 1,
+        )
+      } yield {
+        // The DB was queried directly with the provided pageToken.
+        // For a non-initial page the validAt is derived from the (unset) ledger end cache, hence 0L.
+        verify(spyReader, atLeastOnce).lookupNonUniqueKey(
+          key = key,
+          notEarlierThanEventSeqId = 0L,
+          nextPageToken = Some(eventSeqId2),
+          limit = 1,
+        )
+        // The cache is NOT populated for a non-initial page request.
+        store.contractStateCaches.keyState.get(key) shouldBe None
+        result.contracts.map(_.contractId) shouldBe Vector(cId_2)
+        result.nextPageToken shouldBe None
+      }
+    }
+
+    "cache Last with thereMightBeMore = false when the DB returns a single contract and no continuation" in {
+      val key = globalKey("might-be-more-false-single")
+      val spyReader =
+        spy(
+          ConfigurableContractsReaderFixture(
+            KeyLookupPageResult(
+              Vector(ContractRef(contractId = cId_1, eventSequentialId = eventSeqId1)),
+              None,
+            )
+          )
+        )
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyReader,
+        ).asFuture
+        _ <- store.lookupNonUniqueContractKey(Set(alice), key, pageToken = None, limit = 1)
+      } yield store.contractStateCaches.keyState.get(key) shouldBe Some(
+        Last(cId_1, eventSeqId1, thereMightBeMore = false)
+      )
+    }
+
+    "cache Last with thereMightBeMore = true when the DB returns more than one contract" in {
+      val key = globalKey("might-be-more-true-multi")
+      val spyReader =
+        spy(
+          ConfigurableContractsReaderFixture(
+            KeyLookupPageResult(
+              Vector(
+                ContractRef(contractId = cId_1, eventSequentialId = eventSeqId1),
+                ContractRef(contractId = cId_2, eventSequentialId = eventSeqId2),
+              ),
+              None,
+            )
+          )
+        )
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyReader,
+        ).asFuture
+        result <- store.lookupNonUniqueContractKey(Set(alice), key, pageToken = None, limit = 10)
+      } yield {
+        // The cached entry tracks the head contract and signals more may exist.
+        store.contractStateCaches.keyState.get(key) shouldBe Some(
+          Last(cId_1, eventSeqId1, thereMightBeMore = true)
+        )
+        // The full DB result is returned to the caller, not just the cached subset.
+        result.contracts.map(_.contractId) shouldBe Vector(cId_1, cId_2)
+      }
+    }
+
+    "cache Last with thereMightBeMore = true when the DB returns a single contract but a continuation token" in {
+      val key = globalKey("might-be-more-true-token")
+      val spyReader =
+        spy(
+          ConfigurableContractsReaderFixture(
+            KeyLookupPageResult(
+              Vector(ContractRef(contractId = cId_1, eventSequentialId = eventSeqId1)),
+              Some(eventSeqId1),
+            )
+          )
+        )
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyReader,
+        ).asFuture
+        result <- store.lookupNonUniqueContractKey(Set(alice), key, pageToken = None, limit = 1)
+      } yield {
+        store.contractStateCaches.keyState.get(key) shouldBe Some(
+          Last(cId_1, eventSeqId1, thereMightBeMore = true)
+        )
+        result.contracts.map(_.contractId) shouldBe Vector(cId_1)
+        result.nextPageToken shouldBe Some(eventSeqId1)
+      }
+    }
+
+    "cache Empty when the DB returns no contracts" in {
+      val key = globalKey("empty-key")
+      val spyReader =
+        spy(ConfigurableContractsReaderFixture(KeyLookupPageResult(Vector.empty, None)))
+      for {
+        store <- contractStore(
+          cachesSize = 10L,
+          loggerFactory = loggerFactory,
+          spyReader,
+        ).asFuture
+        result <- store.lookupNonUniqueContractKey(Set(alice), key, pageToken = None, limit = 1)
+      } yield {
+        store.contractStateCaches.keyState.get(key) shouldBe Some(ContractKeyStateValue.Empty)
+        result.contracts shouldBe empty
+        result.nextPageToken shouldBe None
+      }
+    }
+  }
+
+  "resolveFromCache" should {
+    val cid: ContractId = ContractId.V1(Hash.hashPrivateKey("resolveFromCacheTest"))
+
+    "return an empty page (no continuation) for Empty regardless of pageToken" in {
+      resolveFromCache(
+        value = ContractKeyStateValue.Empty,
+        pageToken = None,
+      ) shouldBe Some((Vector.empty, None))
+      resolveFromCache(
+        ContractKeyStateValue.Empty,
+        pageToken = Some(42L),
+      ) shouldBe Some((Vector.empty, None))
+      resolveFromCache(
+        ContractKeyStateValue.Empty,
+        pageToken = Some(Long.MaxValue),
+      ) shouldBe Some((Vector.empty, None))
+    }
+
+    "return the cached contract with no continuation for Last with no more contracts and no pageToken" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 5L, thereMightBeMore = false),
+        pageToken = None,
+      ) shouldBe Some((Vector(cid), None))
+    }
+
+    "return the cached contract and expose its seqId as the next pageToken for Last with potentially more contracts and no pageToken" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 5L, thereMightBeMore = true),
+        pageToken = None,
+      ) shouldBe Some((Vector(cid), Some(5L)))
+    }
+
+    "return the cached contract with no continuation when seqId < pageToken and thereMightBeMore = false" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 5L, thereMightBeMore = false),
+        pageToken = Some(10L),
+      ) shouldBe Some((Vector(cid), None))
+    }
+
+    "return the cached contract with its seqId as next pageToken when seqId < pageToken and thereMightBeMore = true" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 5L, thereMightBeMore = true),
+        pageToken = Some(10L),
+      ) shouldBe Some((Vector(cid), Some(5L)))
+    }
+
+    "return an empty page when seqId == pageToken and thereMightBeMore = false (already seen, nothing older)" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 5L, thereMightBeMore = false),
+        pageToken = Some(5L),
+      ) shouldBe Some((Vector.empty, None))
+    }
+
+    "fall through to DB (None) when seqId == pageToken and thereMightBeMore = true" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 5L, thereMightBeMore = true),
+        pageToken = Some(5L),
+      ) shouldBe None
+    }
+
+    "return an empty page when seqId > pageToken and thereMightBeMore = false" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 10L, thereMightBeMore = false),
+        pageToken = Some(5L),
+      ) shouldBe Some((Vector.empty, None))
+    }
+
+    "fall through to DB (None) when seqId > pageToken and thereMightBeMore = true" in {
+      resolveFromCache(
+        Last(contractId = cid, eventSequentialId = 10L, thereMightBeMore = true),
+        pageToken = Some(5L),
+      ) shouldBe None
+    }
   }
 
   "lookupActiveContract" should {
@@ -253,11 +712,10 @@ class MutableCacheBackedContractStoreSpec
         unassigned_firstLookup shouldBe Option.empty
         unassigned_secondLookup shouldBe Option.empty
 
-        verify(spyContractsReader).lookupKeyState(someKey, eventSeqId0)(loggingContext)
-        // looking up the key state will prefetch and use the contract state
-        verify(spyContractsReader).lookupContractState(cId_1, eventSeqId0)(loggingContext)
-        verify(spyContractsReader).lookupContractState(cId_1, eventSeqId0)(loggingContext)
-        verify(spyContractsReader).lookupKeyState(unassignedKey, eventSeqId1)(loggingContext)
+        verify(spyContractsReader).lookupNonUniqueKey(someKey, eventSeqId0, None, 1)(loggingContext)
+        verify(spyContractsReader).lookupNonUniqueKey(unassignedKey, eventSeqId1, None, 1)(
+          loggingContext
+        )
         verifyNoMoreInteractions(spyContractsReader)
         succeed
       }
@@ -390,14 +848,6 @@ object MutableCacheBackedContractStoreSpec {
     @volatile private var initialResultForCid6 =
       Future.successful(Option.empty[ExistingContractStatus])
 
-    override def lookupKeyState(key: Key, notEarlierThanEventSeqId: Long)(implicit
-        loggingContext: LoggingContextWithTrace
-    ): Future[LedgerDaoContractsReader.KeyState] = (key, notEarlierThanEventSeqId) match {
-      case (`someKey`, `eventSeqId0`) => Future.successful(KeyAssigned(cId_1))
-      case (`someKey`, `eventSeqId2`) => Future.successful(KeyAssigned(cId_2))
-      case _ => Future.successful(KeyUnassigned)
-    }
-
     override def lookupKeyStatesFromDb(keys: Seq[Key], notEarlierThanOffset: Long)(implicit
         loggingContext: LoggingContextWithTrace
     ): Future[Map[Key, Long]] = ??? // not used in this test
@@ -428,8 +878,77 @@ object MutableCacheBackedContractStoreSpec {
         limit: Int,
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[(Vector[ContractId], Option[Long])] =
-      ??? // not used in this test
+    ): Future[KeyLookupPageResult] =
+      (key, notEarlierThanEventSeqId) match {
+        case (`someKey`, `eventSeqId0`) =>
+          Future.successful(
+            KeyLookupPageResult(
+              Vector(ContractRef(contractId = cId_1, eventSequentialId = eventSeqId0)),
+              None,
+            )
+          )
+        case (`someKey`, `eventSeqId2`) =>
+          Future.successful(
+            KeyLookupPageResult(
+              Vector(ContractRef(contractId = cId_2, eventSequentialId = eventSeqId2)),
+              None,
+            )
+          )
+        case _ => Future.successful(KeyLookupPageResult(Vector.empty, None))
+      }
+
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is spied in tests
+  case class ContractsReaderFixtureWithNuck(nuckKey: Key) extends LedgerDaoContractsReader {
+    override def lookupKeyStatesFromDb(keys: Seq[Key], notEarlierThanOffset: Long)(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Future[Map[Key, Long]] = ??? // not used in this test
+
+    override def lookupContractState(contractId: ContractId, notEarlierThanEventSeqId: Long)(
+        implicit loggingContext: LoggingContextWithTrace
+    ): Future[Option[ExistingContractStatus]] = Future.successful(Some(ContractStateStatus.Active))
+
+    override def lookupNonUniqueKey(
+        key: Key,
+        validAtEventSeqId: Long,
+        nextPageToken: Option[Long],
+        limit: Int,
+    )(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Future[KeyLookupPageResult] =
+      if (key == nuckKey)
+        Future.successful(
+          KeyLookupPageResult(
+            Vector(ContractRef(contractId = cId_1, eventSequentialId = eventSeqId0)),
+            None,
+          )
+        )
+      else
+        Future.successful(KeyLookupPageResult(Vector.empty, None))
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is spied in tests
+  case class ConfigurableContractsReaderFixture(
+      dbResult: KeyLookupPageResult
+  ) extends LedgerDaoContractsReader {
+    override def lookupKeyStatesFromDb(keys: Seq[Key], notEarlierThanOffset: Long)(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Future[Map[Key, Long]] = ??? // not used in this test
+
+    override def lookupContractState(contractId: ContractId, notEarlierThanEventSeqId: Long)(
+        implicit loggingContext: LoggingContextWithTrace
+    ): Future[Option[ExistingContractStatus]] = Future.successful(Some(ContractStateStatus.Active))
+
+    override def lookupNonUniqueKey(
+        key: Key,
+        notEarlierThanEventSeqId: Long,
+        nextPageToken: Option[Long],
+        limit: Int,
+    )(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Future[KeyLookupPageResult] =
+      Future.successful(dbResult)
   }
 
   def inMemoryContractStore(

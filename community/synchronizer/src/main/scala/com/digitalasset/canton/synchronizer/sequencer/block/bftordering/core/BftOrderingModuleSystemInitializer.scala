@@ -52,8 +52,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   P2PNetworkInModule,
   P2PNetworkOutModule,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PruningModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.data.BftOrdererPruningSchedulerStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.{
+  PartitionManager,
+  PruningModule,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.{
   SystemInitializationResult,
@@ -309,6 +312,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             requestInspector,
             epochChecker,
             previousStoredBlock = outputPreviousStoredBlock,
+            stores.partitionManager.map(_._1),
           ),
         pruning = () =>
           new PruningModule(
@@ -316,6 +320,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             clock,
             loggerFactory,
             timeouts,
+            stores.partitionManager.map(_._2),
           ),
       )
     ).initialize(moduleSystem, createP2PNetworkManager)
@@ -513,6 +518,9 @@ object BftOrderingModuleSystemInitializer {
       epochStoreReader: EpochStoreReader[E],
       outputStore: OutputMetadataStore[E],
       pruningSchedulerStore: BftOrdererPruningSchedulerStore[E],
+      partitionManager: Option[
+        (PartitionManager.PartitionCreator[E], PartitionManager.PartitionPruner[E])
+      ],
   )
 
   /** In case of onboarding, the topology query timestamps look as follows:

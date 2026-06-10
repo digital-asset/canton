@@ -13,6 +13,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   SynchronizerIndex,
   Update,
 }
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizersLookupContainer
@@ -22,7 +23,8 @@ import com.digitalasset.canton.tracing.TraceContext
 class AcsCommitmentPublicationPostProcessor(
     connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
     override val loggerFactory: NamedLoggerFactory,
-) extends NamedLogging
+)(implicit closeContext: CloseContext)
+    extends NamedLogging
     with (Update => Unit) {
 
   def apply(update: Update): Unit = {
@@ -42,7 +44,8 @@ class AcsCommitmentPublicationPostProcessor(
           )(
             // The trace context is deliberately generated here instead of continuing the one for the Update
             // to unlink the asynchronous acs commitment processing from message processing trace.
-            TraceContext.createNew("publish_acs_commitment")
+            TraceContext.createNew("publish_acs_commitment"),
+            closeContext,
           )
         )
 
@@ -72,7 +75,8 @@ class AcsCommitmentPublicationPostProcessor(
             )(
               // The trace context is deliberately generated here instead of continuing the one for the Update
               // to unlink the asynchronous acs commitment processing from message processing trace.
-              TraceContext.createNew("publish_acs_commitment_upgrade_time")
+              TraceContext.createNew("publish_acs_commitment_upgrade_time"),
+              closeContext,
             )
           )
 

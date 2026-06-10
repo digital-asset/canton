@@ -1167,6 +1167,7 @@ class ConnectedSynchronizer(
           assignmentProcessor,
           badRootHashMessagesRequestProcessor,
           topologyProcessor,
+          topologyClient,
           topologyManager,
           ephemeral.timeTracker, // need to close time tracker before synchronizer handle, as it might otherwise send messages
           synchronizerHandle,

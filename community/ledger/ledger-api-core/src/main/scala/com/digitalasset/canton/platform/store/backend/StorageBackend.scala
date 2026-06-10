@@ -166,28 +166,26 @@ trait ParameterStorageBackend {
   /** Fetches the current state of the Active Contracts Head Snapshot (ACHS) from the database, or
     * None if it hasn't been initialized yet.
     */
-  def fetchACHSState(connection: Connection): Option[AchsState]
+  def fetchAchsState(connection: Connection): Option[AchsState]
 
   /** Inserts the state of the Active Contracts Head Snapshot (ACHS) in the database. Assumes that
     * the ACHS state is not yet present.
     */
-  def insertACHSState(achsState: AchsState)(connection: Connection): Unit
+  def insertAchsState(achsState: AchsState)(connection: Connection): Unit
 
   /** Updates the validAt of the state of the Active Contracts Head Snapshot (ACHS) in the database.
     * Throws an IllegalStateException if the update was not successful.
     */
-  def updateACHSValidAt(validAt: Long)(connection: Connection): Unit
+  def updateAchsValidAt(validAt: Long)(connection: Connection): Unit
 
   /** Updates the lastRemoved and the lastPopulated of the state of the Active Contracts Head
     * Snapshot (ACHS) in the database. Throws an IllegalStateException if the update was not
     * successful.
     */
-  def updateACHSLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
-
-  def clearACHSState(connection: Connection): Unit
+  def updateAchsLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
 
   /** Clears all ACHS data (both the state row and the filter data table). */
-  def clearAchsData(connection: Connection): Unit
+  def clearAchsStateAndData(connection: Connection): Unit
 }
 
 object ParameterStorageBackend {
@@ -232,6 +230,13 @@ object ParameterStorageBackend {
       param("validAt", _.validAt),
       param("lastRemoved", _.lastPointers.lastRemoved),
       param("lastPopulated", _.lastPointers.lastPopulated),
+    )
+  }
+
+  object AchsState {
+    val empty: AchsState = AchsState(
+      validAt = 0,
+      lastPointers = AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
     )
   }
 
@@ -318,37 +323,50 @@ trait ContractStorageBackend {
   /** Returns true if the batch lookup is implemented */
   def supportsBatchKeyStateLookups: Boolean
 
-  def contractKey(keyPageQuery: ContractStorageBackend.KeysPageQuery)(
+  def contractKey(keyPageQuery: ContractStorageBackend.KeyLookupPageQuery)(
       connection: Connection
-  ): ContractStorageBackend.KeysPageResult
+  ): ContractStorageBackend.KeyLookupPageResult
 
   def contractKeysPlain(
-      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      keyPageQueries: Seq[ContractStorageBackend.KeyLookupPageQuery],
       validAtEventSeqId: Long,
   )(
       connection: Connection
-  ): Seq[ContractStorageBackend.KeysPageResult]
+  ): Seq[ContractStorageBackend.KeyLookupPageResult]
 }
 
 object ContractStorageBackend {
-  final case class KeysPageQuery(
+  final case class KeyLookupPageQuery(
       key: Key,
       limit: Int,
       nextPageToken: Option[Long],
       validAtEventSeqId: Long,
   )
 
-  /** @param internalContractIds
-    *   in reverse event sequential ID order starting from nextPageToken (exclusive) or
-    *   validAtEventSeqId (inclusive) from the KeysPageQuery
-    * @param nextPageToken
-    *   If available, this is the event sequential ID of the last (earliest) contract If not
-    *   available, this is the last page from the page-sequence
+  /** @param internalContractId
+    *   the internal contract ID of an activation event
+    * @param eventSequentialId
+    *   the event sequential ID of the activation event
     */
-  final case class KeysPageResult(
-      internalContractIds: Vector[Long],
-      nextPageToken: Option[Long],
+  final case class ContractRef(
+      internalContractId: Long,
+      eventSequentialId: Long,
   )
+
+  /** @param contractRefs
+    *   contract activations in reverse event sequential ID order starting from nextPageToken
+    *   (exclusive) or validAtEventSeqId (inclusive) from the KeyLookupPageQuery
+    * @param nextPageToken
+    *   If available, this is the event sequential ID of the last (earliest) contract. If not
+    *   available, this is the last page from the page-sequence.
+    */
+  final case class KeyLookupPageResult(
+      contractRefs: Vector[ContractRef],
+      nextPageToken: Option[Long],
+  ) {
+    def internalContractIds: Vector[Long] = contractRefs.map(_.internalContractId)
+    def eventSequentialIds: Vector[Long] = contractRefs.map(_.eventSequentialId)
+  }
 }
 
 trait EventStorageBackend {
@@ -506,6 +524,12 @@ trait EventStorageBackend {
   def removeDeactivatedFromAchs(
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit
+
+  /** Removes entries from Active Contracts Head Snapshot above the specified event sequential ID
+    */
+  def deletePartiallyIngestedAchsData(fromExclusiveEventSeqId: Long)(
+      connection: Connection
+  ): Unit
 
   def lockExclusivelyPruningProcessingTable(connection: Connection): Unit
 

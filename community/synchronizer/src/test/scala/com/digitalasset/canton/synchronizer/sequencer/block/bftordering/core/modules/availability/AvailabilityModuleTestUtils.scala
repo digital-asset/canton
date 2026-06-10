@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule.quorum
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore.BatchIdAndEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.memory.GenericInMemoryAvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   BaseIgnoringUnitTestEnv,
@@ -105,6 +106,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
     anEpochNumber,
   )
   protected val ABatchId = BatchId.from(ABatch)
+  protected val ABatchTuple = BatchIdAndEpochNumber(ABatchId, anEpochNumber)
   protected val ANonEmptyBatchId = BatchId.from(ANonEmptyBatch)
   protected val ABatchIdWithInvalidTags = BatchId.from(ABatchWithInvalidTags)
   protected val OrderingTopologyNode0 = OrderingTopology.forTesting(Set(Node0))

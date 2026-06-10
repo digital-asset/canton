@@ -40,6 +40,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.snapshot.SequencerSnapshotAdditionalInfoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PartitionManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -125,6 +126,7 @@ class OutputModule[E <: Env[E]](
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // For testing
     // Passed from BftBlockOrderer to allow a near-0 latency `GetTime` implementation
     private[bftordering] val previousStoredBlock: PreviousStoredBlock = new PreviousStoredBlock,
+    partitionCreator: Option[(PartitionManager.PartitionCreator[E])] = None,
 )(implicit
     override val config: BftBlockOrdererConfig,
     synchronizerProtocolVersion: ProtocolVersion,
@@ -518,12 +520,30 @@ class OutputModule[E <: Env[E]](
             //  be unable to provide it to us.
             // We fetch the topology once the last block is stored as, based on the returned topology, the last block
             //  might need to be updated with pending topology changes.
-            if (orderedBlockData.orderedBlockForOutput.isLastInEpoch)
+            if (orderedBlockData.orderedBlockForOutput.isLastInEpoch) {
               fetchNewEpochTopologyIfNeeded(
                 orderedBlockData,
                 orderedBlockBftTime,
                 epochCouldAlterOrderingTopology,
               )
+
+              partitionCreator.foreach { creator =>
+                context.pipeToSelf(creator.createPartitionsIfNeeded(epochNumber)) {
+                  case Success(partitionsCreated) =>
+                    if (partitionsCreated > 0)
+                      logger.info(
+                        s"Created $partitionsCreated partitions at epoch $epochNumber and block $orderedBlockNumber"
+                      )
+                    None
+                  case Failure(exception) =>
+                    logger.error(
+                      s"Failed to create partitions at epoch $epochNumber and block $orderedBlockNumber",
+                      exception,
+                    )
+                    None
+                }
+              }
+            }
 
             // This is just a defensive check, as the block subscription will have the head correctly set to the
             //  initial height and will ignore blocks before that, but we cannot check nor enforce this assumption

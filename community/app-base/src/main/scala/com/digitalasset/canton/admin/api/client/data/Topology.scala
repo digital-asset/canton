@@ -6,6 +6,8 @@ package com.digitalasset.canton.admin.api.client.data
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantSynchronizers
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v30
@@ -87,4 +89,31 @@ object ListKeyOwnersResult {
       signingKeys <- value.signingKeys.traverse(SigningPublicKey.fromProtoV30)
       encryptionKeys <- value.encryptionKeys.traverse(EncryptionPublicKey.fromProtoV30)
     } yield ListKeyOwnersResult(synchronizerId, owner, signingKeys, encryptionKeys)
+}
+
+final case class SynchronizerPredecessor(
+    psid: PhysicalSynchronizerId,
+    upgradeTime: CantonTimestamp,
+    isLateUpgrade: Boolean,
+)
+
+object SynchronizerPredecessor {
+  def fromProtoV30(
+      proto: com.digitalasset.canton.admin.topology.v30.SynchronizerPredecessor
+  ): ParsingResult[SynchronizerPredecessor] =
+    for {
+      psid <- PhysicalSynchronizerId.fromProtoPrimitive(
+        proto.predecessorPhysicalId,
+        "predecessor_physical_id",
+      )
+      upgradeTime <- ProtoConverter.parseRequired(
+        CantonTimestamp.fromProtoTimestamp,
+        "upgrade_time",
+        proto.upgradeTime,
+      )
+    } yield SynchronizerPredecessor(
+      psid = psid,
+      upgradeTime = upgradeTime,
+      isLateUpgrade = proto.isLateUpgrade,
+    )
 }

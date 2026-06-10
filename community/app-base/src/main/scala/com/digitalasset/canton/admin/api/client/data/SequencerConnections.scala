@@ -119,9 +119,7 @@ final case class SequencerConnections(
       param("sequencer connection pool delays", _.sequencerConnectionPoolDelays),
     )
 
-  private[canton] def toInternal(implicit
-      consoleEnvironment: ConsoleEnvironment
-  ): SequencerConnectionsInternal =
+  private[canton] def toInternal: SequencerConnectionsInternal =
     SequencerConnectionsInternal
       .many(
         aliasToConnection.toSeq.map { case (_, connection) => connection.toInternal },
@@ -130,17 +128,15 @@ final case class SequencerConnections(
         submissionRequestAmplification.toInternal,
         sequencerConnectionPoolDelays.toInternal,
       )
-      .valueOr(consoleEnvironment.raiseError)
+      .valueOr(err => throw new IllegalArgumentException(s"Invariants not respected: $err"))
 }
 
 object SequencerConnections {
-  implicit private[data] def sequencerConnectionsToInternalTransformer(implicit
-      consoleEnvironment: ConsoleEnvironment
-  ): Transformer[SequencerConnections, SequencerConnectionsInternal] = _.toInternal
+  implicit private[data] def sequencerConnectionsToInternalTransformer
+      : Transformer[SequencerConnections, SequencerConnectionsInternal] = _.toInternal
 
-  implicit private[data] def sequencerConnectionsFromInternalTransformer(implicit
-      consoleEnvironment: ConsoleEnvironment
-  ): Transformer[SequencerConnectionsInternal, SequencerConnections] = fromInternal(_)
+  implicit private[data] def sequencerConnectionsFromInternalTransformer
+      : Transformer[SequencerConnectionsInternal, SequencerConnections] = fromInternal(_)
 
   def single(
       connection: SequencerConnection
@@ -183,14 +179,14 @@ object SequencerConnections {
     } yield sequencerConnections
   }
 
-  def tryMany(
+  def many(
       connections: Seq[SequencerConnection],
       sequencerTrustThreshold: PositiveInt,
       sequencerLivenessMargin: NonNegativeInt,
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
-  )(implicit consoleEnvironment: ConsoleEnvironment): SequencerConnections = {
-    val resultE = for {
+  ): Either[String, SequencerConnections] =
+    for {
       connectionsNE <- NonEmpty.from(connections).toRight("connections should not be empty")
       result <- many(
         connectionsNE,
@@ -201,14 +197,24 @@ object SequencerConnections {
       )
     } yield result
 
-    resultE.valueOr(consoleEnvironment.raiseError)
-  }
+  def tryMany(
+      connections: Seq[SequencerConnection],
+      sequencerTrustThreshold: PositiveInt,
+      sequencerLivenessMargin: NonNegativeInt,
+      submissionRequestAmplification: SubmissionRequestAmplification,
+      sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
+  )(implicit consoleEnvironment: ConsoleEnvironment): SequencerConnections =
+    many(
+      connections,
+      sequencerTrustThreshold,
+      sequencerLivenessMargin,
+      submissionRequestAmplification,
+      sequencerConnectionPoolDelays,
+    ).valueOr(consoleEnvironment.raiseError)
 
-  private[canton] def fromInternal(internal: SequencerConnectionsInternal)(implicit
-      consoleEnvironment: ConsoleEnvironment
-  ): SequencerConnections =
+  private[canton] def fromInternal(internal: SequencerConnectionsInternal): SequencerConnections =
     SequencerConnections
-      .tryMany(
+      .many(
         internal.aliasToConnection.toSeq.map { case (_, connection) =>
           SequencerConnection.fromInternal(connection)
         },
@@ -216,6 +222,11 @@ object SequencerConnections {
         internal.sequencerLivenessMargin,
         SubmissionRequestAmplification.fromInternal(internal.submissionRequestAmplification),
         SequencerConnectionPoolDelays.fromInternal(internal.sequencerConnectionPoolDelays),
+      )
+      .valueOr(err =>
+        throw new IllegalStateException(
+          s"Invariants of the sequencers connections don't hold: $err"
+        )
       )
 }
 

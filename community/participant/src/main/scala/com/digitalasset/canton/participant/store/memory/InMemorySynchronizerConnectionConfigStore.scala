@@ -326,8 +326,8 @@ class InMemorySynchronizerConnectionConfigStore(
   ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig] = {
     val data = Map(
       "insert data" -> insert.toString,
-      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
       "overridePredecessor" -> overridePredecessor.toString,
+      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
     )
     logger.info(s"Upserting connection config for synchronizer $psid, with data $data")
 
@@ -352,7 +352,7 @@ class InMemorySynchronizerConnectionConfigStore(
               .modify(value => overrideSequencerConnections.getOrElse(value))
               .focus(_.predecessor)
               .modify(value => overridePredecessor.fold(value)(Some(_)))
-              .focus(_.config.synchronizerId)
+              .focus(_.config.psid)
               .replace(Some(psid))
 
             configuredSynchronizerMap
@@ -470,7 +470,7 @@ class InMemorySynchronizerConnectionConfigStore(
         if (isChangeNeeded)
           EitherT.fromEither[FutureUnlessShutdown](performChange())
         else {
-          logger.debug(
+          logger.info(
             s"Physical synchronizer id for $alias is already set to $psid"
           )
           EitherTUtil.unitUS[Error]

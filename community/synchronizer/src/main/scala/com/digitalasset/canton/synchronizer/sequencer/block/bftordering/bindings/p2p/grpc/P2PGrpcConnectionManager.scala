@@ -329,8 +329,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
     }
   }
 
-  // Note that we loc gRPC channels with their native `toString` be able to correlated
-  //  with orphaned warnings from gRPC itself and avoid leaking channels.
+  // Note that we log gRPC channels with their native `toString` to be able to correlate them
+  //  with orphaned warnings (leaks) from gRPC itself.
 
   private def connect(
       p2pEndpoint: P2PEndpoint
@@ -422,7 +422,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
       .transformWith {
         case f @ Failure(exception) =>
           logger.info(
-            s"Failed adding the P2P endpoint $p2pEndpointId, shutting down the gRPC channel",
+            s"Failed adding the P2P endpoint $p2pEndpointId, transitioning to disconnected and " +
+              s"shutting down the gRPC channel $channel",
             exception,
           )
           val doShutdownChannel =
@@ -578,7 +579,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
       )
     } else {
       logger.info(
-        s"Shutting gRPC channel $channelId with authentication context $authenticationContextId " +
+        s"Shutting down gRPC channel $channelId with authentication context $authenticationContextId " +
           s"to connect to $p2pEndpointId due to connection status having moved away from 'Connecting'"
       )
       shutdownGrpcChannelIfNeeded(p2pEndpointId, channel, authenticationContextO).map(_ =>
@@ -1162,18 +1163,18 @@ private[bftordering] object P2PGrpcConnectionManager {
                 UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
               ) -> ResultWithLogs(
                 true, // Start connection
-                Level.DEBUG -> (() => s"Disconnected (not in state) -> $newState"),
+                Level.INFO -> (() => s"Disconnected (not in state) -> $newState"),
               )
 
             case Some(status) =>
               status match {
 
                 case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(ch, acO, cw) =>
-                  // Connect worker still active on a gRPC channel and asked to disconnect, cancel request
+                  // Connect worker still active on a gRPC channel and asked to disconnect, cancel disconnect request
                   val newState = P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, Some(cw))
                   State(
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
-                  ) -> ResultWithLogs(false, Level.DEBUG -> (() => s"$oldState -> $newState"))
+                  ) -> ResultWithLogs(false, Level.INFO -> (() => s"$oldState -> $newState"))
 
                 case oldState @ P2POutgoingConnectionStatus.Connecting =>
                   // Already connecting
@@ -1217,7 +1218,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     )
                   State(
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
-                  ) -> ResultWithLogs(true, Level.DEBUG -> (() => s"$oldState -> $newState)"))
+                  ) -> ResultWithLogs(true, Level.INFO -> (() => s"$oldState -> $newState)"))
 
                 case oldState: P2POutgoingConnectionStatus.ConnectedOnChannel =>
                   this -> ResultWithLogs(false, Level.WARN -> (() => s"$oldState (unchanged)"))
@@ -1233,7 +1234,7 @@ private[bftordering] object P2PGrpcConnectionManager {
               // gRPC channel shut down before recording the new channel
               this -> ResultWithLogs(
                 false,
-                Level.DEBUG -> (() => "Disconnected (not in state) (unchanged)"),
+                Level.DEBUG -> (() => "Disconnected (not in state, unchanged)"),
               )
           }
 
@@ -1267,9 +1268,12 @@ private[bftordering] object P2PGrpcConnectionManager {
                       )
                     State(
                       UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
-                    ) -> ResultWithLogs((), Level.DEBUG -> (() => s"$oldState -> $newState"))
+                    ) -> ResultWithLogs((), Level.INFO -> (() => s"$oldState -> $newState"))
                   } else {
-                    this -> ResultWithLogs((), Level.WARN -> (() => s"$oldState (unchanged)"))
+                    // A just-created channel could have been disconnected immediately due to connectivity issues,
+                    //  and a new connection attempt with a new worker could already be running when we
+                    //  try to progress the old one.
+                    this -> ResultWithLogs((), Level.DEBUG -> (() => s"$oldState (unchanged)"))
                   }
 
                 case oldState: P2POutgoingConnectionStatus.DisconnectingFromChannel =>
@@ -1323,7 +1327,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
                     ) -> ResultWithLogs(
                       false,
-                      Level.DEBUG -> (() => s"$oldState -> Disconnected (not in state)"),
+                      Level.INFO -> (() => s"$oldState -> Disconnected (not in state)"),
                     )
                   else
                     this -> ResultWithLogs(false, Level.WARN -> (() => s"$oldState (unchanged)"))
@@ -1346,7 +1350,7 @@ private[bftordering] object P2PGrpcConnectionManager {
             case None =>
               this -> ResultWithLogs(
                 false,
-                Level.WARN -> (() => "Disconnected (not in state) (unchanged)"),
+                Level.WARN -> (() => "Disconnected (not in state, unchanged)"),
               )
           }
 
@@ -1375,7 +1379,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     val newState = P2POutgoingConnectionStatus.ConnectedOnChannel(channel, acO)
                     State(
                       UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
-                    ) -> ResultWithLogs(None, Level.DEBUG -> (() => s"$oldState -> $newState"))
+                    ) -> ResultWithLogs(None, Level.INFO -> (() => s"$oldState -> $newState"))
                   } else {
                     this -> ResultWithLogs(
                       Some(channel -> acO),
@@ -1390,7 +1394,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
                     ) -> ResultWithLogs(
                       Some(channel -> acO),
-                      Level.DEBUG -> (() => s"$oldState -> Disconnected (not in state)"),
+                      Level.INFO -> (() => s"$oldState -> Disconnected (not in state)"),
                     )
                   else
                     this -> ResultWithLogs(
@@ -1412,7 +1416,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                 case oldState @ P2POutgoingConnectionStatus.Connecting =>
                   this -> ResultWithLogs(
                     Some(channel -> authenticationContextO),
-                    Level.WARN -> (() => s"oldState (unchanged)"),
+                    Level.WARN -> (() => s"$oldState (unchanged)"),
                   )
               }
 
@@ -1420,7 +1424,7 @@ private[bftordering] object P2PGrpcConnectionManager {
               // gRPC channel shut down before the running worker was recorded as assigned to it
               this -> ResultWithLogs(
                 Some(channel -> authenticationContextO),
-                Level.DEBUG -> (() => "Disconnected (not in state) (unchanged)"),
+                Level.DEBUG -> (() => "Disconnected (not in state, unchanged)"),
               )
           }
 
@@ -1451,7 +1455,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
                     ) -> ResultWithLogs(
                       true,
-                      Level.DEBUG -> (() =>
+                      Level.INFO -> (() =>
                         s"$oldState (this worker's channel) -> Disconnected (not in state)"
                       ),
                     )
@@ -1467,7 +1471,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
                     ) -> ResultWithLogs(
                       true,
-                      Level.DEBUG -> (() =>
+                      Level.INFO -> (() =>
                         s"$oldState (this worker's channel) -> Disconnected (not in state)"
                       ),
                     )
@@ -1487,7 +1491,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       )
                     ) -> ResultWithLogs(
                       true,
-                      Level.DEBUG -> (() =>
+                      Level.INFO -> (() =>
                         s"$oldState (this worker's channel) -> Disconnected (not in state)"
                       ),
                     )
@@ -1543,7 +1547,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                       UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId))
                     ) -> ResultWithLogs(
                       Right(ch -> acO),
-                      Level.DEBUG -> (() => s"$oldState -> Disconnected (not in state)"),
+                      Level.INFO -> (() => s"$oldState -> Disconnected (not in state)"),
                     )
                   }
 
@@ -1552,7 +1556,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                   State(UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId)))
                     -> ResultWithLogs(
                       Left(FutureUnlessShutdown.unit),
-                      Level.DEBUG -> (() => s"$oldState -> Disconnected (not in state)"),
+                      Level.INFO -> (() => s"$oldState -> Disconnected (not in state)"),
                     )
 
                 case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(
@@ -1566,7 +1570,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
                   ) -> ResultWithLogs(
                     Left(cw),
-                    Level.DEBUG -> (() => s"$oldState -> $newState"),
+                    Level.INFO -> (() => s"$oldState -> $newState"),
                   )
 
                 case oldState @ P2POutgoingConnectionStatus.ConnectingOnChannel(ch, acO, None) =>
@@ -1574,7 +1578,7 @@ private[bftordering] object P2PGrpcConnectionManager {
                   State(UnlessShutdown.Outcome(p2pConnectionsStatus.removed(p2pEndpointId)))
                     -> ResultWithLogs(
                       Right(ch -> acO),
-                      Level.DEBUG -> (() => s"$oldState -> Disconnected (not in state)"),
+                      Level.INFO -> (() => s"$oldState -> Disconnected (not in state)"),
                     )
 
                 case oldState @ P2POutgoingConnectionStatus.DisconnectingFromChannel(_, _, cw) =>

@@ -30,15 +30,7 @@ import com.daml.ledger.api.v2.package_service.{
   TopologyStateFilter,
 }
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
-import com.daml.ledger.test.java.vetting_alt.alt.AltT
-import com.daml.ledger.test.java.vetting_dep.dep.DepT
-import com.daml.ledger.test.java.vetting_main_1_0_0.main.{
-  MainT as MainT_1_0_0,
-  MainTSimple as MainTSimple_1_0_0,
-}
-import com.daml.ledger.test.java.vetting_main_2_0_0.main.MainT as MainT_2_0_0
-import com.daml.ledger.test.java.vetting_main_3_0_0.main.MainT as MainT_3_0_0
-import com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0.main.DifferentMainT as MainT_Split_Lineage_2_0_0
+import com.daml.ledger.test.java.vetting_main_1_0_0.main.MainTSimple as MainTSimple_1_0_0
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.{
@@ -73,14 +65,13 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
     VettingMainDar_Split_Lineage_2_0_0,
   }
 
-  private val vettingDepPkgId = Ref.PackageId.assertFromString(DepT.PACKAGE_ID)
-  private val vettingAltPkgId = Ref.PackageId.assertFromString(AltT.PACKAGE_ID)
-  private val vettingMainPkgIdV1 = Ref.PackageId.assertFromString(MainT_1_0_0.PACKAGE_ID)
-  private val vettingMainPkgIdV2 = Ref.PackageId.assertFromString(MainT_2_0_0.PACKAGE_ID)
-  private val vettingMainPkgIdV2SplitLineage =
-    Ref.PackageId.assertFromString(MainT_Split_Lineage_2_0_0.PACKAGE_ID)
+  private val vettingDepPkgId = testDars.VettingDepDar.packageId
+  private val vettingAltPkgId = testDars.VettingAltDar.packageId
+  private val vettingMainPkgIdV1 = testDars.VettingMainDar_1_0_0.packageId
+  private val vettingMainPkgIdV2 = testDars.VettingMainDar_2_0_0.packageId
+  private val vettingMainPkgIdV2SplitLineage = testDars.VettingMainDar_Split_Lineage_2_0_0.packageId
   private val vettingMainPkgIdV3UpgradeIncompatible =
-    Ref.PackageId.assertFromString(MainT_3_0_0.PACKAGE_ID)
+    testDars.VettingMainDar_3_0_0_Incompatible.packageId
 
   private val vettingDepName = "vetting-dep"
   private val vettingMainName = "vetting-main"

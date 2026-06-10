@@ -244,25 +244,22 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     override def postProcessingEnd(connection: Connection): Option[Offset] =
       throw new UnsupportedOperationException
 
-    override def fetchACHSState(connection: Connection): Option[ParameterStorageBackend.AchsState] =
+    override def fetchAchsState(connection: Connection): Option[ParameterStorageBackend.AchsState] =
       throw new UnsupportedOperationException
 
-    override def insertACHSState(achsState: ParameterStorageBackend.AchsState)(
+    override def insertAchsState(achsState: ParameterStorageBackend.AchsState)(
         connection: Connection
     ): Unit = throw new UnsupportedOperationException
 
-    override def updateACHSValidAt(validAt: Long)(connection: Connection): Unit =
+    override def updateAchsValidAt(validAt: Long)(connection: Connection): Unit =
       throw new UnsupportedOperationException
 
-    override def updateACHSLastPointers(lastPointers: AchsLastPointers)(
+    override def updateAchsLastPointers(lastPointers: AchsLastPointers)(
         connection: Connection
     ): Unit =
       throw new UnsupportedOperationException
 
-    override def clearACHSState(connection: Connection): Unit =
-      throw new UnsupportedOperationException
-
-    override def clearAchsData(connection: Connection): Unit =
+    override def clearAchsStateAndData(connection: Connection): Unit =
       throw new UnsupportedOperationException
 
   }
@@ -333,6 +330,7 @@ object SequentialWriteDaoSpec {
     reassignment_id = None,
     reassignment_counter = None,
     notPersistedContractId = hashCid("24"),
+    notPersistedContractKey = None,
   )
 
   private val someEventDeactivate = DbDto.EventDeactivate(
@@ -369,6 +367,7 @@ object SequentialWriteDaoSpec {
     reassignment_counter = None,
     assignment_exclusivity = None,
     target_synchronizer_id = None,
+    notPersistedContractKey = None,
   )
 
   val singlePartyFixture: Option[Update.TopologyTransactionEffective] =

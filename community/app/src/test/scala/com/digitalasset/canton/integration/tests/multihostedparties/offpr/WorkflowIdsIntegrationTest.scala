@@ -24,15 +24,15 @@ import java.util.Collections
   * custom-configured.
   */
 abstract class WorkflowIdsIntegrationTestBase(
-    alphaMultiSynchronizerSupport: Boolean = false
+    enableAllLedgerApiReassignments: Boolean = false
 ) extends OfflinePartyReplicationIntegrationTestBase {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition
       .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport)
-            .replace(alphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
+            .replace(enableAllLedgerApiReassignments)
         )
       )
 
@@ -113,7 +113,7 @@ abstract class WorkflowIdsIntegrationTestBase(
       party: Party,
       expectedCount: Int,
   ): Seq[NormalizedEvent] =
-    if (alphaMultiSynchronizerSupport) {
+    if (enableAllLedgerApiReassignments) {
       val reassignments = target.ledger_api.updates
         .reassignments(Set(party), completeAfter = PositiveInt.tryCreate(expectedCount))
       reassignments.map { r =>
@@ -158,4 +158,4 @@ abstract class WorkflowIdsIntegrationTestBase(
 final class WorkflowIdsIntegrationTest extends WorkflowIdsIntegrationTestBase
 
 final class WorkflowIdsReassignmentIntegrationTest
-    extends WorkflowIdsIntegrationTestBase(alphaMultiSynchronizerSupport = true)
+    extends WorkflowIdsIntegrationTestBase(enableAllLedgerApiReassignments = true)

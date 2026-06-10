@@ -33,8 +33,10 @@ object Pruning {
       retention: FiniteDuration,
       minBlocksToKeep: Int,
   ) extends Message
-  final case class SaveNewLowerBound(epoch: EpochNumber) extends Message
-  final case class PerformPruning(epoch: EpochNumber) extends Message
+  final case class SaveNewLowerBound(epoch: EpochNumber, latestOngoingEpoch: EpochNumber)
+      extends Message
+  final case class PerformPruning(epoch: EpochNumber, latestOngoingEpoch: EpochNumber)
+      extends Message
   final case class FailedDatabaseOperation(msg: String, exception: Throwable) extends Message
 
   final case class StartPruningSchedule(schedule: BftOrdererPruningSchedule) extends Message

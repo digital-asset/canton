@@ -15,9 +15,11 @@ import com.digitalasset.canton.version.{
   ProtocolVersionCompatibility,
   ReleaseVersion,
 }
+import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 
 import java.nio.file.{Files, Paths}
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 /** A collection of small utilities for tests that have no obvious home */
@@ -118,6 +120,8 @@ object ReleaseUtils {
     */
   private val releasesRetrieval: TrieMap[ReleaseVersion, Future[String]] = TrieMap.empty
   private val lock = new Mutex()
+
+  val DefaultReleaseDownloadTimeout: FiniteDuration = 5.minutes
 
   /** If the .tar.gz corresponding to release is not found locally, attempts to download it from
     * artifactory. Then, extract the .tar.gz file.

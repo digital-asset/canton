@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
+import com.daml.ledger.api.testtool.runner.AvailableTests
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -11,7 +12,7 @@ import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipant
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
+import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.*
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
@@ -29,7 +30,8 @@ import monocle.macros.syntax.lens.*
 import org.slf4j.event
 
 trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
-  protected def lfVersion: LanguageVersion = LanguageVersion.v2_2
+  protected def lfVersion: LanguageVersion =
+    AvailableTests.testsForProtocol(testedProtocolVersion).lfVersion
 
   protected def lapittVersion: LAPITTVersion = LAPITTVersion.Local
 
@@ -109,7 +111,7 @@ class LedgerApiConformanceMultiSynchronizerTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-      .addConfigTransforms(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
       .withSetup(setupLedgerApiConformanceEnvironment)
 
   // ensure ledger api conformance tests have less noisy neighbours
@@ -129,7 +131,7 @@ class LedgerApiConformanceMultiSynchronizerTest
     new UseLedgerApiTestTool(
       loggerFactory,
       connectedSynchronizersCount = connectedSynchronizersCount,
-      lfVersion = LanguageVersion.v2_2,
+      lfVersion = AvailableTests.testsForProtocol(testedProtocolVersion).lfVersion,
       version = LAPITTVersion.Local,
     )
   registerPlugin(new UsePostgres(loggerFactory))
@@ -193,6 +195,19 @@ object LedgerApiConformanceBase {
     "CommandServiceIT:CSRefuseBadParameter",
     // TODO(i31186): enable this once the issue is fixed
     "TransactionServiceVisibilityIT:TXLedgerEffectsHideCommandIdToNonSubmittingStakeholders",
+    // TODO(#33111): Test is disabled because it generates multiple command root nodes for the prepare endpoint, which is currently not supported
+    "PrefetchContractKeysIT:CSprefetchContractPrepareKeysMany",
+    // TODO(#33111): The tests below were written with UCK semantics in mind and are generally considered broken now.
+    //               They should be checked up one by one and either fixed or removed. For now, they are excluded to unblock general testing of LF 2.3
+    // tests with divulged/disclosed contracts fail on Canton as does scoping by maintainer unless we're on a UCK synchronizer (see below)
+    "ContractKeysIT:CKFetchOrLookup",
+    "ContractKeysIT:CKMaintainerScoped",
+    "ContractKeysIT:CKNoFetchUndisclosed",
+    // tests with unique contract key assumption fail as does RWArchiveVsFailedLookupByKey (finding a lookup failure after contract creation)
+    "RaceConditionIT:RWArchiveVsFailedLookupByKey",
+    "RaceConditionIT:WWArchiveVsNonTransientCreate",
+    "RaceConditionIT:WWDoubleNonTransientCreate",
+    "RaceConditionIT:RWTransientCreateVsNonTransientCreate",
   )
 }
 

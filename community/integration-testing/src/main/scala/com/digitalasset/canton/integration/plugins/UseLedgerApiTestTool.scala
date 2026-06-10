@@ -45,7 +45,7 @@ import scala.util.{Failure, Success, Try}
 class UseLedgerApiTestTool(
     protected val loggerFactory: NamedLoggerFactory,
     connectedSynchronizersCount: Int,
-    lfVersion: LanguageVersion = LanguageVersion.v2_2,
+    lfVersion: LanguageVersion = LanguageVersion.latestStableLfVersion,
     // If set, unique benchmark name for uploading benchmark results to datadog.
     benchmarkReportFileO: Option[String] = None,
     version: LAPITTVersion = LAPITTVersion.Latest,

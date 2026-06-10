@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -18,8 +19,8 @@ import java.time.Instant
 import scala.collection.immutable.Seq
 import scala.concurrent.Future
 
-class TransactionServiceCorrectnessIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class TransactionServiceCorrectnessIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "TXProcessInTwoChunks",

@@ -48,3 +48,6 @@ CODEOWNERS @DACH-NY/canton-change-owners
 
 # Inform CN on docker image changes but does not require their approval (canton-change-owners can approve)
 /docker/canton/images @DACH-NY/canton-network-upstream-notifications @DACH-NY/canton-change-owners
+
+# Docs should be updated in the cf-docs repo instead
+/docs-open @soren-da @rgugliel-da

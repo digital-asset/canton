@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
+import anorm.SqlParser.int
+import anorm.SqlStringInterpolation
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -22,6 +25,7 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.ParticipantSimpleStreamHelper
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetOutOfRange
+import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
   RepairContract,
@@ -776,11 +780,19 @@ abstract class LedgerPruningIntegrationTest
         contract.contractId
       }
       val cid1 = pushContract("0.01").coid
-      val _ = pushContract("0.02")
+      val cid2 = pushContract("0.02").coid
 
-      // eventually the first should be available in the contract store
+      // eventually the two contracts should be available in the contract store and in the event store too
       eventually() {
         contractFor(participant1, daId, cid1).isDefined shouldBe true
+        contractFor(participant1, daId, cid2).isDefined shouldBe true
+        participant1.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value.ledgerApiDbSupport.dbDispatcher
+          .executeSql(DatabaseMetrics.ForTesting("getting-all-activations-with-workflow-id"))(
+            SQL"""select count(*) c
+                  from lapi_events_activate_contract
+                  where workflow_id like 'failedAddContractOperation%'""".as(int("c").single)(_)
+          )(LoggingContextWithTrace.ForTesting)
+          .futureValue shouldBe 2
       }
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(

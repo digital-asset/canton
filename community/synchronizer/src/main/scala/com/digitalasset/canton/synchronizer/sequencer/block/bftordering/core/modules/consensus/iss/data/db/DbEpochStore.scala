@@ -55,7 +55,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Mi
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.ConsensusMessage as ProtoConsensusMessage
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{BatchAggregator, FutureUnlessShutdownUtil}
+import com.digitalasset.canton.util.BatchAggregator
 import com.digitalasset.canton.{ProtoDeserializationError, RichGeneratedMessage}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedResult, SetParameter}
@@ -201,22 +201,13 @@ class DbEpochStore(
   override def completeEpoch(
       epochNumber: EpochNumber
   )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[Unit] =
-    createFuture(completeEpochActionName(epochNumber), orderingStage = functionFullName) {
-      // asynchronously delete all in-progress messages after an epoch ends
-      FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-        storage
-          .update_(
-            sqlu"""delete from ord_pbft_messages_in_progress where epoch_number <= $epochNumber""",
-            functionFullName,
-          ),
-        failureMessage = "could not delete in-progress pbft messages from previous epoch(s)",
-      )
+    createFuture(completeEpochActionName(epochNumber), orderingStage = functionFullName)(
       // synchronously update the completed epoch to no longer be in progress
       storage.update_(
         sqlu"""update ord_epochs set in_progress = false where epoch_number = $epochNumber""",
         functionFullName,
       )
-    }
+    )
 
   override def latestEpoch(includeInProgress: Boolean)(implicit
       traceContext: TraceContext
@@ -249,7 +240,7 @@ class DbEpochStore(
               .query(
                 sql"""select message
                   from ord_pbft_messages_completed pbft_message
-                  where pbft_message.block_number = ${epoch.lastBlockNumber} and pbft_message.discriminator = $CommitMessageDiscriminator
+                  where pbft_message.epoch_number = ${epoch.number} and pbft_message.block_number = ${epoch.lastBlockNumber} and pbft_message.discriminator = $CommitMessageDiscriminator
                   order by pbft_message.from_sequencer_id
                """.as[SignedMessage[Commit]],
                 functionFullName,
@@ -336,7 +327,7 @@ class DbEpochStore(
         case _: Postgres =>
           """insert into ord_pbft_messages_in_progress(block_number, epoch_number, view_number, message, discriminator, from_sequencer_id)
                    values (?, ?, ?, ?, ?, ?)
-                   on conflict (block_number, view_number, discriminator, from_sequencer_id) do nothing
+                   on conflict (epoch_number, block_number, view_number, discriminator, from_sequencer_id) do nothing
                 """
         case _: H2 =>
           """merge into ord_pbft_messages_in_progress

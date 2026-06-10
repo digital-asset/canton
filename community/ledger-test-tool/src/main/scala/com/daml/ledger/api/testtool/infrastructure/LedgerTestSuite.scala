@@ -103,6 +103,9 @@ abstract class LedgerTestSuite
 
   implicit class IdentifierConverter(id: JavaIdentifier) {
     def toV1: Identifier = Identifier.fromJavaProto(id.toProto)
+
+    def withPackageId(packageId: Ref.PackageId) =
+      new JavaIdentifier(packageId, id.getModuleName(), id.getEntityName())
   }
 
   implicit def partyToString(party: Party): String = party.getValue
