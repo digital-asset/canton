@@ -94,6 +94,7 @@ class HttpExtensionServiceClient(
             Left("Bearer token file is empty")
         }
     }
+  private val maxResponseBodyBytes: Long = config.maxResponseBodyBytes.unwrap.toLong
 
   override def call(
       functionId: String,
@@ -171,7 +172,7 @@ class HttpExtensionServiceClient(
     val response = httpClient.sendAsync(
       request,
       HttpExtensionServiceClient.boundedUtf8BodyHandler(
-        HttpExtensionServiceClient.DefaultMaxResponseBodyBytes
+        maxResponseBodyBytes
       ),
     )
     FutureUtil
@@ -436,7 +437,6 @@ class HttpExtensionServiceClient(
 }
 
 object HttpExtensionServiceClient {
-  private[extension] val DefaultMaxResponseBodyBytes: Long = 20L * 1024L * 1024L
   private val MaxDiagnosticResponseBodyChars: Int = 1024
 
   private[extension] def isRetryableHttpStatus(statusCode: Int): Boolean =

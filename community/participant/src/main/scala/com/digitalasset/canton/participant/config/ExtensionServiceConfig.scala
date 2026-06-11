@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.config
 
 import com.daml.tls.TlsClientConfigOnlyTrustFile
-import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 
 /** Configuration for a single engine extension service.
@@ -35,6 +35,8 @@ import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveFinite
   * @param validateOnStartup
   *   Whether participant startup should validate that the configured extension service endpoint is
   *   reachable.
+  * @param maxResponseBodyBytes
+  *   Maximum HTTP response body size accepted from the extension service.
   */
 final case class ExtensionServiceConfig(
     address: String,
@@ -48,7 +50,12 @@ final case class ExtensionServiceConfig(
     retryInitialDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(1000),
     retryMaxDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(10),
     validateOnStartup: Boolean = false,
+    maxResponseBodyBytes: PositiveInt = ExtensionServiceConfig.DefaultMaxResponseBodyBytes,
 )
+
+object ExtensionServiceConfig {
+  val DefaultMaxResponseBodyBytes: PositiveInt = PositiveInt.tryCreate(20 * 1024 * 1024)
+}
 
 /** Authentication configuration for outbound calls to an extension service. */
 sealed trait ExtensionServiceAuthConfig extends Product with Serializable

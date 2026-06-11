@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.extension
 
 import com.daml.tls.{ServerAuthRequirementConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
-import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PemFile, PositiveFiniteDuration}
 import com.digitalasset.canton.http.HttpService
 import com.digitalasset.canton.lifecycle.{FlagCloseable, UnlessShutdown}
@@ -420,6 +420,50 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         attempts.get() shouldBe 1
       } finally {
         server.stop(0)
+      }
+    }
+
+    "reject oversized response bodies before interpreting the HTTP status" in {
+      Seq(200, 400, 500).foreach { statusCode =>
+        withClue(s"statusCode=$statusCode") {
+          val attempts = new AtomicInteger(0)
+          val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+          server.createContext(
+            "/",
+            exchange => {
+              attempts.incrementAndGet()
+              writeResponse(exchange, statusCode, "beef00")
+            },
+          )
+          server.start()
+
+          try {
+            val client = newClient(
+              configFor(server).copy(
+                maxRetries = NonNegativeInt.tryCreate(1),
+                retryInitialDelay = NonNegativeFiniteDuration.ofMillis(1),
+                retryMaxDelay = NonNegativeFiniteDuration.ofMillis(10),
+                maxResponseBodyBytes = PositiveInt.tryCreate(4),
+              )
+            )
+
+            val error = loggerFactory.suppressWarnings {
+              client
+                .call("function", "config-hash", "input", ExternalCallMode.Submission)
+                .failOnShutdown
+                .futureValue
+                .left
+                .value
+            }
+
+            error.statusCode shouldBe 413
+            error.message should include("exceeded maximum size of 4 bytes")
+            error.message should not include "beef00"
+            attempts.get() shouldBe 1
+          } finally {
+            server.stop(0)
+          }
+        }
       }
     }
 
