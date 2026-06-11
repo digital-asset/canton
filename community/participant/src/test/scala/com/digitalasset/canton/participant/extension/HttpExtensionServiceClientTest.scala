@@ -133,21 +133,29 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
 
       try {
         val client = newClient(configFor(server))
+        val oversizedValue = "a" * 1025
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("bad\u0100function", "config-hash", "input", ExternalCallMode.Submission)(
-              TraceContext.empty
-            )
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
+        Seq(
+          ("X-Daml-External-Function-Id", "bad\u0100function", "config-hash", "bad"),
+          ("X-Daml-External-Function-Id", oversizedValue, "config-hash", oversizedValue),
+          ("X-Daml-External-Config-Hash", "function", oversizedValue, oversizedValue),
+        ).foreach { case (headerName, functionId, configHash, redactedValue) =>
+          val error = loggerFactory.suppressWarnings {
+            client
+              .call(functionId, configHash, "input", ExternalCallMode.Submission)(
+                TraceContext.empty
+              )
+              .failOnShutdown
+              .futureValue
+              .left
+              .value
+          }
+
+          error.statusCode shouldBe 400
+          error.message should include(headerName)
+          error.message should not include redactedValue
         }
 
-        error.statusCode shouldBe 400
-        error.message should include("X-Daml-External-Function-Id")
-        error.message should not include "bad"
         requests.get shouldBe 0
       } finally {
         server.stop(0)

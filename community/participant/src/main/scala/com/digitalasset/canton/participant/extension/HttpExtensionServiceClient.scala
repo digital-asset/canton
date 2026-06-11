@@ -481,12 +481,17 @@ object HttpExtensionServiceClient {
   private def isInvalidBearerTokenChar(char: Char): Boolean =
     char < 33 || char > 126
 
+  private val MaxExternalCallHeaderValueLength = 1024
+
+  private def isInvalidExternalCallHeaderValue(value: String): Boolean =
+    value.length > MaxExternalCallHeaderValueLength || value.exists(isInvalidHeaderChar)
+
   private def invalidExternalCallHeader(
       functionId: String,
       configHash: String,
   ): Option[String] =
-    if (functionId.exists(isInvalidHeaderChar)) Some("X-Daml-External-Function-Id")
-    else if (configHash.exists(isInvalidHeaderChar)) Some("X-Daml-External-Config-Hash")
+    if (isInvalidExternalCallHeaderValue(functionId)) Some("X-Daml-External-Function-Id")
+    else if (isInvalidExternalCallHeaderValue(configHash)) Some("X-Daml-External-Config-Hash")
     else None
 
   private[extension] final case class ResponseBodyTooLarge(maxResponseBodyBytes: Long)
