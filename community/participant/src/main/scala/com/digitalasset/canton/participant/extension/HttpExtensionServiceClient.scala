@@ -409,13 +409,27 @@ class HttpExtensionServiceClient(
       resp: HttpResponse[String],
       requestId: String,
       defaultMessage: String,
-  ): ExtensionCallError =
+  )(implicit tc: TraceContext): ExtensionCallError = {
+    debugLogErrorBody(resp, requestId)
     ExtensionCallError(
       resp.statusCode(),
       defaultMessage,
       Some(requestId),
       retryable = HttpExtensionServiceClient.isRetryableHttpStatus(resp.statusCode()),
     )
+  }
+
+  private def debugLogErrorBody(resp: HttpResponse[String], requestId: String)(implicit
+      tc: TraceContext
+  ): Unit =
+    if (logger.underlying.isDebugEnabled) {
+      val statusCode = resp.statusCode()
+      HttpExtensionServiceClient.diagnosticResponseBody(resp.body()).foreach { body =>
+        logger.debug(
+          s"External call to extension '$extensionId' returned HTTP $statusCode with response body '$body': requestId=$requestId"
+        )
+      }
+    }
 
   private def shouldRetry(error: ExtensionCallError): Boolean =
     error.retryable
@@ -423,12 +437,23 @@ class HttpExtensionServiceClient(
 
 object HttpExtensionServiceClient {
   private[extension] val DefaultMaxResponseBodyBytes: Long = 20L * 1024L * 1024L
+  private val MaxDiagnosticResponseBodyChars: Int = 1024
 
   private[extension] def isRetryableHttpStatus(statusCode: Int): Boolean =
     statusCode match {
       case 408 | 412 | 429 | 500 | 502 | 503 | 504 => true
       case _ => false
     }
+
+  private[extension] def diagnosticResponseBody(body: String): Option[String] =
+    Option.when(body.nonEmpty) {
+      val prefix = body.take(MaxDiagnosticResponseBodyChars).map(sanitizeDiagnosticChar)
+      if (body.length > MaxDiagnosticResponseBodyChars) s"$prefix..."
+      else prefix
+    }
+
+  private def sanitizeDiagnosticChar(char: Char): Char =
+    if (Character.isISOControl(char)) ' ' else char
 
   private[extension] def serviceUri(
       scheme: String,
