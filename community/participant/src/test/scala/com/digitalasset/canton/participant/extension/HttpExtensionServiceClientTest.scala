@@ -423,17 +423,26 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       }
     }
 
-    "map request timeout failures to 408" in {
+    "map stalled response body timeout failures to 408" in {
       val releaseResponse = new CountDownLatch(1)
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
         exchange => {
-          releaseResponse.await(5, TimeUnit.SECONDS)
+          val body = "too late".getBytes(StandardCharsets.UTF_8)
+          exchange.sendResponseHeaders(200, body.length.toLong)
+          val responseBody = exchange.getResponseBody
           try {
-            writeResponse(exchange, 200, "too late")
+            responseBody.flush()
+            releaseResponse.await(5, TimeUnit.SECONDS)
+            responseBody.write(body)
           } catch {
             case _: IOException => ()
+          } finally {
+            try responseBody.close()
+            catch {
+              case _: IOException => ()
+            }
           }
         },
       )

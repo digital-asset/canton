@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.config.{
   ExtensionServiceConfig,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.util.{DelayUtil, FutureUtil}
 import com.digitalasset.canton.util.retry.{Backoff, NoExceptionRetryPolicy, Success}
 
 import java.io.ByteArrayOutputStream
@@ -29,7 +29,7 @@ import java.time.Duration
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import java.util.concurrent.{CompletableFuture, CompletionStage, Flow}
 import java.util.{List as JList, UUID}
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
 import scala.jdk.javaapi.FutureConverters
 import scala.util.control.NonFatal
@@ -156,21 +156,40 @@ class HttpExtensionServiceClient(
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[String, HttpResponse[String]]] =
     performUnlessClosing
       .synchronizeWithClosingF("extension-service-startup-validation") {
-        FutureUtil.unwrapCompletionException(
-          FutureConverters.asScala(
-            httpClient.sendAsync(
-              request,
-              HttpExtensionServiceClient.boundedUtf8BodyHandler(
-                HttpExtensionServiceClient.DefaultMaxResponseBodyBytes
-              ),
-            )
-          )
-        )
+        sendAsyncWithTimeout(request, config.requestTimeout.asJava)
       }
       .map(response => Right(response))
       .recover { case NonFatal(e) =>
         UnlessShutdown.Outcome(Left(validationExceptionMessage(e, requestId)))
       }
+
+  private def sendAsyncWithTimeout(
+      request: HttpRequest,
+      requestTimeout: Duration,
+  ): Future[HttpResponse[String]] = {
+    val result = Promise[HttpResponse[String]]()
+    val response = httpClient.sendAsync(
+      request,
+      HttpExtensionServiceClient.boundedUtf8BodyHandler(
+        HttpExtensionServiceClient.DefaultMaxResponseBodyBytes
+      ),
+    )
+    FutureUtil
+      .unwrapCompletionException(FutureConverters.asScala(response))
+      .onComplete(result.tryComplete)
+    DelayUtil
+      .delay(scala.concurrent.duration.Duration.fromNanos(requestTimeout.toNanos))
+      .foreach { _ =>
+        result
+          .tryFailure(
+            new java.net.http.HttpTimeoutException(s"Request timed out after $requestTimeout")
+          )
+          .discard
+        response.cancel(true).discard
+      }
+
+    result.future
+  }
 
   private def validationExceptionMessage(e: Throwable, requestId: String): String =
     e match {
@@ -287,16 +306,7 @@ class HttpExtensionServiceClient(
 
               performUnlessClosing
                 .synchronizeWithClosingF("external-call-http-request") {
-                  FutureUtil.unwrapCompletionException(
-                    FutureConverters.asScala(
-                      httpClient.sendAsync(
-                        req,
-                        HttpExtensionServiceClient.boundedUtf8BodyHandler(
-                          HttpExtensionServiceClient.DefaultMaxResponseBodyBytes
-                        ),
-                      )
-                    )
-                  )
+                  sendAsyncWithTimeout(req, requestTimeout)
                 }
                 .map(response => responseToResult(response, requestId))
                 .recover { case NonFatal(e) =>
