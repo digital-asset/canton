@@ -350,7 +350,7 @@ abstract class BaseSynchronizerRestartTest
 
 }
 
-class SequencerRestartTest
+final class SequencerRestartTest
     extends BaseSynchronizerRestartTest
     with FlagCloseable
     with HasCloseContext {

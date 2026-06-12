@@ -12,16 +12,21 @@ import com.daml.ledger.api.testtool.runner.AvailableTests
 object ExcludedTests {
 
   /** Suites excluded when running via JSON API (service-level unsupported operations) */
-  val jsonApiExcludedSuites: Seq[String] = Seq(
+  val jsonApiExcludedTests: Seq[String] = Seq(
     // health service not available in JSON API
     "HealthServiceIT",
     // updatePartyIdentityProviderId not available; getParties fails with empty party list
     "PartyManagementServiceIT",
     // PERMISSION_DENIED due to user-management auth mismatch in JSON API
     "UserManagementServiceIT",
+    // TODO(#33111): Testing wrongly typed contract keys is not supported for JSON API
+    "PrefetchContractKeysIT:CSprefetchContractKeysPrepareWronglyTyped",
+    "PrefetchContractKeysIT:CSprefetchContractKeysWronglyTyped",
+    // TODO(#27501): Remove the exclusion once JSON API supports Commands.prefetchContractKeys
+    "PrefetchContractKeysIT",
   )
 
-  lazy val grpcOnlyTestNames: Seq[String] = AvailableTests.v2_2
+  lazy val grpcOnlyTestNames: Seq[String] = AvailableTests.latestStableLf
     .defaultTests(timeoutScaleFactor = 1.0)
     .flatMap(_.tests)
     .collect {
@@ -35,5 +40,5 @@ object ExcludedTests {
   // On the other hand we might occasionally have tests only in previous release lines, that current main does not know about
   // So ideally we need to have exclude using current code plus test tools
   def findExcludedTests(useJson: Boolean): Seq[String] =
-    if (useJson) grpcOnlyTestNames ++ jsonApiExcludedSuites else Seq.empty
+    if (useJson) grpcOnlyTestNames ++ jsonApiExcludedTests else Seq.empty
 }

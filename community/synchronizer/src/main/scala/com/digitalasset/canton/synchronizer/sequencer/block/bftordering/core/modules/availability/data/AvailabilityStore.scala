@@ -19,7 +19,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 
-import AvailabilityStore.FetchBatchesResult
+import AvailabilityStore.{BatchIdAndEpochNumber, FetchBatchesResult}
 
 trait AvailabilityStore[E <: Env[E]] extends AutoCloseable {
   def addBatch(batchId: BatchId, batch: OrderingRequestBatch)(implicit
@@ -27,7 +27,7 @@ trait AvailabilityStore[E <: Env[E]] extends AutoCloseable {
   ): E#FutureUnlessShutdownT[Boolean]
   protected def addBatchActionName(batchId: BatchId): String = s"Add batch $batchId"
 
-  def fetchBatches(batches: Seq[BatchId])(implicit
+  def fetchBatches(batches: Seq[BatchIdAndEpochNumber])(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[FetchBatchesResult]
   protected val fetchBatchesActionName: String = "Fetch batches"
@@ -55,13 +55,15 @@ trait AvailabilityStore[E <: Env[E]] extends AutoCloseable {
 object AvailabilityStore {
   sealed trait FetchBatchesResult
 
-  final case class MissingBatches(batchIds: Set[BatchId]) extends FetchBatchesResult
+  final case class MissingBatches(batches: Set[BatchIdAndEpochNumber]) extends FetchBatchesResult
 
   final case class AllBatches(batches: Seq[(BatchId, OrderingRequestBatch)])
       extends FetchBatchesResult
 
   final case class NumberOfRecords(batches: Long)
   object NumberOfRecords { val empty = NumberOfRecords(0L) }
+
+  final case class BatchIdAndEpochNumber(batchId: BatchId, epochNumber: EpochNumber)
 
   def apply(
       batchAggregatorConfig: BatchAggregatorConfig,

@@ -846,8 +846,10 @@ class OutputModuleTest
       val blockSubscription =
         new PekkoBlockSubscription[FakePipeToSelfCellUnitTestEnv](
           initialHeight = BlockNumber.First,
+          fakeModuleExpectingSilence,
           timeouts,
           loggerFactory,
+          SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
         )(fail(_))
       val output =
         createOutputModule[FakePipeToSelfCellUnitTestEnv](store = store)(
@@ -913,8 +915,10 @@ class OutputModuleTest
       val blockSubscription =
         new PekkoBlockSubscription[FakePipeToSelfCellUnitTestEnv](
           secondBlockNumber,
+          fakeModuleExpectingSilence,
           timeouts,
           loggerFactory,
+          SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
         )(fail(_))
       val output = createOutputModule[FakePipeToSelfCellUnitTestEnv](
         store = store,
@@ -952,7 +956,13 @@ class OutputModuleTest
 
       val initialHeight = BlockNumber(2L)
       val blockSubscription =
-        new PekkoBlockSubscription[IgnoringUnitTestEnv](initialHeight, timeouts, loggerFactory)(
+        new PekkoBlockSubscription[IgnoringUnitTestEnv](
+          initialHeight,
+          fakeModuleExpectingSilence,
+          timeouts,
+          loggerFactory,
+          SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+        )(
           fail(_)
         )
       val output = createOutputModule[IgnoringUnitTestEnv](
@@ -1413,6 +1423,46 @@ class OutputModuleTest
       }
     }
 
+    "not send topology to consensus" when {
+      "the orderer is paused" in {
+        implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+        val topologyProviderSpy =
+          spy(new FakeOrderingTopologyProvider[ProgrammableUnitTestEnv])
+        val consensusRef = mock[ModuleRef[Consensus.Message[ProgrammableUnitTestEnv]]]
+        val blockSubscription = new EmptyBlockSubscription()
+        val output = createOutputModule[ProgrammableUnitTestEnv](
+          initialOrderingTopology = OrderingTopology.forTesting(Set(BftNodeId("node1"))),
+          orderingTopologyProvider = topologyProviderSpy,
+          consensusRef = consensusRef,
+          requestInspector = new FixedResultRequestInspector(false),
+        )(blockSubscription)
+
+        val blockData =
+          completeBlockData(BlockNumber.First, commitTimestamp = aTimestamp, lastInEpoch = true)
+
+        output.receive(Output.Start)
+        blockSubscription.setSequencerCoreIsSlow(true)
+        output.receive(Output.BlockDataFetched(blockData))
+
+        context.runPipedMessagesUntilNoMorePiped(output)
+
+        verifyZeroInteractions(consensusRef)
+
+        blockSubscription.setSequencerCoreIsSlow(false)
+        output.receive(Output.ProcessNewEpochTopologyMessagesIfPossible)
+
+        verify(consensusRef, times(1)).asyncSend(
+          Consensus.NewEpochTopology(
+            secondEpochNumber,
+            Membership.forTesting(BftNodeId("node1")),
+            any[CryptoProvider[ProgrammableUnitTestEnv]],
+          )
+        )(any[TraceContext], any[MetricsContext])
+        succeed
+      }
+    }
+
     "get sequencer snapshot additional info" in {
       implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
         new ProgrammableUnitTestContext(resolveAwaits = true)
@@ -1795,7 +1845,8 @@ object OutputModuleTest {
   ) extends EmptyBlockSubscription {
 
     override def receiveBlock(block: BlockFormat.Block)(implicit
-        traceContext: TraceContext
+        traceContext: TraceContext,
+        metricsContext: MetricsContext,
     ): Unit =
       subscriptionBlocks.enqueue(Traced(block))
   }

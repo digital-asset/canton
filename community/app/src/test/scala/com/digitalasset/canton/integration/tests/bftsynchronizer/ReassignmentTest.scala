@@ -28,7 +28,7 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P5S4M4_Manual
-      .addConfigTransform(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
 
   protected val sequencerGroups: MultiSynchronizer = MultiSynchronizer(
     Seq(

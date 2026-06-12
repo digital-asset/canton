@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -eo pipefail
+
+# The buf command will return a non-zero exist code if differences are found so do not exit on failure
+set -o pipefail
 
 SNAPSHOT_TO_COMPARE=$1
 

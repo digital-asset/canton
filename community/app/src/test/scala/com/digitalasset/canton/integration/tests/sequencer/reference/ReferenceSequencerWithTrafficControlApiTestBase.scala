@@ -1320,6 +1320,7 @@ object ReferenceSequencerWithTrafficControlApiTestBase {
         trafficConfig,
         sequencerMemberRateLimiterFactory,
         eventCostCalculator,
+        lsuSequencingBounds = None,
       ) {
     private val isWriteSideEnforcementDisabled = new AtomicBoolean(false)
     private val readValidationResponse = new AtomicReference[

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.createdEvents
@@ -22,14 +23,16 @@ import com.daml.ledger.api.v2.transaction_filter.{
 }
 import com.daml.ledger.api.v2.value.Identifier
 import com.daml.ledger.javaapi
+import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.daml.ledger.javaapi.data.{DamlRecord, ExerciseByKeyCommand}
 import com.daml.ledger.test.java.keys.test.WithKey
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 
 import java.util.List as JList
 
-final class ContractKeysExplicitDisclosureIT extends LedgerTestSuite {
+final class ContractKeysExplicitDisclosureIT(testDars: TestDars) extends LedgerTestSuite {
   import ContractKeysExplicitDisclosureIT.*
+  import testDars.contractKeysCompanionImplicits.*
 
   test(
     "EDExerciseByKeyDisclosedContract",
@@ -125,13 +128,15 @@ object ContractKeysExplicitDisclosureIT {
       owner: Party,
       party: Party,
       withKeyDisclosedContract: Option[DisclosedContract],
+  )(implicit
+      companion: ContractCompanion[WithKey.Contract, WithKey.ContractId, WithKey]
   ): SubmitAndWaitRequest =
     ledger
       .submitAndWaitRequest(
         party,
         JList.of(
           new ExerciseByKeyCommand(
-            WithKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+            companion.TEMPLATE_ID_WITH_PACKAGE_ID,
             owner,
             "WithKey_NoOp",
             new DamlRecord(

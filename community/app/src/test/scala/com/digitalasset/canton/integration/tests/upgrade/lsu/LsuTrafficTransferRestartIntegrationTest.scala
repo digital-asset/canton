@@ -25,7 +25,8 @@ import java.time.Duration
   *
   * Topology:
   *   - P1 connected to S1
-  *   - P2 connected to S2
+  *   - P2 connected to S1 and S2 with threshold=2
+  *   - P3 connected to S2, offboarded before the LSU
   *
   * This test:
   *   - Generates purchased/consumed traffic by performing some activity on the predecessor
@@ -74,7 +75,9 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
           changeDynamicSynchronizerParameters = false,
         )
         participant1.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer1))
-        participant2.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer2))
+        participant2.synchronizers.connect_by_config(
+          synchronizerConnectionConfig(Seq(sequencer1, sequencer2), 2)
+        )
         participant3.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer2))
 
         participants.all.dars.upload(CantonExamplesPath)
@@ -143,6 +146,11 @@ final class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Traffi
       }
     }
 
+    /*
+      Regression test.
+      This ensures that checks about the number of traffic entries are consistent
+      between export and import.
+     */
     "offboard participant3" in { implicit env =>
       import env.*
 

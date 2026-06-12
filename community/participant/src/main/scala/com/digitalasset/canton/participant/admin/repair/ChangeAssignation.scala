@@ -418,6 +418,7 @@ private final class ChangeAssignation(
             assignmentExclusivity = None,
             reassignmentCounter = reassign.counter.v,
             nodeId = idx,
+            keyOpt = reassign.contract.contractKeyWithMaintainers,
           )
         }),
         repairCounter = sourceTor.repairCounter,

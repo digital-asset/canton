@@ -47,7 +47,7 @@ abstract class UpdateServiceIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S2M1_S2M1
       .addConfigTransforms(
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*

@@ -26,6 +26,12 @@ object Output {
 
   final case object Start extends Message[Nothing]
 
+  /** Sent by the sequencer core subscription to the output module when processing may be able to be
+    * resumed after a sequencer core slowdown in consuming blocks, allowing to always and timely
+    * resume ordering.
+    */
+  final case object ProcessNewEpochTopologyMessagesIfPossible extends Message[Nothing]
+
   // From local consensus
   final case class BlockOrdered(orderedBlockForOutput: OrderedBlockForOutput)
       extends Message[Nothing]

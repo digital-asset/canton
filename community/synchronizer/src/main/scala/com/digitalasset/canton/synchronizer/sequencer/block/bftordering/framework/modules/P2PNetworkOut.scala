@@ -30,7 +30,7 @@ object P2PNetworkOut {
 
   sealed trait Network extends Message
   object Network {
-    final case class Connected(p2pEndpointId: P2PEndpoint.Id) extends Network
+    final case class Connected(maybeP2pEndpointId: Option[P2PEndpoint.Id]) extends Network
     final case class Disconnected(p2pEndpointId: P2PEndpoint.Id) extends Network
     final case class Authenticated(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])
         extends Network

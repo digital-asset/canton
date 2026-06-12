@@ -1013,11 +1013,12 @@ class CantonSyncService(
                 SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId(psid)
               )
             _ <- Either.cond(
-              configForPsid.status != Active,
+              configForPsid.status == Active,
               (),
               SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(
                 configForPsid.config.synchronizerAlias,
                 Seq(configForPsid.configuredPsid -> configForPsid.status),
+                operation = "modify synchronizer",
               ),
             )
           } yield KnownPhysicalSynchronizerId(psid)
@@ -1353,12 +1354,14 @@ class CantonSyncService(
   def getSynchronizerConnectionConfigForAlias(
       synchronizerAlias: SynchronizerAlias,
       onlyActive: Boolean,
+      operation: String,
   )(implicit
       traceContext: TraceContext
   ): Either[SyncServiceError, StoredSynchronizerConnectionConfig] =
     connectionsManager.getSynchronizerConnectionConfigForAlias(
       synchronizerAlias,
       onlyActive = onlyActive,
+      operation = operation,
     )
 
   /** Perform a handshake with the given synchronizer. Does only the static (protocol version,

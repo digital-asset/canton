@@ -13,6 +13,7 @@ import org.flywaydb.core.api.configuration.FluentConfiguration
 
 import javax.sql.DataSource
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters.*
 
 class FlywayMigrations(
     jdbcUrl: String,
@@ -34,6 +35,11 @@ class FlywayMigrations(
       .configure()
       .locations((locations(dbType))*)
       .dataSource(dataSource)
+      .placeholders(
+        Map(
+          "initialBftOrdererTablesPartitionSize" -> "1500"
+        ).asJava
+      )
 
   private def checkFlywayHistory(flyway: Flyway): Unit = {
     val currentVersion = Option(flyway.info().current())

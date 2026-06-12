@@ -3,15 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import cats.syntax.parallel.*
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.{Active, Archived}
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
-  KeyAssigned,
-  KeyState,
-  KeyUnassigned,
-}
-import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.platform.store.interfaces.{ContractRef, KeyLookupPageResult}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueText}
@@ -111,21 +104,25 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
       ledgerEndAtCreate <- ledgerDao.lookupLedgerEnd()
       _ <- store(txArchiveContract(alice, (contractId, None)))
       ledgerEndAfterArchive <- ledgerDao.lookupLedgerEnd()
-      queryAfterCreate <- contractsReader.lookupKeyState(
+      KeyLookupPageResult(queryAfterCreateIds, _) <- contractsReader.lookupNonUniqueKey(
         key.globalKey,
         ledgerEndAtCreate.value.lastEventSeqId,
+        nextPageToken = None,
+        limit = 1,
       )
-      queryAfterArchive <- contractsReader.lookupKeyState(
+      KeyLookupPageResult(queryAfterArchiveIds, _) <- contractsReader.lookupNonUniqueKey(
         key.globalKey,
         ledgerEndAfterArchive.value.lastEventSeqId,
+        nextPageToken = None,
+        limit = 1,
       )
     } yield {
-      queryAfterCreate match {
-        case LedgerDaoContractsReader.KeyAssigned(fetchedContractId) =>
+      queryAfterCreateIds.headOption match {
+        case Some(ContractRef(fetchedContractId, _)) =>
           fetchedContractId shouldBe contractId
-        case _ => fail("Key should be assigned")
+        case None => fail("Key should be assigned")
       }
-      queryAfterArchive shouldBe LedgerDaoContractsReader.KeyUnassigned
+      queryAfterArchiveIds shouldBe empty
     }
   }
 
@@ -154,10 +151,12 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
     def fetchAll(
         keys: Seq[GlobalKey],
         eventSeqId: Long,
-    ): Future[(Map[GlobalKey, KeyState], Map[GlobalKey, KeyState])] = {
-      val oneByOneF = keys
-        .parTraverse { key =>
-          contractsReader.lookupKeyState(key, eventSeqId).map(state => key -> state)
+    ): Future[(Map[GlobalKey, Option[ContractId]], Map[GlobalKey, Option[ContractId]])] = {
+      val oneByOneF = Future
+        .traverse(keys) { key =>
+          contractsReader
+            .lookupNonUniqueKey(key, eventSeqId, nextPageToken = None, limit = 1)
+            .map(result => key -> result.contracts.headOption.map(_.contractId))
         }
         .map(_.toMap)
       val togetherF = contractsReader
@@ -170,8 +169,6 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
                 key -> resultsWithInternalContractIds
                   .get(key)
                   .flatMap(internalToContractIds.get)
-                  .map(KeyAssigned.apply)
-                  .getOrElse(KeyUnassigned)
               }.toMap
             )
         )
@@ -182,15 +179,12 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
     }
 
     def verifyMatch(
-        results: (Map[GlobalKey, KeyState], Map[GlobalKey, KeyState]),
+        results: (Map[GlobalKey, Option[ContractId]], Map[GlobalKey, Option[ContractId]]),
         expected: Map[GlobalKeyWithMaintainers, Option[ContractId]],
     ) = {
       val (oneByOne, together) = results
       oneByOne shouldBe together
-      oneByOne.map {
-        case (k, KeyAssigned(cid)) => (k, Some(cid))
-        case (k, KeyUnassigned) => (k, None)
-      } shouldBe expected.map { case (k, v) => (k.globalKey, v) }
+      oneByOne shouldBe expected.map { case (k, v) => (k.globalKey, v) }
     }
 
     for {

@@ -65,11 +65,12 @@ sealed trait JsonApiConformanceBase
       concurrentTestRuns = 4, // these tests run together with all other tests
       connectedSynchronizers = env.environment.config.sequencers.size,
     )
-    val availableTests = AvailableTests.v2_2
+
+    val availableTests = AvailableTests.testsForProtocol(testedProtocolVersion)
 
     val envArgInclusion = envArgTestsInclusion.getOrElse(TestInclusions.AllIncluded)
     val testsToRun =
-      new ConfiguredTests(availableTests, config).defaultTests.view
+      ConfiguredTests(availableTests, config).defaultTests.view
         .flatMap(_.tests)
         .filter { testCase =>
           testCase.limitation match {
@@ -182,7 +183,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
       .prependConfigTransform(ConfigTransforms.enableHttpLedgerApi)
-      .addConfigTransforms(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
@@ -191,8 +192,10 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
-  override protected def exclusions: Set[String] = LedgerApiConformanceBase.excludedTests.toSet ++
-    ExcludedTests.jsonApiExcludedSuites.toSet
+  override protected def exclusions: Set[String] =
+    ExcludedTests.jsonApiExcludedTests.toSet ++ LedgerApiConformanceBase.excludedTests(
+      testedProtocolVersion
+    )
 
   protected def testCaseName = "pass the Ledger API conformance tests"
 }

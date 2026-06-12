@@ -8,7 +8,12 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.Clock
@@ -45,7 +50,8 @@ class PeriodicAcknowledgements(
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
-    with HasFlushFuture {
+    with HasFlushFuture
+    with HasCloseContext {
 
   private val priorAckRef = new AtomicReference[Option[CantonTimestamp]](None)
 
@@ -94,7 +100,7 @@ class PeriodicAcknowledgements(
     withNewTraceContext("schedule_next_periodic_ack") { implicit traceContext =>
       synchronizeWithClosingSync(functionFullName)(
         clock
-          .scheduleAfter(
+          .scheduleAfterCancelledOnShutdown(
             { _ =>
               // Schedule the next update as soon as possible after the interval has passed;
               //  for static time tests, this runs synchronously when the time is advanced
@@ -102,6 +108,7 @@ class PeriodicAcknowledgements(
               scheduleNextUpdate() // Async-trampolined
               update()
             },
+            "periodick-ack",
             interval.toJava,
           )
           .discard[FutureUnlessShutdown[Unit]]

@@ -13,7 +13,8 @@ import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 
 import java.util.UUID
 
-class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissionNuckSetupTest {
+final class InteractiveSubmissionVersioningIntegrationTest
+    extends InteractiveSubmissionNuckSetupTest {
   "Interactive submission" should {
 
     val supportedHashingSchemeVersions: Set[HashingSchemeVersion] =

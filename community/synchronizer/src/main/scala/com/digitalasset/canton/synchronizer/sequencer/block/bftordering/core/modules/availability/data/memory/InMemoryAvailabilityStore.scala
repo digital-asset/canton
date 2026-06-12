@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoFutureUnlessShutdown,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore.BatchIdAndEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
@@ -36,16 +37,18 @@ abstract class GenericInMemoryAvailabilityStore[E <: Env[E]](
     }
 
   override def fetchBatches(
-      batches: Seq[BatchId]
+      batches: Seq[BatchIdAndEpochNumber]
   )(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[AvailabilityStore.FetchBatchesResult] =
     createFuture(fetchBatchesActionName) { () =>
       Try {
         val keys = allKnownBatchesById.keySet
-        val missing = batches.filterNot(batchId => keys.contains(batchId))
+        val missing = batches.filterNot(batch => keys.contains(batch.batchId))
         if (missing.isEmpty) {
-          AvailabilityStore.AllBatches(batches.map(id => id -> allKnownBatchesById(id)))
+          AvailabilityStore.AllBatches(
+            batches.map(batch => batch.batchId -> allKnownBatchesById(batch.batchId))
+          )
         } else {
           AvailabilityStore.MissingBatches(missing.toSet)
         }

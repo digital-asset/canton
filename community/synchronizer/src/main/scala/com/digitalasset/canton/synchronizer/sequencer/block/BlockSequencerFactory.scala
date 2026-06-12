@@ -176,6 +176,7 @@ abstract class BlockSequencerFactory(
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       protocolVersion: ProtocolVersion,
       trafficConfig: SequencerTrafficConfig,
+      lsuSequencingBounds: Option[LsuSequencingBounds],
   ): SequencerRateLimitManager =
     new SequencerRateLimitManagerImpl(
       trafficPurchasedManager,
@@ -188,6 +189,7 @@ abstract class BlockSequencerFactory(
       protocolVersion,
       trafficConfig,
       eventCostCalculator = new EventCostCalculator(loggerFactory),
+      lsuSequencingBounds = lsuSequencingBounds,
     )
 
   @nowarn("cat=deprecation")
@@ -250,6 +252,7 @@ abstract class BlockSequencerFactory(
         synchronizerSyncCryptoApi,
         protocolVersion,
         trafficConfig,
+        lsuSequencingBounds,
       )
       _ <- balanceManager.initialize
     } yield {

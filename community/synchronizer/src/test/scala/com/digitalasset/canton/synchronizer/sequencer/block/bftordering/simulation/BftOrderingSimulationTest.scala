@@ -181,6 +181,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                 epochStoreReader = simulationEpochStore,
                 new SimulationOutputMetadataStore(fail(_)),
                 new SimulationBftOrdererPruningSchedulerStore(),
+                None,
               )
             },
             initializeImmediately = true,
@@ -218,6 +219,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                   epochStoreReader = simulationEpochStore,
                   new SimulationOutputMetadataStore(fail(_)),
                   new SimulationBftOrdererPruningSchedulerStore(),
+                  None,
                 )
               }
               endpointToTestBftNodeId(endpoint) -> SimulationTestNodeData(

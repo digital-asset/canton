@@ -19,7 +19,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 4,
+  "id": 8,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -52,7 +52,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "ISS proceeds in epochs with stable leader assignments to \"segments\" and stable topology (i.e., sequencers can be added and remove only at epoch boundaries and leaders are reassigned to segments also at epoch boundaries). This is the current epoch.",
       "fieldConfig": {
@@ -76,7 +76,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
+        "h": 11,
         "w": 5,
         "x": 0,
         "y": 1
@@ -104,13 +104,14 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_consensus_epoch{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_consensus_epoch{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -121,7 +122,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Size in blocks of the current epoch.",
       "fieldConfig": {
@@ -145,7 +146,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
+        "h": 11,
         "w": 3,
         "x": 5,
         "y": 1
@@ -173,13 +174,14 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_consensus_epoch_length{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_consensus_epoch_length{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -190,7 +192,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Number of active validators",
       "fieldConfig": {
@@ -214,7 +216,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
+        "h": 11,
         "w": 3,
         "x": 8,
         "y": 1
@@ -242,13 +244,14 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_topology_validators{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_topology_validators{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -259,7 +262,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Number of connected and authenticated P2P peers for the selected sequencer. It should be > 2/3 at all times.",
       "fieldConfig": {
@@ -292,8 +295,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 3,
+        "h": 11,
+        "w": 13,
         "x": 11,
         "y": 1
       },
@@ -317,180 +320,41 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "daml_sequencer_bftordering_p2p_connections_connected{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_p2p_connections_connected{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "instant": true,
           "interval": "30s",
           "intervalFactor": 1,
-          "legendFormat": "Connected",
+          "legendFormat": "Connected ({{node}})",
           "range": false,
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "daml_sequencer_bftordering_p2p_connections_authenticated{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_p2p_connections_authenticated{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "hide": false,
           "instant": true,
-          "legendFormat": "Authenticated",
+          "legendFormat": "Authenticated ({{node}})",
           "range": false,
           "refId": "B"
         }
       ],
-      "title": "Peers",
+      "title": "Peers count",
       "type": "stat"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
-      },
-      "description": "Latest block number ordered and available for the read path. When there is no traffic, a block can be empty.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "locale"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 5,
-        "x": 14,
-        "y": 1
-      },
-      "hideTimeOverride": false,
-      "id": 4,
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "9.5.12",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "expr": "sum(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"})",
-          "format": "time_series",
-          "hide": false,
-          "instant": true,
-          "interval": "30s",
-          "intervalFactor": 1,
-          "refId": "A"
-        }
-      ],
-      "title": "Total Output Blocks",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$DS"
-      },
-      "description": "Total number of requests ordered and output to the read path.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "locale"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 5,
-        "x": 19,
-        "y": 1
-      },
-      "hideTimeOverride": false,
-      "id": 40,
-      "maxDataPoints": 100,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "9.5.12",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "expr": "histogram_sum(sum(daml_sequencer_bftordering_output_block_size_requests{reporting_sequencer=\"$reporting_sequencer\"}))",
-          "format": "time_series",
-          "interval": "30s",
-          "intervalFactor": 1,
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Total Output Requests",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "",
       "fieldConfig": {
@@ -514,10 +378,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 8,
+        "h": 12,
+        "w": 3,
         "x": 0,
-        "y": 4
+        "y": 12
       },
       "hideTimeOverride": false,
       "id": 99,
@@ -542,13 +406,14 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_topology_max_tolerated_faults{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_topology_max_tolerated_faults{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -559,7 +424,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "The size of a weak quorum or non-faulty nodes, needed e.g. to disseminate batches",
       "fieldConfig": {
@@ -583,10 +448,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 8,
-        "y": 4
+        "h": 12,
+        "w": 3,
+        "x": 3,
+        "y": 12
       },
       "hideTimeOverride": false,
       "id": 100,
@@ -611,13 +476,14 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_topology_weak_quorum{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_topology_weak_quorum{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -628,7 +494,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "The size of a strong quorum, needed for ordering consensus",
       "fieldConfig": {
@@ -652,10 +518,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 16,
-        "y": 4
+        "h": 12,
+        "w": 3,
+        "x": 6,
+        "y": 12
       },
       "hideTimeOverride": false,
       "id": 101,
@@ -680,13 +546,14 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_topology_strong_quorum{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_topology_strong_quorum{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -697,7 +564,148 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS}"
+        "uid": "prometheus"
+      },
+      "description": "Latest block number ordered and available for the read path. When there is no traffic, a block can be empty.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 7,
+        "x": 9,
+        "y": 12
+      },
+      "hideTimeOverride": false,
+      "id": 4,
+      "maxDataPoints": 100,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "9.5.12",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by(namespace, job, node) (daml_sequencer_bftordering_global_ordered_blocks_total{namespace=~\"$namespace\", job=~\"$job\", node=~\"$node\"})",
+          "format": "time_series",
+          "hide": false,
+          "instant": true,
+          "interval": "30s",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Output Blocks",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Total number of requests ordered and output to the read path.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "locale"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "hideTimeOverride": false,
+      "id": 40,
+      "maxDataPoints": 100,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "9.5.12",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (namespace,job,node) (histogram_sum(daml_sequencer_bftordering_output_block_size_requests{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}))",
+          "format": "time_series",
+          "interval": "30s",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total Output Requests",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "description": "Sequencers that are part of the BFT ordering topology",
       "fieldConfig": {
@@ -730,7 +738,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "none"
+              "mode": "normal"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -763,10 +771,10 @@
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 6,
+        "h": 21,
+        "w": 12,
         "x": 0,
-        "y": 7
+        "y": 24
       },
       "id": 91,
       "options": {
@@ -785,11 +793,12 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_topology_topology_member{reporting_sequencer=\"$reporting_sequencer\"}",
-          "legendFormat": "{{sequencer_id}}",
+          "expr": "daml_sequencer_bftordering_topology_topology_member{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "interval": "",
+          "legendFormat": " (reporter: {{node}}) {{sequencer_id}}",
           "range": true,
           "refId": "A"
         }
@@ -800,7 +809,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS}"
+        "uid": "prometheus"
       },
       "description": "Sequencers that are allowed to propose blocks for ordering",
       "fieldConfig": {
@@ -832,7 +841,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "none"
+              "mode": "normal"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -869,10 +878,10 @@
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 6,
-        "y": 7
+        "h": 21,
+        "w": 12,
+        "x": 12,
+        "y": 24
       },
       "id": 95,
       "options": {
@@ -891,11 +900,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_topology_topology_leader{reporting_sequencer=\"$reporting_sequencer\"}",
-          "legendFormat": "{{sequencer_id}}",
+          "expr": "daml_sequencer_bftordering_topology_topology_leader{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "legendFormat": " (reporter: {{node}}) {{sequencer_id}}",
           "range": true,
           "refId": "A"
         }
@@ -906,7 +915,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS}"
+        "uid": "prometheus"
       },
       "description": "",
       "fieldConfig": {
@@ -938,7 +947,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "none"
+              "mode": "normal"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -959,26 +968,13 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Value"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "hidden"
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
-        "h": 7,
-        "w": 4,
-        "x": 12,
-        "y": 7
+        "h": 21,
+        "w": 8,
+        "x": 0,
+        "y": 45
       },
       "id": 96,
       "options": {
@@ -997,11 +993,14 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_p2p_authenticated_endpoint{reporting_sequencer=\"$reporting_sequencer\"}",
-          "legendFormat": "{{endpoint}}",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_p2p_authenticated_endpoint{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "format": "time_series",
+          "instant": false,
+          "legendFormat": "(reporter: {{node}}) {{endpoint}}",
           "range": true,
           "refId": "A"
         }
@@ -1012,7 +1011,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS}"
+        "uid": "prometheus"
       },
       "description": "",
       "fieldConfig": {
@@ -1081,10 +1080,10 @@
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 4,
-        "x": 16,
-        "y": 7
+        "h": 21,
+        "w": 8,
+        "x": 8,
+        "y": 45
       },
       "id": 97,
       "options": {
@@ -1103,11 +1102,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_p2p_unauthenticated_endpoint{reporting_sequencer=\"$reporting_sequencer\"}",
-          "legendFormat": "{{endpoint}}",
+          "expr": "daml_sequencer_bftordering_p2p_unauthenticated_endpoint{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "legendFormat": "(reporter: {{node}}) {{endpoint}}",
           "range": true,
           "refId": "A"
         }
@@ -1118,7 +1117,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS}"
+        "uid": "prometheus"
       },
       "description": "",
       "fieldConfig": {
@@ -1187,10 +1186,10 @@
         ]
       },
       "gridPos": {
-        "h": 7,
-        "w": 4,
-        "x": 20,
-        "y": 7
+        "h": 21,
+        "w": 8,
+        "x": 16,
+        "y": 45
       },
       "id": 98,
       "options": {
@@ -1209,11 +1208,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS}"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_p2p_disconnected_endpoint{reporting_sequencer=\"$reporting_sequencer\"}",
-          "legendFormat": "{{endpoint}}",
+          "expr": "daml_sequencer_bftordering_p2p_disconnected_endpoint{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "legendFormat": "(reporter: {{node}}) {{endpoint}}",
           "range": true,
           "refId": "A"
         }
@@ -1283,7 +1282,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 14
+        "y": 66
       },
       "id": 87,
       "options": {
@@ -1291,10 +1290,10 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -1305,8 +1304,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile($percentile, sum(rate(daml_sequencer_bftordering_global_requests_ordering_latency_duration_seconds{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval])))",
-          "legendFormat": "__auto",
+          "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_global_requests_ordering_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -1317,7 +1316,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Rate of blocks ordered and output to the read path.",
       "fieldConfig": {
@@ -1374,7 +1373,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 14
+        "y": 66
       },
       "hideTimeOverride": false,
       "id": 68,
@@ -1390,7 +1389,7 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -1398,12 +1397,12 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
+          "expr": "sum by (namespace, job, node, is_block_empty) (irate(daml_sequencer_bftordering_global_ordered_blocks_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
           "format": "time_series",
           "fullMetaSearch": false,
           "hide": false,
@@ -1411,22 +1410,10 @@
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "All blocks -",
+          "legendFormat": "{{node}} (empty: {{is_block_empty}})",
           "range": true,
           "refId": "A",
           "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "expr": "irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
-          "hide": false,
-          "legendFormat": "Empty blocks -",
-          "range": true,
-          "refId": "B"
         }
       ],
       "title": "Throughput - blocks/s",
@@ -1435,7 +1422,217 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
+      },
+      "description": "Delay introduced by the sequencer core being too slow consuming blocks from ordering, in milliseconds",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 73
+      },
+      "hideTimeOverride": false,
+      "id": 102,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_sequencer_core_backpressure_current_delay_millis{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}\n",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Sequencer core backpressure delay (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Size of the buffer in the subscription from the orderer to the sequencer core, in blocks",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 73
+      },
+      "hideTimeOverride": false,
+      "id": 103,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max",
+            "min",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_sequencer_core_subscription_buffer_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}\n",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Sequencer core buffer size (blocks #)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "description": "Number of requests per consensus block.",
       "fieldConfig": {
@@ -1525,7 +1722,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 21
+        "y": 80
       },
       "hideTimeOverride": false,
       "id": 49,
@@ -1549,15 +1746,15 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_sum(sum by(mode) (rate(daml_sequencer_bftordering_output_block_size_requests{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))) / histogram_count(sum by(mode) (rate(daml_sequencer_bftordering_output_block_size_requests{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval])))",
+          "expr": "histogram_sum(sum by(namespace, job, node, mode) (rate(daml_sequencer_bftordering_output_block_size_requests{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))) / histogram_count(sum by(namespace, job, node, mode) (rate(daml_sequencer_bftordering_output_block_size_requests{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
           "format": "time_series",
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{mode}} - Requests",
+          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],
@@ -1567,7 +1764,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Rate of requests ordered and output to the read path.",
       "fieldConfig": {
@@ -1657,7 +1854,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 21
+        "y": 80
       },
       "hideTimeOverride": false,
       "id": 88,
@@ -1681,15 +1878,15 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(irate(daml_sequencer_bftordering_global_ordered_requests_total{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
+          "expr": "sum by (namespace, job, node) (irate(daml_sequencer_bftordering_global_ordered_requests_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
           "format": "time_series",
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "Requests/s -",
+          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],
@@ -1699,7 +1896,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Number of batches (proofs of availability) per consensus block. Note that < 1 average batch per block likely means empty blocks are being created.",
       "fieldConfig": {
@@ -1789,7 +1986,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 87
       },
       "hideTimeOverride": false,
       "id": 89,
@@ -1813,15 +2010,15 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_sum(sum by(mode) (rate(daml_sequencer_bftordering_output_block_size_batches{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))) / histogram_count(sum by(mode) (rate(daml_sequencer_bftordering_output_block_size_batches{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval])))",
+          "expr": "histogram_sum(sum by(namespace, job, node, mode) (rate(daml_sequencer_bftordering_output_block_size_batches{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))) / histogram_count(sum by(namespace, job, node, mode) (rate(daml_sequencer_bftordering_output_block_size_batches{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
           "format": "time_series",
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{mode}} - Requests",
+          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],
@@ -1831,7 +2028,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Rate of batches (proofs of availability) ordered and output to the read path.",
       "fieldConfig": {
@@ -1921,7 +2118,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 28
+        "y": 87
       },
       "hideTimeOverride": false,
       "id": 90,
@@ -1945,15 +2142,15 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "irate(daml_sequencer_bftordering_global_ordered_batches_total{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval])",
+          "expr": "irate(daml_sequencer_bftordering_global_ordered_batches_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
           "format": "time_series",
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "Batches/s",
+          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],
@@ -1963,7 +2160,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS}"
+        "uid": "prometheus"
       },
       "description": "How many epochs a sequencer is blacklisted",
       "fieldConfig": {
@@ -2006,7 +2203,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2021,7 +2219,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 35
+        "y": 94
       },
       "id": 86,
       "options": {
@@ -2032,7 +2230,7 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -2040,11 +2238,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS}"
+            "uid": "prometheus"
           },
           "editorMode": "builder",
-          "expr": "daml_sequencer_bftordering_blacklist_sequencer{reporting_sequencer=\"$reporting_sequencer\"}",
-          "legendFormat": "{{blacklist_sequencer}}",
+          "expr": "daml_sequencer_bftordering_blacklist_sequencer{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "legendFormat": "(reporter: {{node}}) {{blacklist_sequencer}}",
           "range": true,
           "refId": "A"
         }
@@ -2055,7 +2253,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Wall-clock time of the ordered block being provided to the sequencer minus BFT time of the block",
       "fieldConfig": {
@@ -2109,7 +2307,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2125,7 +2324,7 @@
         "h": 7,
         "w": 6,
         "x": 12,
-        "y": 35
+        "y": 94
       },
       "hideTimeOverride": true,
       "id": 85,
@@ -2137,7 +2336,7 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -2145,16 +2344,16 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "histogram_quantile($percentile, sum by(mode) (rate(daml_sequencer_bftordering_output_block_delay_duration_seconds{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval])))",
+          "expr": "histogram_quantile($percentile, sum by(namespace, job, node, mode) (rate(daml_sequencer_bftordering_output_block_delay_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
           "format": "time_series",
           "instant": false,
           "interval": "30s",
           "intervalFactor": 1,
-          "legendFormat": "{{mode}} - Block Delay",
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -2165,7 +2364,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Size of the payloads of blocks ordered and output to the read path.",
       "fieldConfig": {
@@ -2211,7 +2410,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2258,7 +2458,7 @@
         "h": 7,
         "w": 6,
         "x": 18,
-        "y": 35
+        "y": 94
       },
       "hideTimeOverride": false,
       "id": 50,
@@ -2281,15 +2481,15 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile($percentile, sum by(mode) (rate(daml_sequencer_bftordering_output_block_size_bytes{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval])))",
+          "expr": "histogram_quantile($percentile, sum by(namespace, job, node, mode) (rate(daml_sequencer_bftordering_output_block_size_bytes{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
           "format": "time_series",
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{ mode }} - Block Size",
+          "legendFormat": "(reporter: {{node}}) {{mode}}",
           "refId": "A"
         }
       ],
@@ -2299,7 +2499,126 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
+      },
+      "description": "Percentage of votes received by the currently selected sequencer at every major PBFT stage. Should be > 2/3 at all times, else a leader change (\"view change\" in PBFT parlance) occurs automatically.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "links": [],
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 67
+              },
+              {
+                "color": "#6ED0E0",
+                "value": 80
+              },
+              {
+                "color": "dark-green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 28,
+        "w": 24,
+        "x": 0,
+        "y": 101
+      },
+      "hideTimeOverride": false,
+      "id": 73,
+      "options": {
+        "alignValue": "left",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "showValue": "always",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.1.5",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_consensus_prepare_votes_percent{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "(reporter: {{node}}) Prepare {{voting_sequencer}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "daml_sequencer_bftordering_consensus_commit_votes_percent{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "format": "time_series",
+          "hide": false,
+          "legendFormat": "(reporter: {{node}}) Commit {{voting_sequencer}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "PBFT Voting Power %",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Prepare SEQ::(.*)::.*",
+            "renamePattern": "Prepare $1"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "Commit SEQ::(.*)::.*",
+            "renamePattern": "Commit $1"
+          }
+        }
+      ],
+      "type": "state-timeline"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "description": "Count of non-compliant and possibly byzantine protocol behaviors detected by the currently selected sequencer.",
       "fieldConfig": {
@@ -2345,7 +2664,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -2388,7 +2708,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 42
+        "y": 129
       },
       "hideTimeOverride": false,
       "id": 74,
@@ -2400,7 +2720,7 @@
           ],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
           "mode": "multi",
@@ -2411,15 +2731,15 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(irate(daml_sequencer_bftordering_security_noncompliant_behavior_total[$__rate_interval]))",
+          "expr": "sum by (namespace, job, node) (irate(daml_sequencer_bftordering_security_noncompliant_behavior_total{namespace=~\"$namespace\", job=~\"$job\", node=~\"$node\"}[$__rate_interval]))",
           "format": "time_series",
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "__auto",
+          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],
@@ -2429,462 +2749,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
-      },
-      "description": "Percentage of votes received by the currently selected sequencer at every major PBFT stage. Should be > 2/3 at all times, else a leader change (\"view change\" in PBFT parlance) occurs automatically.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "fillOpacity": 70,
-            "lineWidth": 0,
-            "spanNulls": false
-          },
-          "decimals": 0,
-          "links": [],
-          "mappings": [],
-          "max": 1,
-          "min": 0,
-          "thresholds": {
-            "mode": "percentage",
-            "steps": [
-              {
-                "color": "red"
-              },
-              {
-                "color": "#EAB839",
-                "value": 67
-              },
-              {
-                "color": "#6ED0E0",
-                "value": 80
-              },
-              {
-                "color": "dark-green",
-                "value": 100
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 42
-      },
-      "hideTimeOverride": false,
-      "id": 73,
-      "options": {
-        "alignValue": "left",
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "mergeValues": true,
-        "rowHeight": 0.9,
-        "showValue": "always",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "10.1.5",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "daml_sequencer_bftordering_consensus_prepare_votes_percent{reporting_sequencer=\"$reporting_sequencer\"}",
-          "format": "time_series",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 1,
-          "legendFormat": "Prepare {{voting_sequencer}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "expr": "daml_sequencer_bftordering_consensus_commit_votes_percent{reporting_sequencer=\"$reporting_sequencer\"}",
-          "format": "time_series",
-          "hide": false,
-          "legendFormat": "Commit {{voting_sequencer}}",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "PBFT Voting Power %",
-      "transformations": [
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "Prepare SEQ::(.*)::.*",
-            "renamePattern": "Prepare $1"
-          }
-        },
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "Commit SEQ::(.*)::.*",
-            "renamePattern": "Commit $1"
-          }
-        }
-      ],
-      "type": "state-timeline"
-    },
-    {
-      "collapsed": false,
-      "datasource": {
-        "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 49
-      },
-      "id": 55,
-      "panels": [],
-      "repeat": "instance",
-      "repeatDirection": "h",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "refId": "A"
-        }
-      ],
-      "title": "Sequencer overview: $reporting_sequencer",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$DS"
-      },
-      "description": "Number of proposals requested by consensus.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#7eb26d"
-              },
-              {
-                "color": "#ef843c",
-                "value": 10
-              },
-              {
-                "color": "#e24d42",
-                "value": 20
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 50
-      },
-      "hideTimeOverride": true,
-      "id": 77,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "9.5.12",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "daml_sequencer_bftordering_availability_requested_proposals{reporting_sequencer=\"$reporting_sequencer\"}",
-          "format": "time_series",
-          "instant": false,
-          "interval": "30s",
-          "intervalFactor": 1,
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Block proposals requested by consensus",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$DS"
-      },
-      "description": "Number of batches requested by the availability module and not yet provided.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#7eb26d"
-              },
-              {
-                "color": "#ef843c",
-                "value": 10
-              },
-              {
-                "color": "#e24d42",
-                "value": 20
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 50
-      },
-      "hideTimeOverride": true,
-      "id": 76,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "9.5.12",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "daml_sequencer_bftordering_mempool_requested_batches{reporting_sequencer=\"$reporting_sequencer\"}",
-          "format": "time_series",
-          "instant": false,
-          "interval": "30s",
-          "intervalFactor": 1,
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Outstanding batch requests",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$DS"
-      },
-      "description": "Number of batches that are being disseminated.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#7eb26d"
-              },
-              {
-                "color": "#ef843c",
-                "value": 10
-              },
-              {
-                "color": "#e24d42",
-                "value": 20
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 57
-      },
-      "hideTimeOverride": true,
-      "id": 82,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "9.5.12",
-      "targets": [
-        {
-          "datasource": {
-            "uid": "$DS"
-          },
-          "editorMode": "code",
-          "exemplar": false,
-          "expr": "daml_sequencer_bftordering_availability_disseminating_batches{reporting_sequencer=\"$reporting_sequencer\", ready_for_consensus=~\"false|true\"}",
-          "format": "time_series",
-          "instant": false,
-          "interval": "30s",
-          "intervalFactor": 1,
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Batches being disseminated",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$DS"
       },
       "description": "Size of the incoming requests buffer (\"mempool\") for the selected sequencer. Its maximum size in bytes and requests count can be currently set via static configuration.",
       "fieldConfig": {
@@ -2928,7 +2793,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#7eb26d"
+                "color": "#7eb26d",
+                "value": null
               },
               {
                 "color": "#ef843c",
@@ -2948,7 +2814,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 129
       },
       "hideTimeOverride": true,
       "id": 78,
@@ -2957,10 +2823,10 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -2968,15 +2834,16 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "daml_sequencer_bftordering_ingress_requests_queued{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_ingress_requests_queued{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "instant": false,
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -2987,9 +2854,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
-      "description": "Number of requests in batches that are being disseminated.",
+      "description": "Number of proposals requested by consensus.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3031,7 +2898,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#7eb26d"
+                "color": "#7eb26d",
+                "value": null
               },
               {
                 "color": "#ef843c",
@@ -3051,19 +2919,19 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 64
+        "y": 136
       },
       "hideTimeOverride": true,
-      "id": 83,
+      "id": 77,
       "options": {
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -3071,26 +2939,27 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "daml_sequencer_bftordering_availability_disseminating_requests{reporting_sequencer=\"$reporting_sequencer\", ready_for_consensus=~\"false|true\"}",
+          "expr": "daml_sequencer_bftordering_availability_requested_proposals{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "instant": false,
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Requests being disseminated",
+      "title": "Block proposals requested by consensus",
       "type": "timeseries"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Number of batches requested to be proposed in consensus.",
       "fieldConfig": {
@@ -3134,7 +3003,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#7eb26d"
+                "color": "#7eb26d",
+                "value": null
               },
               {
                 "color": "#ef843c",
@@ -3154,7 +3024,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 64
+        "y": 136
       },
       "hideTimeOverride": true,
       "id": 79,
@@ -3163,10 +3033,10 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -3174,15 +3044,16 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "daml_sequencer_bftordering_availability_requested_batches{reporting_sequencer=\"$reporting_sequencer\"}",
+          "expr": "daml_sequencer_bftordering_availability_requested_batches{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
           "format": "time_series",
           "instant": false,
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -3193,9 +3064,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
-      "description": "Number of payload bytes in requests within batches that are being disseminated.",
+      "description": "Number of batches that are being disseminated.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3237,7 +3108,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#7eb26d"
+                "color": "#7eb26d",
+                "value": null
               },
               {
                 "color": "#ef843c",
@@ -3249,7 +3121,7 @@
               }
             ]
           },
-          "unit": "bytes"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -3257,19 +3129,19 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 71
+        "y": 143
       },
       "hideTimeOverride": true,
-      "id": 84,
+      "id": 82,
       "options": {
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       },
@@ -3277,26 +3149,265 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "daml_sequencer_bftordering_availability_disseminating_bytes{reporting_sequencer=\"$reporting_sequencer\", ready_for_consensus=~\"false|true\"}",
+          "expr": "daml_sequencer_bftordering_availability_disseminating_batches{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ready_for_consensus=~\"false|true\"}",
           "format": "time_series",
           "instant": false,
           "interval": "30s",
           "intervalFactor": 1,
+          "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Bytes being disseminated",
+      "title": "Batches being disseminated",
       "type": "timeseries"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
+      },
+      "description": "Number of batches requested by the availability module and not yet provided.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#7eb26d",
+                "value": null
+              },
+              {
+                "color": "#ef843c",
+                "value": 10
+              },
+              {
+                "color": "#e24d42",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "hideTimeOverride": true,
+      "id": 76,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "9.5.12",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_mempool_requested_batches{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
+          "format": "time_series",
+          "instant": false,
+          "interval": "30s",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outstanding batch requests",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 150
+      },
+      "id": 55,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A"
+        }
+      ],
+      "title": "Sequencer overview: $reporting_sequencer",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Number of requests in batches that are being disseminated.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#7eb26d",
+                "value": null
+              },
+              {
+                "color": "#ef843c",
+                "value": 10
+              },
+              {
+                "color": "#e24d42",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 151
+      },
+      "hideTimeOverride": true,
+      "id": 83,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "9.5.12",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_availability_disseminating_requests{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ready_for_consensus=~\"false|true\"}",
+          "format": "time_series",
+          "instant": false,
+          "interval": "30s",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Requests being disseminated",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
       "description": "Total network ingress for the currently selected sequencer split by sender.",
       "fieldConfig": {
@@ -3340,7 +3451,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3353,10 +3465,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 7,
+        "h": 14,
         "w": 6,
         "x": 12,
-        "y": 71
+        "y": 151
       },
       "id": 59,
       "options": {
@@ -3364,7 +3476,7 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
           "mode": "single",
@@ -3375,13 +3487,13 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by(source_sequencer) (daml_sequencer_bftordering_p2p_receive_received_bytes_total{reporting_sequencer=\"$reporting_sequencer\"})",
+          "expr": "sum by(namespace, job, node, source_sequencer) (daml_sequencer_bftordering_p2p_receive_received_bytes_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
           "format": "time_series",
           "intervalFactor": 1,
-          "legendFormat": "{{peer_id}}",
+          "legendFormat": "(reporter: {{node}}) {{source_sequencer}}",
           "range": true,
           "refId": "A"
         }
@@ -3392,7 +3504,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "$DS"
+        "uid": "prometheus"
       },
       "description": "Total network egress for the currently selected sequencer split by destination.",
       "fieldConfig": {
@@ -3436,7 +3548,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               }
             ]
           },
@@ -3445,10 +3558,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 7,
+        "h": 14,
         "w": 6,
         "x": 18,
-        "y": 71
+        "y": 151
       },
       "id": 58,
       "options": {
@@ -3456,7 +3569,7 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": true
         },
         "tooltip": {
           "mode": "single",
@@ -3467,18 +3580,123 @@
       "targets": [
         {
           "datasource": {
-            "uid": "$DS"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by(target_sequencer) (daml_sequencer_bftordering_p2p_send_sent_bytes_total{reporting_sequencer=\"$reporting_sequencer\"})",
+          "expr": "sum by(namespace, job, node, target_sequencer) (daml_sequencer_bftordering_p2p_send_sent_bytes_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
           "format": "time_series",
           "intervalFactor": 1,
-          "legendFormat": "{{peer_id}}",
+          "legendFormat": "(reporter: {{node}}) {{target_sequencer}}",
           "range": true,
           "refId": "A"
         }
       ],
       "title": "Total Network Output",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Number of payload bytes in requests within batches that are being disseminated.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#7eb26d",
+                "value": null
+              },
+              {
+                "color": "#ef843c",
+                "value": 10
+              },
+              {
+                "color": "#e24d42",
+                "value": 20
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 158
+      },
+      "hideTimeOverride": true,
+      "id": 84,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "9.5.12",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_availability_disseminating_bytes{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ready_for_consensus=~\"false|true\"}",
+          "format": "time_series",
+          "instant": false,
+          "interval": "30s",
+          "intervalFactor": 1,
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Bytes being disseminated",
       "type": "timeseries"
     }
   ],
@@ -3491,49 +3709,102 @@
   "templating": {
     "list": [
       {
+        "allValue": ".*",
         "current": {
-          "selected": false,
-          "text": "default",
-          "value": "default"
-        },
-        "hide": 0,
-        "includeAll": false,
-        "label": "Datasource",
-        "multi": false,
-        "name": "DS",
-        "options": [],
-        "query": "prometheus",
-        "queryValue": "",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "type": "datasource"
-      },
-      {
-        "current": {
-          "selected": false,
-          "text": "SEQ::sequencer1::12201e092c1890e837b24f3d2656885c43e96ffe432ed8a4c85ea1c02e3f52c7b353",
-          "value": "SEQ::sequencer1::12201e092c1890e837b24f3d2656885c43e96ffe432ed8a4c85ea1c02e3f52c7b353"
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(reporting_sequencer)",
+        "definition": "label_values(daml_health_status,namespace}",
         "hide": 0,
-        "includeAll": false,
-        "label": "Reporting sequencer",
-        "multi": false,
-        "name": "reporting_sequencer",
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": true,
+        "name": "namespace",
         "options": [],
         "query": {
-          "query": "label_values(reporting_sequencer)",
+          "qryType": 1,
+          "query": "label_values(daml_health_status,namespace)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
-        "sort": 0,
+        "sort": 7,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(daml_health_status{namespace=~\"$namespace\"},job)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Job",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(daml_health_status{namespace=~\"$namespace\"},job)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 7,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(daml_health_status{namespace=~\"$namespace\", job=~\"$job\"},node)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Node",
+        "multi": true,
+        "name": "node",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(daml_health_status{namespace=~\"$namespace\", job=~\"$job\"},node)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 7,
         "type": "query"
       },
       {
@@ -3633,6 +3904,6 @@
   "timezone": "",
   "title": "BFT ordering",
   "uid": "UJyurCTWz",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

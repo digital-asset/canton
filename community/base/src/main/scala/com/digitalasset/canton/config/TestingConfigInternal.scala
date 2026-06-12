@@ -58,9 +58,10 @@ import com.digitalasset.canton.metrics.MetricsFactoryType.External
   * @param useLegacyContractIdVersionV11
   *   Uses contract id version V11 for testing purposes.
   * @param warnOnJwtScopeUsage
-  *   When true, we log a warning on the first time a JWT token with scope is sent to the Ledger API
-  *   This pattern is currently discouraged for security reasons but will be re-enabled in future
-  *   versions.
+  *   When true, we log a warning on the first time a JWT with a scope but no audience is sent to
+  *   the Ledger API, provided that no explicit targetAudience or targetScope is configured. (In
+  *   other cases, other appropriate warnings are raised on startup if needed). Such tokens are
+  *   currently discouraged for security reasons and will be removed from use in future versions.
   */
 final case class TestingConfigInternal(
     testSequencerClientFor: Set[TestSequencerClientFor] = Set.empty,

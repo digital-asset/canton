@@ -3,13 +3,19 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.apache.pekko.stream.KillSwitch
 import org.apache.pekko.stream.scaladsl.Source
 
 trait BlockSubscription {
+
   def subscription(): Source[Traced[BlockFormat.Block], KillSwitch]
 
-  def receiveBlock(block: BlockFormat.Block)(implicit traceContext: TraceContext): Unit
+  def receiveBlock(
+      block: BlockFormat.Block
+  )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit
+
+  def sequencerCoreIsSlow: Boolean
 }

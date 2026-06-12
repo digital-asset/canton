@@ -91,7 +91,7 @@ sealed trait ReassignmentsConfirmationThresholdIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateTargetTimestampForwardTolerance(10.minutes),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

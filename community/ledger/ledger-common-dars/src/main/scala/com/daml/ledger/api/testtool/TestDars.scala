@@ -5,6 +5,7 @@ package com.daml.ledger.api.testtool
 
 import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.google.protobuf.ByteString
 
@@ -27,6 +28,8 @@ final case class TestDar(nameVersion: String, lfVersion: LanguageVersion)
       .toOption
       .getOrElse(sys.error(s"Cannot decode DAR: $path"))
   }
+
+  def packageId: PackageId = archive.main._1
 
   override def toString = path
 
@@ -63,6 +66,9 @@ final class TestDars private (val lfVersion: LanguageVersion) {
   val VettingMainDar_3_0_0_Incompatible = testDar("vetting-main-3.0.0")
   val VettingDepDar = testDar("vetting-dep-1.0.0")
   val VettingAltDar = testDar("vetting-alt-1.0.0")
+
+  val companionImplicits = new CompanionImplicits(this)
+  val contractKeysCompanionImplicits = new ContractKeysCompanionImplicits(this)
 
   private val v22Plus = List(
     ModelTestDar,

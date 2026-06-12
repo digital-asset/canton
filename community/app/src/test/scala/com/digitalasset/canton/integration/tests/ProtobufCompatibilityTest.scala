@@ -167,10 +167,41 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSequencerConnectionSuccessor" on service "TopologyManagerReadService" was deleted.""",
       """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "ListSynchronizerUpgradeAnnouncement" on service "TopologyManagerReadService" was deleted.""",
       """com/digitalasset/canton/topology/admin/v30/topology_manager_read_service.proto:Previously present RPC "LogicalUpgradeState" on service "TopologyManagerReadService" was deleted.""",
+
+      /// Backward compatibility
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "3" with name "confirmation_response_factor" on message "SubmissionRequestAmplification" was deleted.""",
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "4" with name "confirmation_response_patience" on message "SubmissionRequestAmplification" was deleted.""",
+      """com/digitalasset/canton/mediator/admin/v30/mediator_inspection_service.proto:Previously present field "2" with name "complete" on message "VerdictsResponse" was deleted.""",
+      """com/digitalasset/canton/mediator/admin/v30/mediator_inspection_service.proto:Previously present oneof "payload" on message "VerdictsResponse" was deleted.""",
+      """com/digitalasset/canton/mediator/admin/v30/mediator_inspection_service.proto:Field "1" with name "verdict" on message "VerdictsResponse" moved from inside to outside a oneof.""",
+      """com/digitalasset/canton/mediator/admin/v30/mediator_inspection_service.proto:Previously present field "4" with name "view_hash" on message "TransactionView" was deleted.""",
+      """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Previously present field "6" with name "paid_traffic_cost" on message "CompletionInfo" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/synchronization.proto:Previously present field "7" with name "lsu_sequencing_test_message" on message "EnvelopeContent" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/topology.proto:Previously present enum value "2" on enum "ParticipantFeatureFlag" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/topology.proto:Field "17" with name "synchronizer_upgrade_announcement" on message "TopologyMapping" changed type from "com.digitalasset.canton.protocol.v30.LsuAnnouncement" to "com.digitalasset.canton.protocol.v30.SynchronizerUpgradeAnnouncement".""",
+      """com/digitalasset/canton/protocol/v30/topology.proto:Field "18" with name "sequencer_connection_successor" on message "TopologyMapping" changed type from "com.digitalasset.canton.protocol.v30.LsuSequencerConnectionSuccessor" to "com.digitalasset.canton.protocol.v30.SequencerConnectionSuccessor".""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "4" with name "dynamic_sequencing_parameters_payload31" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present oneof "dynamic_sequencing_parameters" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_authentication_service.proto:Previously present field "3" with name "client_version" on message "ChallengeRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "client_version" on message "HandshakeRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved name "failure" on message "HandshakeResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[3]" on message "HandshakeResponse" is missing values: [3] were removed.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved name "failure" on message "VerifyActiveResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[2]" on message "VerifyActiveResponse" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Previously present field "5" with name "ordering_start_instant" on message "OrderingRequest" was deleted.""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "3" with name "payload" on message "OrderingRequest" changed type from "string" to "bytes".""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "ordering_start_instant" on message "OrderingRequest" changed cardinality from "optional with implicit presence" to "optional with explicit presence".""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "ordering_start_instant" on message "OrderingRequest" changed type from "bytes" to "message".""",
+      """com/digitalasset/canton/synchronizer/v30/synchronizer.proto:Previously present field "3" with name "is_late_upgrade" on message "SynchronizerPredecessor" was deleted.""",
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "3" with name "version" on message "NotInitialized" was deleted.""",
+      // Added DABFT leaders and blacklisted nodes to `get_ordering_topology` console admin function's output
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "leader_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "6" with name "blacklisted_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
+      // undefined epoch_number case is handled
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Previously present field "2" with name "epoch_number" on message "BatchRequest" was deleted.""",
     ),
     (3, 5) -> Seq(
-      // Expose the release version in NotInitialized, is going to be added to 3.5.1-rc4+
-      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "3" with name "version" on message "NotInitialized" was deleted."""
     ),
   )
 

@@ -1004,7 +1004,7 @@ abstract class EventStorageBackendTemplate(
         """
       .asVectorOf(long("event_sequential_id"))(connection)
 
-  def addActivationsToAchs(
+  override def addActivationsToAchs(
       params: AchsAddActivationsParams
   )(connection: Connection): Unit =
     SQL"""
@@ -1023,7 +1023,7 @@ abstract class EventStorageBackendTemplate(
         )
     """.execute()(connection).discard
 
-  def removeDeactivatedFromAchs(
+  override def removeDeactivatedFromAchs(
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit =
     SQL"""
@@ -1036,6 +1036,14 @@ abstract class EventStorageBackendTemplate(
           AND deactivate_evs.event_sequential_id <= ${params.endInclusive}
           AND deactivate_evs.event_sequential_id > ${params.startExclusive}
       )
+    """.execute()(connection).discard
+
+  override def deletePartiallyIngestedAchsData(fromExclusiveEventSeqId: Long)(
+      connection: Connection
+  ): Unit =
+    SQL"""
+      DELETE FROM lapi_filter_achs_stakeholder
+      WHERE lapi_filter_achs_stakeholder.event_sequential_id > $fromExclusiveEventSeqId
     """.execute()(connection).discard
 
   override def firstSynchronizerOffsetAfterOrAt(

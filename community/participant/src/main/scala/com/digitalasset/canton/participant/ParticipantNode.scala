@@ -251,6 +251,7 @@ class ParticipantNodeBootstrap(
           dryRunSnapshot.getOrElse(PackageMetadata()),
           forceFlags,
           disableUpgradeValidation = parameters.disableUpgradeValidation,
+          protocolVersion = authorizedStore.protocolVersion,
         )
 
       override def checkCannotDisablePartyWithActiveContracts(

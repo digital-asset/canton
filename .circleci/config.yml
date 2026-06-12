@@ -711,7 +711,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-f86123997713 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d96e65ce9acf \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1057,8 +1057,8 @@ commands:
                         "U046D8XGD7H" # Kirill
                         "U03FH83LRNH" # Meriam
                         "UF766DLN4" # Oliver
+                        "U0ASDV1UV2S" # Ostap
                         "U020XUXADCP" # Raf
-                        "UDDVDCKD0" # Raphael
                         "U04DC4NAK1S" # Yves
                         # LAPI
                         "U08LBV2U75H" # Adrien
@@ -1090,7 +1090,7 @@ commands:
                 when: always
             - slack/status:
                 fail_only: true
-                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: Person on support takes care of failed nightly jobs.)'
+                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: The person on the CI rota takes care of failed nightly jobs.)'
                 mentions: ${SELECTED_VOLUNTEER}
                 only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
                 webhook: << parameters.webhook_url >>
@@ -2251,26 +2251,6 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
             - slack_red_main_with_volunteer
-    replicate_docs:
-        executor: canton-xlarge-docker-with-postgres
-        parameters:
-            env:
-                type: string
-        steps:
-            - checkout_and_restore_caches
-            - restore_packaged_release:
-                location: community/app/target/release
-            - unpack_scaladoc_in_workspace
-            - execute_sbt_command:
-                cmd: packageDocsWithExistingRelease
-                use_maven_mirror: false
-            - cleanup_test_job
-            - authorize_git
-            - run:
-                command: |
-                    nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "./scripts/docs/replication.sh --env <<parameters.env>> --githubAuth canton-machine:$GITHUB_TOKEN"
-                name: Replicate the docs
-            - cleanup_build_job
     run_propose_script:
         executor: canton-large-docker-on-cci
         parameters:

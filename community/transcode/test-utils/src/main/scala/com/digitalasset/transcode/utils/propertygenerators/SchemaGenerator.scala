@@ -70,6 +70,7 @@ object SchemaGenerator:
               case Descriptor.Enumeration(cases) =>
                 Gen.int(0, cases.length - 1).map(DynamicValue.Enumeration)
           yield result
+        case Descriptor.Unknown(id, args) => Gen.empty
       )
 
     // mapping inside Dictionary happens deterministically, so we can traverse over schema by extracting generators,

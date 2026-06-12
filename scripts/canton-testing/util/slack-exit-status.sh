@@ -20,7 +20,7 @@ slack-exit-status() {
   else
     # If the build failed, the logs directory does not yet exist; point to the CRON output file instead.
     LOGS_LOCATION=$( [ -d "$LOGS_DIR" ] && echo "$LOGS_DIR" || echo "${CRON_OUTPUT_FILE:-unknown}" )
-    send-slack-message.sh "<!here> :bangbang: Performance test '$TEST_NAME' has terminated at $HOSTNAME with non-zero exit code $EXIT_CODE! Log location is \`$LOGS_LOCATION\`. The person on support rotation should investigate."
+    send-slack-message.sh "<!here> :bangbang: Performance test '$TEST_NAME' has terminated at $HOSTNAME with non-zero exit code $EXIT_CODE! Log location is \`$LOGS_LOCATION\`. The person on the CI rota should investigate."
   fi
 
   echo

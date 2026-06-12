@@ -29,7 +29,7 @@ trait ImportContractsIntegrationTestBase
     with SharedEnvironment
     with EntitySyntax {
 
-  protected def enableAlphaMultiSynchronizerSupport: Boolean
+  protected def enableAllLedgerApiReassignments: Boolean
 
   private var alice: PartyId = _
   private var bob: PartyId = _
@@ -39,10 +39,10 @@ trait ImportContractsIntegrationTestBase
     EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport)
-            .replace(enableAlphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
+            .replace(enableAllLedgerApiReassignments)
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -91,7 +91,7 @@ trait ImportContractsIntegrationTestBase
 
   "Importing an ACS" should {
 
-    s"handle contracts with non-zero reassignment counter (multi-synchronizer-support=$enableAlphaMultiSynchronizerSupport)" in {
+    s"handle contracts with non-zero reassignment counter (multi-synchronizer-support=$enableAllLedgerApiReassignments)" in {
       implicit env =>
         import env.*
 
@@ -129,7 +129,7 @@ trait ImportContractsIntegrationTestBase
 
           participant3.synchronizers.disconnect_all()
 
-          if (enableAlphaMultiSynchronizerSupport) {
+          if (enableAllLedgerApiReassignments) {
             participant3.repair.import_acs(daId, file.canonicalPath)
 
             val reassignedContract = participant3.ledger_api.state.acs
@@ -157,11 +157,11 @@ trait ImportContractsIntegrationTestBase
       * The ACS import will simply drop contracts that are associated to a different synchronizer;
       * and logs that fact once.
       */
-    s"import a multi-synchronizer ACS snapshot (multi-synchronizer-support=$enableAlphaMultiSynchronizerSupport)" in {
+    s"import a multi-synchronizer ACS snapshot (multi-synchronizer-support=$enableAllLedgerApiReassignments)" in {
       implicit env =>
         import env.*
 
-        // Create several contracts for both synchronizers having reassignment counter zero (thus independent of enableAlphaMultiSynchronizerSupport)
+        // Create several contracts for both synchronizers having reassignment counter zero (thus independent of enableAllLedgerApiReassignments)
         val contractsDa = (1 to 2).map { _ =>
           IouSyntax.createIou(participant1, synchronizerId = Some(daId))(charlie, bob)
         }
@@ -208,7 +208,7 @@ trait ImportContractsIntegrationTestBase
     //   1. Non-zero reassignment counter in recovered contract
     //   2. Imports contract using Assign/Unassign events
     //   3. Recovery retains pre-existing active contracts
-    s"recover successfully ACS import mid-crash for a reassigned contract preserving pre-existing state (multi-synchronizer-support=$enableAlphaMultiSynchronizerSupport)" in {
+    s"recover successfully ACS import mid-crash for a reassigned contract preserving pre-existing state (multi-synchronizer-support=$enableAllLedgerApiReassignments)" in {
       implicit env =>
         import env.*
 
@@ -244,7 +244,7 @@ trait ImportContractsIntegrationTestBase
 
           participant3.synchronizers.disconnect_all()
 
-          if (enableAlphaMultiSynchronizerSupport) {
+          if (enableAllLedgerApiReassignments) {
             val contractInstance =
               participant1.underlying.value.sync.participantNodePersistentState.value.contractStore
                 .lookup(cid)
@@ -339,10 +339,10 @@ trait ImportContractsIntegrationTestBase
 }
 
 final class ImportContractsIntegrationTest extends ImportContractsIntegrationTestBase {
-  override protected def enableAlphaMultiSynchronizerSupport: Boolean = false
+  override protected def enableAllLedgerApiReassignments: Boolean = false
 }
 
 final class ImportContractsWithReassignmentIntegrationTest
     extends ImportContractsIntegrationTestBase {
-  override protected def enableAlphaMultiSynchronizerSupport: Boolean = true
+  override protected def enableAllLedgerApiReassignments: Boolean = true
 }
