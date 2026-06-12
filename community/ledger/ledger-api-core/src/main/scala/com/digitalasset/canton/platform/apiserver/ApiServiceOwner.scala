@@ -30,7 +30,6 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandProgressTracker,
   DynamicSynchronizerParameterGetter,
 }
-import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.{
   PartyAllocation,
@@ -47,6 +46,7 @@ import com.digitalasset.canton.platform.config.{
   UpdateServiceConfig,
   UserManagementServiceConfig,
 }
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn

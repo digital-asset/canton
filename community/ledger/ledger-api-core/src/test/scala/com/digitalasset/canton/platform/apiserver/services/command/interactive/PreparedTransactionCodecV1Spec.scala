@@ -10,8 +10,8 @@ import com.digitalasset.canton.data.LedgerTimeBoundaries
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
-import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.PreparedTransactionCodec.*
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.EnrichedTransactionData.ExternalInputContract
+import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.PreparedTransactionCodec.*
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.{
   PrepareTransactionData,
   PreparedTransactionDecoder,
@@ -113,7 +113,6 @@ class PreparedTransactionCodecV1Spec
         optByKeyNodes = None,
       ),
       transaction = SubmittedTransaction(transaction),
-      globalKeyMapping = Map.empty,
       inputContracts = inputContracts,
       synchronizer = synchronizer,
       mediatorGroup = 0,

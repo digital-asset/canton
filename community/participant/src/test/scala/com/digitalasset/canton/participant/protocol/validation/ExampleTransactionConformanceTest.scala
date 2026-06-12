@@ -90,7 +90,7 @@ class ExampleTransactionConformanceTest
 
   val pureCrypto = new SymbolicPureCrypto()
 
-  forAll(Table("contract ID version", CantonContractIdVersion.all*)) { contractIdVersion =>
+  CantonContractIdVersion.all.foreach { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory()(
       cantonContractIdVersion = contractIdVersion
     )
@@ -511,7 +511,6 @@ class ExampleTransactionConformanceTest
           transactionUuid = devFactory.transactionUuid,
           topologySnapshot = devFactory.topologySnapshot,
           contractOfId = contractOfId,
-          legacyKeyResolver = example.keyResolver,
           maxSequencingTime = devFactory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
         )

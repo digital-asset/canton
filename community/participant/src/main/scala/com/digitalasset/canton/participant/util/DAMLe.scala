@@ -28,7 +28,7 @@ import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.digitalasset.canton.{LfCommand, LfGlobalKeyMapping, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfCommand, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{Bytes as LfBytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
@@ -44,7 +44,6 @@ import com.digitalasset.daml.lf.value.ContractIdVersion
 
 import java.nio.file.Path
 import scala.annotation.tailrec
-import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
@@ -312,6 +311,35 @@ object DAMLe {
   private final case class ContinuationToken(rest: Vector[FatContractInstance])
       extends NeedKeyProgression.Token
 
+  private final case class ExternalCallLoopState(
+      nextCallIndex: Int,
+      replayDataO: Option[ExternalCallReplayData],
+      validationKeyCounts: Map[ExternalCallKey, Int],
+  ) {
+    def takeCallIndex: (Int, ExternalCallLoopState) =
+      nextCallIndex -> copy(nextCallIndex = nextCallIndex + 1)
+
+    def withReplayData(replayData: ExternalCallReplayData): ExternalCallLoopState =
+      copy(
+        replayDataO = Some(replayData),
+        validationKeyCounts = replayData.validationKeyCounts,
+      )
+
+    def consumeValidation(key: ExternalCallKey): (Boolean, ExternalCallLoopState) =
+      validationKeyCounts.get(key) match {
+        case Some(remaining) if remaining > 0 =>
+          val nextValidationKeyCounts =
+            if (remaining == 1) validationKeyCounts - key
+            else validationKeyCounts.updated(key, remaining - 1)
+          true -> copy(validationKeyCounts = nextValidationKeyCounts)
+        case _ => false -> this
+      }
+  }
+
+  private object ExternalCallLoopState {
+    val empty: ExternalCallLoopState = ExternalCallLoopState(0, None, Map.empty)
+  }
+
 }
 
 /** Represents a Daml runtime instance for interpreting commands. Provides an abstraction for the
@@ -499,27 +527,6 @@ class DAMLe(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-    val externalCallIndices = Iterator.from(0)
-    val externalCallValidationRemaining = mutable.Map.empty[ExternalCallKey, Int]
-    lazy val externalCallReplayDataF: FutureUnlessShutdown[ExternalCallReplayData] =
-      externalCallReplayData().map { replayData =>
-        externalCallValidationRemaining ++= replayData.validationKeyCounts
-        replayData
-      }
-
-    def consumeExternalCallValidation(key: ExternalCallKey): Boolean =
-      externalCallValidationRemaining.get(key) match {
-        case Some(remaining) if remaining > 0 =>
-          val nextRemaining = remaining - 1
-          if (nextRemaining == 0) externalCallValidationRemaining -= key
-          else externalCallValidationRemaining.update(key, nextRemaining)
-          true
-        case _ => false
-      }
-
-    def nextExternalCallIndex(): Int =
-      externalCallIndices.next()
-
     def failExternalCall(
         error: ReinterpretationError
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
@@ -528,19 +535,21 @@ class DAMLe(
     def resumeWithExternalCallOutput(
         output: String,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
-      handleResultInternal(resume(Right(output)))
+      handleResultInternal(resume(Right(output)), externalCallState)
 
     def replayStoredExternalCallOutput(
         extensionId: String,
         functionId: String,
         storedOutput: LfBytes,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
       logger.debug(
         s"Replaying recorded external call result for extension=$extensionId, function=$functionId"
       )
-      resumeWithExternalCallOutput(storedOutput.toHexString, resume)
+      resumeWithExternalCallOutput(storedOutput.toHexString, resume, externalCallState)
     }
 
     def validateExternalCallOutput(
@@ -552,6 +561,7 @@ class DAMLe(
         externalCallKey: ExternalCallKey,
         currentCallIndex: Int,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
       logger.debug(
         s"Re-executing external call for validation: extension=$extensionId, function=$functionId, callIndex=$currentCallIndex"
@@ -605,7 +615,7 @@ class DAMLe(
                 }
 
               case Right(_) =>
-                resumeWithExternalCallOutput(output, resume)
+                resumeWithExternalCallOutput(output, resume, externalCallState)
             }
           case Left(error) =>
             failExternalCall(
@@ -624,43 +634,60 @@ class DAMLe(
         configHash: String,
         input: String,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-      val currentCallIndex = nextExternalCallIndex()
+      val (currentCallIndex, stateAfterCallIndex) = externalCallState.takeCallIndex
       val externalCallKey = ExternalCallKey(extensionId, functionId, configHash, input)
 
-      externalCallReplayDataF.flatMap { externalCallReplayData =>
-        val storedExternalCallResults = externalCallReplayData.storedExternalCallResults
+      val replayDataWithStateF = stateAfterCallIndex.replayDataO match {
+        case Some(replayData) => FutureUnlessShutdown.pure(replayData -> stateAfterCallIndex)
+        case None =>
+          externalCallReplayData().map { replayData =>
+            replayData -> stateAfterCallIndex.withReplayData(replayData)
+          }
+      }
 
-        storedExternalCallResults.outputFor(externalCallKey) match {
+      replayDataWithStateF.flatMap { case (externalCallReplayData, stateWithReplayData) =>
+        externalCallReplayData.storedExternalCallResults.outputFor(externalCallKey) match {
           case Left(disagreement) =>
             failExternalCall(disagreement)
 
-          case Right(None) if consumeExternalCallValidation(externalCallKey) =>
-            failExternalCall(ExternalCallReplayMissing(externalCallKey, currentCallIndex))
+          case Right(outputO) =>
+            val (shouldValidate, stateAfterValidationDecision) =
+              stateWithReplayData.consumeValidation(externalCallKey)
+            outputO match {
+              case None =>
+                failExternalCall(ExternalCallReplayMissing(externalCallKey, currentCallIndex))
 
-          case Right(Some(expectedOutput)) if consumeExternalCallValidation(externalCallKey) =>
-            validateExternalCallOutput(
-              extensionId,
-              functionId,
-              configHash,
-              input,
-              expectedOutput,
-              externalCallKey,
-              currentCallIndex,
-              resume,
-            )
+              case Some(expectedOutput) if shouldValidate =>
+                validateExternalCallOutput(
+                  extensionId,
+                  functionId,
+                  configHash,
+                  input,
+                  expectedOutput,
+                  externalCallKey,
+                  currentCallIndex,
+                  resume,
+                  stateAfterValidationDecision,
+                )
 
-          case Right(Some(storedOutput)) =>
-            replayStoredExternalCallOutput(extensionId, functionId, storedOutput, resume)
-
-          case Right(None) =>
-            failExternalCall(ExternalCallReplayMissing(externalCallKey, currentCallIndex))
+              case Some(storedOutput) =>
+                replayStoredExternalCallOutput(
+                  extensionId,
+                  functionId,
+                  storedOutput,
+                  resume,
+                  stateAfterValidationDecision,
+                )
+            }
         }
       }
     }
 
     def handleResultInternal(
-        result: Result[A]
+        result: Result[A],
+        externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
 
       @tailrec
@@ -688,7 +715,7 @@ class DAMLe(
             )
             .transformWithHandledAborted {
               case Success(pkg) =>
-                handleResultInternal(resume(pkg))
+                handleResultInternal(resume(pkg), externalCallState)
               case Failure(ex) =>
                 logger.error(s"Package resolution failed for [$packageId]", ex)
                 FutureUnlessShutdown.failed(ex)
@@ -720,7 +747,10 @@ class DAMLe(
                     ResultNeedKey.Response.UnsupportedContractIdVersion(contract.contractId)
                 }
               }
-              handleResultInternal(resume(ResultNeedKey.Response(entries, hasStarted)))
+              handleResultInternal(
+                resume(ResultNeedKey.Response(entries, hasStarted)),
+                externalCallState,
+              )
             }
 
         case ResultNeedContract(acoid, resume) =>
@@ -739,7 +769,9 @@ class DAMLe(
               case Left(_) =>
                 Response.UnsupportedContractIdVersion
             }
-          FutureUnlessShutdown.pure(response).flatMap(r => handleResultInternal(resume(r)))
+          FutureUnlessShutdown
+            .pure(response)
+            .flatMap(r => handleResultInternal(resume(r), externalCallState))
 
         case ResultError(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
         case ResultInterruption(continue, _) =>
@@ -747,17 +779,24 @@ class DAMLe(
           // Using a `Future` as a trampoline also makes the recursive call to `handleResult` stack safe.
           FutureUnlessShutdown.pure(iterateOverInterrupts(continue)).flatMap {
             case Left(abort) => FutureUnlessShutdown.pure(Left(abort))
-            case Right(result) => handleResultInternal(result)
+            case Right(result) => handleResultInternal(result, externalCallState)
           }
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
-          handleResultInternal(resume())
+          handleResultInternal(resume(), externalCallState)
         case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-          handleExternalCall(extensionId, functionId, configHash, input, resume)
+          handleExternalCall(
+            extensionId,
+            functionId,
+            configHash,
+            input,
+            resume,
+            externalCallState,
+          )
       }
     }
 
-    handleResultInternal(result)
+    handleResultInternal(result, ExternalCallLoopState.empty)
   }
 
 }

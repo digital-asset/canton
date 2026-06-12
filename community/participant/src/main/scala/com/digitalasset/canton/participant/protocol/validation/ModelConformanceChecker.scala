@@ -284,13 +284,11 @@ class ModelConformanceChecker(
       if (!viewParticipantData.supportsExternalCallResults)
         Seq.empty[(TransactionView, Seq[ViewParticipantData.ViewExternalCallResult])]
       else
-        view.foldLeft(
-          Vector.empty[(TransactionView, Seq[ViewParticipantData.ViewExternalCallResult])]
-        ) { (acc, currentView) =>
+        view.flatten.flatMap { currentView =>
           currentView.viewParticipantData.unwrap match {
             case Right(vpd) if vpd.externalCallResults.nonEmpty =>
-              acc :+ (currentView -> vpd.externalCallResults.toSeq)
-            case _ => acc
+              Some(currentView -> vpd.externalCallResults.toSeq)
+            case _ => None
           }
         }
 

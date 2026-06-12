@@ -8,12 +8,12 @@ import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.apiserver.execution.{
   StoreBackedCommandInterpreter,
   TestDynamicSynchronizerParameterGetter,
 }
 import com.digitalasset.canton.platform.config.CommandServiceConfig
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.{AuthenticatedContractIdVersionV10, LfFatContractInst}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.util.{ContractValidator, TestEngine}

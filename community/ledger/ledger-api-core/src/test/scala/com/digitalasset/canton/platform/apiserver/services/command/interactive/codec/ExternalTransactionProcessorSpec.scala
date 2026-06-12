@@ -90,7 +90,6 @@ class ExternalTransactionProcessorSpec
         transaction = SubmittedTransaction(transaction),
         dependsOnLedgerTime = false,
         interpretationTimeNanos = 0L,
-        globalKeyMapping = Map.empty,
         processedDisclosedContracts = ImmArray.Empty,
       ),
       synchronizerRank = SynchronizerRank.single(physicalSynchronizerId),
