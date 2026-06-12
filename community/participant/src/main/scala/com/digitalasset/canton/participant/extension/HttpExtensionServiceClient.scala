@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.config.{
   ExtensionServiceAuthConfig,
   ExtensionServiceConfig,
 }
+import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.util.retry.{Backoff, NoExceptionRetryPolicy, Success}
@@ -292,7 +293,7 @@ class HttpExtensionServiceClient(
             .header("Accept", "text/plain")
             .header("X-Daml-External-Function-Id", functionId)
             .header("X-Daml-External-Config-Hash", configHash)
-            .header("X-Daml-External-Mode", mode.headerValue)
+            .header("X-Daml-External-Mode", mode.wireValue)
             .header("X-Request-Id", requestId)
             .header("Idempotency-Key", idempotencyKey)
 
@@ -317,7 +318,7 @@ class HttpExtensionServiceClient(
                 .build()
 
               logger.debug(
-                s"Making external call to extension '$extensionId': functionId=$functionId, mode=${mode.headerValue}, requestId=$requestId"
+                s"Making external call to extension '$extensionId': functionId=$functionId, mode=${mode.wireValue}, requestId=$requestId"
               )
 
               performUnlessClosing

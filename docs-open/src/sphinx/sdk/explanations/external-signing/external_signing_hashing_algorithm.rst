@@ -56,7 +56,8 @@ Transaction Nodes
 Transaction nodes are additionally individually versioned with a Daml version (also called LF version).
 The encoding version is decoupled from the LF version and implementations should only focus on the hashing version.
 However, new LF versions may introduce new fields in nodes or new node types. For that reason, the protobuf representation of a node is
-versioned to accommodate those future changes. In practice, every new Daml language version results in a new hashing version.
+versioned to accommodate those future changes. In stable protocol versions, new Daml language versions may result in new hashing
+versions. Development-only Daml versions may be supported under the development protocol before a stable hashing version is assigned.
 
 .. literalinclude:: CANTON/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
     :start-after: [docs-entry-start: DamlTransaction.Node]
@@ -70,7 +71,7 @@ V3
 General approach
 ----------------
 
-The hash of the ``PreparedTransaction`` is computed by encoding every protobuf field of the messages to byte arrays,
+The hash of the ``PreparedTransaction`` is computed by encoding the fields specified by this section to byte arrays,
 and feeding those encoded values into a ``SHA-256`` hash builder. The rest of this section details how to deterministically encode
 every proto message into a byte array. Sometimes during the process, partially encoded results are hashed with SHA-256, and the resulting hash value serves as the encoding in messages further up.
 This is explicit when necessary.
@@ -90,6 +91,8 @@ Changes from V2
 ---------------
 
 - Addition of an ``max_record_time`` field in :ref:`metadata <metadata_encoding>` to make maximum record time explicit in the signed metadata.
+- Under the development protocol, support for LF development-version exercise nodes that may carry recorded
+  ``external_call_results``. These recorded result payloads are not encoded into the prepared transaction hash.
 
 Changes from V1
 ---------------
@@ -658,6 +661,9 @@ Exercise
 .. note::
 
     The last encoded value of the exercise node is its ``children`` field. This recursively traverses the transaction tree.
+    ``external_call_results``, when present on development-version exercise nodes, are intentionally not encoded into the
+    prepared transaction hash. Prepared signatures authorize the LF action. Recorded external-call results are Canton
+    protocol data carried separately for replay and validation.
 
 .. _fetch_node_encoding:
 

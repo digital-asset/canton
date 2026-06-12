@@ -99,12 +99,19 @@ private[hash] object NodeHashBuilder {
       : SortedMap[HashingSchemeVersion, SerializationVersion] =
     SortedMap(
       HashingSchemeVersion.V2 -> SerializationVersion.V1,
-      HashingSchemeVersion.V3 -> SerializationVersion.V2,
+      HashingSchemeVersion.V3 -> SerializationVersion.VDev,
     )
-  private[hash] val LFSerializationVersionMappingToMinimumHashingSchemeVersion
-      : Map[SerializationVersion, HashingSchemeVersion] =
-    HashingVersionToMaxSupportedLFSerializationVersionMapping
-      .groupMapReduce(_._2)(_._1)(Ordering[HashingSchemeVersion].min)
+  private[hash] def minimumHashingSchemeVersionForLfSerializationVersion(
+      serializationVersion: SerializationVersion
+  ): Option[HashingSchemeVersion] =
+    HashingVersionToMaxSupportedLFSerializationVersionMapping.collectFirst {
+      case (hashingSchemeVersion, maximumSupportedLfVersion)
+          if Ordering[SerializationVersion].lteq(
+            serializationVersion,
+            maximumSupportedLfVersion,
+          ) =>
+        hashingSchemeVersion
+    }
 
   private[hash] sealed abstract class NodeTag(val tag: Byte)
 

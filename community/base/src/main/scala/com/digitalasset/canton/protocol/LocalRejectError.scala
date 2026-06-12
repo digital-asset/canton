@@ -116,6 +116,23 @@ object LocalRejectError extends LocalRejectionGroup {
             _resourcesType = Some(ErrorResource.ContractId),
           )
     }
+
+    @Explanation(
+      """This rejection is made by a participant if external call results visible to a confirming
+        |party disagree on the output for the same external call.
+        |"""
+    )
+    @Resolution("This indicates either malicious or faulty behaviour.")
+    object ExternalCallResultDisagreement
+        extends LocalRejectErrorCode(
+          id = "LOCAL_VERDICT_EXTERNAL_CALL_RESULT_DISAGREEMENT",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+      final case class Reject(override val _details: String)
+          extends LocalRejectErrorImpl(
+            _causePrefix = "Rejected transaction due to inconsistent external call results: "
+          )
+    }
   }
 
   object TimeRejects extends ErrorGroup() {

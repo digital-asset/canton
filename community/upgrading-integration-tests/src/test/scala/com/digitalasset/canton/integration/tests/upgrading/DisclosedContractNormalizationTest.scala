@@ -8,6 +8,7 @@ import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.apiserver.execution.{
   StoreBackedCommandInterpreter,
   TestDynamicSynchronizerParameterGetter,
@@ -121,6 +122,7 @@ class DisclosedContractNormalizationTest
         dynParamGetter =
           new TestDynamicSynchronizerParameterGetter(NonNegativeFiniteDuration.Zero)(ec),
         timeProvider = TimeProvider.UTC,
+        externalCallHandler = ExternalCallHandler.Unsupported,
       )(ec)
 
     def interpretDisclosure(cId: Upgrading.ContractId, fat: LfFatContractInst): Assertion = {

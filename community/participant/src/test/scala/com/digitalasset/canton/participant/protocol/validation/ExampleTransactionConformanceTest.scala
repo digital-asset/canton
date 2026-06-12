@@ -56,7 +56,7 @@ import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.Future
 
 class ExampleTransactionConformanceTest
@@ -113,6 +113,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
+          externalCallReplayData: () => FutureUnlessShutdown[DAMLe.ExternalCallReplayData],
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -160,6 +161,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
+          externalCallReplayData: () => FutureUnlessShutdown[DAMLe.ExternalCallReplayData],
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -244,7 +246,7 @@ class ExampleTransactionConformanceTest
           commonData.ledgerTime,
           commonData.preparationTime,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
-          topologySnapshot = mock[TopologySnapshot],
+          topologySnapshot = factory.topologySnapshot,
         )
         .failOnShutdown
 
@@ -271,9 +273,15 @@ class ExampleTransactionConformanceTest
     }
 
     def buildUnderTest(reinterpretCommand: HasReinterpret): ModelConformanceChecker =
+      buildUnderTestWithFactory(reinterpretCommand, transactionTreeFactory)
+
+    def buildUnderTestWithFactory(
+        reinterpretCommand: HasReinterpret,
+        treeFactory: TransactionTreeFactory,
+    ): ModelConformanceChecker =
       new ModelConformanceChecker(
         reinterpretCommand,
-        transactionTreeFactory,
+        treeFactory,
         submittingParticipant,
         ContractValidator.AllowAll,
         packageResolver,
@@ -451,6 +459,161 @@ class ExampleTransactionConformanceTest
             receivedRecord.checkingParties shouldBe Set.empty
             reconstructedRecord.checkingParties shouldBe Set(submitter)
           }
+        }
+      }
+
+      "derive external-call validation keys from hosted checking parties" in {
+        val devFactory = new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))(
+          psid = factory.psid.copy(protocolVersion = ProtocolVersion.dev),
+          cantonContractIdVersion = contractIdVersion,
+        )
+        val devTreeFactory = TransactionTreeFactory(
+          ExampleTransactionFactory.submittingParticipant,
+          devFactory.psid,
+          devFactory.cantonContractIdVersion,
+          devFactory.cryptoOps,
+          TestContractHasher.Async,
+          loggerFactory,
+        )
+        val externalCallResult = ExternalCallResult(
+          extensionId = "extension",
+          functionId = "function",
+          config = Bytes.fromStringUtf8("config"),
+          input = Bytes.fromStringUtf8("input"),
+          output = Bytes.fromStringUtf8("output"),
+        )
+        val externalCallKey = DAMLe.ExternalCallKey.fromResult(externalCallResult)
+        val expectedStoredResults =
+          DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult))
+        val example = devFactory.SingleExercise(devFactory.deriveNodeSeed(0))
+        val transaction =
+          withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult))
+        val contractOfId: LfContractId => EitherT[
+          FutureUnlessShutdown,
+          TransactionTreeFactory.ContractLookupError,
+          GenContractInstance,
+        ] =
+          cId =>
+            EitherT.fromEither[FutureUnlessShutdown](
+              example.inputContracts
+                .get(cId)
+                .toRight(
+                  TransactionTreeFactory.ContractLookupError(cId, "Not found")
+                )
+            )
+
+        val createTree = devTreeFactory.createTransactionTree(
+          transaction = transaction,
+          submitterInfo = DefaultParticipantStateValues.submitterInfo(List(submitter)),
+          workflowId = None,
+          mediator = devFactory.mediatorGroup,
+          transactionSeed = devFactory.transactionSeed,
+          transactionUuid = devFactory.transactionUuid,
+          topologySnapshot = devFactory.topologySnapshot,
+          contractOfId = contractOfId,
+          legacyKeyResolver = example.keyResolver,
+          maxSequencingTime = devFactory.ledgerTime.plusSeconds(100),
+          validatePackageVettings = true,
+        )
+
+        def treeWithCheckingParties(
+            fullTree: FullTransactionViewTree,
+            checkingParties: Set[LfPartyId],
+        ): FullTransactionViewTree =
+          FullTransactionViewTree.Optics.tree
+            .andThen(GenTransactionTree.rootViewsUnsafe)
+            .andThen(
+              MerkleSeq.Optics.toSeq[TransactionView](devFactory.cryptoOps, ProtocolVersion.dev)
+            )
+            .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
+            .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
+            .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+            .andThen(ViewParticipantData.Optics.externalCallResultsUnsafe)
+            .modify(results =>
+              ImmArray.from(results.toSeq.map(_.copy(checkingParties = checkingParties)))
+            )(fullTree)
+
+        def observedExternalCallArguments(
+            fullTree: FullTransactionViewTree,
+            checkingParties: Set[LfPartyId],
+        ): Future[(DAMLe.StoredExternalCallResults, Set[DAMLe.ExternalCallKey])] = {
+          val observed = new AtomicReference[
+            Option[(DAMLe.StoredExternalCallResults, Set[DAMLe.ExternalCallKey])]
+          ](None)
+          val recordingReinterpreter = new HasReinterpret {
+            override def reinterpret(
+                contracts: ReplayContractLookup,
+                contractAuthenticator: ContractAuthenticatorFn,
+                submitters: Set[LfPartyId],
+                command: LfCommand,
+                topologySnapshot: TopologySnapshot,
+                ledgerTime: CantonTimestamp,
+                preparationTime: CantonTimestamp,
+                rootSeed: Option[LfHash],
+                packageResolution: Map[PackageName, PackageId],
+                expectFailure: Boolean,
+                getEngineAbortStatus: GetEngineAbortStatus,
+                externalCallReplayData: () => FutureUnlessShutdown[DAMLe.ExternalCallReplayData],
+            )(implicit traceContext: TraceContext): EitherT[
+              FutureUnlessShutdown,
+              DAMLe.ReinterpretationError,
+              ReInterpretationResult,
+            ] =
+              EitherT.right[DAMLe.ReinterpretationError](externalCallReplayData()).flatMap {
+                replayData =>
+                  observed.set(
+                    Some(
+                      replayData.storedExternalCallResults -> replayData.validationKeyCounts.keySet
+                    )
+                  )
+                  reinterpretTransaction(example, transaction).reinterpret(
+                    contracts,
+                    contractAuthenticator,
+                    submitters,
+                    command,
+                    topologySnapshot,
+                    ledgerTime,
+                    preparationTime,
+                    rootSeed,
+                    packageResolution,
+                    expectFailure,
+                    getEngineAbortStatus,
+                    () => FutureUnlessShutdown.pure(replayData),
+                  )
+              }
+          }
+
+          val viewTree = treeWithCheckingParties(fullTree, checkingParties)
+          buildUnderTestWithFactory(recordingReinterpreter, devTreeFactory)
+            .reInterpret(
+              view = viewTree.view,
+              ledgerTime = viewTree.ledgerTime,
+              preparationTime = viewTree.preparationTime,
+              getEngineAbortStatus = () => EngineAbortStatus.notAborted,
+              topologySnapshot = devFactory.topologySnapshot,
+            )
+            .value
+            .failOnShutdown
+            .map { result =>
+              inside(result) { case Right(_) => succeed }
+              observed.get().getOrElse(fail("Expected reinterpreter arguments to be recorded"))
+            }
+        }
+
+        for {
+          genTree <- valueOrFail(createTree.failOnShutdown)("create transaction tree")
+          fullTree = FullTransactionViewTree.tryCreate(genTree)
+          hostedPartyArguments <- observedExternalCallArguments(
+            fullTree,
+            Set(ExampleTransactionFactory.submitter),
+          )
+          unhostedPartyArguments <- observedExternalCallArguments(
+            fullTree,
+            Set(ExampleTransactionFactory.signatory),
+          )
+        } yield {
+          hostedPartyArguments shouldBe (expectedStoredResults -> Set(externalCallKey))
+          unhostedPartyArguments shouldBe (expectedStoredResults -> Set.empty)
         }
       }
 

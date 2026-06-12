@@ -44,6 +44,7 @@ import io.scalaland.chimney.{PartialTransformer, Transformer}
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordering.Implicits.infixOrderingOps
 
 /** Class to encode an LF Transaction and its metadata to a PreparedTransaction. Uses chimney to
   * define Transformers and PartialTransformer for all conversions.
@@ -139,6 +140,30 @@ final class PreparedTransactionEncoder(
    * V1 Transformers
    */
   object v1 {
+    // Transformer for LfBytes -> ByteString (used by external call results)
+    private implicit val lfBytesToByteStringTransformer: Transformer[lf.data.Bytes, ByteString] =
+      (bytes: lf.data.Bytes) => bytes.toByteString
+
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : Transformer[lf.transaction.ExternalCallResult, isdv1.ExternalCallResult] =
+      Transformer.derive[lf.transaction.ExternalCallResult, isdv1.ExternalCallResult]
+
+    private def encodeExternalCallResults(
+        exerciseNode: lf.transaction.Node.Exercise
+    )(implicit serializationVersion: SerializationVersion): Result[Seq[isdv1.ExternalCallResult]] =
+      if (
+        exerciseNode.externalCallResults.nonEmpty &&
+        serializationVersion < SerializationVersion.VDev
+      )
+        Result.fromErrorString(
+          s"External call results are not supported in nodes with LF Serialization version ${serializationVersion.pretty}"
+        )
+      else
+        Result.fromValue(
+          exerciseNode.externalCallResults.toSeq.map(_.transformInto[isdv1.ExternalCallResult])
+        )
+
     private implicit def createNodeTransformer(implicit
         serializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node.Create, isdv1.Create] = Transformer
@@ -169,6 +194,10 @@ final class PreparedTransactionEncoder(
         _.keyOpt.traverse(_.transformIntoPartial[iscd.GlobalKeyWithMaintainers]),
       )
       .withFieldComputed(_.byKey, _.byKey)
+      .withFieldComputedPartial(
+        _.externalCallResults,
+        encodeExternalCallResults,
+      )
       .buildTransformer
 
     private[interactive] implicit def fetchTransformer(implicit

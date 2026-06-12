@@ -44,6 +44,7 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
 }
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.*
@@ -168,19 +169,17 @@ class ModelConformanceCheckerTest
 
   private def buildUnderTest(
       contractValidator: ContractValidator = ContractValidator.AllowAll
-  ): ModelConformanceChecker = {
-
-    val damlE: DAMLe = new DAMLe(
-      resolvePackage = testEngine.packageResolver,
-      engine = testEngine.engine,
-      interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
-      participantId = participantId,
-      loggerFactory = loggerFactory,
-    )
-
+  ): ModelConformanceChecker =
     new ModelConformanceChecker(
       participantId = participantId,
-      reinterpreter = damlE,
+      reinterpreter = new DAMLe(
+        resolvePackage = testEngine.packageResolver,
+        engine = testEngine.engine,
+        interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+        participantId = participantId,
+        loggerFactory = loggerFactory,
+        externalCallHandler = ExternalCallHandler.Unsupported,
+      ),
       transactionTreeFactory = transactionTreeFactory,
       contractValidator = contractValidator,
       packageResolver = testEngine.packageResolver,
@@ -190,7 +189,6 @@ class ModelConformanceCheckerTest
       hashOps = symbolicCrypto.pureCrypto,
       loggerFactory = loggerFactory,
     )
-  }
 
   "When provided with valid input" should {
 
@@ -225,13 +223,11 @@ class ModelConformanceCheckerTest
     val underTest: ModelConformanceChecker = buildUnderTest()
 
     "exceptionTesterFail" in {
-      val example = exampleFactory.exceptionTesterFail()
-      verifyExample(underTest, example)
+      verifyExample(underTest, exampleFactory.exceptionTesterFail())
     }
 
     "exceptionTesterNonConsumingExec" in {
-      val example = exampleFactory.exceptionTesterNonConsumingExec()
-      verifyExample(underTest, example)
+      verifyExample(underTest, exampleFactory.exceptionTesterNonConsumingExec())
     }
 
     "exceptionTesterCreateFail" in {
@@ -922,6 +918,7 @@ object ModelConformanceCheckerTest extends OptionValues {
         // Vetting checks in PV 35 only apply to packages of action nodes
         tx.nodes.values.collect { case action: LfActionNode => action.packageIds }.flatten.toSet
       } else metadata.usedPackages
+
   }
 
   class ExampleFactory(testEngine: TestEngine) extends EitherValues with AsJavaExtensions {

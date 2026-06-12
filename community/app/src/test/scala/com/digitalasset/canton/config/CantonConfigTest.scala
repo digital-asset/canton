@@ -20,6 +20,7 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
 import com.typesafe.config.{Config, ConfigFactory}
@@ -490,6 +491,46 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       }
     }
 
+    "load bearer token file auth for participant engine extensions" in {
+      File.usingTemporaryFile("extension-token", ".txt") { tokenFile =>
+        tokenFile.writeText("test-token")
+
+        File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+          overrideFile.writeText(
+            s"""
+               |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+               |  address = "127.0.0.1"
+               |  port = 12345
+               |  version = "v-test"
+               |  tls.enabled = false
+               |
+               |  auth {
+               |    type = bearer-token-file
+               |    token-file = "${tokenFile.pathAsString}"
+               |  }
+               |}
+               |""".stripMargin
+          )
+
+          val config = CantonConfig.parseAndLoadOrExit(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          )
+
+          val extension = config
+            .participantsByString("participant1")
+            .parameters
+            .engine
+            .extensions("external-call-test")
+          extension.version shouldBe "v-test"
+
+          inside(extension.auth) { case ExtensionServiceAuthConfig.BearerTokenFile(file) =>
+            file.unwrap.getAbsolutePath shouldBe tokenFile.toJava.getAbsolutePath
+          }
+        }
+      }
+    }
+
     "remote sequencer ha onboarding config" in {
       val configE =
         CantonConfig.parseAndLoad(
@@ -538,6 +579,91 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           .init
           .identity should matchPattern { case IdentityConfig.Auto(`expectedConfig`) => }
 
+      }
+    }
+  }
+
+  "config validation on engine extensions" should {
+    "reject API versions that are not single path segments" in {
+      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          """
+             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+             |  address = "127.0.0.1"
+             |  port = 12345
+             |  version = "v1/internal"
+             |  tls.enabled = false
+             |}
+             |""".stripMargin
+        )
+
+        val result = loggerFactory.assertLogs(
+          CantonConfig.parseAndLoad(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          ),
+          _.errorMessage should (include("external-call-test") and include(
+            "version"
+          ) and include("URI path segment")),
+        )
+
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+      }
+    }
+
+    "reject extension service port 0" in {
+      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          """
+             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+             |  address = "127.0.0.1"
+             |  port = 0
+             |  version = "v1"
+             |  tls.enabled = false
+             |}
+             |""".stripMargin
+        )
+
+        val result = loggerFactory.assertLogs(
+          CantonConfig.parseAndLoad(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          ),
+          _.errorMessage should (include("external-call-test") and include("port") and include(
+            "between 1"
+          )),
+        )
+
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+      }
+    }
+
+    "reject retry delays where the initial delay exceeds the maximum delay" in {
+      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          """
+             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+             |  address = "127.0.0.1"
+             |  port = 12345
+             |  version = "v1"
+             |  tls.enabled = false
+             |  retry-initial-delay = 2s
+             |  retry-max-delay = 1s
+             |}
+             |""".stripMargin
+        )
+
+        val result = loggerFactory.assertLogs(
+          CantonConfig.parseAndLoad(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          ),
+          _.errorMessage should (include("external-call-test") and include(
+            "retry-initial-delay <= retry-max-delay"
+          )),
+        )
+
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
       }
     }
   }

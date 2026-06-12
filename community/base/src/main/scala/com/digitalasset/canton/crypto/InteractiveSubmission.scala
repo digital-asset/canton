@@ -13,12 +13,16 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
 import com.digitalasset.canton.protocol.hash.{HashTracer, TransactionHash}
-import com.digitalasset.canton.protocol.{LfContractId, LfHash}
+import com.digitalasset.canton.protocol.{LfContractId, LfHash, LfSerializationVersion}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PartyId, Synchronizer}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  HashingSchemeVersion,
+  LfSerializationVersionToProtocolVersions,
+  ProtocolVersion,
+}
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, NodeId, VersionedTransaction}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -46,6 +50,15 @@ object InteractiveSubmission {
         s" Minimum protocol version for hashing version $version: ${minProtocolVersion.map(_.toString).getOrElse("Unsupported")}." +
         s" Supported hashing version on protocol version $currentProtocolVersion: ${supportedSchemesOnCurrentPV
             .mkString(", ")}"
+  }
+  final case class UnsupportedLfSerializationVersion(
+      version: LfSerializationVersion,
+      currentProtocolVersion: ProtocolVersion,
+      minProtocolVersion: ProtocolVersion,
+  ) extends HashError {
+    override def message: String =
+      s"LF serialization version $version is not supported on protocol version $currentProtocolVersion." +
+        s" Minimum protocol version for LF serialization version $version: $minProtocolVersion."
   }
 
   object TransactionMetadataForHashing {
@@ -129,9 +142,22 @@ object InteractiveSubmission {
         )
       )
     } else {
-      catchHashingErrors(
-        tryComputeHash(hashVersion, transaction, metadata, nodeSeeds, hashTracer)
-      )
+      val minimumProtocolVersion =
+        LfSerializationVersionToProtocolVersions.getMinimumSupportedProtocolVersion(
+          transaction.version
+        )
+      if (protocolVersion < minimumProtocolVersion)
+        Left(
+          UnsupportedLfSerializationVersion(
+            transaction.version,
+            protocolVersion,
+            minimumProtocolVersion,
+          )
+        )
+      else
+        catchHashingErrors(
+          tryComputeHash(hashVersion, transaction, metadata, nodeSeeds, hashTracer)
+        )
     }
   }
 

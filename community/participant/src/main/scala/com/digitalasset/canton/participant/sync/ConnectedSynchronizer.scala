@@ -77,6 +77,7 @@ import com.digitalasset.canton.participant.traffic.{
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.*
@@ -175,6 +176,7 @@ class ConnectedSynchronizer(
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
     testingConfig: TestingConfigInternal,
+    externalCallHandler: ExternalCallHandler,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with FlagCloseableAsync
@@ -268,6 +270,7 @@ class ConnectedSynchronizer(
       engine,
       InterpretationConfig.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
       loggerFactory,
+      externalCallHandler,
     )
 
   private val transactionProcessor: TransactionProcessor = new TransactionProcessor(
@@ -1247,6 +1250,7 @@ object ConnectedSynchronizer {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         testingConfig: TestingConfigInternal,
+        externalCallHandler: ExternalCallHandler,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): FutureUnlessShutdown[T]
   }
 
@@ -1274,6 +1278,7 @@ object ConnectedSynchronizer {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         testingConfig: TestingConfigInternal,
+        externalCallHandler: ExternalCallHandler,
     )(implicit
         ec: ExecutionContext,
         mat: Materializer,
@@ -1385,6 +1390,7 @@ object ConnectedSynchronizer {
           futureSupervisor,
           loggerFactory,
           testingConfig,
+          externalCallHandler,
         )
       }
     }

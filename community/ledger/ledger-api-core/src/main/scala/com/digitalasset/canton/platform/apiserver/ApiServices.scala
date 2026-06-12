@@ -25,6 +25,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, Traced
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
 import com.digitalasset.canton.platform.apiserver.execution.*
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.apiserver.services.*
 import com.digitalasset.canton.platform.apiserver.services.admin.*
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.InteractiveSubmissionServiceImpl
@@ -125,6 +126,7 @@ object ApiServices {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      externalCallHandler: ExternalCallHandler,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -286,6 +288,7 @@ object ApiServices {
           loggerFactory = loggerFactory,
           dynParamGetter = dynParamGetter,
           timeProvider = timeProvider,
+          externalCallHandler = externalCallHandler,
         )
 
       val commandExecutor =
