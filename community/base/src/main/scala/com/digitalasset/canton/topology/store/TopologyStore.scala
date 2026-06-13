@@ -335,6 +335,33 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[PositiveStoredTopologyTransactions]
 
+  /** Returns the upgrade time of the LSU that lead to current synchronizer.
+    */
+  def findUpgradeTimeFromPredecessor()(implicit
+      ev: StoreID <:< SynchronizerStore,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[
+    Option[CantonTimestamp]
+  ] = {
+    val currentPsid = ev(storeId).psid
+
+    inspect(
+      proposals = false,
+      timeQuery = TimeQuery.Range(None, None),
+      asOfExclusiveO = None,
+      op = Some(TopologyChangeOp.Replace),
+      types = Seq(TopologyMapping.Code.LsuAnnouncement),
+      idFilter = Some(currentPsid.identifier.toProtoPrimitive),
+      namespaceFilter = Some(currentPsid.namespace.toProtoPrimitive),
+    ).map(
+      _.collectOfMapping[LsuAnnouncement]
+        .filter(_.mapping.successor.psid == currentPsid)
+        .result
+        .maxByOption(_.serial)
+        .map(_.mapping.upgradeTime)
+    )
+  }
+
   /** Same as [[findPositiveTransactions]] but returns negative transactions (with a remove
     * operation)
     */
@@ -608,7 +635,14 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
             .map(_.psid)}]"
       )
     } else if (ongoingCopyFromPredecessor.compareAndSet(None, newRef)) {
-      val work = doCopyFromPredecessorSynchronizerStore(sourceStore)
+      errorLoggingContext.info(
+        s"LSU: About to copy topology from ${sourceStore.storeId.psid.suffix}"
+      )
+      val work = doCopyFromPredecessorSynchronizerStore(sourceStore).map { _ =>
+        errorLoggingContext.info(
+          s"LSU: Done copying topology from ${sourceStore.storeId.psid.suffix}"
+        )
+      }
       newPromise
         .completeWithUS(
           work.thereafter(_ => ongoingCopyFromPredecessor.compareAndSet(newRef, None).discard)

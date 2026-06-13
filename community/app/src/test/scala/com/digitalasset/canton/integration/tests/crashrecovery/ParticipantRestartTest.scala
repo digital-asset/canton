@@ -610,7 +610,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
     EnvironmentDefinition.P4S2M2_Manual
       .addConfigTransforms(
         ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)
@@ -975,7 +975,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
       )
 
@@ -1589,7 +1589,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
 }
 
 abstract class ParticipantRestartStaticTimeIntegrationTestBase(
-    alphaMultiSynchronizerSupport: Boolean = false
+    enableAllLedgerApiReassignments: Boolean = false
 ) extends ParticipantRestartTest {
 
   private val overrideMaxRequestSize = NonNegativeInt.tryCreate(100 * 1024)
@@ -1608,7 +1608,8 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
           _.focus(_.sequencerClient.overrideMaxRequestSize).replace(Some(overrideMaxRequestSize))
         ),
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(alphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
+            .replace(enableAllLedgerApiReassignments)
         ),
       )
       .withSetup { implicit env =>
@@ -1746,7 +1747,7 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
 
           participant1.repair.purge(daName, Seq(baselineContractId), ignoreAlreadyPurged = false)
 
-          val (repairOffset, repairRecordTime) = if (alphaMultiSynchronizerSupport) {
+          val (repairOffset, repairRecordTime) = if (enableAllLedgerApiReassignments) {
             participant1.ledger_api.updates
               .reassignments(
                 Set(party),
@@ -2199,7 +2200,7 @@ class ParticipantRestartStaticTimeIntegrationTest
 
 @UnstableTest // TODO(#30408)
 class ParticipantRestartStaticTimeReassignmentIntegrationTest
-    extends ParticipantRestartStaticTimeIntegrationTestBase(alphaMultiSynchronizerSupport = true)
+    extends ParticipantRestartStaticTimeIntegrationTestBase(enableAllLedgerApiReassignments = true)
 
 @nowarn("msg=match may not be exhaustive")
 class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTest {

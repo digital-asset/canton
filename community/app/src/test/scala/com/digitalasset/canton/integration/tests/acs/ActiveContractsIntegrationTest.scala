@@ -68,7 +68,7 @@ import scala.jdk.CollectionConverters.*
 
 import ActiveContractsIntegrationTestBase.*
 
-abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport: Boolean = false)
+abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignments: Boolean = false)
     extends CommunityIntegrationTest
     with SharedEnvironment
     with AcsInspection
@@ -96,9 +96,10 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
         // Ensure reassignments are not tripped up by some participants being a little behind.
         ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(alphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
+            .replace(enableAllLedgerApiReassignments)
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -263,7 +264,7 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
     val createdEvent = eventually() {
       val endOffset = participant1.ledger_api.state.end()
 
-      if (participant1.config.parameters.alphaMultiSynchronizerSupport) {
+      if (participant1.config.parameters.enableAllLedgerApiReassignments) {
         participant1.ledger_api.updates
           .reassignments(
             partyIds = Set(signatory),
@@ -900,4 +901,4 @@ private object ActiveContractsIntegrationTestBase {
 final class ActiveContractsIntegrationTest extends ActiveContractsIntegrationTestBase
 
 final class ActiveContractsReassignmentIntegrationTest
-    extends ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport = true)
+    extends ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignments = true)

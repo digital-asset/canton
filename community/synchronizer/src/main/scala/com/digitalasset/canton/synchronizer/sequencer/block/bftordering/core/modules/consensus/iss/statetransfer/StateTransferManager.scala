@@ -30,6 +30,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 
+import java.time.Instant
 import scala.util.{Failure, Random, Success}
 
 /** Manages a single state transfer instance in a client role and multiple state transfer instances
@@ -47,8 +48,9 @@ class StateTransferManager[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(
-    private val maybeCustomTimeoutManager: Option[TimeoutManager[E, Consensus.Message[E], String]] =
-      None
+    private val maybeCustomTimeoutManager: Option[
+      TimeoutManager[E, Consensus.Message[E], String]
+    ] = None
 )(implicit
     synchronizerProtocolVersion: ProtocolVersion,
     config: BftBlockOrdererConfig,
@@ -56,6 +58,9 @@ class StateTransferManager[E <: Env[E]](
 ) extends NamedLogging {
 
   private val stateTransferStartEpoch = new SingleUseCell[EpochNumber]
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var waitingForEpochTransfer: Option[Instant] = None
 
   private val validator = new StateTransferMessageValidator[E](metrics, loggerFactory)
 
@@ -71,6 +76,7 @@ class StateTransferManager[E <: Env[E]](
       loggerFactory,
       config.epochStateTransferRetryTimeout,
       timeoutId = "state transfer",
+      timeoutMetric = None,
     )
   )
 
@@ -122,6 +128,7 @@ class StateTransferManager[E <: Env[E]](
       abort: String => Nothing,
   )(implicit context: E#ActorContextT[Consensus.Message[E]]): Unit = context.withNewTraceContext {
     implicit traceContext =>
+      waitingForEpochTransfer = Some(Instant.now)
       val blockTransferRequest =
         StateTransferMessage.BlockTransferRequest.create(newEpochNumber, membership.myId)
       messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
@@ -191,6 +198,7 @@ class StateTransferManager[E <: Env[E]](
   ): Unit = {
     logger.debug(s"State transfer cancelling a timeout for epoch $epochNumber")
     timeoutManager.cancelTimeout()
+    emitEpochTransferLatency()
   }
 
   private def handleStateTransferNetworkMessage(
@@ -319,6 +327,18 @@ class StateTransferManager[E <: Env[E]](
     //  orders them (has a Peano queue).
     logger.debug(s"State transfer sending block $blockMetadata to Output")
     messageSender.sendBlockToOutput(prePrepare, blockLastInEpoch)
+  }
+
+  private def emitEpochTransferLatency(): Unit = {
+    import metrics.performance.orderingStageLatency.*
+    val now = Instant.now()
+    emitOrderingStageLatency(
+      labels.stage.values.consensus.stateTransfer.TotalEpochTransferLatency,
+      // Always emit batch wait latency for dashboard clarity, even if 0
+      startInstant = waitingForEpochTransfer.orElse(Some(now)),
+      endInstant = now,
+      cleanup = () => waitingForEpochTransfer = None,
+    )
   }
 }
 

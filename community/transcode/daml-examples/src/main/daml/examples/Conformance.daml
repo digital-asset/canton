@@ -18,6 +18,8 @@ import qualified DA.TextMap
 import qualified DA.Time
 import qualified DA.Date
 
+data Void
+
 template Roundtrip
   with
     party: Party
@@ -195,6 +197,11 @@ template Roundtrip
         return payload
 
     nonconsuming choice Primitives_ContractId_Roundtrip_1: ContractId Conformance.Roundtrip  with payload: ContractId Conformance.Roundtrip  controller party
+      do
+        assert (payload == payload)
+        return payload
+
+    nonconsuming choice Primitives_ContractId_Void_1: ContractId Conformance.Void  with payload: ContractId Conformance.Void  controller party
       do
         assert (payload == payload)
         return payload

@@ -276,18 +276,8 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             else createNode.templateId.packageId,
           notPersistedContractId = createNode.coid,
           internal_contract_id = 42L,
-          create_key_hash = Some(
-            GlobalKey
-              .assertBuild(
-                contractTemplate,
-                createNode.packageName,
-                keyValue,
-                crypto.Hash.hashPrivateKey(keyValue.toString),
-              )
-              .hash
-              .bytes
-              .toHexString
-          ),
+          create_key_hash = createNode.gkeyOpt.map(_.hash.toHexString),
+          notPersistedContractKey = createNode.gkeyOpt,
         )
         val dtoCompletion = DbDto.CommandCompletion(
           completion_offset = someOffset.unwrap,
@@ -643,6 +633,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           package_id = exerciseNode.templateId.packageId,
           stakeholders = Set("signatory", "observer"),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          notPersistedContractKey = exerciseNode.keyOpt.map(_.globalKey),
         )
       dtos(3) shouldEqual
         DbDto.CommandCompletion(
@@ -1360,18 +1351,8 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           representative_package_id = createNodeC.templateId.packageId,
           notPersistedContractId = createNodeC.coid,
           internal_contract_id = 42L,
-          create_key_hash = Some(
-            GlobalKey
-              .assertBuild(
-                Ref.Identifier.assertFromString("P:M:T2"),
-                createNodeC.packageName,
-                Value.ValueUnit,
-                crypto.Hash.hashPrivateKey("dummy-key-hash"),
-              )
-              .hash
-              .bytes
-              .toHexString
-          ),
+          create_key_hash = createNodeC.gkeyOpt.map(_.hash.toHexString),
+          notPersistedContractKey = createNodeC.gkeyOpt,
         ),
         DbDto.IdFilterActivateStakeholder(
           IdFilter(
@@ -1858,6 +1839,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           package_id = exerciseNode.templateId.packageId,
           stakeholders = Set("signatory", "observer"),
           ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+          notPersistedContractKey = exerciseNode.keyOpt.map(_.globalKey),
         ),
         DbDto.IdFilterDeactivateStakeholder(
           IdFilter(
@@ -1989,6 +1971,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
         create_key_hash = None,
+        notPersistedContractKey = createNode.gkeyOpt,
       )
       Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
         DbDto.IdFilterActivateStakeholder(
@@ -2042,6 +2025,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         package_id = exerciseNode.templateId.packageId,
         stakeholders = Set("signatory", "observer"),
         ledger_effective_time = Some(transactionMeta.ledgerEffectiveTime.micros),
+        notPersistedContractKey = exerciseNode.keyOpt.map(_.globalKey),
       )
       dtos(4) shouldEqual DbDto.IdFilterDeactivateStakeholder(
         IdFilter(
@@ -2235,6 +2219,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
         create_key_hash = None,
+        notPersistedContractKey = createNode.gkeyOpt,
       )
       Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
         DbDto.IdFilterActivateStakeholder(
@@ -2393,6 +2378,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             notPersistedContractId = createNode.coid,
             internal_contract_id = 42L,
             create_key_hash = None,
+            notPersistedContractKey = createNode.gkeyOpt,
           )
           Set(dtos(1), dtos(2)) should contain theSameElementsAs Set(
             DbDto.IdFilterActivateStakeholder(
@@ -2518,9 +2504,8 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         representative_package_id = createNode.templateId.packageId,
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
-        create_key_hash = Some(
-          crypto.Hash.hashPrivateKey(keyValue.toString).bytes.toHexString
-        ),
+        create_key_hash = createNode.gkeyOpt.map(_.hash.toHexString),
+        notPersistedContractKey = createNode.gkeyOpt,
       )
       dtos(4) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.unwrap,
@@ -2616,6 +2601,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             assignmentExclusivity = Some(Time.Timestamp.assertFromLong(123456)),
             reassignmentCounter = 1500L,
             nodeId = 0,
+            keyOpt = createNode.keyOpt,
           )
         ),
         recordTime = CantonTimestamp.ofEpochMicro(120),
@@ -2659,6 +2645,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         package_id = createNode.templateId.packageId,
         stakeholders = Set("signatory12", "observer23", "asdasdasd"),
         ledger_effective_time = None,
+        notPersistedContractKey = createNode.keyOpt.map(_.globalKey),
       )
       dtos(4) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.unwrap,

@@ -16,10 +16,10 @@ trait DivulgenceIntegrationTest extends OfflinePartyReplicationIntegrationTestBa
   import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.*
 
   // Whether to use Assign/Unassign (multi-synchronizer) or Create/Archive for the ACS import
-  def alphaMultiSynchronizerSupport: Boolean
+  def enableAllLedgerApiReassignments: Boolean
 
   // Inject this setting into the implicit scope for the helper class
-  implicit def alphaSupportImplicit: Boolean = alphaMultiSynchronizerSupport
+  implicit def alphaSupportImplicit: Boolean = enableAllLedgerApiReassignments
 
   // Make sure deduplication duration does not block pruning
   private val maxDedupDuration = java.time.Duration.ofSeconds(2)
@@ -29,7 +29,8 @@ trait DivulgenceIntegrationTest extends OfflinePartyReplicationIntegrationTestBa
     super.environmentDefinition
       .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(alphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
+            .replace(enableAllLedgerApiReassignments)
         ),
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
       )
@@ -100,7 +101,7 @@ trait DivulgenceIntegrationTest extends OfflinePartyReplicationIntegrationTestBa
         participant: LocalParticipantReference,
         contractId: String,
         party: Party,
-    ) = if (alphaMultiSynchronizerSupport) {
+    ) = if (enableAllLedgerApiReassignments) {
       assertEventNotFound(participant, contractId, party)
     } else {
       checkCreatedEventFor(participant, contractId, party)
@@ -525,13 +526,13 @@ trait DivulgenceIntegrationTest extends OfflinePartyReplicationIntegrationTestBa
       immediateDivulged2P2Import,
     )
     // event query
-    if (alphaMultiSynchronizerSupport)
+    if (enableAllLedgerApiReassignments)
       assertEventNotFound(participant2, aliceStakeholderCreatedP1.contractId, alice)
     else checkCreatedEventFor(participant2, aliceStakeholderCreatedP1.contractId, alice)
     checkCreatedEventFor(participant2, aliceBobStakeholderCreatedP1.contractId, alice)
     checkCreatedEventFor(participant2, divulgeIouByExerciseP1.contractId, alice)
     assertEventNotFound(participant2, immediateDivulged1P1.contractId, alice)
-    if (alphaMultiSynchronizerSupport)
+    if (enableAllLedgerApiReassignments)
       assertEventNotFound(participant2, immediateDivulged2P1.contractId, alice)
     else checkCreatedEventFor(participant2, immediateDivulged2P1.contractId, alice)
     assertEventNotFound(participant2, immediateDivulged1ArchiveP1.contractId, alice)
@@ -596,18 +597,18 @@ trait DivulgenceIntegrationTestWithoutCache extends DivulgenceIntegrationTest {
 }
 
 class DivulgenceIntegrationTestReassignmentWithCache extends DivulgenceIntegrationTest {
-  override def alphaMultiSynchronizerSupport: Boolean = true
+  override def enableAllLedgerApiReassignments: Boolean = true
 }
 
 class DivulgenceIntegrationTestLegacyWithCache extends DivulgenceIntegrationTest {
-  override def alphaMultiSynchronizerSupport: Boolean = false
+  override def enableAllLedgerApiReassignments: Boolean = false
 }
 
 class DivulgenceIntegrationTestReassignmentWithoutCache
     extends DivulgenceIntegrationTestWithoutCache {
-  override def alphaMultiSynchronizerSupport: Boolean = true
+  override def enableAllLedgerApiReassignments: Boolean = true
 }
 
 class DivulgenceIntegrationTestLegacyWithoutCache extends DivulgenceIntegrationTestWithoutCache {
-  override def alphaMultiSynchronizerSupport: Boolean = false
+  override def enableAllLedgerApiReassignments: Boolean = false
 }

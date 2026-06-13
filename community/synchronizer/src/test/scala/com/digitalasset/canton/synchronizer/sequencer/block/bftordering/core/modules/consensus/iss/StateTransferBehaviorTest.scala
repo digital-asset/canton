@@ -436,6 +436,8 @@ class StateTransferBehaviorTest
           Consensus.Admin.GetOrderingTopologyResponse(
             Bootstrap.BootstrapEpochNumber,
             aMembership.orderingTopology.nodes,
+            aMembership.leaders,
+            aMembership.blacklistedNodes,
             aMembership.orderingTopology.sequencingParameters,
           )
         )

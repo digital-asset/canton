@@ -108,10 +108,16 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         when(outputStore.getLowerBound()(traceContext)).thenReturn(() =>
           Some(OutputMetadataStore.LowerBound(EpochNumber(10), BlockNumber(10)))
         )
+        when(outputStore.getLastNonSequentialBlockMetadataStored(traceContext)).thenReturn(() =>
+          Some(latestBlock)
+        )
 
         module.receiveInternal(Pruning.Start)
 
-        context.runPipedMessages() should contain only Pruning.PerformPruning(EpochNumber(10))
+        context.runPipedMessages() should contain only Pruning.PerformPruning(
+          EpochNumber(10),
+          EpochNumber(100),
+        )
       }
 
       "do nothing on startup if no previous pruning point exists" in {
@@ -122,6 +128,9 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         val module = createPruningModule[ProgrammableUnitTestEnv](outputStore = outputStore)
 
         when(outputStore.getLowerBound()(traceContext)).thenReturn(() => None)
+        when(outputStore.getLastNonSequentialBlockMetadataStored(traceContext)).thenReturn(() =>
+          None
+        )
 
         module.receiveInternal(Pruning.Start)
 
@@ -169,7 +178,10 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           Pruning.ComputePruningPoint(latestBlock, retentionPeriod, minNumberOfBlocksToKeep)
         )
 
-        context.runPipedMessages() should contain only Pruning.SaveNewLowerBound(EpochNumber(40))
+        context.runPipedMessages() should contain only Pruning.SaveNewLowerBound(
+          EpochNumber(40),
+          EpochNumber(100),
+        )
       }
 
       "when missing pruning point from retentionPeriod, prune nothing" in {
@@ -228,15 +240,18 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
         when(outputStore.saveLowerBound(EpochNumber(40))(traceContext)).thenReturn(() => Right(()))
 
-        module.receiveInternal(Pruning.SaveNewLowerBound(EpochNumber(40)))
-        context.runPipedMessages() should contain only Pruning.PerformPruning(EpochNumber(40))
+        module.receiveInternal(Pruning.SaveNewLowerBound(EpochNumber(40), EpochNumber(100)))
+        context.runPipedMessages() should contain only Pruning.PerformPruning(
+          EpochNumber(40),
+          EpochNumber(100),
+        )
       }
 
       "perform pruning by pruning stores" in {
         implicit val context: ProgrammableUnitTestContext[Pruning.Message] =
           new ProgrammableUnitTestContext()
         val module = moduleReadyToBePruned()
-        module.receiveInternal(Pruning.PerformPruning(EpochNumber(40)))
+        module.receiveInternal(Pruning.PerformPruning(EpochNumber(40), EpochNumber(50)))
         context.runPipedMessages() shouldBe empty
       }
 
@@ -268,7 +283,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         context.lastDelayedMessage should contain((1, KickstartPruning(30 seconds, 100, None)))
         // kick-starting pruning without a promise indicates this is a scheduled operation
         module.receiveInternal(KickstartPruning(30 seconds, 100, None))
-        module.receiveInternal(Pruning.PerformPruning(EpochNumber(40)))
+        module.receiveInternal(Pruning.PerformPruning(EpochNumber(40), EpochNumber(100)))
 
         context.runPipedMessages() should contain(SchedulePruning)
       }
@@ -316,7 +331,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           )(traceContext)
         ).thenReturn(() => AvailabilityStore.NumberOfRecords(10L))
 
-        module.receiveInternal(Pruning.PerformPruning(EpochNumber(40)))
+        module.receiveInternal(Pruning.PerformPruning(EpochNumber(40), EpochNumber(100)))
         context.runPipedMessages() shouldBe empty
 
         requestPromise.isCompleted shouldBe true
@@ -400,6 +415,7 @@ class PruningModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       mock[EpochStoreReader[E]],
       outputStore,
       mock[BftOrdererPruningSchedulerStore[E]],
+      None,
     )
     val pruning = new PruningModule[E](
       stores,

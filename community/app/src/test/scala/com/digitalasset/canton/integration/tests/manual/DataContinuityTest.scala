@@ -39,9 +39,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, TracedLogger}
-import com.digitalasset.canton.resource.DatabaseStorageError
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
@@ -103,34 +101,6 @@ trait DataContinuityTest
   // Set to true if you want to persist the dumps locally even if a test container is found
   lazy val forceLocalDumps = false
 
-  // Suppress flaky DB task rejection warnings during outer environment transitions and final teardown.
-  // When nodes are stopped, Slick connection pools terminate immediately ("Terminated"). If background
-  // processes (like the ACS Commitment Processor running heavy SQL queries) are still executing,
-  // subsequent pool submissions trigger benign DB_STORAGE_DEGRADATION warnings caused by underlying
-  // RejectedExecutionException failures.
-  //
-  // TODO(#16601): This is a workaround for an uncoordinated shutdown sequence
-  // A coordinated graceful shutdown that actively cancels ongoing queries would make this suppression obsolete.
-  protected def assertBenignDbStorageDegradationShutdown(e: LogEntry): Assertion =
-    e.shouldBeCantonError(
-      DatabaseStorageError.DatabaseStorageDegradation,
-      messageAssertion = msg => {
-        // Check the top-level message text
-        msg should include("A database task was rejected from the database task queue")
-      },
-      contextAssertion = mdc => {
-        // Inspect the raw error context dumped by Slick into the MDC map
-        val slickMsg = mdc.getOrElse("messageFromSlick", "")
-        slickMsg should include("RejectedExecutionException")
-        // These strings originate from java.util.concurrent.ThreadPoolExecutor#toString().
-        // We match only shutdown phases to suppress benign teardown races, while ensuring
-        // actual load-based queue rejections ("Running") remain visible.
-        slickMsg should include regex "Shutting down|Terminated"
-      },
-      loggerAssertion =
-        loggerName => loggerName should startWith("com.digitalasset.canton.resource.DbStorageMulti"),
-    )
-
   override val logsToBeHandledAtStartup: Option[Seq[LogEntry] => Assertion] = Some(
     LogEntry.assertLogSeq(
       Seq.empty,
@@ -143,8 +113,6 @@ trait DataContinuityTest
               s"Using a session signing key is not possible with protocol version 34."
             )
           ),
-        // Flake prevention: Suppress trailing DB task rejections during mid-test dump restorations via loadState
-        assertBenignDbStorageDegradationShutdown,
       ),
     )
   )
@@ -154,12 +122,7 @@ trait DataContinuityTest
       protocolVersion: ProtocolVersion,
   )(f: TestConsoleEnvironment => Unit): Unit = {
 
-    // Flake prevention: Catch benign DB rejections when stopping the old environment.
-    // Wrapped separately to avoid nesting suppression scopes.
-    loggerFactory.assertLogsUnorderedOptional(
-      oldEnv.nodes.local.foreach(_.stop()),
-      LogEntryOptionality.OptionalMany -> assertBenignDbStorageDegradationShutdown,
-    )
+    oldEnv.nodes.local.foreach(_.stop())
     val newEnv = manualCreateEnvironment(
       initialConfig = oldEnv.environment.config,
       configTransform = config =>
@@ -173,12 +136,7 @@ trait DataContinuityTest
       logger.info(s"About to run with protocol version $protocolVersion")
       f(newEnv)
     } finally {
-      // Flake prevention: Catch benign DB rejections during final environment teardown.
-      // Wrapped separately so mid-test calls to `handleStartupLogs` do not trigger nested suppression errors.
-      loggerFactory.assertLogsUnorderedOptional(
-        destroyEnvironment(newEnv),
-        LogEntryOptionality.OptionalMany -> assertBenignDbStorageDegradationShutdown,
-      )
+      destroyEnvironment(newEnv)
     }
 
   }
@@ -727,16 +685,11 @@ trait SynchronizerChangeDataContinuityTest extends SynchronizerChangeDataContinu
             val unassignedEvent = incompleteUnassignedEvents.loneElement
             // act on state
             clue("starting assignment and paint offer acceptance") {
-              // Flake prevention: Catch trailing DB task rejections if background processors
-              // flake concurrently with active test execution.
-              loggerFactory.assertLogsUnorderedOptional(
-                assignmentAndPaintOfferAcceptance(
-                  Alice.toPartyId(),
-                  Bank.toPartyId(),
-                  Painter.toPartyId(),
-                  unassignedEvent.entry.getUnassignedEvent,
-                ),
-                LogEntryOptionality.OptionalMany -> assertBenignDbStorageDegradationShutdown,
+              assignmentAndPaintOfferAcceptance(
+                Alice.toPartyId(),
+                Bank.toPartyId(),
+                Painter.toPartyId(),
+                unassignedEvent.entry.getUnassignedEvent,
               )
             }
           }

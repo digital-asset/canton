@@ -7,9 +7,11 @@ import com.daml.tls.{TlsServerConfig, TlsVersion}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.integration.plugins.*
-import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
-import com.digitalasset.canton.integration.tests.ledgerapi.SingleVersionLedgerApiConformanceBase
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.tests.ledgerapi.{
+  LedgerApiConformanceBase,
+  SingleVersionLedgerApiConformanceBase,
+}
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.logging.SuppressionRule
@@ -52,7 +54,7 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
         ledgerApiTestToolPlugin.runShardedSuites(
           shard = shard,
           numShards = numShards,
-          exclude = excludedTests,
+          exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion),
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
           useJson = false,
         )
@@ -120,7 +122,7 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
         ledgerApiTestToolPlugin.runShardedSuites(
           shard = shard,
           numShards = numShards,
-          exclude = excludedTests,
+          exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion),
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
           useJson = false,
         )
@@ -256,7 +258,7 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
         ledgerApiTestToolPlugin.runShardedSuites(
           shard = 0,
           numShards = 1,
-          exclude = excludedTests ++ exclusions,
+          exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion) ++ exclusions,
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
           useJson = false,
         )

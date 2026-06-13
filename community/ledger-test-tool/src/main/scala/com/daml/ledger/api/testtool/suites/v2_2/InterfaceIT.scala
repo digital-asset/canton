@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.{
   Participant,
   Participants,
@@ -22,9 +23,11 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import java.util.List as JList
 import scala.jdk.CollectionConverters.*
 
-class InterfaceIT extends LedgerTestSuite {
-  implicit val tCompanion: ContractCompanion.WithoutKey[T.Contract, T.ContractId, T] =
-    T.COMPANION
+class InterfaceIT(testDars: TestDars) extends LedgerTestSuite {
+  private val semanticTestsPackageId = testDars.SemanticTestDar.packageId
+  private implicit val tCompanion: ContractCompanion.WithoutKey[T.Contract, T.ContractId, T] =
+    T.COMPANION.withPackageId(semanticTestsPackageId)
+  private val interface1Companion = interface1.I.INTERFACE.withPackageId(semanticTestsPackageId)
 
   // replace identifier with the wrong identifier for some of these tests
   private[this] def useWrongId[X](
@@ -67,13 +70,13 @@ class InterfaceIT extends LedgerTestSuite {
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     for {
       t <- ledger.create(party, new T(party))
-      tree <- ledger.exercise(party, t.toInterface(interface1.I.INTERFACE).exerciseMyArchive())
+      tree <- ledger.exercise(party, new interface1.I.ContractId(t.contractId).exerciseMyArchive())
     } yield {
       val events = exercisedEvents(tree)
       assertLength(s"1 successful exercise", 1, events).discard
       assertEquals(
         events.headOption.value.interfaceId,
-        Some(interface1.I.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+        Some(interface1Companion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
       )
       assertEquals(events.headOption.value.getExerciseResult.getText, "Interface1.I")
     }
@@ -91,7 +94,7 @@ class InterfaceIT extends LedgerTestSuite {
         .submitAndWaitForTransaction(
           ledger.submitAndWaitForTransactionRequest(
             party,
-            useWrongId(t.toInterface(interface1.I.INTERFACE).exerciseChoiceI1(), T.TEMPLATE_ID),
+            useWrongId(new interface1.I.ContractId(t.contractId).exerciseChoiceI1(), T.TEMPLATE_ID),
           )
         )
         .mustFail("unknown choice")
@@ -118,7 +121,7 @@ class InterfaceIT extends LedgerTestSuite {
           ledger.submitAndWaitForTransactionRequest(
             party,
             useWrongId(
-              t.toInterface(interface1.I.INTERFACE).exerciseChoiceI1(),
+              new interface1.I.ContractId(t.contractId).exerciseChoiceI1(),
               interface2.I.TEMPLATE_ID,
             ),
           )

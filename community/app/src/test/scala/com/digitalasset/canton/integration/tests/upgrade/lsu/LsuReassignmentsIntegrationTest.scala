@@ -52,7 +52,7 @@ final class LsuReassignmentsIntegrationTest extends LsuBase {
         NetworkBootstrapper(S1M1_S1M1)
       }
       .addConfigTransforms(configTransforms*)
-      .addConfigTransform(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         defaultEnvironmentSetup()
       }

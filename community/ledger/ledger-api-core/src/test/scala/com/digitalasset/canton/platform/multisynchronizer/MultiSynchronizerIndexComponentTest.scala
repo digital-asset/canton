@@ -369,6 +369,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
           assignmentExclusivity = None,
           reassignmentCounter = 15L,
           nodeId = 0,
+          keyOpt = None,
         ),
         contracIds.tail.map(contractId =>
           Reassignment.Unassign(
@@ -379,6 +380,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
             assignmentExclusivity = None,
             reassignmentCounter = 15L,
             nodeId = 0,
+            keyOpt = None,
           )
         )*
       ),

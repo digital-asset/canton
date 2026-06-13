@@ -68,8 +68,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PNetworkOutModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.BftOrdererPruningScheduler
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.data.BftOrdererPruningSchedulerStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.{
+  BftOrdererPruningScheduler,
+  PartitionManager,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
   BftBlockOrdererConfig,
   BftOrderingModuleSystemInitializer,
@@ -180,26 +183,7 @@ final class BftBlockOrderer(
       BftNodeId(standaloneConfig.thisSequencerId)
     }
 
-  // The initial metrics factory, which also pre-initializes histograms (as required by OpenTelemetry), is built
-  //  very early in the Canton bootstrap process, before unique IDs for synchronizer nodes are even available,
-  //  so it doesn't include the sequencer ID in the labels, rather just the node name AKA "instance name".
-  //
-  //  The instance name, though, coming from the Canton config, is operator-chosen and is, in general, not unique and
-  //  even uncorrelated with the sequencer ID, while the BFT ordering system must refer to nodes uniquely and, thus,
-  //  refers to them only by their sequencer IDs.
-  //
-  //  Since we want to always be able to correlate the sequencer IDs included as additional metrics context, e.g. in
-  //  consensus voting metrics, with the label used by each sequencer to identify itself as the metrics reporting
-  //  sequencer, we use the sequencer ID for that, rather than the instance name.
-  //
-  //  Hence, we add to the metrics context this node's sequencer ID as the reporting sequencer.
-  //  Also, we do it as soon as the BFT block orderer is created, so that all BFT ordering sequencers include it in all
-  //  emitted metrics.
-  private implicit val metricsContext: MetricsContext =
-    MetricsContext(metrics.global.labels.ReportingSequencer -> thisNode)
-
-  // Initialize the non-compliant behavior meter so that a value appears even if all behavior is compliant.
-  metrics.security.noncompliant.behavior.mark(0)
+  private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
   metrics.performance.enabled = config.enablePerformanceMetrics
 
@@ -284,6 +268,15 @@ final class BftBlockOrderer(
       timeouts,
       loggerFactory,
     )
+
+  val partitionManager: Option[
+    (PartitionManager.PartitionCreator[PekkoEnv], PartitionManager.PartitionPruner[PekkoEnv])
+  ] =
+    awaitFuture(
+      PartitionManager.create(localStorage, timeouts, loggerFactory),
+      "initialize partition management",
+    )(TraceContext.empty)
+
   private val epochStore = EpochStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
   private val outputStore = OutputMetadataStore(localStorage, timeouts, loggerFactory)
   private val pruningSchedulerStore =
@@ -343,8 +336,11 @@ final class BftBlockOrderer(
   private lazy val blockSubscription =
     new PekkoBlockSubscription[PekkoEnv](
       BlockNumber(sequencerSubscriptionInitialHeight),
+      outputModuleRef,
       timeouts,
       loggerFactory,
+      metrics,
+      config.sequencerCoreSubscriptionConfig,
       config.outputEnqueueMaxRetries,
       config.outputEnqueueMaxRetryDelay,
     )(
@@ -413,6 +409,7 @@ final class BftBlockOrderer(
         epochStoreReader = epochStore,
         outputStore,
         pruningSchedulerStore,
+        partitionManager,
       )
     val topologyProvider =
       config.standalone.fold[OrderingTopologyProvider[PekkoEnv]](
@@ -682,6 +679,8 @@ final class BftBlockOrderer(
           SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
           SyncCloseable("pruningScheduler.close()", pruningScheduler.close()),
           SyncCloseable("pruningSchedulerStore.close()", pruningSchedulerStore.close()),
+          SyncCloseable("PartitionCreator.close()", partitionManager.map(_._1).foreach(_.close())),
+          SyncCloseable("PartitionPruner.close()", partitionManager.map(_._2).foreach(_.close())),
         ) ++
         // Shutdown the dedicated local storage if present
         Option

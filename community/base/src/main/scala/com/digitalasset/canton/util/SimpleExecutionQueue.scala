@@ -13,6 +13,11 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FailureMode.{
+  ContinueAfterFailure,
+  CrashAfterFailure,
+  StopAfterFailure,
+}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SimpleExecutionQueue.TaskCell
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -27,18 +32,21 @@ import scala.util.{Failure, Success, Try}
   */
 sealed trait FailureMode
 
-/** Causes the queue to crash the entire process if a task is scheduled after a previously failed
-  * task.
-  */
-object CrashAfterFailure extends FailureMode
+object FailureMode {
 
-/** Causes the queue to not process any further tasks after a previously failed task.
-  */
-object StopAfterFailure extends FailureMode
+  /** Causes the queue to crash the entire process if a task is scheduled after a previously failed
+    * task.
+    */
+  object CrashAfterFailure extends FailureMode
 
-/** The queue will continue the execution of tasks even if previous tasks had failed.
-  */
-object ContinueAfterFailure extends FailureMode
+  /** Causes the queue to not process any further tasks after a previously failed task.
+    */
+  object StopAfterFailure extends FailureMode
+
+  /** The queue will continue the execution of tasks even if previous tasks had failed.
+    */
+  object ContinueAfterFailure extends FailureMode
+}
 
 /** Functions executed with this class will only run when all previous calls have completed
   * executing. This can be used when async code should not be run concurrently.
@@ -86,7 +94,7 @@ class SimpleExecutionQueue(
     timeouts,
     loggerFactory,
     logTaskTiming,
-    if (crashOnFailure) CrashAfterFailure else StopAfterFailure,
+    failureMode = if (crashOnFailure) CrashAfterFailure else StopAfterFailure,
   )
 
   protected val directExecutionContext: DirectExecutionContext =

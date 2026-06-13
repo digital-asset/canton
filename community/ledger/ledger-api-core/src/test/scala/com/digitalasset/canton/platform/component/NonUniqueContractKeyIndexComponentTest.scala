@@ -149,6 +149,7 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
                 assignmentExclusivity = None,
                 reassignmentCounter = 15L,
                 nodeId = index,
+                keyOpt = contract.contractKeyWithMaintainers,
               )
             }.toSeq)
             .value
@@ -231,7 +232,7 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
         token: Option[Long],
     ): ContractKeyPage =
       index
-        .lookupNonUniqueContractKey(
+        .lookupContractKey(
           readers = key.maintainers,
           key = key.globalKey,
           pageToken = token,
@@ -271,9 +272,12 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
         contractKey2,
       )
     )
+    // From here on, the contract key state cache holds Last(contractKey9, _, thereMightBeMore=true)
+    // so every fresh lookup (pageToken=None) is served from the cache as a single-element first page,
+    // and subsequent pages are read from the DB.
     nuckPages(key1, 8)()() shouldBe coids(
+      Vector(contractKey9),
       Vector(
-        contractKey9,
         contractKey8,
         contractKey7,
         contractKey6,
@@ -281,69 +285,63 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
         contractKey4,
         contractKey3,
         contractKey2,
-      )
+      ),
     )
     nuckPages(key1, 7)()() shouldBe coids(
+      Vector(contractKey9),
       Vector(
-        contractKey9,
         contractKey8,
         contractKey7,
         contractKey6,
         contractKey5,
         contractKey4,
         contractKey3,
-      ),
-      Vector(
-        contractKey2
+        contractKey2,
       ),
     )
     nuckPages(key1, 4)()() shouldBe coids(
+      Vector(contractKey9),
       Vector(
-        contractKey9,
         contractKey8,
         contractKey7,
         contractKey6,
+        contractKey5,
       ),
       Vector(
-        contractKey5,
         contractKey4,
         contractKey3,
         contractKey2,
       ),
     )
     nuckPages(key1, 3)()() shouldBe coids(
+      Vector(contractKey9),
       Vector(
-        contractKey9,
         contractKey8,
         contractKey7,
+        contractKey6,
       ),
       Vector(
-        contractKey6,
         contractKey5,
         contractKey4,
-      ),
-      Vector(
         contractKey3,
-        contractKey2,
       ),
+      Vector(contractKey2),
     )
     nuckPages(key1, 2)()() shouldBe coids(
+      Vector(contractKey9),
       Vector(
-        contractKey9,
         contractKey8,
-      ),
-      Vector(
         contractKey7,
+      ),
+      Vector(
         contractKey6,
-      ),
-      Vector(
         contractKey5,
-        contractKey4,
       ),
       Vector(
+        contractKey4,
         contractKey3,
-        contractKey2,
       ),
+      Vector(contractKey2),
     )
     nuckPages(key1, 1)()() shouldBe coids(
       Vector(contractKey9),

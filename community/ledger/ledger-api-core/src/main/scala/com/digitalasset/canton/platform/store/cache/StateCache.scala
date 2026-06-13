@@ -66,6 +66,46 @@ private[platform] case class StateCache[K, V](
   def putBatch(validAtEventSeqId: Long, batch: Map[K, V])(implicit
       traceContext: TraceContext
   ): Unit =
+    internalPutBatch(
+      validAtEventSeqId = validAtEventSeqId,
+      computeChange = () => (batch, Set.empty[K]),
+    )
+
+  /** Like [[putBatch]], but the to-be-written values are computed by a single function that
+    * receives the currently cached values for the affected `keys`.
+    *
+    * The `change` callback is invoked under the cache lock with a map containing only those entries
+    * from `keys` that are currently present in the cache. It must return the upserts to apply and
+    * the keys to invalidate.
+    *
+    * @param validAtEventSeqId
+    *   ordering discriminator for pending updates for the same key
+    * @param keys
+    *   the set of keys to read from the cache before computing the change
+    * @param change
+    *   function from the currently cached values (restricted to `keys`) to (`upserts`,
+    *   `invalidations`)
+    */
+  def putBatchCond(
+      validAtEventSeqId: Long,
+      keys: Set[K],
+      change: Map[K, V] => (Map[K, V], Set[K]),
+  )(implicit traceContext: TraceContext): Unit =
+    internalPutBatch(
+      validAtEventSeqId = validAtEventSeqId,
+      computeChange = { () =>
+        val cached = keys.view.flatMap(k => cache.getIfPresent(k).map(k -> _)).toMap
+        change(cached)
+      },
+    )
+
+  private def bumpPendingValidAt(validAtEventSeqId: Long)(key: K): Unit =
+    pendingUpdates.updateWith(key)(_.map(_.withValidAt(validAtEventSeqId))).discard
+
+  private def internalPutBatch(
+      validAtEventSeqId: Long,
+      computeChange: () => (Map[K, V], Set[K]),
+  )(implicit traceContext: TraceContext): Unit =
     Timed.value(
       registerUpdateTimer,
       (lock.exclusive {
@@ -73,14 +113,16 @@ private[platform] case class StateCache[K, V](
         // However, the most recent updates can be replayed in case of failure of the mutable contract state cache update stream.
         // In this case, we must ignore the already seen updates (i.e. that have `validAt` before or at the cacheIndex).
         if (validAtEventSeqId > cacheEventSeqIdIndex) {
-          batch.keySet.foreach { key =>
-            pendingUpdates.updateWith(key)(_.map(_.withValidAt(validAtEventSeqId))).discard
-          }
+          val (toPut, toInvalidate) = computeChange()
+          toPut.keySet.foreach(bumpPendingValidAt(validAtEventSeqId))
+          toInvalidate.foreach(bumpPendingValidAt(validAtEventSeqId))
           cacheEventSeqIdIndex = validAtEventSeqId
-          cache.putAll(batch)
+          if (toInvalidate.nonEmpty) cache.invalidateAll(toInvalidate)
+          if (toPut.nonEmpty) cache.putAll(toPut)
           logger.debug(
-            s"Updated cache with a batch of ${batch
+            s"Updated cache with a batch of ${toPut
                 .map { case (k, v) => s"$k -> ${truncateValueForLogging(v)}" }
+                .mkString("[", ", ", "]")} and invalidated ${toInvalidate
                 .mkString("[", ", ", "]")} at $validAtEventSeqId"
           )
         } else

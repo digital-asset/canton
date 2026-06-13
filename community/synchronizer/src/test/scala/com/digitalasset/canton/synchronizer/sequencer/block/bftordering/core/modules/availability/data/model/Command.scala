@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.model
 
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore.BatchIdAndEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
@@ -12,7 +13,7 @@ sealed trait Command
 object Command {
   final case class AddBatch(batchId: BatchId, batch: OrderingRequestBatch) extends Command
 
-  final case class FetchBatches(batches: Seq[BatchId]) extends Command
+  final case class FetchBatches(batches: Seq[BatchIdAndEpochNumber]) extends Command
 
   final case class GC(staleBatchIds: Seq[BatchId]) extends Command
 

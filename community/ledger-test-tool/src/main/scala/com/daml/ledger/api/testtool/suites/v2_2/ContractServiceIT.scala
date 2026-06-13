@@ -3,14 +3,15 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.test.java.model.test.Dummy
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 
-class ContractServiceIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class ContractServiceIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "CSNotFound",

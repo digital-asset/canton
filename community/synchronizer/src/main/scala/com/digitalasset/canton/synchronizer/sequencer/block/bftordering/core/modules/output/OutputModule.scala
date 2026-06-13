@@ -40,6 +40,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.snapshot.SequencerSnapshotAdditionalInfoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PartitionManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -72,6 +73,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Message,
   MetadataStoredForNewEpoch,
   NoTopologyAvailable,
+  ProcessNewEpochTopologyMessagesIfPossible,
   SequencerSnapshotMessage,
   Start,
   TopologyFetched,
@@ -95,7 +97,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.{Span, Tracer}
 
-import java.time.Instant
+import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.util.chaining.scalaUtilChainingOps
@@ -125,6 +127,7 @@ class OutputModule[E <: Env[E]](
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // For testing
     // Passed from BftBlockOrderer to allow a near-0 latency `GetTime` implementation
     private[bftordering] val previousStoredBlock: PreviousStoredBlock = new PreviousStoredBlock,
+    partitionCreator: Option[(PartitionManager.PartitionCreator[E])] = None,
 )(implicit
     override val config: BftBlockOrdererConfig,
     synchronizerProtocolVersion: ProtocolVersion,
@@ -207,6 +210,8 @@ class OutputModule[E <: Env[E]](
   private val blockSpanMap: mutable.Map[BlockNumber, (Span, TraceContext)] = mutable.Map()
 
   private val blocksRecoveredFromConsensus = new BlocksRecoveredFromConsensusMessages[E]
+
+  private var backPressureStartInstant: Option[Instant] = None
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def receiveInternal(message: Message[E])(implicit
@@ -424,6 +429,13 @@ class OutputModule[E <: Env[E]](
         ifInitCompleted(message) {
           case Start =>
 
+          case ProcessNewEpochTopologyMessagesIfPossible =>
+            logger.info(
+              "Received notification from subscription that sequencer core may be caught up enough, " +
+                "checking if we can process new epoch topology messages"
+            )
+            processNewEpochTopologyMessagesIfPossible()
+
           // From local consensus
           case BlockOrdered(
                 orderedBlockForOutput @ OrderedBlockForOutput(
@@ -518,12 +530,30 @@ class OutputModule[E <: Env[E]](
             //  be unable to provide it to us.
             // We fetch the topology once the last block is stored as, based on the returned topology, the last block
             //  might need to be updated with pending topology changes.
-            if (orderedBlockData.orderedBlockForOutput.isLastInEpoch)
+            if (orderedBlockData.orderedBlockForOutput.isLastInEpoch) {
               fetchNewEpochTopologyIfNeeded(
                 orderedBlockData,
                 orderedBlockBftTime,
                 epochCouldAlterOrderingTopology,
               )
+
+              partitionCreator.foreach { creator =>
+                context.pipeToSelf(creator.createPartitionsIfNeeded(epochNumber)) {
+                  case Success(partitionsCreated) =>
+                    if (partitionsCreated > 0)
+                      logger.info(
+                        s"Created $partitionsCreated partitions at epoch $epochNumber and block $orderedBlockNumber"
+                      )
+                    None
+                  case Failure(exception) =>
+                    logger.error(
+                      s"Failed to create partitions at epoch $epochNumber and block $orderedBlockNumber",
+                      exception,
+                    )
+                    None
+                }
+              }
+            }
 
             // This is just a defensive check, as the block subscription will have the head correctly set to the
             //  initial height and will ignore blocks before that, but we cannot check nor enforce this assumption
@@ -564,7 +594,7 @@ class OutputModule[E <: Env[E]](
                   "to sequencer subscription"
               )(blockTraceContext)
 
-              blockSubscription.receiveBlock(
+              val fullyAssembledBlock =
                 BlockFormat.Block(
                   orderedBlockNumber,
                   orderedBlockBftTime.toMicros,
@@ -575,7 +605,8 @@ class OutputModule[E <: Env[E]](
                       .toMicros
                   ),
                 )
-              )(blockTraceContext)
+
+              blockSubscription.receiveBlock(fullyAssembledBlock)(blockTraceContext, mc)
             }
 
           case UpdateLeaderSelection(topologyFetched) =>
@@ -646,6 +677,27 @@ class OutputModule[E <: Env[E]](
             logger.info("No topology snapshot available due to either shutting down or testing")
         }
     }
+
+  private def emitBackpressureMetrics(): Unit = {
+    val now = Instant.now()
+    locally {
+      import metrics.output.*
+      backPressureStartInstant.fold {
+        currentSequencerCoreBackpressureDelayMillis.updateValue(0L)
+      } { startInstant =>
+        currentSequencerCoreBackpressureDelayMillis.updateValue(
+          Duration.between(startInstant, now).toMillis
+        )
+      }
+    }
+    import metrics.performance.orderingStageLatency.*
+    emitOrderingStageLatency(
+      labels.stage.values.output.Backpressure,
+      startInstant = backPressureStartInstant,
+      endInstant = now,
+      cleanup = () => backPressureStartInstant = None,
+    )
+  }
 
   private def processFetchedBlocks()(implicit
       context: E#ActorContextT[Message[E]],
@@ -885,7 +937,6 @@ class OutputModule[E <: Env[E]](
       context: E#ActorContextT[Message[E]],
       traceContext: TraceContext,
   ): Unit = {
-
     val orderingTopology =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochOrderingTopology)(_._1)
     val newEpochLeaders = leaderSelectionPolicy.getLeaders(orderingTopology, newEpochNumber)
@@ -895,6 +946,10 @@ class OutputModule[E <: Env[E]](
     val cryptoProvider =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
 
+    if (epochMetadataStored)
+      setEpochMetadataStoredCache(newEpochNumber)
+    cleanupEpochMetadataStoredCache(newEpochNumber)
+
     logger.debug(
       s"Inserting NewEpochTopology message for epoch $newEpochNumber into Peano queue, " +
         s"(head=$newEpochTopologyMessagePeanoQueue)"
@@ -903,48 +958,79 @@ class OutputModule[E <: Env[E]](
       newEpochNumber,
       Consensus.NewEpochTopology(newEpochNumber, newMembership, cryptoProvider),
     )
-    val newEpochTopologyMessages = newEpochTopologyMessagePeanoQueue.pollAvailable()
-    logger.debug(
-      s"Polled NewEpochTopology messages: $newEpochTopologyMessages from Peano queue"
-    )
 
-    newEpochTopologyMessages.foreach { newEpochTopologyMessage =>
-      // It is safe to use and change epoch-related mutable state in this block because:
-      //  - New epoch messages are processed sequentially and in order.
-      //  - Ordered blocks processing, which uses and changes epoch-related mutable state:
-      //    - Also happens sequentially and in order.
-      //    - Furthermore, only blocks for the current epoch are processed.
-      val newEpochNumber = newEpochTopologyMessage.epochNumber
-      logger.debug(s"Setting up new epoch $newEpochNumber")
-      currentEpochCouldAlterOrderingTopology = false
-      if (epochMetadataStored)
-        setEpochMetadataStoredCache(newEpochNumber)
-      cleanupEpochMetadataStoredCache(newEpochNumber)
-      processingFetchedBlocksInEpoch = Some(newEpochNumber)
+    processNewEpochTopologyMessagesIfPossible()
+  }
 
-      currentEpochOrderingTopology = newEpochTopologyMessage.membership.orderingTopology
-      currentEpochCryptoProvider = newEpochTopologyMessage.cryptoProvider
-      val pendingTopologyChanges = currentEpochOrderingTopology.areTherePendingCantonTopologyChanges
+  private def processNewEpochTopologyMessagesIfPossible()(implicit
+      context: E#ActorContextT[Message[E]],
+      traceContext: TraceContext,
+  ): Unit = {
+    // We check directly the subscriptions state, rather than using a notification mechanism through actor messages,
+    //  because the subscription state update is multi-threaded and pause/resume messages may be reordered due
+    //  to thread scheduling, potentially causing a deadlock.
+    //  In addition to reading the state, we also get notified by the subscription when processing may be able to
+    //  be resumed via `ProcessNewEpochTopologyMessagesIfPossible` messages; this allows to always and timely
+    //  resume ordering.
+    emitBackpressureMetrics()
+    if (blockSubscription.sequencerCoreIsSlow) {
+      if (backPressureStartInstant.isEmpty) {
+        logger.info(
+          s"Not processing new epoch topology messages because the sequencer core is slow to consume blocks"
+        )
+        backPressureStartInstant = Some(Instant.now())
+      } else {
+        logger.debug(
+          s"The sequencer core is still slow, not processing new epoch topology messages yet"
+        )
+      }
+    } else {
+      if (backPressureStartInstant.isDefined)
+        logger.info(
+          s"The sequencer core has caught up enough, processing new epoch topology messages"
+        )
+
+      val newEpochTopologyMessages = newEpochTopologyMessagePeanoQueue.pollAvailable()
       logger.debug(
-        s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
-      )
-      currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
-
-      metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
-      logger.debug(
-        s"Sending topology $currentEpochOrderingTopology of a new epoch $newEpochNumber " +
-          s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
+        s"Polled NewEpochTopology messages: $newEpochTopologyMessages from Peano queue"
       )
 
-      consensus.asyncSend(newEpochTopologyMessage)
-      epochChecker.check(
-        thisNode,
-        newEpochNumber,
-        newEpochTopologyMessage.membership,
-      )
-      blocksRecoveredFromConsensus.releaseMessagesForEpoch(newEpochNumber)
+      newEpochTopologyMessages.foreach { newEpochTopologyMessage =>
+        // It is safe to use and change epoch-related mutable state in this block because:
+        //  - New epoch messages are processed sequentially and in order.
+        //  - Ordered blocks processing, which uses and changes epoch-related mutable state:
+        //    - Also happens sequentially and in order.
+        //    - Furthermore, only blocks for the current epoch are processed.
+        val newEpochNumber = newEpochTopologyMessage.epochNumber
+        logger.debug(s"Setting up new epoch $newEpochNumber")
+        currentEpochCouldAlterOrderingTopology = false
+        processingFetchedBlocksInEpoch = Some(newEpochNumber)
 
-      processFetchedBlocks()
+        currentEpochOrderingTopology = newEpochTopologyMessage.membership.orderingTopology
+        currentEpochCryptoProvider = newEpochTopologyMessage.cryptoProvider
+        val pendingTopologyChanges =
+          currentEpochOrderingTopology.areTherePendingCantonTopologyChanges
+        logger.debug(
+          s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
+        )
+        currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
+
+        metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
+        logger.debug(
+          s"Sending topology $currentEpochOrderingTopology of a new epoch $newEpochNumber " +
+            s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
+        )
+
+        consensus.asyncSend(newEpochTopologyMessage)
+        epochChecker.check(
+          thisNode,
+          newEpochNumber,
+          newEpochTopologyMessage.membership,
+        )
+        blocksRecoveredFromConsensus.releaseMessagesForEpoch(newEpochNumber)
+
+        processFetchedBlocks()
+      }
     }
   }
 

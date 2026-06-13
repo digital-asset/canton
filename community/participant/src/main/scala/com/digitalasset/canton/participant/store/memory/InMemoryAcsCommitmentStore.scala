@@ -129,7 +129,8 @@ class InMemoryAcsCommitmentStore(
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit] = {
     if (counterParticipants.nonEmpty) {
       _outstanding.updateAndGet(os =>
@@ -144,7 +145,7 @@ class InMemoryAcsCommitmentStore(
 
   override def markComputedAndSent(
       period: CommitmentPeriod
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     val timestamp = period.toInclusive
     lastComputed.set(Some(timestamp))
     FutureUnlessShutdown.unit
@@ -169,7 +170,7 @@ class InMemoryAcsCommitmentStore(
       counterParticipant: ParticipantId,
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     val periodSets = periods.toSet
     _outstanding.updateAndGet { currentOutstanding =>
       currentOutstanding.map {

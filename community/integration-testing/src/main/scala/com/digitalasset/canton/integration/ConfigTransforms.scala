@@ -937,7 +937,7 @@ object ConfigTransforms {
       )
     )
 
-  def enableAlphaMultiSynchronizerTopologyFeatureFlag: ConfigTransform = {
+  def enableMultiSynchronizerTopologyFeatureFlag: ConfigTransform = {
     (cantonConfig: CantonConfig) =>
       cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
   }.compose(

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.ProtobufConverters.*
@@ -26,8 +27,8 @@ import java.util.regex.Pattern
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
 
-class CommandDeduplicationPeriodValidationIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+class CommandDeduplicationPeriodValidationIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 

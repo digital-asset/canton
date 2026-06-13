@@ -188,7 +188,8 @@ class DbAcsCommitmentStore(
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      externalCloseContext: CloseContext,
   ): FutureUnlessShutdown[Unit] = {
     logger.debug(
       s"Marking $periods as outstanding for ${counterParticipants.size} remote participants"
@@ -210,15 +211,25 @@ class DbAcsCommitmentStore(
         ( ?, ?, ?, ?, ?)
         on conflict do nothing"""
 
-    storage.queryAndUpdate(
-      DbStorage.bulkOperation_(insertOutstanding, crossProduct, storage.profile)(setParams),
-      operationName = "commitments: storeOutstanding",
-    )
+    CloseContext.withCombinedContext(closeContext, externalCloseContext, timeouts, logger) {
+      combinedCloseContext =>
+        storage.queryAndUpdate(
+          DbStorage.bulkOperation_(insertOutstanding, crossProduct, storage.profile)(setParams),
+          operationName = "commitments: storeOutstanding",
+        )(
+          traceContext,
+          combinedCloseContext,
+          DbStorage.RowsAltered.ofUnit,
+        )
+    }
   }
 
   override def markComputedAndSent(
       period: CommitmentPeriod
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit
+      traceContext: TraceContext,
+      externalCloseContext: CloseContext,
+  ): FutureUnlessShutdown[Unit] = {
     val timestamp = period.toInclusive
     val upsertQuery = storage.profile match {
       case _: DbStorage.Profile.H2 =>
@@ -228,7 +239,14 @@ class DbAcsCommitmentStore(
                  on conflict (synchronizer_idx) do update set ts = $timestamp"""
     }
 
-    storage.update_(upsertQuery, operationName = "commitments: markComputedAndSent")
+    CloseContext.withCombinedContext(closeContext, externalCloseContext, timeouts, logger) {
+      combinedCloseContext =>
+        storage.update_(upsertQuery, operationName = "commitments: markComputedAndSent")(
+          traceContext,
+          combinedCloseContext,
+          DbStorage.RowsAltered.ofInt,
+        )
+    }
   }
 
   private def buildParticipantFilter(
@@ -304,7 +322,8 @@ class DbAcsCommitmentStore(
       periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      externalCloseContext: CloseContext,
   ): FutureUnlessShutdown[Unit] = {
 
     val upsertQuery = storage.profile match {
@@ -338,22 +357,25 @@ class DbAcsCommitmentStore(
           """
     }
 
-    storage.queryAndUpdate(
-      DbStorage.bulkOperation_(upsertQuery, periods, storage.profile) { pp => period =>
-        pp >> indexedSynchronizer
-        pp >> period.fromExclusive
-        pp >> period.toInclusive
-        pp >> counterParticipant
-        pp >> matchingState
-        // when par_outstanding_acs_commitments.matching_state = ? then excluded.matching_state
-        pp >> CommitmentPeriodState.Outstanding
-        //  when par_outstanding_acs_commitments.matching_state = ? and excluded.matching_state = ? then excluded.matching_state
-        pp >> CommitmentPeriodState.Mismatched
-        pp >> CommitmentPeriodState.Matched
-      },
-      operationName =
-        s"commitments: marking until ${periods.last1.toInclusive} with state $matchingState for $counterParticipant",
-    )
+    CloseContext.withCombinedContext(closeContext, externalCloseContext, timeouts, logger) {
+      combinedCloseContext =>
+        storage.queryAndUpdate(
+          DbStorage.bulkOperation_(upsertQuery, periods, storage.profile) { pp => period =>
+            pp >> indexedSynchronizer
+            pp >> period.fromExclusive
+            pp >> period.toInclusive
+            pp >> counterParticipant
+            pp >> matchingState
+            // when par_outstanding_acs_commitments.matching_state = ? then excluded.matching_state
+            pp >> CommitmentPeriodState.Outstanding
+            //  when par_outstanding_acs_commitments.matching_state = ? and excluded.matching_state = ? then excluded.matching_state
+            pp >> CommitmentPeriodState.Mismatched
+            pp >> CommitmentPeriodState.Matched
+          },
+          operationName =
+            s"commitments: marking until ${periods.last1.toInclusive} with state $matchingState for $counterParticipant",
+        )(traceContext, combinedCloseContext, DbStorage.RowsAltered.ofUnit)
+    }
   }
 
   override def doPrune(

@@ -215,6 +215,11 @@ public class TestHelpers {
         // Dummy
         return new Tmpl();
       }
+
+      @Override
+      public TmplCompanion withPackageId(String packageId) {
+        return this;
+      }
     }
 
     public static final class IfaceCompanion

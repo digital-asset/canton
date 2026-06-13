@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -10,8 +11,8 @@ import com.daml.ledger.test.java.keys.test.{Delegated, Delegation}
 import com.daml.ledger.test.java.model.test.Dummy
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 
-final class ContractKeysWronglyTypedContractIdIT extends LedgerTestSuite {
-  import ContractKeysCompanionImplicits.*
+final class ContractKeysWronglyTypedContractIdIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.contractKeysCompanionImplicits.*
 
   test("WTFetchFails", "Fetching of the wrong type fails", allocate(SingleParty))(implicit ec => {
     case Participants(Participant(ledger, Seq(party))) =>

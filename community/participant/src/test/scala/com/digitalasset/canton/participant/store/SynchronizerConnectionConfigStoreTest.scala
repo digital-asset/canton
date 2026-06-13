@@ -60,7 +60,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.util.Random
 
 trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
-  this: AsyncWordSpec with BaseTest with HasExecutionContext =>
+  this: AsyncWordSpec & BaseTest & HasExecutionContext =>
 
   private val uid = DefaultTestIdentities.uid
   private val psid =
@@ -450,9 +450,9 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
       "return error when trying to have multiple active configs for a synchronizer alias" in {
         val c1 = config
         val psid_1 = psid.copy(serial = NonNegativeInt.one)
-        val c2 = config.copy(synchronizerId = Some(psid_1))
+        val c2 = config.copy(psid = Some(psid_1))
 
-        c1.synchronizerId should not be c2.synchronizerId
+        c1.psid should not be c2.psid
 
         for {
           sut <- mk
@@ -868,10 +868,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           sut <- sutF
 
           // First insert
-          insertResult <- sut
-            .upsert(daDev, key)
-            .valueOrFail("initial insert")
-            .map(getData)
+          insertResult <- sut.upsert(daDev, key).valueOrFail("initial insert").map(getData)
           queryAfterInsert <- queryData().valueOrFail("get initial ports")
           _ = insertResult shouldBe Data(
             Map(
@@ -888,11 +885,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             Endpoint("host3", Port.tryCreate(700)),
           )(initialConfig.sequencerConnections)
           addEndpointResult <- sut
-            .upsert(
-              daDev,
-              key,
-              overrideSequencerConnections = sequencerConnections2.some,
-            )
+            .upsert(daDev, key, overrideSequencerConnections = sequencerConnections2.some)
             .valueOrFail("initial update")
             .map(getData)
           queryAfterAddEndpoint <- queryData().valueOrFail("get ports after update")
@@ -908,11 +901,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
 
           // Idempotency
           idempotencyResult <- sut
-            .upsert(
-              daDev,
-              key,
-              overrideSequencerConnections = sequencerConnections2.some,
-            )
+            .upsert(daDev, key, overrideSequencerConnections = sequencerConnections2.some)
             .valueOrFail("idempotency")
             .map(getData)
           queryAfterIdempotency <- queryData().valueOrFail("get ports idempotency")
@@ -922,11 +911,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           // Remove endpoint for sequencer2
           sequencerConnections3 = removeEndpoint(sequencerAlias2, 501)(sequencerConnections2)
           removeEndpointResult <- sut
-            .upsert(
-              daDev,
-              key,
-              overrideSequencerConnections = sequencerConnections3.some,
-            )
+            .upsert(daDev, key, overrideSequencerConnections = sequencerConnections3.some)
             .valueOrFail("remove endpoint")
             .map(getData)
           queryAfterRemoveEndpoint <- queryData().valueOrFail("get ports remove endpoints")

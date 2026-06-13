@@ -12,7 +12,7 @@ import com.daml.tls.TlsClientConfig
 class V2_dev(override val testDars: TestDars) extends AvailableTests {
   override def defaultTests(timeoutScaleFactor: Double): Vector[LedgerTestSuite] =
     new V2_3(testDars).defaultTests(timeoutScaleFactor) ++ Vector(
-      new EventsDescendantsIT,
+      new EventsDescendantsIT(testDars),
       new ExceptionRaceConditionIT,
       new ExceptionsIT,
     )

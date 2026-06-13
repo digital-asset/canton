@@ -6,12 +6,12 @@ package com.digitalasset.canton.platform.store.cache
 import cats.data.NonEmptyVector
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.TestEssentials
-import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.{
   Active,
   Archived,
   ExistingContractStatus,
 }
+import com.digitalasset.canton.ledger.participant.state.index.{ContractKeyPage, ContractStateStatus}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -26,8 +26,11 @@ import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractSt
   test,
 }
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
+import com.digitalasset.canton.platform.store.interfaces.{
+  ContractRef,
+  KeyLookupPageResult,
+  LedgerDaoContractsReader,
+}
 import com.digitalasset.canton.platform.store.{LedgerApiContractStore, LedgerApiContractStoreImpl}
 import com.digitalasset.canton.protocol.{
   ContractInstance,
@@ -167,16 +170,34 @@ private object MutableCacheBackedContractStoreRaceTests {
 
     // Start async key lookup
     // Use Future.delegate here to ensure immediate control handover to the next statement
-    val keyLookupF = Future.delegate(contractStore.lookupContractKey(stakeholders, event.key))
+    val keyLookupF =
+      Future.delegate(
+        contractStore.lookupContractKey(
+          readers = stakeholders,
+          key = event.key,
+          pageToken = None,
+          limit = 1,
+        )
+      )
     // Update the mutable contract state cache synchronously
     contractStore.contractStateCaches.push(NonEmptyVector.of(contractStateEvent), event.eventSeqId)
 
     for {
       // Lookup after synchronous update
-      firstAsyncLookupResult <- contractStore.lookupContractKey(stakeholders, event.key)
+      firstAsyncLookupResult <- contractStore.lookupContractKey(
+        readers = stakeholders,
+        key = event.key,
+        pageToken = None,
+        limit = 1,
+      )
       _ <- keyLookupF
       // Lookup after asynchronous update
-      secondAsyncLookupResult <- contractStore.lookupContractKey(stakeholders, event.key)
+      secondAsyncLookupResult <- contractStore.lookupContractKey(
+        readers = stakeholders,
+        key = event.key,
+        pageToken = None,
+        limit = 1,
+      )
     } yield {
       assertKeyAssignmentAfterAppliedEvent(firstAsyncLookupResult)(event)
       assertKeyAssignmentAfterAppliedEvent(secondAsyncLookupResult)(event)
@@ -208,9 +229,9 @@ private object MutableCacheBackedContractStoreRaceTests {
   }
 
   private def assertKeyAssignmentAfterAppliedEvent(
-      assignment: Option[ContractId]
+      assignment: ContractKeyPage
   )(event: SimplifiedContractStateEvent): Unit =
-    assignment match {
+    assignment.contracts.headOption.map(_.contractId) match {
       case Some(contractId) if (event.contractId != contractId) || !event.created =>
         fail(message =
           s"Key state corruption for ${event.key}: " +
@@ -250,10 +271,11 @@ private object MutableCacheBackedContractStoreRaceTests {
   )(implicit ec: ExecutionContext) =
     for {
       _ <- indexViewContractsReader
-        .lookupKeyState(event.key, event.eventSeqId)
+        .lookupActiveContractId(event.key, event.eventSeqId)
         .map {
-          case KeyAssigned(contractId) if contractId == event.contractId && event.created =>
-          case KeyUnassigned if !event.created =>
+          case Some(ContractRef(contractId, _))
+              if contractId == event.contractId && event.created =>
+          case None if !event.created =>
           case actual =>
             fail(
               s"Test bug: actual $actual after event $event: index view: ${indexViewContractsReader.keyStateStore
@@ -302,20 +324,24 @@ private object MutableCacheBackedContractStoreRaceTests {
     val updates =
       keysToContracts.map { case (key, contracts) =>
         contracts.flatMap { case (_, contractRef) =>
+          var createdAtSeqId: Long = 0L
           Vector(
-            (eventSeqId: Long) =>
+            (eventSeqId: Long) => {
+              createdAtSeqId = eventSeqId
               SimplifiedContractStateEvent(
                 eventSeqId = eventSeqId,
                 contract = contractRef,
                 created = true,
                 key = key,
-              ),
+              )
+            },
             (eventSeqId: Long) =>
               SimplifiedContractStateEvent(
                 eventSeqId = eventSeqId,
                 contract = contractRef,
                 created = false,
                 key = key,
+                activatedAtSeqId = Some(createdAtSeqId),
               ),
           )
         }
@@ -349,6 +375,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       contract: FatContract,
       created: Boolean,
       key: Key,
+      activatedAtSeqId: Option[Long] = None,
   ) {
     val contractId: ContractId = contract.contractId
   }
@@ -394,11 +421,25 @@ private object MutableCacheBackedContractStoreRaceTests {
   }
 
   private val toContractStateEvent: SimplifiedContractStateEvent => ContractStateEvent = {
-    case SimplifiedContractStateEvent(_eventSeqId, contract, created, key) =>
+    case SimplifiedContractStateEvent(eventSeqId, contract, created, key, activatedAtSeqId) =>
       if (created)
-        ContractStateEvent.Created(contract.contractId, Some(key))
+        ContractStateEvent.Activated(
+          contractId = contract.contractId,
+          globalKey = Some(key),
+          eventSequentialId = eventSeqId,
+          isInitial = true,
+        )
       else
-        ContractStateEvent.Archived(contract.contractId, Some(key))
+        ContractStateEvent.Deactivated(
+          contractId = contract.contractId,
+          globalKey = Some(key),
+          deactivatedEventSequentialId = activatedAtSeqId.getOrElse(
+            throw new IllegalStateException(
+              s"Archive event for ${contract.contractId} missing activatedAtSeqId"
+            )
+          ),
+          isFinal = true,
+        )
   }
 
   final case class ContractLifecycle(
@@ -481,21 +522,22 @@ private object MutableCacheBackedContractStoreRaceTests {
           }
       }(ec)
 
-    override def lookupKeyState(key: Key, notEarlierThanEventSeqId: Long)(implicit
+    def lookupActiveContractId(key: Key, notEarlierThanEventSeqId: Long)(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[KeyState] = Future {
+    ): Future[Option[ContractRef]] = Future {
       val _ = loggingContext
       keyStateStore
         .get(key)
-        .map(_.maxBefore(notEarlierThanEventSeqId + 1) match {
+        .flatMap(_.maxBefore(notEarlierThanEventSeqId + 1) match {
           case Some((_, contractId)) =>
-            contractStateStore(contractId).archivedAt match {
-              case Some(archivedAt) if archivedAt <= notEarlierThanEventSeqId => KeyUnassigned
-              case _ => KeyAssigned(contractId)
+            val lifecycle = contractStateStore(contractId)
+            lifecycle.archivedAt match {
+              case Some(archivedAt) if archivedAt <= notEarlierThanEventSeqId => None
+              case _ =>
+                Some(ContractRef(contractId = contractId, eventSequentialId = lifecycle.createdAt))
             }
-          case None => KeyUnassigned
+          case None => None
         })
-        .getOrElse(KeyUnassigned)
     }(ec)
 
     override def lookupKeyStatesFromDb(keys: Seq[Key], notEarlierThanEventSeqId: Long)(implicit
@@ -509,8 +551,11 @@ private object MutableCacheBackedContractStoreRaceTests {
         limit: Int,
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Future[(Vector[ContractId], Option[Long])] =
-      ??? // not used in this test
+    ): Future[KeyLookupPageResult] =
+      lookupActiveContractId(key, notEarlierThanEventSeqId).map {
+        case Some(cidWithSeqId) => KeyLookupPageResult(Vector(cidWithSeqId), None)
+        case None => KeyLookupPageResult(Vector.empty, None)
+      }(ec)
   }
 
   def update(contractStore: LedgerApiContractStoreImpl, event: SimplifiedContractStateEvent)(

@@ -355,7 +355,7 @@ class TestSubmissionService(
           response: Response =
             contractOpt match {
               case Some(contract) =>
-                Response.ContractFound(contract, Hash.HashingMethod.UpgradeFriendly, _ => true)
+                Response.ContractFound(contract, Hash.HashingMethod.TypedNormalForm, _ => true)
               case None =>
                 Response.ContractNotFound
             }
@@ -378,7 +378,22 @@ class TestSubmissionService(
         for {
           cidO <- keyResolver.resolveKey(key)(traceContext)
           contracts <- cidO.toList.parTraverse(contractResolver(_)(traceContext))
-          r <- resolve(resume(contracts.flatten.toVector, NeedKeyProgression.Finished))
+          r <- resolve(
+            resume(
+              ResultNeedKey.Response(
+                contracts.flatten
+                  .map(fci =>
+                    ResultNeedKey.Response.AuthenticableFatContractInstance(
+                      fci,
+                      Hash.HashingMethod.TypedNormalForm,
+                      _ => true,
+                    )
+                  )
+                  .toVector,
+                NeedKeyProgression.Finished,
+              )
+            )
+          )
         } yield r
 
       case ResultInterruption(continue, _) =>

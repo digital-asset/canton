@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -19,6 +20,10 @@ class SimulationBlockSubscription(
   override def subscription(): Source[Traced[BlockFormat.Block], KillSwitch] =
     Source.empty.viaMat(KillSwitches.single)(Keep.right)
 
-  override def receiveBlock(block: BlockFormat.Block)(implicit traceContext: TraceContext): Unit =
+  override def receiveBlock(
+      block: BlockFormat.Block
+  )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     queue.addOne(thisNode -> Traced(block))
+
+  override def sequencerCoreIsSlow: Boolean = false
 }

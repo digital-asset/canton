@@ -70,7 +70,6 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.PackageResolution
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{FullIdentifier, Identifier, NameTypeConRef, PackageId}
-import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.google.rpc.Status
 import io.grpc.StatusRuntimeException
 import org.apache.pekko.NotUsed
@@ -115,11 +114,6 @@ private[index] class IndexServiceImpl(
     Future.successful(participantId)
 
   override def currentHealth(): HealthStatus = ledgerDao.currentHealth()
-
-  override def lookupContractKey(readers: Set[Ref.Party], key: GlobalKey)(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[ContractId]] =
-    contractStore.lookupContractKey(readers, key)
 
   override def updates(
       startExclusive: Option[Offset],
@@ -735,13 +729,13 @@ private[index] class IndexServiceImpl(
     }
   }
 
-  override def lookupNonUniqueContractKey(
+  override def lookupContractKey(
       readers: Set[Party],
       key: Key,
       pageToken: Option[Long],
       limit: Int,
   )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
-    contractStore.lookupNonUniqueContractKey(readers, key, pageToken, limit)
+    contractStore.lookupContractKey(readers, key, pageToken, limit)
 }
 
 object IndexServiceImpl {

@@ -26,6 +26,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.{LoggerUtil, MonadUtil, ResourceUtil}
 import org.flywaydb.core.Flyway
+import org.flywaydb.core.api.configuration.FluentConfiguration
 import org.flywaydb.core.api.{FlywayException, MigrationInfo}
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.hikaricp.HikariCPJdbcDataSource
@@ -35,6 +36,7 @@ import java.sql.SQLException
 import javax.sql.DataSource
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, blocking}
+import scala.jdk.CollectionConverters.*
 
 /** Performs DB migrations using Flyway.
   *
@@ -59,6 +61,9 @@ class DbMigrations(
     * https://flywaydb.org/documentation/getstarted/firststeps/api
     */
   protected def createFlyway(dataSource: DataSource): Flyway =
+    createFlywayConfig(dataSource: DataSource).load()
+
+  protected def createFlywayConfig(dataSource: DataSource): FluentConfiguration =
     Flyway.configure
       .locations(dbConfig.buildMigrationsPaths(alphaVersionSupport)*)
       .dataSource(dataSource)
@@ -66,7 +71,11 @@ class DbMigrations(
       .cleanOnValidationError(dbConfig.parameters.unsafeCleanOnValidationError)
       .baselineOnMigrate(dbConfig.parameters.unsafeBaselineOnMigrate)
       .lockRetryCount(60)
-      .load()
+      .placeholders(
+        Map(
+          "initialBftOrdererTablesPartitionSize" -> dbConfig.parameters.partitions.initialBftOrdererTablesPartitionSize.toString
+        ).asJava
+      )
 
   protected def withCreatedDb[A](retryConfig: DbStorage.RetryConfig)(
       fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A]
