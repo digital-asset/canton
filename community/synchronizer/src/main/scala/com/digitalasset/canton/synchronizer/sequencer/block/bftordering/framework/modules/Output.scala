@@ -62,6 +62,9 @@ object Output {
       cryptoProvider: CryptoProvider[E],
   ) extends Message[E]
 
+  final case class AddMessageChunkFromRestart(value: Seq[OrderedBlockForOutput])
+      extends Message[Nothing]
+
   final case class AsyncException(error: Throwable) extends Message[Nothing]
 
   final case object NoTopologyAvailable extends Message[Nothing]

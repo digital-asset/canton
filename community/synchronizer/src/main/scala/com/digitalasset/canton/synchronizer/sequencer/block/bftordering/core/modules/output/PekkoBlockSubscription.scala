@@ -57,11 +57,11 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.immutable.Queue
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 class PekkoBlockSubscription[E <: Env[E]](
     initialHeight: BlockNumber,
-    outputModule: ModuleRef[Output.ProcessNewEpochTopologyMessagesIfPossible.type],
+    getOutputModule: () => ModuleRef[Output.ProcessNewEpochTopologyMessagesIfPossible.type],
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
     metrics: BftOrderingMetrics,
@@ -122,7 +122,11 @@ class PekkoBlockSubscription[E <: Env[E]](
             s"Inserting block $blockHeight into subscription Peano queue (head=${blocksPeanoQueue.head})"
           )(block.traceContext)
           blocksPeanoQueue.insert(BlockNumber(blockHeight), block)
-          blocksPeanoQueue.pollAvailable()
+          val polled = blocksPeanoQueue.pollAvailable()
+          logger.debug(
+            s"Polled ${polled.size} blocks from subscription Peano queue, new head=${blocksPeanoQueue.head}"
+          )(block.traceContext)
+          polled
         }
       }
       .viaMat(KillSwitches.single)(Keep.right)
@@ -147,11 +151,6 @@ class PekkoBlockSubscription[E <: Env[E]](
     emitBufferSizeGauge()
   }
 
-  private def emitBufferSizeGauge(): Unit =
-    metrics.output.sequencerCoreSubscriptionBufferSize.updateValue(
-      stateRef.get().blocksToEnqueue.size
-    )
-
   override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
     SyncCloseable("dabft-output-queue.complete", pekkoQueueSource.complete()) +: Option
@@ -165,8 +164,16 @@ class PekkoBlockSubscription[E <: Env[E]](
       .toList
   }
 
-  override def sequencerCoreIsSlow: Boolean =
+  override def isSequencerCoreSlow: Boolean =
     stateRef.get().sequencerCoreIsSlow
+
+  override def bufferSize: Int =
+    stateRef.get().blocksToEnqueue.size
+
+  private def emitBufferSizeGauge(): Unit =
+    metrics.output.sequencerCoreSubscriptionBufferSize.updateValue(
+      stateRef.get().blocksToEnqueue.size
+    )
 
   // Advances the enqueueing state and starts the next enqueueing task
   private def advance(
@@ -185,6 +192,11 @@ class PekkoBlockSubscription[E <: Env[E]](
           val updatedBlocksToEnqueue =
             newTracedBlockO.fold(blocksToEnqueue)(blocksToEnqueue.enqueue(_))
 
+          logger.trace(
+            s"updatedBlocksToEnqueue: size=${updatedBlocksToEnqueue.size}, head=${updatedBlocksToEnqueue.headOption
+                .map(_.value.blockHeight)}"
+          )
+
           val updatedSequencerCoreIsSlow =
             if (
               updatedBlocksToEnqueue.sizeIs > sequencerCoreSubscriptionConfig.pauseOrdererThresholdBufferSize
@@ -196,15 +208,31 @@ class PekkoBlockSubscription[E <: Env[E]](
               false
             else sequencerCoreIsSlow
 
+          logger.trace(
+            s"updatedSequencerCoreIsSlow: $updatedSequencerCoreIsSlow (was $sequencerCoreIsSlow)"
+          )
+
           val resumeIfPossible = sequencerCoreIsSlow && !updatedSequencerCoreIsSlow
 
+          logger.trace(s"resumeIfPossible: $resumeIfPossible")
+
           if (taskO.isEmpty || taskComplete) {
+            logger.trace(s"Pekko enqueue completed")
+
             val (tracedBlockToEnqueueO, restOfBlocksToEnqueue) =
               updatedBlocksToEnqueue.dequeueOption.fold(
                 Option.empty[Traced[BlockFormat.Block]] -> Queue.empty[Traced[BlockFormat.Block]]
               ) { case (tracedBlock, restOfBlocks) =>
                 Some(tracedBlock) -> restOfBlocks
               }
+
+            tracedBlockToEnqueueO.fold(logger.trace(s"No block to enqueue to Pekko queue source")) {
+              tracedBlockToEnqueue =>
+                logger.trace(
+                  s"Next block to enqueue to Pekko queue source: ${tracedBlockToEnqueue.value.blockHeight}"
+                )
+            }
+
             val updatedState =
               State(
                 restOfBlocksToEnqueue,
@@ -218,9 +246,9 @@ class PekkoBlockSubscription[E <: Env[E]](
                   //  Pekko queue source, which would fail due to either the max insertion concurrency (set to 1)
                   //  or due to internal synchronization of the Pekko queue source.
                   enqueuePekkoSourcePromise.futureUS.flatMap { _ =>
-                    if (enqueuedInPekkoQueueSource.compareAndSet(false, true))
+                    if (enqueuedInPekkoQueueSource.compareAndSet(false, true)) {
                       pekkoEnqueue(tracedBlockToEnqueue)
-                    else
+                    } else
                       FutureUnlessShutdown.pure(QueueOfferResult.Enqueued)
                   }
                 ),
@@ -235,11 +263,24 @@ class PekkoBlockSubscription[E <: Env[E]](
 
     startPekkoEnqueueIfNeeded()
 
-    if (resumeIfPossible)
-      outputModule.asyncSend(Output.ProcessNewEpochTopologyMessagesIfPossible)(
-        traceContext,
-        metricsContext,
-      )
+    if (resumeIfPossible) {
+      Try(
+        getOutputModule().asyncSend(Output.ProcessNewEpochTopologyMessagesIfPossible)(
+          traceContext,
+          metricsContext,
+        )
+      ) match {
+        case Failure(exception) =>
+          logger.error(
+            "Failed to send ProcessNewEpochTopologyMessagesIfPossible message to output module",
+            exception,
+          )
+        case Success(value) =>
+          logger.info(
+            "Detected that sequencer core has caught up, notified the output module to check if it should resume"
+          )
+      }
+    }
   }
 
   private def pekkoEnqueue(

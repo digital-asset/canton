@@ -61,6 +61,7 @@ import com.digitalasset.canton.tracing.{
   TraceContextGrpc,
   Traced,
 }
+import com.digitalasset.canton.util.GrpcStreamingUtils.withServerCallStreamObserver
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{
   EitherTUtil,
@@ -73,7 +74,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
-import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 import org.apache.pekko.stream.{
   Materializer,
@@ -755,26 +756,6 @@ class GrpcSequencerService(
     )
     subscription.initialize().map(_ => subscription)
   }
-
-  /** Ensure observer is a ServerCalLStreamObserver
-    *
-    * @param observer
-    *   underlying observer
-    * @param handler
-    *   handler requiring a ServerCallStreamObserver
-    */
-  private def withServerCallStreamObserver[R](
-      observer: StreamObserver[R]
-  )(handler: ServerCallStreamObserver[R] => Unit)(implicit traceContext: TraceContext): Unit =
-    observer match {
-      case serverCallStreamObserver: ServerCallStreamObserver[R] =>
-        handler(serverCallStreamObserver)
-      case _ =>
-        val statusException =
-          Status.INTERNAL.withDescription("Unknown stream observer request").asException()
-        logger.warn(statusException.getMessage)
-        observer.onError(statusException)
-    }
 
   private def checkAuthenticatedMemberPermissionWithCurrentMember(
       member: Member,

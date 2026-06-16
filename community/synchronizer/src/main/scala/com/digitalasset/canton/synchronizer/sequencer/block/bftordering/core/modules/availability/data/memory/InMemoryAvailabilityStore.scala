@@ -22,7 +22,8 @@ import scala.collection.concurrent.TrieMap
 import scala.util.{Success, Try}
 
 abstract class GenericInMemoryAvailabilityStore[E <: Env[E]](
-    allKnownBatchesById: TrieMap[BatchId, OrderingRequestBatch] = TrieMap.empty
+    @VisibleForTesting
+    private[data] val allKnownBatchesById: TrieMap[BatchId, OrderingRequestBatch] = TrieMap.empty
 ) extends AvailabilityStore[E] {
 
   def createFuture[A](action: String)(x: () => Try[A]): E#FutureUnlessShutdownT[A]
@@ -55,11 +56,11 @@ abstract class GenericInMemoryAvailabilityStore[E <: Env[E]](
       }
     }
 
-  override def gc(staleBatchIds: Seq[BatchId])(implicit
+  override def gc(staleBatchIds: Map[EpochNumber, Set[BatchId]])(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Unit] =
     createFuture(gcName) { () =>
-      staleBatchIds.foreach { staleBatchId =>
+      staleBatchIds.values.flatten.foreach { staleBatchId =>
         val _ = allKnownBatchesById.remove(staleBatchId)
       }
       Success(())

@@ -27,14 +27,26 @@ class Generator(random: Random, inMemoryStore: InMemoryAvailabilityStore) {
 
   type Gen[A] = Unit => A
 
+  private def randomBatchId = BatchId.createForTesting(random.nextLong().toString)
+
   def genBatchId: Gen[BatchId] = _ => {
     if (inMemoryStore.isEmpty || random.nextBoolean()) {
-      BatchId.createForTesting(random.nextLong().toString)
+      randomBatchId
     } else {
       val ix = random.nextInt(inMemoryStore.size)
       inMemoryStore.keys.toSeq(ix)
     }
   }
+
+  def genStaleBatchIds: Gen[Map[EpochNumber, Set[BatchId]]] = _ =>
+    if (inMemoryStore.isEmpty || random.nextBoolean())
+      Map(genEpochNumber.apply(()) -> Set(randomBatchId))
+    else {
+      val ix = random.nextInt(inMemoryStore.size)
+      val (batchId, OrderingRequestBatch(_, epochNumber)) =
+        inMemoryStore.allKnownBatchesById.toSeq(ix)
+      Map(epochNumber -> Set(batchId))
+    }
 
   def genSeq[A](gen: Gen[A]): Gen[Seq[A]] = _ => {
     (0 until random.nextInt(10)).map(_ => gen.apply(()))
@@ -73,7 +85,7 @@ class Generator(random: Random, inMemoryStore: InMemoryAvailabilityStore) {
   def generateCommand: Gen[Command] = _ => {
     random.nextInt(4) match {
       case 0 =>
-        GC(genSeq(genBatchId).apply(()))
+        GC(genStaleBatchIds.apply(()))
       case 1 =>
         FetchBatches(genSeq(genBatchIdAndEpochNumber).apply(()))
       case 2 =>

@@ -17,5 +17,7 @@ trait BlockSubscription {
       block: BlockFormat.Block
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit
 
-  def sequencerCoreIsSlow: Boolean
+  def isSequencerCoreSlow: Boolean
+
+  def bufferSize: Int
 }

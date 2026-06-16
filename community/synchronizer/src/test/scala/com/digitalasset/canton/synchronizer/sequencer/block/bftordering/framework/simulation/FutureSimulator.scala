@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation
 
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleName
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -27,6 +28,7 @@ class FutureSimulator(
     agenda: Agenda,
     settings: FutureSettings,
     state: FutureSimulator.FutureSimulatorState,
+    loggerFactory: NamedLoggerFactory,
 ) {
 
   private val random = new Random(settings.randomSeed)
@@ -68,7 +70,8 @@ class FutureSimulator(
       futureResultToMessage: Try[FutureT] => Option[MessageT],
       traceContext: TraceContext,
   ): Unit = {
-    val allocator = new FutureSimulatorAllocator(state, settings, agenda, random, nodeId)
+    val allocator =
+      new FutureSimulatorAllocator(state, settings, agenda, random, nodeId, loggerFactory)
     val runningFuture = future.schedule(allocator)
     runningFuture.addContinuation(
       Continuation(nodeId, to, runningFuture, futureResultToMessage, traceContext)

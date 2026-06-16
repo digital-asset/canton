@@ -22,7 +22,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerSnapshotSyncCryptoApi,
 }
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
-import com.digitalasset.canton.error.CantonBaseError
+import com.digitalasset.canton.error.{CantonBaseError, FatalError}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
@@ -350,9 +350,13 @@ class BlockSequencer(
     )
   }
 
-  done onComplete {
+  done.onComplete {
     case Success(_) => noTracingLogger.debug("Sequencer flow has shutdown")
-    case Failure(ex) => noTracingLogger.error("Sequencer flow has failed", ex)
+    case Failure(ex) =>
+      if (parameters.exitOnFatalFailures)
+        FatalError.exitOnFatalError("Sequencer flow has failed", ex, logger)(TraceContext.empty)
+      else
+        noTracingLogger.error("Sequencer flow has failed", ex)
   }
 
   private def validateMaxSequencingTime(

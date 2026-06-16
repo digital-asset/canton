@@ -501,10 +501,11 @@ class DbEpochStore(
     }.map(_.headOption)
 
   override def loadOrderedBlocks(
-      initialBlockNumber: BlockNumber
+      initialEpochNumber: EpochNumber,
+      limit: Int,
   )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[Seq[OrderedBlockForOutput]] =
     createFuture(
-      loadOrderedBlocksActionName(initialBlockNumber),
+      loadOrderedBlocksActionName(initialEpochNumber, limit),
       orderingStage = functionFullName,
     ) {
       storage
@@ -518,7 +519,8 @@ class DbEpochStore(
                     on epoch.epoch_number = completed_message.epoch_number
                 where
                   completed_message.discriminator = $PrePrepareMessageDiscriminator and
-                  completed_message.block_number >= $initialBlockNumber
+                  completed_message.epoch_number >= $initialEpochNumber and
+                  completed_message.epoch_number < ${initialEpochNumber + limit}
                 order by
                   completed_message.block_number
               """.as[(PrePrepare, EpochInfo)](tryReadPrePrepareMessageAndEpochInfo),
@@ -539,6 +541,23 @@ class DbEpochStore(
             )
           }
         }
+    }
+
+  override def lastEpochWithCompletedBlock(lowerBound: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): PekkoFutureUnlessShutdown[Option[EpochNumber]] =
+    createFuture(lastEpochWithCompletedBlockActionName, orderingStage = functionFullName) {
+      storage.query(
+        sql"""select epoch_number
+              from ord_pbft_messages_completed
+              where epoch_number >= $lowerBound
+              order by epoch_number desc
+              limit 1"""
+          .as[Long]
+          .headOption
+          .map(_.map(EpochNumber(_))),
+        functionFullName,
+      )
     }
 
   override def loadNumberOfRecords(implicit

@@ -320,9 +320,66 @@ trait EpochStoreTest extends AsyncWordSpec {
             prePrepare(epochNumber = EpochNumber.First, blockNumber = BlockNumber(1)),
             Seq.empty,
           )
-          blocks <- store.loadOrderedBlocks(initialBlockNumber = BlockNumber.First)
+          blocks <- store.loadOrderedBlocks(initialEpochNumber = EpochNumber.First, 10)
         } yield {
           blocks should contain theSameElementsInOrderAs expectedOrderedBlocks
+        }
+      }
+
+      "load should respect limit" in {
+        val store = createStore()
+        val epoch0 = EpochInfo.forTesting(EpochNumber.First, BlockNumber.First, length = 2)
+
+        val expectedOrderedBlocks =
+          Seq(
+            orderedBlock(BlockNumber.First, isLastInEpoch = false),
+            orderedBlock(BlockNumber(1), isLastInEpoch = true),
+          )
+
+        for {
+          _ <- store.startEpoch(epoch0)
+          _ <- store.addOrderedBlockAtomically(
+            prePrepare(epochNumber = EpochNumber.First, blockNumber = BlockNumber.First),
+            Seq.empty,
+          )
+          _ <- store.addOrderedBlockAtomically(
+            prePrepare(epochNumber = EpochNumber.First, blockNumber = BlockNumber(1)),
+            Seq.empty,
+          )
+          _ <- store.addOrderedBlockAtomically(
+            prePrepare(epochNumber = EpochNumber(1), blockNumber = BlockNumber(2)),
+            Seq.empty,
+          )
+          blocks <- store.loadOrderedBlocks(initialEpochNumber = EpochNumber.First, limit = 1)
+        } yield {
+          blocks should contain theSameElementsInOrderAs expectedOrderedBlocks
+        }
+      }
+    }
+
+    "last completed block" should {
+      "return epoch of last completed block" in {
+        val store = createStore()
+
+        val lowerBound = EpochNumber(5)
+        val epochNumber = EpochNumber(13)
+
+        for {
+          _ <- store.addOrderedBlockAtomically(
+            prePrepare(epochNumber = EpochNumber.First, blockNumber = BlockNumber.First),
+            Seq.empty,
+          )
+          _ <- store.addOrderedBlockAtomically(
+            prePrepare(epochNumber = lowerBound, blockNumber = BlockNumber(1)),
+            Seq.empty,
+          )
+          _ <- store.addOrderedBlockAtomically(
+            prePrepare(epochNumber = epochNumber, blockNumber = BlockNumber(2)),
+            Seq.empty,
+          )
+          epoch <- store.lastEpochWithCompletedBlock(lowerBound)
+        } yield {
+          epoch shouldBe Some(epochNumber)
         }
       }
     }

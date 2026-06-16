@@ -71,10 +71,10 @@ class BatchDisseminationNodeQuotaTracker {
     */
   def evictBatches(
       evictionEpoch: EpochNumber
-  ): Seq[BatchId] = {
+  ): Map[EpochNumber, Set[BatchId]] = {
     val range = expiredEpochs.rangeTo(evictionEpoch)
-    val batchesToEvict = range.values.toSeq.flatten
+    val result = range.toMap
     range.keySet.foreach(expiredEpochs.remove(_).discard)
-    batchesToEvict
+    result
   }
 }
