@@ -26,11 +26,13 @@ import com.digitalasset.canton.util.ResourceUtil
 import monocle.macros.syntax.lens.*
 
 /** Verifies that canton behaves correctly when a new sql migration is added after the migrations
-  * have been previously run. We test this by copying all of the usual migrations to a temporary
-  * directory, starting and stopping canton once so the original set of migrations will be applied,
-  * then add a new migration file to this temporary directory and see if canton prevents a startup
-  * until it has been applied. We use a temporary directory so not to confuse any instances of
-  * canton concurrently running when the new migration file is added.
+  * have been previously run. We test this by pointing canton at the usual classpath migrations plus
+  * an additional, initially-empty temporary directory, starting and stopping canton once so the
+  * original set of migrations will be applied, then add a new migration file to this temporary
+  * directory and see if canton prevents a startup until it has been applied. We use a temporary
+  * directory so not to confuse any instances of canton concurrently running when the new migration
+  * file is added, and we keep the original migrations on the classpath so that Java/Scala-based
+  * migrations (which are only discovered on the classpath, not on filesystem locations) still run.
   */
 trait FlywayMigrationIntegrationTest
     extends CommunityIntegrationTest
@@ -272,31 +274,6 @@ class UseCustomMigrationsPath(
 
   val migrationPath: File = File.newTemporaryDirectory("migrations-test")
 
-  private def copyMigrations(path: String, dest: File): Unit = {
-    // our copying assumes we're copying from the classpath
-    // double-check that's the case
-    require(
-      path.startsWith("classpath:"),
-      "expecting the default migrations to be stored on the classpath",
-    )
-
-    val resourcePath = path.stripPrefix("classpath:")
-    val resourceLoader = Resource.from(Thread.currentThread().getContextClassLoader)
-
-    // list all the files in the resource directory (yes, this is apparently how you do this ¯\_(ツ)_/¯)
-    resourceLoader
-      .getAsString(resourcePath)
-      .split(System.lineSeparator())
-      .toSeq
-      .foreach { filename =>
-        if (filename.nonEmpty) {
-          // then copy each file to our fake migrations directory
-          val content = resourceLoader.getAsString(s"$resourcePath/$filename")
-          (dest / filename).write(content)
-        }
-      }
-  }
-
   private def updateStorage(
       update: (String, StorageConfig) => StorageConfig
   ): ConfigTransform =
@@ -310,15 +287,16 @@ class UseCustomMigrationsPath(
 
   private val useCustomMigrations: (String, StorageConfig) => StorageConfig = {
     case (_, dbConfig: ModifiableDbConfig[?]) =>
-      val prevMigrationsPath = dbConfig.buildMigrationsPaths(alphaVersionSupport = isDevVersion)
-      // Copy original migrations
-      prevMigrationsPath.foreach(prev => copyMigrations(prev, migrationPath))
+      // Keep the real migrations on the classpath (so that Java/Scala-based migrations are
+      // discovered, which only works for classpath locations) and add an initially-empty
+      // temporary filesystem location for the dummy migrations the tests add/modify/delete.
+      val classpathMigrations = dbConfig.buildMigrationsPaths(alphaVersionSupport = isDevVersion)
       dbConfig
         .modify(parameters =
           dbConfig.parameters
             .focus(_.migrationsPaths)
             .replace(
-              Seq(s"filesystem:${migrationPath.path.toAbsolutePath}")
+              classpathMigrations :+ s"filesystem:${migrationPath.path.toAbsolutePath}"
             )
         )
     case _ => sys.error("every node should be using h2/postgres")

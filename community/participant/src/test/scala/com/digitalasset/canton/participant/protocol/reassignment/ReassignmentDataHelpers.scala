@@ -47,7 +47,8 @@ final case class ReassignmentDataHelpers(
       submittingParticipant,
       LedgerCommandId.assertFromString("assignment-validation-command-id"),
       submissionId = None,
-      LedgerUserId.assertFromString("tests"),
+      // Match LedgerApiCommands.defaultUserId so that myParticipant.ledger-api can be used to capture completions.
+      LedgerUserId.assertFromString("CantonConsole"),
       workflowId = None,
     )
 

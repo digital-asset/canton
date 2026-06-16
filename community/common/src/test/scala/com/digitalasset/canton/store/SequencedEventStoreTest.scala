@@ -54,8 +54,8 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
     Batch(envelopes.toList, testedProtocolVersion)
 
   private def signDeliver(
-      event: Deliver[ClosedEnvelope]
-  ): SignedContent[Deliver[ClosedEnvelope]] =
+      event: Deliver[Batch[ClosedEnvelope]]
+  ): SignedContent[Deliver[Batch[ClosedEnvelope]]] =
     SignedContent(
       event,
       sign(s"deliver signature for ${event.timestamp}"),
@@ -192,7 +192,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
   private def ts(counter: Long): CantonTimestamp = CantonTimestamp.Epoch.addMicros(counter)
 
   private def mkSequencedSerializedEvent(
-      event: SignedContent[SequencedEvent[ClosedEnvelope]],
+      event: SignedContent[DecompressedSequencedEvent[ClosedEnvelope]],
       traceContext: TraceContext = TraceContext.empty,
   ): SequencedSerializedEvent =
     SequencedEventWithTraceContext(event)(traceContext)

@@ -51,6 +51,8 @@ class MediatorEventDeduplicatorTest
 
   private val maxDelayMillis: Int = 10
 
+  private val metrics = MediatorTestMetrics(this.getClass.getSimpleName)
+
   private def mkDeduplicator()
       : (MediatorEventDeduplicator, TestVerdictSender, MediatorDeduplicationStore) = {
     val store: MediatorDeduplicationStore =
@@ -67,7 +69,7 @@ class MediatorEventDeduplicatorTest
       finalizedResponseStore,
       store,
       wallClock,
-      MediatorTestMetrics,
+      metrics,
       testedProtocolVersion,
       timeouts,
       loggerFactory,
@@ -79,7 +81,7 @@ class MediatorEventDeduplicatorTest
       _ => FutureUnlessShutdown.outcomeF(delayed(deduplicationTimeout)),
       _ => FutureUnlessShutdown.outcomeF(delayed(decisionTime)),
       testedProtocolVersion,
-      MediatorTestMetrics,
+      metrics,
       loggerFactory,
     )
     (deduplicator, verdictSender, store)
@@ -357,7 +359,7 @@ class MediatorEventDeduplicatorTest
       finalizedResponseStore,
       store,
       wallClock,
-      MediatorTestMetrics,
+      metrics,
       testedProtocolVersion,
       timeouts,
       loggerFactory,
@@ -397,7 +399,7 @@ class MediatorEventDeduplicatorTest
       _ => FutureUnlessShutdown.pure(deduplicationTimeout),
       _ => FutureUnlessShutdown.pure(decisionTime),
       testedProtocolVersion,
-      MediatorTestMetrics,
+      metrics,
       loggerFactory,
     )
   }

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.concurrent.Threading
@@ -140,6 +141,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
               sequencerLivenessMargin = NonNegativeInt.zero,
               SubmissionRequestAmplification.NoAmplification,
               SequencerConnectionPoolDelays.default,
+              SubscriptionLivenessLimits.default,
             ),
           )
         )

@@ -1742,12 +1742,12 @@ private[lf] object SBuiltinFun {
                 srcArg = coinst.createArg,
                 mbTypedNormalFormAuthenticator = hashingMethod match {
                   case HashingMethod.TypedNormalForm => Some(authenticator)
-                  case HashingMethod.Legacy | HashingMethod.UpgradeFriendly => None
+                  case HashingMethod.Legacy | HashingMethod.UpgradeFriendlyUnsafe => None
                 },
                 forbidLocalContractIds = true,
                 forbidTrailingNones = hashingMethod match {
                   case HashingMethod.Legacy => false
-                  case HashingMethod.UpgradeFriendly | HashingMethod.TypedNormalForm => true
+                  case HashingMethod.UpgradeFriendlyUnsafe | HashingMethod.TypedNormalForm => true
                 },
               )
             }
@@ -2300,15 +2300,6 @@ private[lf] object SBuiltinFun {
   final case class SBUFetchKey(
       templateId: TypeConId
   ) extends SBUKeyBuiltin(new KeyOperation.Fetch(templateId))
-
-  /** $lookupKey[T]
-    *   :: { key: key, maintainers: List Party }
-    *   -> Maybe (ContractId T)
-    * Inserts a QueryByKey node
-    */
-  final case class SBULookupKey(
-      templateId: TypeConId
-  ) extends SBUKeyBuiltin(new KeyOperation.Lookup(templateId))
 
   /** $queryNByKey[T]
     *   :: { key: key, n: Int,  maintainers: List Party }
@@ -2884,12 +2875,12 @@ private[lf] object SBuiltinFun {
                 srcArg = coinst.createArg,
                 mbTypedNormalFormAuthenticator = hashingMethod match {
                   case HashingMethod.TypedNormalForm => Some(authenticator)
-                  case HashingMethod.Legacy | HashingMethod.UpgradeFriendly => None
+                  case HashingMethod.Legacy | HashingMethod.UpgradeFriendlyUnsafe => None
                 },
                 forbidLocalContractIds = true,
                 forbidTrailingNones = hashingMethod match {
                   case HashingMethod.Legacy => false
-                  case HashingMethod.UpgradeFriendly | HashingMethod.TypedNormalForm => true
+                  case HashingMethod.UpgradeFriendlyUnsafe | HashingMethod.TypedNormalForm => true
                 },
               )
             }
@@ -2946,7 +2937,7 @@ private[lf] object SBuiltinFun {
     }
 
   /** Authenticates the provided FatContractInstance using [hashingMethod] if [hashingMethod] is
-    * one of [[HashingMethod.Legacy]] or [[HashingMethod.UpgradeFriendly]]. Does nothing if the
+    * one of [[HashingMethod.Legacy]] or [[HashingMethod.UpgradeFriendlyUnsafe]]. Does nothing if the
     * hashing method is [[HashingMethod.TypedNormalForm]].
     */
   private def authenticateIfLegacyContract(
@@ -2962,16 +2953,16 @@ private[lf] object SBuiltinFun {
             coinst.templateId,
             coinst.createArg,
             coinst.packageName,
-            upgradeFriendly = false,
+            upgradeFriendlyUnsafe = false,
           )
         )
-      case HashingMethod.UpgradeFriendly =>
+      case HashingMethod.UpgradeFriendlyUnsafe =>
         Some(
           hashContractInstance(
             coinst.templateId,
             coinst.createArg,
             coinst.packageName,
-            upgradeFriendly = true,
+            upgradeFriendlyUnsafe = true,
           )
         )
       case HashingMethod.TypedNormalForm =>

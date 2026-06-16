@@ -47,9 +47,11 @@ import scalaz.Scalaz.*
 
 import java.io.InputStream
 import java.nio.file.{Files, Path}
+import java.security.cert.{Certificate, CertificateFactory}
 import java.security.{Key, KeyStore}
 import javax.net.ssl.SSLContext
 import scala.concurrent.Future
+import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 @SuppressWarnings(Array("com.digitalasset.canton.DirectGrpcServiceInvocation"))
@@ -284,24 +286,23 @@ object HttpService extends NoTracing {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private def emptyPassword: Null = null
 
-  private def buildKeyStore(
+  private[http] def buildKeyStore(
       certFile: InputStream,
       privateKeyFile: Path,
       caCertFile: InputStream,
   ): KeyStore = {
-    import java.security.cert.CertificateFactory
     val alias = "key" // This can be anything as long as it's consistent.
 
     val cf = CertificateFactory.getInstance("X.509")
-    val cert = Using.resource(certFile)(cf.generateCertificate(_))
+    val certs = Using.resource(certFile) { stream =>
+      cf.generateCertificates(stream).asScala.toArray[Certificate]
+    }
     val caCert = Using.resource(caCertFile)(cf.generateCertificate(_))
     val privateKey = loadPrivateKey(privateKeyFile)
 
     val keyStore = KeyStore.getInstance("PKCS12")
     keyStore.load(emptyLoadStoreParameter)
-    keyStore.setCertificateEntry(alias, cert)
-    keyStore.setCertificateEntry(alias, caCert)
-    keyStore.setKeyEntry(alias, privateKey, emptyPassword, Array(cert, caCert))
+    keyStore.setKeyEntry(alias, privateKey, emptyPassword, certs)
     keyStore.setCertificateEntry("trusted-ca", caCert)
     keyStore
   }

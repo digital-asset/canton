@@ -34,6 +34,7 @@ import com.digitalasset.canton.synchronizer.mediator.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
@@ -331,6 +332,24 @@ class ConfigValidationsTest extends BaseTestWordSpec {
         ),
       )
       assertErrors(config)(dbSequencerRequiresNonStandardError("s1"))
+      assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
+    }
+
+    "prevent BftBlockOrdering standalone mode in sequencer configuration without non-standard config option" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(),
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            sequencer = SequencerConfig.BftSequencer(
+              config = BftBlockOrdererConfig(
+                // The config validation logic only checks for the standalone config being != `None`
+                standalone = Some(null)
+              )
+            )
+          )
+        ),
+      )
+      assertErrors(config)(bftBlockOrderingStandaloneModeRequiresNonStandardError("s1"))
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 

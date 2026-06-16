@@ -82,7 +82,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope, TrafficState}
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, Envelope, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.{TrafficControlProcessor, TrafficStateController}
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
@@ -248,7 +248,6 @@ class ConnectedSynchronizer(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -258,7 +257,6 @@ class ConnectedSynchronizer(
       transaction,
       transactionMeta,
       submitterInfo,
-      keyResolver,
       disclosedContracts,
       costHints,
     )
@@ -782,7 +780,7 @@ class ConnectedSynchronizer(
         )
         messageHandler =
           new UnthrottledApplicationHandler[
-            Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
+            Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[Batch[X]]]]],
             ClosedEnvelope,
           ] {
             override def name: String = s"connected-synchronizer-$psid"
@@ -796,9 +794,7 @@ class ConnectedSynchronizer(
               ).parSequence_
 
             override def apply(
-                tracedEvents: BoxedEnvelope[Lambda[
-                  `+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]
-                ], ClosedEnvelope]
+                tracedEvents: Traced[Seq[PossiblyIgnoredSequencedEvent[Batch[ClosedEnvelope]]]]
             ): HandlerResult =
               tracedEvents.withTraceContext { traceContext => closedEvents =>
                 val openEvents = closedEvents.map { event =>
@@ -1041,7 +1037,6 @@ class ConnectedSynchronizer(
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,
@@ -1059,7 +1054,6 @@ class ConnectedSynchronizer(
         .submit(
           submitterInfo,
           transactionMeta,
-          keyResolver,
           transaction,
           disclosedContracts,
           topologySnapshot,
@@ -1167,6 +1161,7 @@ class ConnectedSynchronizer(
           assignmentProcessor,
           badRootHashMessagesRequestProcessor,
           topologyProcessor,
+          topologyClient,
           topologyManager,
           ephemeral.timeTracker, // need to close time tracker before synchronizer handle, as it might otherwise send messages
           synchronizerHandle,

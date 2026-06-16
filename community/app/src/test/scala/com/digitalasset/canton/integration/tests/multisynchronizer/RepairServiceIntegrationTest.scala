@@ -53,7 +53,7 @@ abstract class RepairServiceIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S2M1_S2M1
       .addConfigTransforms(
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         // TODO(#23735): re-enable addition checks
         ConfigTransforms.disableAdditionalConsistencyChecks,
       )

@@ -11,7 +11,12 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
+import com.digitalasset.canton.store.{
+  GenericPendingOperationStore,
+  PendingOperation,
+  PendingOperationMetadata,
+  PendingOperationStore,
+}
 import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasProtocolVersionedWrapper, VersioningCompanion}
@@ -22,18 +27,50 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.util.Try
 
+class InMemoryGenericPendingOperationStore(
+    override protected val loggerFactory: NamedLoggerFactory
+)(implicit val executionContext: ExecutionContext)
+    extends GenericPendingOperationStore
+    with NamedLogging {
+
+  override def isInMemoryStore(): Boolean = true
+
+  override def getAllMetadata(
+      operationName: Option[NonEmptyString],
+      synchronizerId: Option[Synchronizer],
+      operationKey: Option[String],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PendingOperationMetadata]] =
+    FutureUnlessShutdown.failed(
+      new UnsupportedOperationException(
+        "getAllMetadata is not supported in InMemoryGenericPendingOperationStore"
+      )
+    )
+
+  override def delete(
+      synchronizer: Synchronizer,
+      operationKey: String,
+      operationName: NonEmptyString,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    FutureUnlessShutdown.failed(
+      new UnsupportedOperationException(
+        "delete is not supported in InMemoryGenericPendingOperationStore"
+      )
+    )
+}
+
 class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](
     override protected val opCompanion: VersioningCompanion[Op],
     override protected val loggerFactory: NamedLoggerFactory,
-)(implicit val executionContext: ExecutionContext)
-    extends PendingOperationStore[Op, SId]
+)(override implicit val executionContext: ExecutionContext)
+    extends InMemoryGenericPendingOperationStore(loggerFactory)
+    with PendingOperationStore[Op, SId]
     with NamedLogging {
 
   // Allows tests to bypass validation and insert malformed data into the store
   @VisibleForTesting
   private[memory] val store =
     TrieMap.empty[
-      (SId, String, NonEmptyString),
+      (Synchronizer, String, NonEmptyString),
       InMemoryPendingOperationStore.StoredPendingOperation[SId],
     ]
 
@@ -85,7 +122,7 @@ class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <
   }
 
   override def delete(
-      synchronizer: SId,
+      synchronizer: Synchronizer,
       operationKey: String,
       operationName: NonEmptyString,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {

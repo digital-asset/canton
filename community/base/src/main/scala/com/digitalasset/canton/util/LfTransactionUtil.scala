@@ -4,8 +4,8 @@
 package com.digitalasset.canton.util
 
 import cats.{Monad, Order}
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.{LfPartyId, LfValue}
 import com.digitalasset.daml.lf.data.*
 
 import scala.annotation.nowarn
@@ -82,15 +82,14 @@ object LfTransactionUtil {
     suffixOfCreatedContract(LocalContractId.V2(localPrefix))
       .fold(Bytes.Empty)(_.toBytes)
 
-  def suffixContractInst(
+  def suffixArg(
       suffixOfCreatedContract: LocalContractId => Option[RelativeContractIdSuffix]
-  )(contractInst: LfThinContractInst): Either[String, LfThinContractInst] =
-    contractInst.unversioned
+  )(arg: LfValue): Either[String, LfValue] =
+    arg
       .suffixCid(
         suffixForDiscriminator(suffixOfCreatedContract),
         suffixForLocalPrefix(suffixOfCreatedContract),
       )
-      .map(unversionedContractInst => contractInst.map(_ => unversionedContractInst))
 
   def suffixNode(
       suffixOfCreatedContract: LocalContractId => Option[RelativeContractIdSuffix]

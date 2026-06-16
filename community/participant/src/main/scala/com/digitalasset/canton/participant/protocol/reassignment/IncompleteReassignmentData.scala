@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.syntax.either.*
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.UnassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.data.{Offset, UnassignmentData}
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData.ReassignmentEventGlobalOffset
@@ -37,7 +38,7 @@ object IncompleteReassignmentData {
       reassignmentId: ReassignmentId,
       unassignmentData: Option[UnassignmentData],
       reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
-      contracts: Seq[ContractInstance],
+      stakeholders: Set[LfPartyId],
   ) {
     def toIncompleteReassignmentData(
         queryOffset: Offset

@@ -362,7 +362,7 @@ private[reassignment] class UnassignmentProcessingSteps(
   }
 
   override def createSubmissionResult(
-      deliver: Deliver[Envelope[?]],
+      deliver: Deliver[Batch[Envelope[?]]],
       pendingSubmission: PendingSubmissionData,
   ): SubmissionResult =
     SubmissionResult(
@@ -564,7 +564,7 @@ private[reassignment] class UnassignmentProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: PendingUnassignment,
       pendingSubmissionMap: PendingSubmissions,

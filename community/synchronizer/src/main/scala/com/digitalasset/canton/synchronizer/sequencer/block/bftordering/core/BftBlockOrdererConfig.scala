@@ -46,7 +46,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultOutputFetchMinimumDelay,
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
+  DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
+  DefaultSequencerCoreSubscriptionConfig,
   P2PNetworkConfig,
+  SequencerCoreSubscriptionConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
@@ -153,6 +156,8 @@ import scala.concurrent.duration.*
   *   useful in deployments with heavy execution context contention between the sequencer and BFT
   *   ordering layer. If set to the default [[scala.None]], the BFT orderer shares the same
   *   execution context as the sequencer.
+  * @param sequencerCoreSubscriptionConfig
+  *   Configuration for the subscription of the sequencer core to the BFT block orderer.
   */
 final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
@@ -183,6 +188,7 @@ final case class BftBlockOrdererConfig(
     outputFetchTimeoutCap: FiniteDuration = DefaultOutputFetchTimeoutCap,
     outputEnqueueMaxRetries: Int = DefaultOutputEnqueueMaxRetries,
     outputEnqueueMaxRetryDelay: FiniteDuration = DefaultOutputEnqueueMaxRetryDelay,
+    outputSizeOfChunkOfEpochsToLoadAtStart: Int = DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
     blockingDbReadTimeout: FiniteDuration = DefaultBlockingDbReadTimeout,
     initialNetwork: Option[P2PNetworkConfig] = None,
     standalone: Option[BftBlockOrderingStandaloneNetworkConfig] = None,
@@ -191,6 +197,8 @@ final case class BftBlockOrdererConfig(
     enablePerformanceMetrics: Boolean = true,
     batchAggregator: BatchAggregatorConfig = BatchAggregatorConfig(),
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
+    sequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
+      DefaultSequencerCoreSubscriptionConfig,
 ) {
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
   require(
@@ -228,12 +236,16 @@ object BftBlockOrdererConfig {
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
+  val DefaultOutputSizeOfChunkOfEpochsToLoadAtStart: Int = 10
   val DefaultBlockingDbReadTimeout: FiniteDuration = 1.minute
 
   val DefaultDedicatedExecutionContextDivisor: Option[Int] = None
 
   val DefaultAuthenticationTokenManagerConfig: AuthenticationTokenManagerConfig =
     AuthenticationTokenManagerConfig()
+
+  val DefaultSequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
+    SequencerCoreSubscriptionConfig()
 
   /** Configuration for peer-to-peer network settings
     *
@@ -398,4 +410,29 @@ object BftBlockOrdererConfig {
       signingPublicKeyProtoFile: File,
   )
 
+  /** Configuration for the subscription of the sequencer core to the BFT block orderer. This
+    * includes settings for the Pekko buffer and for the additional backpressure buffering mechanism
+    * between the sequencer core and the orderer, which prevents the sequencer core to be
+    * overwhelmed if the orderer is consistently faster.
+    *
+    * @param pekkoQueueSourceBufferSize
+    *   The buffer size of the Pekko source queue that provides blocks from the orderer to the
+    *   sequencer core.
+    * @param pauseOrdererThresholdBufferSize
+    *   The threshold buffer size after which the sequencer core signals the orderer to pause.
+    * @param resumeOrdererThresholdBufferSize
+    *   The threshold buffer size at or below which the sequencer core signals the orderer to resume
+    *   after a pause.
+    */
+  final case class SequencerCoreSubscriptionConfig(
+      pekkoQueueSourceBufferSize: Int = 5000,
+      pauseOrdererThresholdBufferSize: Int = 5000,
+      resumeOrdererThresholdBufferSize: Int = 1000,
+  ) {
+    require(
+      pauseOrdererThresholdBufferSize >= resumeOrdererThresholdBufferSize,
+      s"The pause threshold buffer size ($pauseOrdererThresholdBufferSize) must be greater than or equal " +
+        s"to the resume threshold buffer size ($resumeOrdererThresholdBufferSize).",
+    )
+  }
 }

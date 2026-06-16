@@ -1764,11 +1764,11 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     }
 
     "be rejected in fetches for v11 contracts" in {
-      expectInvalidValue(runFetch(Hash.HashingMethod.UpgradeFriendly))
+      expectInvalidValue(runFetch(Hash.HashingMethod.UpgradeFriendlyUnsafe))
     }
 
     "be rejected in exercises for v11 contracts" in {
-      expectInvalidValue(runExercise(Hash.HashingMethod.UpgradeFriendly))
+      expectInvalidValue(runExercise(Hash.HashingMethod.UpgradeFriendlyUnsafe))
     }
 
     "be rejected in fetches for v12 contracts" in {
@@ -1817,11 +1817,11 @@ class EngineTest(contractIdVersion: ContractIdVersion)
 
     val expectedLegacyHash =
       Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = false)
+        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendlyUnsafe = false)
         .value
     val expectedUpgradeFriendlyHash =
       Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendly = true)
+        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendlyUnsafe = true)
         .value
     def expectedTypedNormalFormHash = SValueHash
       .hashContractInstance(
@@ -1862,7 +1862,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     val cases = Table(
       ("hashingMethod", "expectedHash"),
       (Hash.HashingMethod.Legacy, expectedLegacyHash),
-      (Hash.HashingMethod.UpgradeFriendly, expectedUpgradeFriendlyHash),
+      (Hash.HashingMethod.UpgradeFriendlyUnsafe, expectedUpgradeFriendlyHash),
       (Hash.HashingMethod.TypedNormalForm, expectedTypedNormalFormHash),
     )
 
@@ -2435,11 +2435,6 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
     lazy val lookupKey =
       Map(lookedUpInst.contractKeyWithMaintainers.get.globalKey -> Vector(lookedUpInst))
 
-    def firstLookupNode(tx: Tx): Option[(NodeId, Node.LookupByKey)] =
-      tx.nodes.collectFirst { case (nid, nl: Node.LookupByKey) =>
-        nid -> nl
-      }
-
     val now = Time.Timestamp.now()
 
     "mark all lookupByKey nodes as byKey" in {
@@ -2472,99 +2467,12 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
       actualByKeyNodes shouldBe expectedByKeyNodes.toSet
     }
 
-    "be reinterpreted to the same node when lookup finds a contract" in {
-      val exerciseCmd = ApiCommand.Exercise(
-        lookerUpTemplateId.toRef,
-        lookerUpInst.contractId,
-        "Lookup",
-        ValueRecord(None, ImmArray((Some[Name]("n"), ValueInt64(42)))),
-      )
-      val submitters = Set(alice)
-      val readAs = Set.empty[Party]
-
-      val Right((tx, txMeta)) = suffixStrictEngine
-        .submit(
-          submitters = submitters,
-          readAs = readAs,
-          cmds = ApiCommands(ImmArray(exerciseCmd), now, "test"),
-          participantId = participant,
-          submissionSeed = seed,
-          contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
-          prefetchKeys = Seq.empty,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-      val nodeSeedMap = HashMap(txMeta.nodeSeeds.toSeq: _*)
-
-      val Some((nid, lookupNode)) = firstLookupNode(tx.transaction)
-      lookupNode.result shouldBe Vector(lookedUpInst.contractId)
-
-      val Right((reinterpreted, _)) =
-        suffixStrictEngine
-          .reinterpret(
-            submitters,
-            ReplayCommand.LookupByKey(lookupNode.templateId, lookupNode.key.value),
-            nodeSeedMap.get(nid),
-            txMeta.preparationTime,
-            now,
-            contractIdVersion = contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
-          )
-          .consume(lookupContract, lookupPackage, lookupKey)
-
-      firstLookupNode(reinterpreted.transaction).map(_._2) shouldEqual Some(lookupNode)
-    }
-
-    "be reinterpreted to the same node when lookup doesn't find a contract" in {
-      val exerciseCmd = ApiCommand.Exercise(
-        lookerUpTemplateId.toRef,
-        lookerUpInst.contractId,
-        "Lookup",
-        ValueRecord(None, ImmArray((Some[Name]("n"), ValueInt64(57)))),
-      )
-      val submitters = Set(alice)
-      val readAs = Set.empty[Party]
-
-      val Right((tx, txMeta)) = suffixStrictEngine
-        .submit(
-          submitters = submitters,
-          readAs = readAs,
-          cmds = ApiCommands(ImmArray(exerciseCmd), now, "test"),
-          participantId = participant,
-          submissionSeed = seed,
-          contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
-          prefetchKeys = Seq.empty,
-        )
-        .consume(lookupContract, lookupPackage, lookupKey)
-
-      val nodeSeedMap = HashMap(txMeta.nodeSeeds.toSeq: _*)
-
-      val Some((nid, lookupNode)) = firstLookupNode(tx.transaction)
-      lookupNode.result should be(empty)
-
-      val Right((reinterpreted, _)) =
-        suffixStrictEngine
-          .reinterpret(
-            submitters,
-            ReplayCommand.LookupByKey(lookupNode.templateId, lookupNode.key.value),
-            nodeSeedMap.get(nid),
-            txMeta.preparationTime,
-            now,
-            contractIdVersion = contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
-          )
-          .consume(lookupContract, lookupPackage, lookupKey)
-
-      firstLookupNode(reinterpreted.transaction).map(_._2) shouldEqual Some(lookupNode)
-    }
-
     "crash if use a contract key with an empty set of maintainers" in {
       val templateId =
         Identifier(basicTestsPkgId, "BasicTests:NoMaintainer")
 
       val cmds = ImmArray(
-        speedy.Command.LookupByKey(templateId, SParty(alice))
+        speedy.Command.FetchByKey(templateId, SParty(alice))
       )
 
       val submitters = Set(alice)
@@ -3343,8 +3251,15 @@ class EngineTestHelpers(
 
     val nodeSeedMap = txMeta.nodeSeeds.toSeq.toMap
 
+    val actionNodes = nodes.filter { nodeId =>
+      tx.transaction.nodes(nodeId) match {
+        case _: Node.Exercise | _: Node.Fetch | _: Node.Create => true
+        case _: Node.LookupByKey | _: Node.Rollback => false
+      }
+    }
+
     val finalState =
-      nodes.foldLeft[Either[Error, ReinterpretState]](Right(ReinterpretState(contracts, keys))) {
+      actionNodes.foldLeft[Either[Error, ReinterpretState]](Right(ReinterpretState(contracts, keys))) {
         case (acc, nodeId) =>
           for {
             state <- acc
@@ -3356,8 +3271,6 @@ class EngineTestHelpers(
                 ReplayCommand.FetchByKey(fetch.templateId, key)
               case fetch: Node.Fetch =>
                 ReplayCommand.Fetch(fetch.templateId, None, fetch.coid)
-              case lookup: Node.LookupByKey =>
-                ReplayCommand.LookupByKey(lookup.templateId, lookup.key.value)
               case exe: Node.Exercise if exe.byKey =>
                 val key = exe.keyOpt.getOrElse(sys.error("unexpected empty contract key")).value
                 ReplayCommand.ExerciseByKey(
@@ -3374,6 +3287,8 @@ class EngineTestHelpers(
                   exe.choiceId,
                   exe.chosenValue,
                 )
+              case _: Node.LookupByKey =>
+                sys.error("unexpected lookup node")
               case _: Node.Rollback =>
                 sys.error("unexpected rollback node")
             }

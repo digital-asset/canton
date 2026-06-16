@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import cats.syntax.either.*
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -17,66 +16,50 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.ConcurrentSkipListSet
 import scala.concurrent.ExecutionContext
-import scala.util.Either
 
 class InMemoryAcsDigestStore(
     indexedSynchronizer: IndexedSynchronizer,
     stringInterning: StringInterning,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
+)(override implicit val executionContext: ExecutionContext)
     extends AcsDigestStore
     with NamedLogging {
   // Note: shardId=indexedSynchronizer.index is fixed so we don't have to store it in the journals
 
   private val checkpointJournal =
     new ConcurrentSkipListSet[RecordTime](RecordTime.recordTimeOrdering)
-  private val participant_ =
+  override protected val participant_ =
     new InMemoryAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
       indexedSynchronizer,
       loggerFactory,
       prettyKey = stringInterning.participantId.externalize,
     )
-  private val party_ = new InMemoryAcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest](
-    indexedSynchronizer,
-    loggerFactory,
-    prettyKey = _.map(stringInterning.party.externalize).party,
-  )
-
-  override def participant
-      : AcsDigestStore.DigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] =
-    participant_
-
-  override def party
-      : AcsDigestStore.DigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId], RawDigest] =
-    party_
+  override protected val party_ =
+    new InMemoryAcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest](
+      indexedSynchronizer,
+      loggerFactory,
+      prettyKey = _.map(stringInterning.party.externalize).party,
+    )
 
   override def insertCheckpointTime(recordTime: RecordTime)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.pure(checkpointJournal.add(recordTime).discard)
 
-  override def deleteAfter(fromExclusive: RecordTime)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    for {
-      _ <- FutureUnlessShutdown.pure {
-        val isInclusive = false
-        checkpointJournal.tailSet(fromExclusive, isInclusive).clear()
-      }
-      _ <- party_.deleteAfter(fromExclusive)
-      _ <- participant_.deleteAfter(fromExclusive)
-    } yield ()
-
-  override def deleteUpTo(toExclusive: RecordTime)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = for {
-    _ <- FutureUnlessShutdown.pure {
+  override protected def deleteCheckpointsAfter(
+      fromExclusive: RecordTime
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    FutureUnlessShutdown.pure {
       val isInclusive = false
-      checkpointJournal.headSet(toExclusive, isInclusive).clear()
+      checkpointJournal.tailSet(fromExclusive, isInclusive).clear()
     }
-    _ <- party_.deleteUpTo(toExclusive)
-    _ <- participant_.deleteUpTo(toExclusive)
-  } yield ()
+
+  override protected def deleteCheckpointsUpTo(toExclusive: RecordTime)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
+    val isInclusive = false
+    checkpointJournal.headSet(toExclusive, isInclusive).clear()
+  }
 
   override def latestCheckpointUpTo(toInclusive: RecordTime)(implicit
       traceContext: TraceContext
@@ -90,19 +73,5 @@ class InMemoryAcsDigestStore(
   ): FutureUnlessShutdown[Option[RecordTime]] =
     FutureUnlessShutdown.pure {
       Option(checkpointJournal.higher(fromExclusive))
-    }
-
-  override def checkReplacesInvariant()(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    Either.catchOnly[NoSuchElementException](checkpointJournal.last()).toOption match {
-      case Some(lastCheckpoint) =>
-        for {
-          _ <- party_.checkReplacesInvariant(lastCheckpoint)
-          _ <- participant_.checkReplacesInvariant(lastCheckpoint)
-        } yield ()
-      case None =>
-        logger.debug(s"checkReplacesInvariant: no latest checkpoint!")
-        FutureUnlessShutdown.unit
     }
 }

@@ -36,7 +36,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerNodeConfig,
+  SequencerNodeParameterConfig,
+}
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import monocle.macros.syntax.lens.*
@@ -92,7 +95,9 @@ abstract class ExternalSequencerIntegrationTest(override val name: String)
     EnvironmentDefinition(
       CantonConfig(
         sequencers = sequencerNamesList.map { sequencerName =>
-          InstanceName.tryCreate(sequencerName) -> SequencerNodeConfig()
+          InstanceName.tryCreate(sequencerName) -> SequencerNodeConfig(parameters =
+            SequencerNodeParameterConfig(disableAggregationRuleSizeCheckForTesting = true)
+          )
         }.toMap,
         mediators = Map(InstanceName.tryCreate(s"mediator1") -> MediatorNodeConfig()),
         participants = (1 to 2).map { i =>

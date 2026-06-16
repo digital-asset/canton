@@ -92,7 +92,7 @@ class HashCreateNodeSpec
           templateId,
           createArg(cid1),
           packageName,
-          upgradeFriendly = false,
+          upgradeFriendlyUnsafe = false,
         )
         .value
 
@@ -109,12 +109,12 @@ class HashCreateNodeSpec
           templateId,
           createArg(cid1),
           packageName,
-          upgradeFriendly = true,
+          upgradeFriendlyUnsafe = true,
         )
         .value
 
       newEngine
-        .hashCreateNode(createNode(createArg(cid0)), cidMapping, HashingMethod.UpgradeFriendly)
+        .hashCreateNode(createNode(createArg(cid0)), cidMapping, HashingMethod.UpgradeFriendlyUnsafe)
         .consume() shouldBe Right(
         expectedHash
       )

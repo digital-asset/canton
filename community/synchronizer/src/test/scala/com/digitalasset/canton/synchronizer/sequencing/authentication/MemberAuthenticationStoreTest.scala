@@ -5,8 +5,8 @@ package com.digitalasset.canton.synchronizer.sequencing.authentication
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{Fingerprint, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
@@ -138,14 +138,16 @@ class MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
   private def mk(maxItems: PositiveInt = PositiveInt.tryCreate(10)): MemberAuthenticationStore =
     new MemberAuthenticationStore(
       maxItems,
+      maxItems,
       loggerFactory,
     )
 
   private def generateToken(
       member: Member,
       expiry: CantonTimestamp = defaultExpiry,
+      fingerprint: Fingerprint = Fingerprint.tryFromString("default-test-token-key-fingerprint"),
   ): StoredAuthenticationToken =
-    StoredAuthenticationToken(member, expiry, AuthenticationToken.generate(crypto))
+    StoredAuthenticationToken(member, expiry, AuthenticationToken.generate(crypto), fingerprint)
 
   private def generateNonce(member: Member, expiry: CantonTimestamp = defaultExpiry): StoredNonce =
     StoredNonce(member, Nonce.generate(crypto), CantonTimestamp.Epoch, expiry)

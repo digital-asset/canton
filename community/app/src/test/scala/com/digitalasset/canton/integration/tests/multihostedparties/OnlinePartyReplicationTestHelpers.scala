@@ -331,8 +331,8 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
     ) {
       // The try handles the optional `CommandFailure`, so that we don't give up while the SP is stopped.
       val spStatusO =
-        Try(sourceParticipant.parties.get_add_party_status(addPartyRequestId)).toOption
-      val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
+        Try(sourceParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)).toOption
+      val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)
 
       (spStatusO, tpStatus) match {
         case (Some(spStatus), tp)
@@ -366,7 +366,7 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
       retryOnTestFailuresOnly = false,
       maxPollInterval = 1.second,
     ) {
-      targetParticipant.parties.get_add_party_status(addPartyRequestId) match {
+      targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId) match {
         case tpStatus if countsMatch(tpStatus, expectedNumContractsO) =>
           logger.info(s"TP completed party replication with status $tpStatus")
         case tpStatus if finished(tpStatus) =>
@@ -416,11 +416,11 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
 
       assert(
         missingFromTP.isEmpty,
-        s"These ${missingFromTP.size} contracts are missing from the TP: $missingFromTP",
+        s"These ${missingFromTP.size} contracts for party $replicatedParty are missing from the TP: $missingFromTP",
       )
       assert(
         missingFromSP.isEmpty,
-        s"These ${missingFromSP.size} contracts are missing from the SP: $missingFromSP",
+        s"These ${missingFromSP.size} contracts for party $replicatedParty are missing from the SP: $missingFromSP",
       )
     }
 

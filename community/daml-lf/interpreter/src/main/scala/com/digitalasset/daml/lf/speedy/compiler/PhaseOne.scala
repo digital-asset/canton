@@ -733,8 +733,6 @@ private[lf] final class PhaseOne(
         compileExp(env, time) { time =>
           Return(SBULedgerTimeLT(time))
         }
-      case UpdateLookupByKey(templateId) =>
-        Return(t.LookupByKeyDefRef(templateId)())
       case UpdateQueryNByKey(templateId) =>
         Return(t.QueryNByKeyDefRef(templateId)())
       case UpdateFetchByKey(templateId) =>

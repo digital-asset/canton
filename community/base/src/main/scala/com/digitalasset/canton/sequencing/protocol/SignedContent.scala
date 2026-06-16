@@ -84,6 +84,19 @@ final case class SignedContent[+A <: HasCryptographicEvidence] private (
     snapshot.verifySignature(hash, member, signature, SigningKeyUsage.ProtocolOnly)
   }
 
+  def verifyKeyUsage(
+      snapshot: SyncCryptoApi,
+      member: Member,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    snapshot.verifyKeyUsage(
+      member,
+      signature.authorizingLongTermKey,
+      signature.signatureDelegation,
+      SigningKeyUsage.ProtocolOnly,
+    )
+
   def deserializeContent[B <: HasCryptographicEvidence](
       contentDeserializer: ByteString => ParsingResult[B]
   ): ParsingResult[SignedContent[B]] =
@@ -285,10 +298,10 @@ object SignedContent
     )
   }
 
-  def openEnvelopes(event: SignedContent[SequencedEvent[ClosedEnvelope]])(
+  def openEnvelopes(event: SignedContent[DecompressedSequencedEvent[ClosedEnvelope]])(
       protocolVersion: ProtocolVersion,
       hashOps: HashOps,
-  ): WithOpeningErrors[SignedContent[SequencedEvent[DefaultOpenEnvelope]]] = {
+  ): WithOpeningErrors[SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]]] = {
     val (openSequencedEvent, openingErrors) =
       SequencedEvent.openEnvelopes(event.content)(protocolVersion, hashOps)
     WithOpeningErrors(

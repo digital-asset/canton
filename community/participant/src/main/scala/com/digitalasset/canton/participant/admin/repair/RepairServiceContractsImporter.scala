@@ -269,7 +269,7 @@ final class RepairServiceContractsImporter(
           }
           // Publish events to the indexer
           .mapAsync(1) { contractsToAddWithInternalContractIds =>
-            if (nodeParameters.alphaMultiSynchronizerSupport) {
+            if (nodeParameters.enableAllLedgerApiReassignments) {
               publishAssignedEvents(
                 synchronizerId,
                 synchronizer.currentRecordTime,
@@ -365,7 +365,7 @@ final class RepairServiceContractsImporter(
         .toEitherT[FutureUnlessShutdown]
 
       contractsWithUnexpectedReassignmentCounter =
-        if (nodeParameters.alphaMultiSynchronizerSupport) {
+        if (nodeParameters.enableAllLedgerApiReassignments) {
           Nil
         } else {
           contractsUnfiltered.filter(_.reassignmentCounter != ReassignmentCounter.Genesis)

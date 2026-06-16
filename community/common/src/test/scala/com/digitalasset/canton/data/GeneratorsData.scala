@@ -10,7 +10,6 @@ import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
   ExerciseActionDescription,
   FetchActionDescription,
-  LookupByKeyActionDescription,
 }
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndex}
@@ -219,14 +218,8 @@ final class GeneratorsData(
       case _: CreateActionDescription => ()
       case _: ExerciseActionDescription => ()
       case _: FetchActionDescription => ()
-      case _: LookupByKeyActionDescription => ()
     }).discard
   }
-
-  private def lookupByKeyActionDescriptionGenFor(): Gen[LookupByKeyActionDescription] =
-    for {
-      key <- Arbitrary.arbitrary[LfVersioned[LfGlobalKey]]
-    } yield LookupByKeyActionDescription.tryCreate(key)
 
   implicit val actionDescriptionArb: Arbitrary[ActionDescription] = Arbitrary {
 
@@ -241,7 +234,6 @@ final class GeneratorsData(
         createActionDescriptionGenFor(),
         exerciseActionDescriptionGenFor(),
         fetchActionDescriptionGenFor(),
-        lookupByKeyActionDescriptionGenFor(),
       )
     }
   }
@@ -346,8 +338,6 @@ final class GeneratorsData(
             .map(c => List(InputContract(c, consumed = false)))
 
         case _: CreateActionDescription => Gen.const(List.empty)
-
-        case _: LookupByKeyActionDescription => Gen.const(List.empty)
       }
 
       createdCore <- actionDescription match {
@@ -392,7 +382,7 @@ final class GeneratorsData(
               }
             )
 
-        case _: FetchActionDescription | _: LookupByKeyActionDescription => Gen.const(List.empty)
+        case _: FetchActionDescription => Gen.const(List.empty)
       }
 
       notTransient = (createdCore.map(_.contract.contractId) ++ coreInputs.map(_.contractId)).toSet
@@ -418,16 +408,6 @@ final class GeneratorsData(
                 kr1.version,
                 kr1.unversioned
                   .copy(contracts = kr1.unversioned.contracts ++ kr2.unversioned.contracts),
-              )
-            )
-          }
-
-        case ad: LookupByKeyActionDescription =>
-          nonEmptySetGen[LfPartyId].map { maintainers =>
-            Map(
-              ad.key.unversioned -> LfVersioned(
-                ad.key.version,
-                KeyResolutionWithMaintainers(Seq.empty, maintainers),
               )
             )
           }

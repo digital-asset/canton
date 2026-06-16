@@ -9,10 +9,12 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.KeysPageQuery
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.KeyLookupPageQuery
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
-import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
+import com.digitalasset.canton.platform.store.interfaces.{
+  KeyLookupPageResult,
+  LedgerDaoContractsReader,
+}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -39,7 +41,7 @@ private[dao] sealed class ContractsReader(
         .executeSql(metrics.index.db.lookupContractByKeyDbMetrics)(
           storageBackend.contractKeysPlain(
             keys.map(key =>
-              KeysPageQuery(
+              KeyLookupPageQuery(
                 key = key,
                 validAtEventSeqId = notEarlierThanEventSeqId,
                 limit = 1,
@@ -56,43 +58,6 @@ private[dao] sealed class ContractsReader(
               result.internalContractIds.headOption.map(key -> _)
             }
             .toMap
-        },
-    )
-
-  /** Lookup a contract key state at a specific ledger offset.
-    *
-    * @param key
-    *   the contract key
-    * @param notEarlierThanEventSeqId
-    *   the lower bound offset of the ledger for which to query for the key state
-    * @return
-    *   the key state.
-    */
-  override def lookupKeyState(key: Key, notEarlierThanEventSeqId: Long)(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[KeyState] =
-    Timed.future(
-      metrics.index.db.lookupKey,
-      contractLoader.keys
-        .load(
-          KeysPageQuery(
-            key = key,
-            validAtEventSeqId = notEarlierThanEventSeqId,
-            limit = 1,
-            nextPageToken = None,
-          )
-        )
-        .map {
-          case Some((contractIds, _)) =>
-            contractIds.headOption
-              .map(KeyAssigned.apply)
-              .getOrElse(KeyUnassigned)
-          case None =>
-            logger
-              .error(
-                s"Key $key resulted in an invalid empty load at offset $notEarlierThanEventSeqId"
-              )(loggingContext.traceContext)
-            KeyUnassigned
         },
     )
 
@@ -127,12 +92,12 @@ private[dao] sealed class ContractsReader(
       limit: Int,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[(Vector[ContractId], Option[Long])] =
+  ): Future[KeyLookupPageResult] =
     Timed.future(
       metrics.index.db.lookupNonUniqueKey,
       contractLoader.keys
         .load(
-          KeysPageQuery(
+          KeyLookupPageQuery(
             key = key,
             limit = limit,
             nextPageToken = nextPageToken,
@@ -145,7 +110,7 @@ private[dao] sealed class ContractsReader(
             logger.error(
               s"Non-unique key lookup for $key resulted in an invalid empty load"
             )(loggingContext.traceContext)
-            (Vector.empty, None)
+            KeyLookupPageResult(contracts = Vector.empty, nextPageToken = None)
         },
     )
 }

@@ -147,7 +147,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion, forbidTrailingNones:
       ),
       (
         TTextMap(TBool),
-        ValueTextMap(SortedLookupList(Map("0" -> ValueTrue, "1" -> ValueFalse))),
+        ValueTextMap(SortedLookupList.from(Map("0" -> ValueTrue, "1" -> ValueFalse))),
         SMap(true, SText("0") -> SValue.True, SText("1") -> SValue.False),
       ),
       (
@@ -567,14 +567,14 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion, forbidTrailingNones:
         (
           TTextMap(TInt64),
           ValueTextMap(
-            SortedLookupList(
+            SortedLookupList.from(
               Map(
                 "\u0001" -> ValueInt64(1)
               )
             )
           ),
           ValueTextMap(
-            SortedLookupList(
+            SortedLookupList.from(
               Map(
                 "\u0000" -> ValueInt64(0),
                 "\u0001" -> ValueInt64(2),
@@ -600,7 +600,9 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion, forbidTrailingNones:
         ("type" -> "value"),
         t"ContractId Mod:Template" -> cid,
         TList(t"ContractId Mod:Template") -> ValueList(FrontStack(cid)),
-        TTextMap(t"ContractId Mod:Template") -> ValueTextMap(SortedLookupList(Map("0" -> cid))),
+        TTextMap(t"ContractId Mod:Template") -> ValueTextMap(
+          SortedLookupList.from(Map("0" -> cid))
+        ),
         TGenMap(TInt64, t"ContractId Mod:Template") -> ValueGenMap(ImmArray(ValueInt64(1) -> cid)),
         TGenMap(t"ContractId Mod:Template", TInt64) -> ValueGenMap(ImmArray(cid -> ValueInt64(0))),
         TOptional(t"ContractId Mod:Template") -> ValueOptional(Some(cid)),

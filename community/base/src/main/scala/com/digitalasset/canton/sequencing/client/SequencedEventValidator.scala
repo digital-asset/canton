@@ -37,8 +37,15 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.protocol.DynamicSynchronizerParametersWithValidity
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.UpstreamSubscriptionError
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent}
+import com.digitalasset.canton.sequencing.client.SequencedEventValidator.decompressEvent
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  DecompressedSequencedEvent,
+  SequencedEvent,
+}
 import com.digitalasset.canton.sequencing.{
+  MaybeCompressedSerializedEvent,
   OrdinarySerializedEvent,
   ProcessingSerializedEvent,
   SequencedSerializedEvent,
@@ -50,10 +57,10 @@ import com.digitalasset.canton.store.SequencedEventStore.{
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
-import com.google.common.annotations.VisibleForTesting
+import com.digitalasset.canton.util.{ErrorUtil, MaxBytesToDecompress}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -96,8 +103,8 @@ object SequencedEventValidationError {
   }
   final case class ForkHappened(
       sequencingTimestamp: CantonTimestamp,
-      suppliedEvent: SequencedEvent[ClosedEnvelope],
-      expectedEvent: Option[SequencedEvent[ClosedEnvelope]],
+      suppliedEvent: DecompressedSequencedEvent[ClosedEnvelope],
+      expectedEvent: Option[DecompressedSequencedEvent[ClosedEnvelope]],
   )(implicit
       val loggingContext: ErrorLoggingContext
   ) extends CantonError.Impl(
@@ -143,6 +150,15 @@ object SequencedEventValidationError {
       param("decalred signing key timestamp", _.declaredSigningKeyTimestamp),
     )
   }
+  final case class DecompressionFailed(
+      sequencedTimestamp: CantonTimestamp,
+      reason: String,
+  ) extends SequencedEventValidationError[Nothing] {
+    override protected def pretty: Pretty[DecompressionFailed] = prettyOfClass(
+      param("sequenced timestamp", _.sequencedTimestamp),
+      param("reason", _.reason.unquoted),
+    )
+  }
 }
 
 /** Validate whether a received event is valid for processing. */
@@ -153,25 +169,33 @@ trait SequencedEventValidator extends AutoCloseable {
     * be validated against. We currently assume this is safe to do as if the event fails to be
     * handled by the application then the sequencer client will halt and will need recreating to
     * restart event processing.
+    *
+    * @return
+    *   the validated event with its batch decompressed (decompression is deferred to here, where
+    *   the topology snapshot used for validation provides the bound).
     */
   def validate(
       priorEvent: Option[ProcessingSerializedEvent],
-      event: SequencedSerializedEvent,
+      event: MaybeCompressedSerializedEvent,
       sequencerId: SequencerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit]
+  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], SequencedSerializedEvent]
 
   /** Validates a sequenced event when we reconnect against the prior event supplied to
     * [[SequencedEventValidatorFactory.create]]
+    *
+    * @return
+    *   the validated event with its batch decompressed (decompression is deferred to here, where
+    *   the topology snapshot used for validation provides the bound).
     */
   def validateOnReconnect(
       priorEvent: Option[ProcessingSerializedEvent],
-      reconnectEvent: SequencedSerializedEvent,
+      reconnectEvent: MaybeCompressedSerializedEvent,
       sequencerId: SequencerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit]
+  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], SequencedSerializedEvent]
 
   /** Add event validation to the given
     * [[com.digitalasset.canton.sequencing.client.SequencerSubscriptionPekko]]. Stuttering is
@@ -200,19 +224,27 @@ object SequencedEventValidator extends HasLoggerName {
   private case object NoValidation extends SequencedEventValidator {
     override def validate(
         priorEvent: Option[ProcessingSerializedEvent],
-        event: SequencedSerializedEvent,
+        event: MaybeCompressedSerializedEvent,
         sequencerId: SequencerId,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] =
-      EitherT(FutureUnlessShutdown.pure(Either.unit))
+    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
+      Nothing
+    ], SequencedSerializedEvent] =
+      // No validation means we blindly trust the sequencer, so we do not enforce a maxRequestSize
+      // bound on decompression here.
+      EitherT(
+        FutureUnlessShutdown.pure(decompressEvent(event, MaxBytesToDecompress.MaxValueUnsafe))
+      )
     override def validateOnReconnect(
         priorEvent: Option[ProcessingSerializedEvent],
-        reconnectEvent: SequencedSerializedEvent,
+        reconnectEvent: MaybeCompressedSerializedEvent,
         sequencerId: SequencerId,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] =
+    ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
+      Nothing
+    ], SequencedSerializedEvent] =
       validate(priorEvent, reconnectEvent, sequencerId)
 
     override def validatePekko[E: Pretty](
@@ -229,6 +261,21 @@ object SequencedEventValidator extends HasLoggerName {
 
     override def close(): Unit = ()
   }
+
+  /** Decompresses the batch of a (possibly still compressed) serialized event using the given
+    * bound, yielding a fully decompressed [[SequencedSerializedEvent]]. Decompression failure (e.g.
+    * the batch exceeds `maxBytesToDecompress`) is reported as a validation error.
+    */
+  private[client] def decompressEvent(
+      event: MaybeCompressedSerializedEvent,
+      maxBytesToDecompress: MaxBytesToDecompress,
+  ): Either[SequencedEventValidationError[Nothing], SequencedSerializedEvent] =
+    event.signedEvent
+      .traverse(SequencedEvent.decompress(_, maxBytesToDecompress))
+      .bimap(
+        err => SequencedEventValidationError.DecompressionFailed(event.timestamp, err.toString),
+        signedEvent => SequencedEventWithTraceContext(signedEvent)(event.traceContext),
+      )
 
   /** Do not validate sequenced events. Only use it in case of a programming error and the need to
     * unblock a deployment or if you blindly trust the sequencer.
@@ -404,11 +451,13 @@ class SequencedEventValidatorImpl(
     */
   override def validate(
       priorEventO: Option[ProcessingSerializedEvent],
-      event: SequencedSerializedEvent,
+      event: MaybeCompressedSerializedEvent,
       sequencerId: SequencerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] = {
+  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
+    Nothing
+  ], SequencedSerializedEvent] = {
     val expectedPreviousTimestamp = priorEventO.map(_.timestamp).orElse(None)
     val newTimestamp = event.timestamp
 
@@ -455,22 +504,19 @@ class SequencedEventValidatorImpl(
         s"Successfully checked synchronizer id (${event.signedEvent.content.synchronizerId}), " +
           s"and increasing timestamp (old = ${priorEventO.map(_.timestamp)}, new = $newTimestamp)"
       )
-      // Verify the signature only if we know of a prior event.
-      // Otherwise, this is a fresh subscription and we will get the topology state with the first transaction
-      // TODO(#4933) Upon a fresh subscription, retrieve the keys via the topology API and validate immediately or
-      //  validate the signature after processing the initial event
-      _ <- verifySignature(priorEventO, event, sequencerId)
-      _ = logger.debug("Successfully verified signature")
-    } yield ()
+      decompressed <- verifySignatureAndDecompress(priorEventO, event, sequencerId)
+    } yield decompressed
   }
 
   override def validateOnReconnect(
       priorEvent0: Option[ProcessingSerializedEvent],
-      reconnectEvent: SequencedSerializedEvent,
+      reconnectEvent: MaybeCompressedSerializedEvent,
       sequencerId: SequencerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] = {
+  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
+    Nothing
+  ], SequencedSerializedEvent] = {
     implicit val traceContext: TraceContext = reconnectEvent.traceContext
     val priorEvent = priorEvent0.getOrElse(
       ErrorUtil.internalError(
@@ -479,10 +525,14 @@ class SequencedEventValidatorImpl(
         )
       )
     )
-    def checkFork: Either[SequencedEventValidationError[Nothing], Unit] = priorEvent match {
+
+    // The fork check compares the decompressed `SequencedEvent` contents against the prior event.
+    def checkFork(
+        decompressed: SequencedSerializedEvent
+    ): Either[SequencedEventValidationError[Nothing], Unit] = priorEvent match {
       case SequencedEventWithTraceContext(signedEvent) =>
         val oldSequencedEvent = signedEvent.content
-        val newSequencedEvent = reconnectEvent.signedEvent.content
+        val newSequencedEvent = decompressed.signedEvent.content
         // We compare the contents of the `SequencedEvent` rather than their serialization
         // because the SequencerReader serializes the `SequencedEvent` afresh upon each resubscription
         // and the serialization may therefore differ from time to time. This is fine for auditability
@@ -494,7 +544,7 @@ class SequencedEventValidatorImpl(
         )
       case ordinaryPrior: OrdinarySerializedEvent =>
         val oldSequencedEvent = ordinaryPrior.signedEvent.content
-        val newSequencedEvent = reconnectEvent.signedEvent.content
+        val newSequencedEvent = decompressed.signedEvent.content
         // We compare the contents of the `SequencedEvent` rather than their serialization
         // because the SequencerReader serializes the `SequencedEvent` afresh upon each resubscription
         // and the serialization may therefore differ from time to time. This is fine for auditability
@@ -504,14 +554,14 @@ class SequencedEventValidatorImpl(
           (),
           ForkHappened(oldSequencedEvent.timestamp, newSequencedEvent, Some(oldSequencedEvent)),
         )
-      case ignored: IgnoredSequencedEvent[ClosedEnvelope] =>
+      case ignored: IgnoredSequencedEvent[Batch[ClosedEnvelope]] =>
         // If the event should be ignored, we nevertheless check the timestamp
         Either.cond(
           ignored.timestamp == reconnectEvent.timestamp,
           (),
           ForkHappened(
             ignored.timestamp,
-            reconnectEvent.signedEvent.content,
+            decompressed.signedEvent.content,
             ignored.underlying.map(_.content),
           ),
         )
@@ -521,19 +571,15 @@ class SequencedEventValidatorImpl(
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         checkSynchronizerId(reconnectEvent)
       )
+      decompressed <- verifySignatureAndDecompress(Some(priorEvent), reconnectEvent, sequencerId)
       _ <- EitherT.fromEither[FutureUnlessShutdown](
-        checkFork
+        checkFork(decompressed)
       )
-      _ <- verifySignature(
-        Some(priorEvent),
-        reconnectEvent,
-        sequencerId,
-      )
-    } yield ()
+    } yield decompressed
     // do not update the priorEvent because if it was ignored, then it was ignored for a reason.
   }
 
-  private def checkSynchronizerId(event: SequencedSerializedEvent): ValidationResult = {
+  private def checkSynchronizerId(event: MaybeCompressedSerializedEvent): ValidationResult = {
     val receivedSynchronizerId = event.signedEvent.content.synchronizerId
     Either.cond(
       receivedSynchronizerId == psid,
@@ -542,52 +588,118 @@ class SequencedEventValidatorImpl(
     )
   }
 
-  @VisibleForTesting
-  protected def verifySignature(
+  /** Resolves and validates the topology snapshot at the event's topology timestamp. Only used for
+    * non-fresh subscriptions, where a prior event tells us the latest topology client timestamp.
+    */
+  private def resolveTopologySnapshot(
       priorEventO: Option[ProcessingSerializedEvent],
-      event: SequencedSerializedEvent,
+      event: MaybeCompressedSerializedEvent,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], SyncCryptoApi] = {
+    val signingTs = event.signedEvent.content.timestampOfSigningKey
+    for {
+      _ <- EitherT.fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
+      _ = logger.debug("Successfully checked that there's no timestamp of signing key")
+      snapshot <- SequencedEventValidator
+        .validateTopologyTimestamp(
+          syncCryptoApi,
+          signingTs,
+          event.timestamp,
+          lastTopologyClientTimestamp(priorEventO),
+          warnIfApproximate = priorEventO.nonEmpty,
+          _.sequencerTopologyTimestampTolerance,
+        )
+        .leftMap[SequencedEventValidationError[Nothing]](
+          InvalidTopologyTimestamp(event.timestamp, signingTs, _)
+        )
+      _ = logger.debug(s"Successfully validated the event topology timestamp ${event.timestamp}")
+    } yield snapshot
+  }
+
+  /** Verifies the event signature against the given topology snapshot. */
+  protected def verifySignature(
+      snapshot: SyncCryptoApi,
+      event: MaybeCompressedSerializedEvent,
       sequencerId: SequencerId,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] = {
-    implicit val traceContext: TraceContext = event.traceContext
+    val signingTs = event.signedEvent.content.timestampOfSigningKey
+    event.signedEvent
+      .verifySignature(snapshot, sequencerId, HashPurpose.SequencedEventSignature)
+      .leftMap[SequencedEventValidationError[Nothing]](
+        SignatureInvalid(event.timestamp, signingTs, _)
+      )
+  }
+
+  /** Derives the [[com.digitalasset.canton.util.MaxBytesToDecompress]] bound to use when
+    * decompressing the event's batch. The dynamic `maxRequestSize` bound from the topology snapshot
+    * is only used from protocol version 36 on; earlier protocol versions keep the historical fixed
+    * [[com.digitalasset.canton.util.MaxBytesToDecompress.HardcodedDefault]] bound.
+    */
+  private def decompressionBound(
+      snapshot: SyncCryptoApi
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[MaxBytesToDecompress] =
+    if (psid.protocolVersion <= ProtocolVersion.v35)
+      FutureUnlessShutdown.pure(MaxBytesToDecompress.HardcodedDefault)
+    else
+      snapshot.ipsSnapshot
+        .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
+        .map(parameters => MaxBytesToDecompress(parameters.maxRequestSize.value))
+
+  /** Verifies the event's signature against the resolved topology snapshot and decompresses its
+    * batch within the [[com.digitalasset.canton.util.MaxBytesToDecompress]] bound derived from that
+    * snapshot. On a fresh subscription (no prior event yet) there is no topology snapshot
+    * available, so signature verification is skipped and the batch is decompressed within the
+    * [[com.digitalasset.canton.util.MaxBytesToDecompress.HardcodedDefault]] bound.
+    */
+  private def verifySignatureAndDecompress(
+      priorEventO: Option[ProcessingSerializedEvent],
+      event: MaybeCompressedSerializedEvent,
+      sequencerId: SequencerId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
+    Nothing
+  ], SequencedSerializedEvent] =
     if (event.previousTimestamp.isEmpty) {
       // TODO(#4933) This is a fresh subscription. Either fetch the synchronizer keys via a future sequencer API and validate the signature
       //  or wait until the topology processor has processed the topology information in the first message and then validate the signature.
+      // On a fresh subscription we get the topology state with the first transaction, so we skip
+      // signature verification and decompress with the hardcoded bound.
       logger.info(
         s"Skipping signature verification of the first sequenced event due to a fresh subscription from $sequencerId"
       )
       // The first sequenced event addressed to a member must not specify a signing key timestamp because
       // the member will only be able to compute snapshots for the current topology state and later.
-      EitherT.fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
-    } else {
-      val signingTs = event.signedEvent.content.timestampOfSigningKey
+      EitherT
+        .fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
+        .flatMap(_ =>
+          EitherT.fromEither[FutureUnlessShutdown](
+            decompressEvent(event, MaxBytesToDecompress.HardcodedDefault)
+          )
+        )
+    } else
       for {
-        _ <- EitherT.fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
-        _ = logger.debug("Successfully checked that there's no timestamp of signing key")
-        snapshot <- SequencedEventValidator
-          .validateTopologyTimestamp(
-            syncCryptoApi,
-            signingTs,
-            event.timestamp,
-            lastTopologyClientTimestamp(priorEventO),
-            warnIfApproximate = priorEventO.nonEmpty,
-            _.sequencerTopologyTimestampTolerance,
-          )
-          .leftMap(InvalidTopologyTimestamp(event.timestamp, signingTs, _))
-        _ = logger.debug(s"Successfully validated the event topology timestamp ${event.timestamp}")
-        _ <- event.signedEvent
-          .verifySignature(snapshot, sequencerId, HashPurpose.SequencedEventSignature)
-          .leftMap[SequencedEventValidationError[Nothing]](
-            SignatureInvalid(event.timestamp, signingTs, _)
-          )
-      } yield ()
-    }
-  }
+        snapshot <- resolveTopologySnapshot(priorEventO, event)
+        _ <- verifySignature(snapshot, event, sequencerId)
+        _ = logger.debug("Successfully verified signature")
+        maxBytesToDecompress <- EitherT.right[SequencedEventValidationError[Nothing]](
+          decompressionBound(snapshot)
+        )
+        decompressed <- EitherT.fromEither[FutureUnlessShutdown](
+          decompressEvent(event, maxBytesToDecompress)
+        )
+      } yield decompressed
 
   /** The timestamp of signing key is always derived from the timestamps in the
     * [[com.digitalasset.canton.sequencing.protocol.SequencedEvent]], so it must never be set as
     * [[com.digitalasset.canton.sequencing.protocol.SignedContent.timestampOfSigningKey]]
     */
-  private def checkNoTimestampOfSigningKey(event: SequencedSerializedEvent): ValidationResult =
+  private def checkNoTimestampOfSigningKey(
+      event: MaybeCompressedSerializedEvent
+  ): ValidationResult =
     event.signedEvent.timestampOfSigningKey
       .toLeft(())
       .leftMap(TimestampOfSigningKeyNotAllowed(event.timestamp, _))
@@ -611,7 +723,7 @@ class SequencedEventValidatorImpl(
           val validationEF =
             if (rememberedAndCurrent.sizeIs <= 1)
               validateOnReconnect(priorReconnectEvent, current, sequencerId).value.map(
-                _.traverse((_: Unit) => None)
+                _.traverse((_: SequencedSerializedEvent) => None)
               )
             else {
               val previousEvent = rememberedAndCurrent.head1.value.valueOr { previousErr =>
@@ -626,10 +738,10 @@ class SequencedEventValidatorImpl(
               val stutter = previousEventId == currentEventId
               if (stutter)
                 validateOnReconnect(Some(previousEvent), current, sequencerId).value
-                  .map(_.traverse((_: Unit) => None))
+                  .map(_.traverse((_: SequencedSerializedEvent) => None))
               else
                 validate(Some(previousEvent), current, sequencerId).value
-                  .map(_.traverse((_: Unit) => Option(current)))
+                  .map(_.traverse(validated => Option(validated)))
             }
           validationEF
       }

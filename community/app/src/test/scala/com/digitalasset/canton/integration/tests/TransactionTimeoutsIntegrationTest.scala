@@ -23,9 +23,10 @@ import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
   SequencedEventDelayPolicy,
 }
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   ClosedEnvelope,
+  DecompressedSequencedEvent,
   Deliver,
-  SequencedEvent,
   TimeProof,
 }
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.isConfirmationResponse
@@ -248,9 +249,11 @@ abstract class TransactionTimeoutsIntegrationTest
       .delayedSequencerClient(this.getClass.getSimpleName, daId, mediator1.id.uid.toString)
       .value
     mediatorSequencerClientInterceptor.setDelayPolicy(new SequencedEventDelayPolicy {
-      private def isConfirmationResponse(event: SequencedEvent[ClosedEnvelope]): Boolean =
+      private def isConfirmationResponse(
+          event: DecompressedSequencedEvent[ClosedEnvelope]
+      ): Boolean =
         event match {
-          case deliver: Deliver[ClosedEnvelope] =>
+          case deliver: Deliver[Batch[ClosedEnvelope]] =>
             ProgrammableSequencerPolicies.isConfirmationResponse(deliver.batch)
           case _ => false
         }

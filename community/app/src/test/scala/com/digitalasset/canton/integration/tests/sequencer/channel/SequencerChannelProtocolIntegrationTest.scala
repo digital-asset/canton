@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelProtocolProcessor
@@ -276,13 +276,15 @@ sealed trait SequencerChannelProtocolIntegrationTest
       val testProcessor1 = new TestProcessor(daId)
       val recorder1 = new TestRecorder(participant1, daId, staticSynchronizerParameters1)
 
-      channelClient.connectToSequencerChannel(
-        sequencer1.id,
-        channelId,
-        participant2.id,
-        testProcessor1,
-        isSessionKeyOwner = true,
-        recorder1.timestamp,
+      exec("connect channel to be canceled")(
+        channelClient.connectToSequencerChannel(
+          sequencer1.id,
+          channelId,
+          participant2.id,
+          testProcessor1,
+          isSessionKeyOwner = true,
+          recorder1.timestamp,
+        )
       )
 
       val serverSideCancelMessage = "CANCELLED: client cancelled"
@@ -429,17 +431,16 @@ trait SequencerChannelProtocolTestExecHelpers {
   )(code: => EitherT[FutureUnlessShutdown, String, A]): A =
     clue(operation)(code.futureValueUS.value)
 
-  protected def exec[A](operation: String)(code: => EitherT[UnlessShutdown, String, A]): A =
-    code.value
-      .onShutdown(fail(s"Shutdown during $operation"))
+  protected def exec[A](operation: String)(
+      code: => EitherT[FutureUnlessShutdown, String, A]
+  ): A =
+    code.value.futureValueUS
       .valueOr(err => fail(s"Error during $operation: $err"))
 
   protected def execWithError[A](operation: String)(
-      code: => EitherT[UnlessShutdown, String, A]
+      code: => EitherT[FutureUnlessShutdown, String, A]
   ): String =
-    code.value
-      .onShutdown(fail(s"Shutdown during $operation"))
-      .swap
+    code.value.futureValueUS.swap
       .getOrElse(fail(s"Operation $operation expected to fail, but succeeded"))
 }
 

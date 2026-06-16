@@ -588,7 +588,6 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         synchronizer = synchronizer,
         transactionMeta = transactionMeta,
         transaction = lf.transaction.SubmittedTransaction(transaction),
-        globalKeyMapping = Map.empty, // This field is deprecated
         inputContracts = inputContracts,
         externallySignedSubmission = externallySignedSubmission,
       )

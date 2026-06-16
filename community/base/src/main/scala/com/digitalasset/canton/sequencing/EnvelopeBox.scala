@@ -4,7 +4,13 @@
 package com.digitalasset.canton.sequencing
 
 import cats.{Applicative, Traverse}
-import com.digitalasset.canton.sequencing.protocol.{Envelope, SequencedEvent}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  DecompressedSequencedEvent,
+  Envelope,
+  GenBatch,
+  SequencedEvent,
+}
 import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
@@ -47,7 +53,7 @@ object EnvelopeBox {
 
   implicit val unsignedEnvelopeBox: EnvelopeBox[UnsignedEnvelopeBox] = {
     type TracedSeqWithCounterTraced[+A] = Traced[Seq[WithCounter[Traced[A]]]]
-    EnvelopeBox[SequencedEvent].revCompose(
+    EnvelopeBox[DecompressedSequencedEvent].revCompose(
       Traverse[Traced]
         .compose[Seq]
         .compose[WithCounter]
@@ -55,58 +61,72 @@ object EnvelopeBox {
     )
   }
 
+  type OrdinarySequencedEventOf[+E <: Envelope[?]] = OrdinarySequencedEvent[Batch[E]]
+  type IgnoredSequencedEventOf[+E <: Envelope[?]] = IgnoredSequencedEvent[Batch[E]]
+  type PossiblyIgnoredSequencedEventOf[+E <: Envelope[?]] =
+    PossiblyIgnoredSequencedEvent[Batch[E]]
+
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  private def traverseOrdinarySequencedEvent[G[_], A <: Envelope[?], B <: Envelope[?]](
-      ordinaryEvent: OrdinarySequencedEvent[A]
-  )(f: A => G[B])(implicit G: Applicative[G]): G[OrdinarySequencedEvent[B]] = {
+  private def traverseOrdinarySequencedEvent[G[_], B <: GenBatch[?], C <: GenBatch[?]](
+      ordinaryEvent: OrdinarySequencedEvent[B]
+  )(f: B => G[C])(implicit G: Applicative[G]): G[OrdinarySequencedEvent[C]] = {
     val oldSignedEvent = ordinaryEvent.signedEvent
-    G.map(SequencedEvent.signedContentEnvelopeBox.traverse(ordinaryEvent.signedEvent)(f)) {
+    G.map(oldSignedEvent.traverse(seqEvent => SequencedEvent.traverseBatch(seqEvent)(f))) {
       newSignedEvent =>
-        if (newSignedEvent eq oldSignedEvent) ordinaryEvent.asInstanceOf[OrdinarySequencedEvent[B]]
-        else ordinaryEvent.copy(signedEvent = newSignedEvent)(ordinaryEvent.traceContext)
+        if (newSignedEvent eq oldSignedEvent)
+          ordinaryEvent.asInstanceOf[OrdinarySequencedEvent[C]]
+        else
+          OrdinarySequencedEvent(ordinaryEvent.counter, newSignedEvent)(ordinaryEvent.traceContext)
     }
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  private def traverseIgnoredSequencedEvent[G[_], A <: Envelope[?], B <: Envelope[?]](
-      event: IgnoredSequencedEvent[A]
-  )(f: A => G[B])(implicit G: Applicative[G]): G[IgnoredSequencedEvent[B]] =
+  private def traverseIgnoredSequencedEvent[G[_], B <: GenBatch[?], C <: GenBatch[?]](
+      event: IgnoredSequencedEvent[B]
+  )(f: B => G[C])(implicit G: Applicative[G]): G[IgnoredSequencedEvent[C]] =
     event.underlying match {
-      case None => G.pure(event.asInstanceOf[IgnoredSequencedEvent[B]])
+      case None => G.pure(event.asInstanceOf[IgnoredSequencedEvent[C]])
       case Some(signedEvent) =>
-        G.map(SequencedEvent.signedContentEnvelopeBox.traverse(signedEvent)(f)) { newSignedEvent =>
-          if (newSignedEvent eq signedEvent) event.asInstanceOf[IgnoredSequencedEvent[B]]
-          else event.copy(underlying = Some(newSignedEvent))(event.traceContext)
+        G.map(signedEvent.traverse(seqEvent => SequencedEvent.traverseBatch(seqEvent)(f))) {
+          newSignedEvent =>
+            if (newSignedEvent eq signedEvent) event.asInstanceOf[IgnoredSequencedEvent[C]]
+            else
+              IgnoredSequencedEvent(
+                event.timestamp,
+                event.counter,
+                Some(newSignedEvent),
+                event.previousTimestamp,
+              )(event.traceContext)
         }
     }
 
-  implicit val ordinarySequencedEventEnvelopeBox: EnvelopeBox[OrdinarySequencedEvent] =
-    new EnvelopeBox[OrdinarySequencedEvent] {
+  implicit val ordinarySequencedEventEnvelopeBox: EnvelopeBox[OrdinarySequencedEventOf] =
+    new EnvelopeBox[OrdinarySequencedEventOf] {
       override private[sequencing] def traverse[G[_], A <: Envelope[?], B <: Envelope[?]](
-          ordinaryEvent: OrdinarySequencedEvent[A]
-      )(f: A => G[B])(implicit G: Applicative[G]): G[OrdinarySequencedEvent[B]] =
-        traverseOrdinarySequencedEvent(ordinaryEvent)(f)
+          ordinaryEvent: OrdinarySequencedEvent[Batch[A]]
+      )(f: A => G[B])(implicit G: Applicative[G]): G[OrdinarySequencedEvent[Batch[B]]] =
+        traverseOrdinarySequencedEvent[G, Batch[A], Batch[B]](ordinaryEvent)(_.traverse(f))
     }
 
-  implicit val ignoredSequencedEventEnvelopeBox: EnvelopeBox[IgnoredSequencedEvent] =
-    new EnvelopeBox[IgnoredSequencedEvent] {
+  implicit val ignoredSequencedEventEnvelopeBox: EnvelopeBox[IgnoredSequencedEventOf] =
+    new EnvelopeBox[IgnoredSequencedEventOf] {
       override private[sequencing] def traverse[G[_], A <: Envelope[?], B <: Envelope[?]](
-          ignoredEvent: IgnoredSequencedEvent[A]
-      )(f: A => G[B])(implicit G: Applicative[G]): G[IgnoredSequencedEvent[B]] =
-        traverseIgnoredSequencedEvent(ignoredEvent)(f)
+          ignoredEvent: IgnoredSequencedEvent[Batch[A]]
+      )(f: A => G[B])(implicit G: Applicative[G]): G[IgnoredSequencedEvent[Batch[B]]] =
+        traverseIgnoredSequencedEvent[G, Batch[A], Batch[B]](ignoredEvent)(_.traverse(f))
     }
 
   implicit val possiblyIgnoredSequencedEventEnvelopeBox
-      : EnvelopeBox[PossiblyIgnoredSequencedEvent] =
-    new EnvelopeBox[PossiblyIgnoredSequencedEvent] {
+      : EnvelopeBox[PossiblyIgnoredSequencedEventOf] =
+    new EnvelopeBox[PossiblyIgnoredSequencedEventOf] {
       override private[sequencing] def traverse[G[_], A <: Envelope[?], B <: Envelope[?]](
-          event: PossiblyIgnoredSequencedEvent[A]
-      )(f: A => G[B])(implicit G: Applicative[G]): G[PossiblyIgnoredSequencedEvent[B]] =
+          event: PossiblyIgnoredSequencedEvent[Batch[A]]
+      )(f: A => G[B])(implicit G: Applicative[G]): G[PossiblyIgnoredSequencedEvent[Batch[B]]] =
         event match {
-          case ignored: IgnoredSequencedEvent[?] =>
-            G.widen(traverseIgnoredSequencedEvent[G, A, B](ignored)(f))
-          case ordinary: OrdinarySequencedEvent[?] =>
-            G.widen(traverseOrdinarySequencedEvent(ordinary)(f))
+          case ignored: IgnoredSequencedEvent[Batch[A]] =>
+            G.widen(traverseIgnoredSequencedEvent[G, Batch[A], Batch[B]](ignored)(_.traverse(f)))
+          case ordinary: OrdinarySequencedEvent[Batch[A]] =>
+            G.widen(traverseOrdinarySequencedEvent[G, Batch[A], Batch[B]](ordinary)(_.traverse(f)))
         }
     }
 

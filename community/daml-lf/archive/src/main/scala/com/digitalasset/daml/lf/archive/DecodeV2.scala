@@ -1492,12 +1492,6 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             Ret(UpdateFetchByKey(tmplId))
           }
 
-        case PLF.Update.SumCase.LOOKUP_BY_KEY =>
-          assertVersionSupports(LV.featureLegacyLookupByKey)
-          Work.bind(decodeRetrieveByKey(lfUpdate.getLookupByKey)) { tmplId =>
-            Ret(UpdateLookupByKey(tmplId))
-          }
-
         case PLF.Update.SumCase.QUERY_N_BY_KEY =>
           assertVersionSupports(LV.featureNUCK)
           val queryNByKey = lfUpdate.getQueryNByKey

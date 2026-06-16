@@ -15,12 +15,13 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   LifeCycle,
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.sequencing.protocol.{Envelope, TimeProof}
+import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope, TimeProof}
 import com.digitalasset.canton.sequencing.{
   BoxedEnvelope,
   OrdinaryApplicationHandler,
@@ -71,7 +72,8 @@ class SynchronizerTimeTracker(
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
-    with HasFlushFuture {
+    with HasFlushFuture
+    with HasCloseContext {
 
   /** Timestamps that we are waiting to observe held in ascending order. Queue access must be made
     * while holding the [[lock]].
@@ -253,11 +255,11 @@ class SynchronizerTimeTracker(
   }
 
   @VisibleForTesting
-  private[time] def update(events: Seq[OrdinarySequencedEvent[Envelope[?]]])(implicit
+  private[time] def update(events: Seq[OrdinarySequencedEvent[Batch[Envelope[?]]]])(implicit
       batchTraceContext: TraceContext
   ): Unit = {
     withLock {
-      def updateOne(event: OrdinarySequencedEvent[Envelope[?]]): Unit = {
+      def updateOne(event: OrdinarySequencedEvent[Batch[Envelope[?]]]): Unit = {
         updateTimestampRef(event.timestamp)
         TimeProof.fromEventO(event).foreach { proof =>
           val oldTimeProof = timeProofRef.getAndSet(LatestAndNext(received(proof).some, None))
@@ -517,7 +519,14 @@ class SynchronizerTimeTracker(
           val latestTimestamp = timestampRef.get().latest.fold(clock.now)(_.receivedAt)
           val expectUpdateBy = latestTimestamp.add(minObservationDuration).immediateSuccessor
 
-          val _ = clock.scheduleAt(performUpdate, expectUpdateBy)
+          clock
+            .scheduleAtCancelledOnShutdown(
+              action = performUpdate,
+              taskName = "min-observation",
+              expectUpdateBy,
+            )
+            .discard
+
         }.onShutdown(())
 
       scheduleNextUpdate()

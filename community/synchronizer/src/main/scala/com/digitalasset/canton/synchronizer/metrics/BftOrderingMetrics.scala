@@ -110,6 +110,13 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
         "Records the rate and latency it takes to commit a block at the consensus level.",
       qualification = MetricQualification.Latency,
     )
+
+    private[metrics] val viewChangeProgressLatency: Item = Item(
+      prefix :+ "view-change-progress-latency",
+      summary = "View change progress latency",
+      description = "Records the rate and latency it takes to make progress on a view.",
+      qualification = MetricQualification.Latency,
+    )
   }
   private[metrics] val consensus = new ConsensusHistograms
 
@@ -293,12 +300,14 @@ class BftOrderingMetrics private[metrics] (
                 // Time spent by consensus messages in the postponed queue during state transfer
                 val PostponedMessagesQueueLatency =
                   "state-transfer-postponed-consensus-messages-queue-latency"
+                val TotalEpochTransferLatency = "state-transfer-total-epoch-transfer-latency"
               }
             }
 
             object output {
               val Fetch = "output-block-fetch-batches"
               val Inspection = "output-block-inspection"
+              val Backpressure = "output-backpressure"
             }
           }
         }
@@ -428,7 +437,6 @@ class BftOrderingMetrics private[metrics] (
   final class GlobalMetrics private[BftOrderingMetrics] {
 
     object labels {
-      val ReportingSequencer: String = "reporting-sequencer"
       val IsBlockEmpty: String = "is-block-empty" // true or false
     }
 
@@ -693,6 +701,10 @@ class BftOrderingMetrics private[metrics] (
   final class ConsensusMetrics private[BftOrderingMetrics] {
     private val prefix = histograms.consensus.prefix
 
+    object labels {
+      val Leader = "Leader"
+    }
+
     val epoch: Gauge[Long] = openTelemetryMetricsFactory.gauge(
       MetricInfo(
         prefix :+ "epoch",
@@ -769,6 +781,9 @@ class BftOrderingMetrics private[metrics] (
 
     val commitLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.consensus.consensusCommitLatency.info)
+
+    val viewChangeProgressLatency: Timer =
+      openTelemetryMetricsFactory.timer(histograms.consensus.viewChangeProgressLatency.info)
 
     // Private constructor to avoid being instantiated multiple times by accident
     final class RetransmissionsMetrics private[BftOrderingMetrics] {
@@ -987,6 +1002,28 @@ class BftOrderingMetrics private[metrics] (
 
     val blockDelay: Timer =
       openTelemetryMetricsFactory.timer(histograms.output.blockDelay.info)
+
+    val sequencerCoreSubscriptionBufferSize: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "sequencer-core-subscription-buffer-size",
+        summary = "Sequencer core subscription buffer size",
+        description = "Size of the buffer for the subscription to the sequencer core output, " +
+          "which is used to apply backpressure to the sequencer core when the output is not consumed fast enough.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val currentSequencerCoreBackpressureDelayMillis: Gauge[Long] =
+      openTelemetryMetricsFactory.gauge(
+        MetricInfo(
+          prefix :+ "sequencer-core-backpressure-current-delay-millis",
+          summary = "Current sequencer core backpressure delay (ms)",
+          description = "Current sequencer core backpressure delay in milliseconds.",
+          qualification = MetricQualification.Latency,
+        ),
+        0L,
+      )
   }
   val output = new OutputMetrics
 

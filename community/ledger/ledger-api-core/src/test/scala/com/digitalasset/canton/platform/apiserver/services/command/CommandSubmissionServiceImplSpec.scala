@@ -299,7 +299,6 @@ class CommandSubmissionServiceImplSpec
       transaction = transaction,
       dependsOnLedgerTime = false,
       interpretationTimeNanos = estimatedInterpretationCost,
-      globalKeyMapping = Map.empty,
       processedDisclosedContracts = processedDisclosedContracts,
     )
     val synchronizerRank =
@@ -338,7 +337,6 @@ class CommandSubmissionServiceImplSpec
         eqTo(submitterInfo),
         eqTo(transactionMeta),
         eqTo(estimatedInterpretationCost),
-        eqTo(Map.empty),
         eqTo(processedDisclosedContracts),
       )(any[TraceContext])
     ).thenReturn(Future(SubmissionResult.Acknowledged))

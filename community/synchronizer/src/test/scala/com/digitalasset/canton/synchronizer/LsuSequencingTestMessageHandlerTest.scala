@@ -135,7 +135,7 @@ final class LsuSequencingTestMessageHandlerTest
         Recipients.cc(MediatorGroupRecipient(NonNegativeInt.zero)),
       )(testedProtocolVersion)
 
-      deliver: Deliver[OpenEnvelope[LsuSequencingTestMessage]] = Deliver.create(
+      deliver: Deliver[Batch[OpenEnvelope[LsuSequencingTestMessage]]] = Deliver.create(
         previousTimestamp = None,
         timestamp = CantonTimestamp.Epoch,
         psid,

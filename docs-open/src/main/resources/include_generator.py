@@ -18,7 +18,7 @@ class JsonToRstConverter:
     def __init__(self):
         assembly_website_unidoc_root = '../scaladoc/'
         website_unidoc_root = assembly_website_unidoc_root
-        ci_unidoc_root = '/tmp/workspace/docs/scaladoc/'
+        ci_unidoc_root = os.environ.get('CI_UNIDOC_ROOT', '/tmp/workspace/docs/scaladoc/')
         local_unidoc_root = f'{os.path.dirname(os.path.realpath(__file__))}/../../../../target/scala-2.13/unidoc/'
         self.unidoc_root_to_test = ci_unidoc_root if os.environ.get('CI') \
             else local_unidoc_root

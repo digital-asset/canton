@@ -113,8 +113,6 @@ private[lf] object ExprIterable {
       case UpdateLedgerTimeLT(time) => Iterator(time)
       case UpdateFetchByKey(_) | UpdateQueryNByKey(_) =>
         Iterator.empty
-      case UpdateLookupByKey(_) =>
-        Iterator.empty
       case UpdateEmbedExpr(typ @ _, body) =>
         Iterator(body)
       case UpdateTryCatchV1(typ @ _, body, binder @ _, handler) =>

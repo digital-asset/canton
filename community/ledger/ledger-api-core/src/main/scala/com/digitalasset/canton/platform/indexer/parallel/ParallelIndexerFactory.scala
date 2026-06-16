@@ -11,7 +11,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.ResourceOwnerOps
 import com.digitalasset.canton.platform.config.ServerRole
-import com.digitalasset.canton.platform.indexer.Indexer
 import com.digitalasset.canton.platform.indexer.ha.{
   HaConfig,
   HaCoordinator,
@@ -19,6 +18,7 @@ import com.digitalasset.canton.platform.indexer.ha.{
   NoopHaCoordinator,
 }
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
+import com.digitalasset.canton.platform.indexer.{Indexer, IndexerParams}
 import com.digitalasset.canton.platform.store.DbSupport.DbConfig
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{AchsState, LedgerEnd}
 import com.digitalasset.canton.platform.store.backend.{
@@ -28,7 +28,7 @@ import com.digitalasset.canton.platform.store.backend.{
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.PekkoUtil.{Commit, FutureQueueConsumer}
+import com.digitalasset.canton.util.PekkoUtil.FutureQueueConsumer
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 import org.apache.pekko.Done
@@ -127,11 +127,11 @@ object ParallelIndexerFactory {
           )
         } else
           ResourceOwner.successful(NoopHaCoordinator)
-    } yield { (repairMode: Boolean) => (commit: Commit) =>
+    } yield { (indexerParams: IndexerParams) =>
       implicit val ec: ExecutionContext = executionContext
       implicit val rc: ResourceContext = ResourceContext(ec)
       val futureQueueConsumerFactoryPromise =
-        Promise[Future[Done] => FutureQueueConsumer[Update]]()
+        Promise[Future[Done] => Future[FutureQueueConsumer[Update]]]()
       val haProtectedExecutionHandle = haCoordinator
         .protectedExecution { connectionInitializer =>
           val indexingHandleF = initializeHandle(
@@ -159,28 +159,36 @@ object ParallelIndexerFactory {
             } yield dbDispatcher
           ) { dbDispatcher =>
             for {
-              (initialLedgerEnd, initialAchsWork) <- initializeParallelIngestion(
-                dbDispatcher = dbDispatcher,
-                initializeInMemoryState = initializeInMemoryState,
-              )
-              (handle, futureQueueForCompletion) = parallelIndexerSubscription(
+              initializedStep1F <-
+                initializeParallelIngestion(
+                  dbDispatcher = dbDispatcher,
+                  initializeInMemoryState = initializeInMemoryState,
+                  shutdownRequested = indexerParams.shutdownRequested,
+                )
+              initializedStep2F = for {
+                (initialLedgerEnd, initialAchsWork) <- initializedStep1F
+              } yield parallelIndexerSubscription(
                 inputMapperExecutor = inputMapperExecutor,
                 batcherExecutor = batcherExecutor,
                 dbDispatcher = dbDispatcher,
                 materializer = mat,
                 initialLedgerEnd = initialLedgerEnd,
                 initialAchsWork = initialAchsWork,
-                commit = commit,
+                commit = indexerParams.commit,
                 clock = clock,
-                repairMode = repairMode,
+                repairMode = indexerParams.repairMode,
               )
-            } yield {
-              futureQueueConsumerFactoryPromise.success(completion =>
-                FutureQueueConsumer(
+              _ = futureQueueConsumerFactoryPromise.success(completion =>
+                for {
+                  (initialLedgerEnd, _) <- initializedStep1F
+                  (_, futureQueueForCompletion) <- initializedStep2F
+                } yield FutureQueueConsumer(
                   futureQueue = futureQueueForCompletion(completion),
                   fromExclusive = initialLedgerEnd.map(_.lastOffset.unwrap).getOrElse(0L),
                 )
               )
+              (handle, _) <- initializedStep2F
+            } yield {
               handle
             }
           }

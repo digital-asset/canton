@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -125,6 +126,7 @@ class ToxiproxyParticipantMultiSequencerConnectivityTest
           sequencerLivenessMargin = NonNegativeInt.zero,
           submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
           sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+          subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
         )
 
         participant1.synchronizers.connect_by_config(
@@ -178,6 +180,7 @@ class ToxiproxyParticipantMultiSequencerConnectivityTest
                   sequencerLivenessMargin = NonNegativeInt.zero,
                   submissionRequestAmplification = sc.submissionRequestAmplification,
                   sequencerConnectionPoolDelays = sc.sequencerConnectionPoolDelays,
+                  subscriptionLivenessLimits = sc.subscriptionLivenessLimits,
                 )
                 .getOrElse(fail("Must succeed increasing threshold to 4 with 4 sequencers"))
             )

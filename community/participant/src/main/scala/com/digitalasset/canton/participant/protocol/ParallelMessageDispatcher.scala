@@ -214,7 +214,9 @@ class ParallelMessageDispatcher(
 
   private def processOrdinary(
       sequencerCounter: SequencerCounter,
-      signedEventE: WithOpeningErrors[SignedContent[SequencedEvent[DefaultOpenEnvelope]]],
+      signedEventE: WithOpeningErrors[
+        SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]]
+      ],
   )(implicit traceContext: TraceContext): ProcessingResult =
     signedEventE.event.content match {
       case deliver @ Deliver(_pts, ts, _, _, _, _, _) if TimeProof.isTimeProofDeliver(deliver) =>
@@ -234,7 +236,8 @@ class ParallelMessageDispatcher(
         }
         @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
         val deliverE =
-          signedEventE.asInstanceOf[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]]
+          signedEventE
+            .asInstanceOf[WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]]
         processBatch(sequencerCounter, deliverE)
           .transform {
             case success @ Success(_) => success

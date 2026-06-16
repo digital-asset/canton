@@ -169,27 +169,42 @@ trait P2PNetworkRef[-P2PMessageT] extends FlagCloseable {
   ): Unit
 }
 
+/** Notifies P2P connection management events.
+  *
+  * The P2P endpoint may be missing if the connection is incoming and the connecting peer did not
+  * communicate one.
+  */
 trait P2PConnectionEventListener {
-  def onConnect(p2pEndpointId: P2PEndpoint.Id)(implicit traceContext: TraceContext): Unit
+
+  def onConnect(maybeP2pEndpointId: Option[P2PEndpoint.Id])(implicit
+      traceContext: TraceContext
+  ): Unit
+
   def onDisconnect(p2pEndpointId: P2PEndpoint.Id)(implicit traceContext: TraceContext): Unit
-  // The P2P endpoint may be None if the connection is incoming and the connecting peer did not communicate one
+
   def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
       traceContext: TraceContext
   ): Unit
 }
+
 object P2PConnectionEventListener {
-  val NoOp: P2PConnectionEventListener = new P2PConnectionEventListener {
-    override def onConnect(p2pEndpointId: P2PEndpoint.Id)(implicit
-        traceContext: TraceContext
-    ): Unit = ()
-    override def onDisconnect(p2pEndpointId: P2PEndpoint.Id)(implicit
-        traceContext: TraceContext
-    ): Unit = ()
-    override def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
-        traceContext: TraceContext
-    ): Unit =
-      ()
-  }
+
+  val NoOp: P2PConnectionEventListener =
+    new P2PConnectionEventListener {
+
+      override def onConnect(maybeP2pEndpointId: Option[P2PEndpoint.Id])(implicit
+          traceContext: TraceContext
+      ): Unit = ()
+
+      override def onDisconnect(p2pEndpointId: P2PEndpoint.Id)(implicit
+          traceContext: TraceContext
+      ): Unit = ()
+
+      override def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(
+          implicit traceContext: TraceContext
+      ): Unit =
+        ()
+    }
 }
 
 sealed trait P2PAddress extends Product with Serializable {

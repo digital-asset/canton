@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.{Participant, *}
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
@@ -11,10 +12,8 @@ import com.daml.ledger.api.testtool.infrastructure.{FutureAssertions, LedgerTest
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdRequest
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
-import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.daml.ledger.test.java.model
-import com.daml.ledger.test.java.semantic.divulgencetests
-import com.daml.ledger.test.java.semantic.divulgencetests.{Contract, Dummy}
+import com.daml.ledger.test.java.semantic.divulgencetests.Dummy
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -23,16 +22,8 @@ import java.util.regex.Pattern
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
-class ParticipantPruningIT extends LedgerTestSuite {
-  import CompanionImplicits.*
-  implicit val contractCompanion
-      : ContractCompanion.WithoutKey[Contract.Contract$, Contract.ContractId, Contract] =
-    Contract.COMPANION
-  implicit val semanticTestsDummyCompanion: ContractCompanion.WithoutKey[
-    divulgencetests.Dummy.Contract,
-    divulgencetests.Dummy.ContractId,
-    divulgencetests.Dummy,
-  ] = divulgencetests.Dummy.COMPANION
+class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 

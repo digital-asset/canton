@@ -119,11 +119,6 @@ commands:
                     exit $((NUM_SUCCESSES < << parameters.min_successes >>))
                 name: Fail, if there are fewer than << parameters.min_successes >> successes
                 when: always
-    check_pr_compliance_labels:
-        steps:
-            - run:
-                command: scripts/ci/check-pr-compliance-labels.sh
-                name: Compliance labels check for PR
     check_pr_skip_ci:
         steps:
             - run:
@@ -196,7 +191,7 @@ commands:
                 steps:
                     - run:
                         command: |
-                            .ci/nix-exec .circleci/dump-pg-query-stats.sh
+                            .ci/nix-exec scripts/ci/dump-pg-query-stats.sh
                         name: Dump Postgres query stats (if any)
                         when: always
                     - store_artifacts:
@@ -499,6 +494,30 @@ commands:
                     fi
                 name: << parameters.label >>
                 when: << parameters.when >>
+    post_transaction_snapshot_metrics:
+        steps:
+            - run:
+                command: |
+                    TIMESTAMP=$(date +%s)
+                    echo "Timestamp: $TIMESTAMP"
+                    HASH=$(git log -1 --pretty=%h)
+                    echo "Commit hash (abbreviated): $HASH"
+
+                    for obj in $(jq -c '.[] | {params:.params, primaryMetric:.primaryMetric, secondaryMetrics:.secondaryMetrics}' $BENCHMARKING_RESULT_FILE); do
+                      CHOICE_NAME=$(echo $obj |jq -r '.params.choiceName'  |sed 's/^[0-9a-fA-F]*://')
+                      CONTRACT_ID_VERSION=$(echo $obj |jq -r '.params.contractIdVersion')
+                      GAS_ON=$(echo $obj |jq -r '.params.gasOn')
+                      BENCHMARK=$(echo $obj |jq -r '.primaryMetric.score')
+                      STEP_COUNT=$(echo $obj |jq -r '.secondaryMetrics.stepCount.score')
+                      FETCH_NODE_COUNT=$(echo $obj |jq -r '.secondaryMetrics.fetchNodeCount.score')
+                      TRANSACTION_NODE_COUNT=$(echo $obj |jq -r '.secondaryMetrics.transactionNodeCount.score')
+                      TAGS=$(jo -a "branch:$CIRCLE_BRANCH" "hash:$HASH" "workflow:$CIRCLE_WORKFLOW_ID" "job:$CIRCLE_JOB" "build:$CIRCLE_BUILD_NUM" "url:$CIRCLE_BUILD_URL" "container:$CIRCLE_NODE_INDEX" "snapshotVersion:$SNAPSHOT_VERSION" "choiceName:$CHOICE_NAME" "contractIdVersion:$CONTRACT_ID_VERSION" "gasOn:$GAS_ON")
+
+                      ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" rate "$TAGS" "transaction.snapshot.benchmark=$BENCHMARK"
+                      ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" count "$TAGS" "transaction.snapshot.stepCount=$STEP_COUNT" "transaction.snapshot.fetchNodeCount=$FETCH_NODE_COUNT" "transaction.snapshot.nodeCount=$TRANSACTION_NODE_COUNT"
+                    done
+                name: Read transaction snapshot benchmark metrics from JMH test report
+                when: always
     publish_api_to_gar:
         parameters:
             gar_maven_repo_url:
@@ -735,7 +754,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d4fdb9b49dec \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-21a091f28a16 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1073,7 +1092,7 @@ commands:
                 when: always
             - slack/status:
                 fail_only: true
-                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: the support CI rota takes care of failed nightly jobs.)'
+                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: The person on the CI rota takes care of failed nightly jobs.)'
                 mentions: ${SELECTED_VOLUNTEER}
                 only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
                 webhook: << parameters.webhook_url >>
@@ -1245,6 +1264,13 @@ commands:
                 when: always
             - store_test_results:
                 path: test-reports
+    use_new_sequencer_aggregator:
+        steps:
+            - run:
+                command: |
+                    echo 'export USE_NEW_SEQUENCER_AGGREGATOR=true' >> "$BASH_ENV"
+                    echo "Using new sequencer aggregator for tests"
+                name: Use new sequencer aggregator
 executors:
     canton-2xlarge-docker:
         docker:
@@ -1683,7 +1709,7 @@ jobs:
                 default: true
                 type: boolean
             snapshot_version:
-                default: 53ab9995a
+                default: 94db88e
                 type: string
         steps:
             - checkout_and_restore_caches
@@ -1738,6 +1764,7 @@ jobs:
                 destination: log
                 name: Store log directory as artifacts (if any)
                 path: log
+            - post_transaction_snapshot_metrics
             - slack_red_main_with_volunteer:
                 fixed_volunteer: U03K3A3UAGY
     blackduck:
@@ -1979,14 +2006,8 @@ jobs:
                 default: https://github.com/DACH-NY/canton-network-apps.git
                 type: string
         steps:
-            - checkout_and_restore_caches
             - attach_workspace:
                 at: /tmp/workspace
-            - run:
-                command: |
-                    echo "export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION" >> $BASH_ENV
-                environment:
-                    SNAPSHOT_VERSION: << parameters.git_commit >>
             - run:
                 command: |
                     cd /tmp/workspace
@@ -1994,15 +2015,23 @@ jobs:
                     BASE_REPOSITORY_URL=$(echo << parameters.repository_url >> | cut -c 9-)
 
                     if [ -z "<< parameters.git_commit >>" ]; then
-                      git clone --depth 1 https://canton-machine:${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+                      git clone --depth 1 https://${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
                     else
-                      git clone --depth 1 --revision << parameters.git_commit >> https://canton-machine:${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+                      git clone --depth 1 --revision << parameters.git_commit >> https://${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
                     fi
 
                     cd $(basename << parameters.repository_url >> .git)
+                    direnv allow .
+                    eval "$(direnv export bash)"
+                    unset TMP TMPDIR
+                    export SNAPSHOT_VERSION=$(git rev-parse --short HEAD)
+                    export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION
+                    echo "export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION" >> $BASH_ENV
                     dpm build --all
+                    mkdir -p $SNAPSHOT_DIR/dars
                     find . -regex ".*/test/\.daml/.*\.dar" -print -exec cp {} $SNAPSHOT_DIR/dars \;
                 name: Clone and Build Daml project from Github URL, then save test dar files
+            - checkout_and_restore_caches
             - run:
                 command: |
                     export DAR_DIR=$SNAPSHOT_DIR/dars
@@ -2064,6 +2093,7 @@ jobs:
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
+            - use_new_sequencer_aggregator
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
@@ -2516,6 +2546,10 @@ jobs:
                 name: Check Protobuf Required/Optional requirements
             - run:
                 command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
+                name: Lint yaml files
+            - run:
+                command: |
                     echo "checking that the containers shell.nix matches the one in the repository".
                     echo "if this fails, you need to update our build image. have a look at .ci/README.md"
                     diff shell.nix /tmp/shell.nix || exit 1
@@ -2828,13 +2862,12 @@ jobs:
             - run_variations_tests:
                 exclude_unstable_tests: true
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-    verify_circleci_config_and_compliance_label:
+    verify_circleci_config:
         executor: canton-small-docker
         steps:
             - checkout:
                 method: blobless
             - check_pr_skip_ci
-            - check_pr_compliance_labels
             - run:
                 command: |
                     cd .circleci
@@ -2844,10 +2877,6 @@ jobs:
                       exit 1
                     fi
                 name: Generate and check circleci config with committed one
-            - run:
-                command: |
-                    nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
-                name: Lint yaml files
             - slack_red_main_with_volunteer
 orbs:
     slack: circleci/slack@3.3.0
@@ -2948,7 +2977,7 @@ workflows:
                         only: /^v.*/
                 requires:
                     - package_community
-            - verify_circleci_config_and_compliance_label:
+            - verify_circleci_config:
                 filters:
                     branches:
                         ignore:
@@ -3160,6 +3189,23 @@ workflows:
                         only:
                             - main
                             - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - protocol_continuity_test_latest:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - da-images
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - /^gh-readonly-queue\/main\/.*/
                     tags:
                         only: /^v.*/
                 requires:
@@ -4321,6 +4367,35 @@ workflows:
         when:
             equal:
                 - test-protocol-version-34
+                - << pipeline.parameters.manual_job >>
+    manual_test_protocol_version_36:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                name: test_protocol_version_36
+                protocol_version: "36"
+                requires:
+                    - compile
+        when:
+            equal:
+                - test-protocol-version-36
                 - << pipeline.parameters.manual_job >>
     manual_test_protocol_version_dev:
         jobs:

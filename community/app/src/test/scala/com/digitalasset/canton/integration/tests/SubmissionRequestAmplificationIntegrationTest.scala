@@ -102,6 +102,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
             config.NonNegativeFiniteDuration.Zero,
           ),
           old.sequencerConnectionPoolDelays,
+          old.subscriptionLivenessLimits,
         )
       }
     )

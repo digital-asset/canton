@@ -10,6 +10,7 @@ let
 in
 pkgs.mkShell {
   packages = with pkgs; [
+    actionlint
     (ammonite_2_13.override { inherit jre; })
     awscli2
     azure-storage-azcopy
@@ -44,7 +45,6 @@ pkgs.mkShell {
     toxiproxy
     unzip
     (sbt.override { inherit jre; })
-    xxd
     yamllint
     zip
     tinyproxy

@@ -417,12 +417,14 @@ class GrpcParticipantInspectionService(
   override def openCommitment(
       request: v30.OpenCommitmentRequest,
       responseObserver: StreamObserver[v30.OpenCommitmentResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => openCommitment(request, out),
       responseObserver,
       byteString => v30.OpenCommitmentResponse(byteString),
     )
+  }
 
   private def openCommitment(
       request: v30.OpenCommitmentRequest,
@@ -605,12 +607,14 @@ class GrpcParticipantInspectionService(
   override def inspectCommitmentContracts(
       request: v30.InspectCommitmentContractsRequest,
       responseObserver: StreamObserver[v30.InspectCommitmentContractsResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => inspectCommitmentContracts(request, out),
       responseObserver,
       byteString => v30.InspectCommitmentContractsResponse(byteString),
     )
+  }
 
   private def inspectCommitmentContracts(
       request: v30.InspectCommitmentContractsRequest,

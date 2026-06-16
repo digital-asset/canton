@@ -9,7 +9,6 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.sequencing.authentication.MemberAuthentication
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   AuthenticationError,
   MemberAccessDisabled,
@@ -17,10 +16,18 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   NonMatchingSynchronizerId,
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
+import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.transaction.{
+  OwnerToKeyMapping,
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, FailOnShutdown}
+import com.digitalasset.canton.{BaseTest, FailOnShutdown, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration as JDuration
@@ -43,8 +50,11 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       nonceDuration: JDuration = JDuration.ofMinutes(1),
       tokenDuration: JDuration = JDuration.ofHours(1),
       invalidateMemberCallback: Member => Unit = _ => (),
-      store: MemberAuthenticationStore =
-        new MemberAuthenticationStore(PositiveInt.tryCreate(10), loggerFactory),
+      store: MemberAuthenticationStore = new MemberAuthenticationStore(
+        PositiveInt.tryCreate(10),
+        PositiveInt.tryCreate(10),
+        loggerFactory,
+      ),
   ): MemberAuthenticationService =
     new MemberAuthenticationService(
       physicalSynchronizerId,
@@ -65,6 +75,24 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       ): FutureUnlessShutdown[Boolean] =
         FutureUnlessShutdown.pure(participantIsActive)
     }
+
+  private def serviceImpl(
+      store: MemberAuthenticationStore
+  ): MemberAuthenticationServiceImpl =
+    new MemberAuthenticationServiceImpl(
+      physicalSynchronizerId,
+      syncCrypto,
+      store,
+      clock,
+      nonceExpirationInterval = JDuration.ofMinutes(1),
+      maxTokenExpirationInterval = JDuration.ofHours(1),
+      useExponentialRandomTokenExpiration = false,
+      _ => (),
+      isTopologyInitialized = FutureUnlessShutdown.unit,
+      timeouts = DefaultProcessingTimeouts.testing,
+      batchingConfig = BatchingConfig(),
+      loggerFactory,
+    )
 
   private def getMemberAuthentication(member: Member): MemberAuthentication =
     MemberAuthentication(member).getOrElse(fail("unsupported"))
@@ -179,7 +207,11 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     }
 
     "invalidate all tokens from a member when logging out" in {
-      val store = new MemberAuthenticationStore(PositiveInt.tryCreate(10), loggerFactory)
+      val store = new MemberAuthenticationStore(
+        PositiveInt.tryCreate(10),
+        PositiveInt.tryCreate(10),
+        loggerFactory,
+      )
       val sut = service(participantIsActive = true, store = store)
 
       for {
@@ -200,6 +232,173 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
         tokensBefore(p1) should have size 2
         tokensAfter shouldBe empty
       }
+    }
+  }
+
+  "revoke tokens via the topology processing subscriber when an OwnerToKeyMapping is removed" in {
+    val store = new MemberAuthenticationStore(
+      PositiveInt.tryCreate(10),
+      PositiveInt.tryCreate(10),
+      loggerFactory,
+    )
+
+    val sutImpl = serviceImpl(store)
+
+    val retainedKey = syncCrypto.crypto
+      .generateSigningKey(usage = com.digitalasset.canton.crypto.SigningKeyUsage.All)
+      .value
+      .futureValueUS
+      .getOrElse(fail("Retained key generation failed"))
+    val evictedKey = syncCrypto.crypto
+      .generateSigningKey(usage = com.digitalasset.canton.crypto.SigningKeyUsage.All)
+      .value
+      .futureValueUS
+      .getOrElse(fail("Evicted key generation failed"))
+
+    val retainedFingerprint = retainedKey.fingerprint
+    val evictedFingerprint = evictedKey.fingerprint
+
+    val retainedToken = StoredAuthenticationToken(
+      p1,
+      clock.now.plusSeconds(100),
+      AuthenticationToken.generate(syncCrypto.pureCrypto),
+      retainedFingerprint,
+    )
+    val evictedToken = StoredAuthenticationToken(
+      p1,
+      clock.now.plusSeconds(100),
+      AuthenticationToken.generate(syncCrypto.pureCrypto),
+      evictedFingerprint,
+    )
+
+    store.saveToken(retainedToken)
+    store.saveToken(evictedToken)
+
+    // Create an OTK for the evictedKey
+    val evictedOtk = OwnerToKeyMapping.tryCreate(p1, com.daml.nonempty.NonEmpty(Seq, evictedKey))
+
+    // create a topology transaction for the removal of the created OTK
+    val removeTopologyTx = TopologyTransaction(
+      TopologyChangeOp.Remove,
+      PositiveInt.one,
+      evictedOtk,
+      testedProtocolVersion,
+    )
+
+    // create a SignedTopologyTransaction wrapping the removal transaction
+    val txElement = SignedTopologyTransaction.withSignature(
+      transaction = removeTopologyTx,
+      signature = com.digitalasset.canton.crypto.Signature.noSignature,
+      isProposal = false,
+      protocolVersion = testedProtocolVersion,
+    )
+
+    val sequencerTime = SequencedTime(clock.now)
+    val effectiveTime = EffectiveTime(clock.now)
+
+    val tokensBefore = store.fetchTokens(p1)
+
+    // check that both tokens are active in the store prior to execution
+    tokensBefore should contain.only(retainedToken, evictedToken)
+
+    // Trigger the subscriber callback to simulate the observation of a real transaction.
+    // Note that the call to observed here is meant to trigger the token eviction, but effectiveTime
+    // is not what determines the "old" state in the eviction logic in this test. These tests use the TestingTopology
+    // which only support one overall snapshot state, so they have, in fact, only one topology state.
+    // Since we only want to test here that the tokens are removed from the stores, this is fine.
+    for {
+      _ <- sutImpl
+        .observed(sequencerTime, effectiveTime, SequencerCounter(1), Seq(txElement))
+        .failOnShutdown
+    } yield {
+      val tokensAfter = store.fetchTokens(p1)
+
+      // Verify the targeted token is revoked and the other token stays
+      tokensAfter should contain.only(retainedToken)
+    }
+  }
+
+  "revoke evicted tokens via the topology processing subscriber when an OwnerToKeyMapping is replaced" in {
+    val store = new MemberAuthenticationStore(
+      PositiveInt.tryCreate(10),
+      PositiveInt.tryCreate(10),
+      loggerFactory,
+    )
+
+    val sutImpl = serviceImpl(store)
+
+    // For a Replace operation, the transaction payload only contains the new (retained) keys.
+    // sutImpl calculates the evicted keys by taking the difference of this new payload against the historical topology snapshot.
+    // Thus, we have to ensure that the evicted key exists in the historical state.
+    // We do this by fetching the pre-existing default key from the testing topology to act as the evicted key.
+    val snapshot = syncCrypto.currentSnapshotApproximation.futureValueUS
+    val defaultKeys = snapshot.ipsSnapshot
+      .signingKeys(p1, com.digitalasset.canton.crypto.SigningKeyUsage.SequencerAuthenticationOnly)
+      .futureValueUS
+    val evictedKey = defaultKeys.headOption.getOrElse(fail("Evicted key fetch failed"))
+
+    // Generate a new key to act as the retained key that replaces the old mapping
+    val retainedKey = syncCrypto.crypto
+      .generateSigningKey(usage = com.digitalasset.canton.crypto.SigningKeyUsage.All)
+      .value
+      .futureValueUS
+      .getOrElse(fail("Retained key generation failed"))
+
+    val retainedFingerprint = retainedKey.fingerprint
+    val evictedFingerprint = evictedKey.fingerprint
+
+    val retainedToken = StoredAuthenticationToken(
+      p1,
+      clock.now.plusSeconds(100),
+      AuthenticationToken.generate(syncCrypto.pureCrypto),
+      retainedFingerprint,
+    )
+    val evictedToken = StoredAuthenticationToken(
+      p1,
+      clock.now.plusSeconds(100),
+      AuthenticationToken.generate(syncCrypto.pureCrypto),
+      evictedFingerprint,
+    )
+
+    store.saveToken(retainedToken)
+    store.saveToken(evictedToken)
+
+    val retainedOtk = OwnerToKeyMapping.tryCreate(p1, com.daml.nonempty.NonEmpty(Seq, retainedKey))
+
+    // Create an OTK for the retainedKey
+    val replaceTopologyTx = TopologyTransaction(
+      TopologyChangeOp.Replace,
+      PositiveInt.one,
+      retainedOtk,
+      testedProtocolVersion,
+    )
+
+    // create a SignedTopologyTransaction wrapping the removal transaction
+    val txElement = SignedTopologyTransaction.withSignature(
+      transaction = replaceTopologyTx,
+      signature = com.digitalasset.canton.crypto.Signature.noSignature,
+      isProposal = false,
+      protocolVersion = testedProtocolVersion,
+    )
+
+    val sequencerTime = SequencedTime(clock.now)
+    val effectiveTime = EffectiveTime(clock.now)
+
+    val tokensBefore = store.fetchTokens(p1)
+
+    // check that both tokens are active in the store prior to execution
+    tokensBefore should contain.only(retainedToken, evictedToken)
+
+    // Trigger the subscriber callback to simulate the observation of a real transaction
+    for {
+      _ <- sutImpl
+        .observed(sequencerTime, effectiveTime, SequencerCounter(1), Seq(txElement))
+        .failOnShutdown
+    } yield {
+      val tokensAfter = store.fetchTokens(p1)
+
+      // Verify the evicted token is revoked and the retained token persists
+      tokensAfter should contain.only(retainedToken)
     }
   }
 }

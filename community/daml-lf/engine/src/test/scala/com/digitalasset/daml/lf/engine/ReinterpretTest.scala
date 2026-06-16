@@ -188,7 +188,6 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
       ReplayCommand.Fetch(templateId, Some(interfaceId), toContractId("cid")) ->
         List(templatePkgId, interfacePkgId),
       ReplayCommand.FetchByKey(templateId, ValueUnit) -> List(templatePkgId),
-      ReplayCommand.LookupByKey(templateId, ValueUnit) -> List(templatePkgId),
     )
 
     forEvery(testCases) { (cmd, pkgIds) =>

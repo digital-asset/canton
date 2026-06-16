@@ -303,6 +303,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 )
               ),
               PromiseUnlessShutdown.unit,
+              firstResponseReceived = Some(changeTs1),
             )(TraceContext.empty, None)
           }
         }
@@ -371,6 +372,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 changeTs2,
                 Left(rejection),
                 PromiseUnlessShutdown.unit,
+                firstResponseReceived = Some(changeTs1),
               )(TraceContext.empty, None)
             }
 
@@ -485,6 +487,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               changeTs,
               Left(MediatorApprove),
               PromiseUnlessShutdown.unit,
+              firstResponseReceived = Some(changeTs),
             )(TraceContext.empty, None)
           }
 
@@ -601,6 +604,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               )
             ),
             PromiseUnlessShutdown.unit,
+            firstResponseReceived = Some(t2),
           )(TraceContext.empty, None)
         }
       }
@@ -1400,6 +1404,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 )
               ),
               PromiseUnlessShutdown.unit,
+              firstResponseReceived = Some(changeTs1),
             )(TraceContext.empty, None)
           }
         }
@@ -1529,6 +1534,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 changeTs5,
                 Left(rejection),
                 PromiseUnlessShutdown.unit,
+                firstResponseReceived = Some(changeTs1),
               )(TraceContext.empty, None)
             }
 
@@ -1927,6 +1933,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               changeTs2,
               Left(MediatorApprove),
               PromiseUnlessShutdown.unit,
+              firstResponseReceived = Some(changeTs1),
             )(TraceContext.empty, None)
           }
 

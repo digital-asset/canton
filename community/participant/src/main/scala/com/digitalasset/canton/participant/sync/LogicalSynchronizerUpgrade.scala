@@ -818,7 +818,7 @@ sealed trait ManualLogicalSynchronizerUpgrade[Req <: ManualLsuRequest]
         )
 
       case LogicalSynchronizerUpgrade.NewConfig(config) =>
-        EitherT.pure(config.copy(synchronizerId = Some(successorPsid)))
+        EitherT.pure(config.copy(psid = Some(successorPsid)))
     }
 
 }
@@ -1371,6 +1371,6 @@ object LogicalSynchronizerUpgrade {
       }
     } yield currentConfig.config.copy(
       sequencerConnections = newSequencerConnections,
-      synchronizerId = Some(successorPsid),
+      psid = Some(successorPsid),
     )
 }

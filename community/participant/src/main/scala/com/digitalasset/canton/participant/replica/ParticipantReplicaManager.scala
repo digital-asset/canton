@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.replica
 
+import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -75,6 +76,7 @@ class ParticipantReplicaManager(
           _ = logger.info(
             "Participant replica is becoming active: CantonSyncService caches refreshed"
           )
+          _ <- participantServices.partyReplicatorContainerO.traverse(_.initializeNext())
           // Start up the Ledger API server
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
@@ -125,6 +127,7 @@ class ParticipantReplicaManager(
         )
         participantServices.ledgerApiServerContainer.closeCurrent()
         logger.info("Participant replica is becoming passive: Ledger API Server stopped")
+        participantServices.partyReplicatorContainerO.foreach(_.closeCurrent())
         for {
           // Explicitly disconnect from synchronizers
           _ <- EitherTUtil

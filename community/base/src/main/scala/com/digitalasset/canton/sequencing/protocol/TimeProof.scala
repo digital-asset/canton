@@ -30,7 +30,7 @@ import java.util.UUID
   *   the time proof event itself. this must be the event content signedEvent wrapper.
   */
 final case class TimeProof private (
-    private val event: OrdinarySequencedEvent[Envelope[?]],
+    private val event: OrdinarySequencedEvent[Batch[Envelope[?]]],
     private val deliver: Deliver[Nothing],
 ) extends PrettyPrinting
     with HasCryptographicEvidence {
@@ -54,17 +54,19 @@ final case class TimeProof private (
 object TimeProof {
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def fromEvent(event: OrdinarySequencedEvent[Envelope[?]]): Either[String, TimeProof] =
+  def fromEvent(event: OrdinarySequencedEvent[Batch[Envelope[?]]]): Either[String, TimeProof] =
     for {
       deliver <- PartialFunction
-        .condOpt(event.signedEvent.content) { case deliver: Deliver[?] => deliver }
+        .condOpt(event.signedEvent.content) { case deliver: Deliver[Batch[Envelope[?]]] =>
+          deliver
+        }
         .toRight("Time Proof must be a deliver event")
       _ <- validateDeliver(deliver)
       // is now safe to cast to a `Deliver[Nothing]` as we've validated it has no envelopes
       emptyDeliver = deliver.asInstanceOf[Deliver[Nothing]]
     } yield new TimeProof(event, emptyDeliver)
 
-  private def validateDeliver(deliver: Deliver[Envelope[?]]): Either[String, Unit] =
+  private def validateDeliver(deliver: Deliver[Batch[Envelope[?]]]): Either[String, Unit] =
     for {
       _ <- Either.cond(
         isTimeEventBatch(deliver.batch),
@@ -79,11 +81,11 @@ object TimeProof {
     } yield ()
 
   /** Return a wrapped [[TimeProof]] if the given `event` has the correct properties. */
-  def fromEventO(event: OrdinarySequencedEvent[Envelope[?]]): Option[TimeProof] =
+  def fromEventO(event: OrdinarySequencedEvent[Batch[Envelope[?]]]): Option[TimeProof] =
     fromEvent(event).toOption
 
   /** Is the event a time proof */
-  def isTimeProofDeliver(deliver: Deliver[Envelope[?]]): Boolean =
+  def isTimeProofDeliver(deliver: Deliver[Batch[Envelope[?]]]): Boolean =
     validateDeliver(deliver).isRight
 
   /** Does the submission request look like a request to create a time event */

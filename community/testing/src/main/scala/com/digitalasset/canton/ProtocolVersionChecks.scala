@@ -245,6 +245,14 @@ trait ProtocolVersionChecksAsyncWordSpec {
     def in(testFun: => Future[Assertion])(implicit pos: source.Position): Unit =
       if (condition) verb.in(testFun) else verb.ignore(testFun)
 
+    def inUS(
+        testFun: => FutureUnlessShutdown[Assertion]
+    )(implicit pos: source.Position): Unit = {
+      def testFunHandleShutdown(): Future[Assertion] =
+        testFun.onShutdown(fail(s"Unexpected shutdown in OnlyRunWhenWordSpecStringWrapper.inUS"))
+      if (condition) verb.in(testFunHandleShutdown()) else verb.ignore(testFunHandleShutdown())
+    }
+
     def when(testFun: => Unit)(implicit pos: source.Position): Unit =
       if (condition) verb.when(testFun)
   }

@@ -47,6 +47,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import monocle.macros.syntax.lens.*
@@ -69,6 +70,8 @@ sealed trait PackageVettingIntegrationTest
   val ledgerIntegrity: SecurityTest =
     SecurityTest(property = Integrity, asset = "virtual shared ledger")
 
+  private val pvSupportsUnvettedDependencies: Boolean = testedProtocolVersion > ProtocolVersion.v34
+
   private lazy val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()
   def pureCrypto: CryptoPureApi = pureCryptoRef.get()
 
@@ -84,7 +87,7 @@ sealed trait PackageVettingIntegrationTest
           _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
             .replace(config.NonNegativeFiniteDuration.ofMinutes(10))
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -591,7 +594,7 @@ sealed trait PackageVettingIntegrationTest
     }
 
     "all packages are stored, but a dependent package has not been vetted" must {
-      "refuse to vet the package" taggedAs_ { mit =>
+      s"refuse to vet the package on PV=${ProtocolVersion.v34}" taggedAs_ { mit =>
         ledgerIntegrity.setAttack(
           Attack(
             actor = "participant operator",
@@ -599,7 +602,7 @@ sealed trait PackageVettingIntegrationTest
             mitigation = mit,
           )
         )
-      } in { implicit env =>
+      } onlyRunWhen (!pvSupportsUnvettedDependencies) in { implicit env =>
         import env.*
 
         participant3.packages.list().filter(_.packageId == packId) should not be empty
@@ -620,9 +623,16 @@ sealed trait PackageVettingIntegrationTest
       ) in { implicit env =>
         import env.*
 
-        // can vet dependencies one by one using force
         archive.dependencies.foreach { dep =>
-          vettingCmd(adds = List(dep), force = ForceFlags(ForceFlag.AllowUnvettedDependencies))
+          vettingCmd(
+            adds = List(dep),
+            force =
+              if (pvSupportsUnvettedDependencies) ForceFlags.none
+              else {
+                // can vet dependencies one by one using force
+                ForceFlags(ForceFlag.AllowUnvettedDependencies)
+              },
+          )
           eventually() {
             participant3.topology.vetted_packages
               .list(daId, filterParticipant = participant3.filterString)
@@ -861,17 +871,27 @@ sealed trait PackageVettingIntegrationTest
       val vettingDepDar = tryReadDar(VettingDepPath)
       val vettingMainDar = tryReadDar(VettingMainPath)
 
-      "refuse to unvet if the package is used as a dependency" in { implicit env =>
-        import env.*
+      s"refuse to unvet if the package is used as a dependency on PV=${ProtocolVersion.v34} or before" onlyRunWhen (!pvSupportsUnvettedDependencies) in {
+        implicit env =>
+          import env.*
 
-        // upload and vet the main dar and its dependencies
-        participant3.dars.upload(VettingMainPath, vetAllPackages = true)
+          // upload and vet the main dar and its dependencies
+          participant3.dars.upload(VettingMainPath, vetAllPackages = true)
 
-        // unvetting the dep package should fail
-        assertThrowsAndLogsCommandFailures(
-          vettingCmd(removes = Seq(vettingDepDar.main)),
-          _.shouldBeCantonErrorCode(ParticipantTopologyManagerError.DependenciesNotVetted),
-        )
+          assertThrowsAndLogsCommandFailures(
+            vettingCmd(removes = Seq(vettingDepDar.main)),
+            _.shouldBeCantonErrorCode(ParticipantTopologyManagerError.DependenciesNotVetted),
+          )
+      }
+
+      s"allow to unvet if the package is used as a dependency on PV=${ProtocolVersion.v35} or after" onlyRunWhen (pvSupportsUnvettedDependencies) in {
+        implicit env =>
+          import env.*
+
+          // upload and vet the main dar and its dependencies
+          participant3.dars.upload(VettingMainPath, vetAllPackages = true)
+
+          vettingCmd(removes = Seq(vettingDepDar.main))
       }
 
       "allow to unvet if the package is used as a dependency and AllowUnvettedDependencies is used" in {
@@ -882,20 +902,35 @@ sealed trait PackageVettingIntegrationTest
           )
       }
 
-      "refuse to unvet while vetting a dependent package" in { implicit env =>
-        // vet the dep package and unvet the main package
-        vettingCmd(
-          adds = Seq(vettingDepDar.main),
-          removes = Seq(vettingMainDar.main),
-        )
+      s"refuse to unvet while vetting a dependent package (PV=${ProtocolVersion.v34})" onlyRunWhen (!pvSupportsUnvettedDependencies) in {
+        implicit env =>
+          // vet the dep package and unvet the main package
+          vettingCmd(
+            adds = Seq(vettingDepDar.main),
+            removes = Seq(vettingMainDar.main),
+          )
 
-        assertThrowsAndLogsCommandFailures(
+          assertThrowsAndLogsCommandFailures(
+            vettingCmd(
+              adds = Seq(vettingMainDar.main),
+              removes = Seq(vettingDepDar.main),
+            ),
+            _.shouldBeCantonErrorCode(ParticipantTopologyManagerError.DependenciesNotVetted),
+          )
+      }
+
+      s"allow to unvet while vetting a dependent package (PV=${ProtocolVersion.v35}+)" onlyRunWhen pvSupportsUnvettedDependencies in {
+        implicit env =>
+          // vet the dep package and unvet the main package
+          vettingCmd(
+            adds = Seq(vettingDepDar.main),
+            removes = Seq(vettingMainDar.main),
+          )
+
           vettingCmd(
             adds = Seq(vettingMainDar.main),
             removes = Seq(vettingDepDar.main),
-          ),
-          _.shouldBeCantonErrorCode(ParticipantTopologyManagerError.DependenciesNotVetted),
-        )
+          )
       }
     }
 

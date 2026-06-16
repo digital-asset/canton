@@ -5,21 +5,15 @@ package com.digitalasset.canton.synchronizer.metrics
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName}
-import com.digitalasset.canton.synchronizer.metrics.{
-  MediatorHistograms,
-  MediatorMetrics,
-  SequencerHistograms,
-  SequencerMetrics,
-}
 
-object SequencerTestMetrics
+final case class SequencerTestMetrics(testName: String)
     extends SequencerMetrics(
-      new SequencerHistograms(MetricName("test"))(new HistogramInventory),
+      new SequencerHistograms(MetricName(testName))(new HistogramInventory),
       NoOpMetricsFactory,
     )
 
-object MediatorTestMetrics
+final case class MediatorTestMetrics(testName: String)
     extends MediatorMetrics(
-      new MediatorHistograms(MetricName("test"))(new HistogramInventory),
+      new MediatorHistograms(MetricName(testName))(new HistogramInventory),
       NoOpMetricsFactory,
     )

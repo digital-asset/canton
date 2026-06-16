@@ -7,8 +7,10 @@ import better.files.*
 import better.files.File.newTemporaryFile
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserverWithContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.thereafterFutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
@@ -21,28 +23,22 @@ import com.digitalasset.canton.version.{
   VersioningCompanion,
 }
 import com.google.protobuf.ByteString
-import io.grpc.Context
-import io.grpc.stub.StreamObserver
+import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.{Context, Status}
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Source, Source as PekkoSource}
 
-import java.io.{
-  BufferedInputStream,
-  ByteArrayInputStream,
-  ByteArrayOutputStream,
-  InputStream,
-  OutputStream,
-  PipedInputStream,
-  PipedOutputStream,
-}
+import java.io.{InputStream, OutputStream, PipedInputStream, PipedOutputStream}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.tailrec
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{Await, ExecutionContext, Future, Promise, blocking}
+import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
 object GrpcStreamingUtils {
+
   private[util] final val defaultChunkSize: Int =
     1024 * 1024 * 2 // 2MB - This is half of the default max message size of gRPC
 
@@ -77,30 +73,32 @@ object GrpcStreamingUtils {
     observer
   }
 
-  /** Streams requests of gzipped bytes from the client in multiple stages, allowing efficient
-    * memory usage.
+  /** Streams requests of gzipped bytes from the client in multiple stages, allowing for efficient
+    * memory usage and safe early termination.
     *
-    *   1. The first request can contain some context `RequestContext`, which is extracted with
-    *      `contextFromFirstElement` and passed along with the source.
-    *   1. The gzipped bytes from each request are extracted with `getGzippedBytes`.
-    *   1. Messages from the decompressed InputStream can be extracted via `parseMessage`.
+    *   1. The first request can contain some context `RequestContext`, which is extracted using
+    *      `contextFromFirstRequest` and passed along with the source.
+    *   1. The gzipped bytes from each request are extracted using `getGzippedBytes`.
+    *   1. Messages from the decompressed input stream are extracted via `parseMessage`.
     *   1. The source, which the caller uses for further processing, continually parses new messages
     *      from the decompressed input stream.
     *
     * @param responseObserver
-    *   the response observer to signal errors or completion to the client
+    *   The response observer used to signal errors or completion to the client.
     * @param responseIfNoRequests
-    *   the response if no requests were actually submitted.
+    *   The response to return if no requests were actually submitted.
     * @param getGzippedBytes
-    *   the extractor method to get a `ByteString` from the request `Req`
+    *   The extractor method used to get a `ByteString` from the request `Req`.
     * @param parseMessage
-    *   should return `None` if there is no more input to read, `Some(Right(_))` for a successful
-    *   parse, and `Some(Left(_))` if an error occurred during parsing. Any parsing errors bubbled
-    *   up and the processing is aborted.
+    *   A method that returns `None` if there is no more input to read, `Some(Right(_))` for a
+    *   successful parse, and `Some(Left(_))` if an error occurred during parsing. Any parsing
+    *   errors are bubbled up, and processing is aborted.
     * @param contextFromFirstRequest
-    *   extract context from the first request
+    *   The extractor method used to get the context from the first request.
     * @param action
-    *   the main processing pipeline
+    *   The main processing pipeline consuming the parsed messages. If the returned future fails
+    *   (for example, due to a validation failure or an intentional abort), the stream terminates
+    *   early and safely returns that exact application error to the client.
     */
   def streamGzippedChunksFromClient[Req, Resp, RequestContext, ParsedMessage](
       responseObserver: StreamObserver[Resp],
@@ -130,7 +128,19 @@ object GrpcStreamingUtils {
     def writeRequestBytes(request: Req): Unit = Try {
       // gRPC backpressure works by "blocking" the onNext call.
       blocking(getGzippedBytes(request).writeTo(output))
-    }.forFailed(reportError)
+    } forFailed {
+      case err: java.io.IOException
+          if err.getMessage != null && err.getMessage.contains("Pipe closed") =>
+        // Expected race condition during an early stream abort.
+        // If the downstream processing (`action`) fails with an application error (e.g., validation failure),
+        // it closes the `input` stream (`PipedInputStream`). If the client concurrently sends another chunk,
+        // writing to `output` (`PipedOutputStream`) throws this "Pipe closed" IOException.
+        // We safely swallow this to prevent a double `onError` call on the gRPC observer (`responseObserver.onError`),
+        // ensuring the client receives the actual application error instead of a broken pipe error.
+        Try(output.close()).discard
+      case err =>
+        reportError(err)
+    }
 
     new StreamObserver[Req] {
       override def onNext(value: Req): Unit =
@@ -142,6 +152,8 @@ object GrpcStreamingUtils {
 
             case Success(context) =>
               // hold a lazy reference, because the constructor of GZIPInputStream immediately executes a blocking read
+              // No zip-bomb risk: messages are parsed and ingested one at a time, so only a single
+              // decompressed message is held in memory rather than the whole decompressed stream.
               lazy val gunzip = new GzipCompressorInputStream(input)
               // construct the source by repeatedly reading from the gunzip input stream until there's no more data.
               // we don't really have a "state", so we use Unit.
@@ -171,7 +183,20 @@ object GrpcStreamingUtils {
         } else writeRequestBytes(value)
 
       override def onError(t: Throwable): Unit =
-        reportError(t)
+        // The gRPC framework invokes this requestObserver.onError exclusively when the inbound stream dies
+        // (e.g., client cancellation, network drop, or server shutdown). An error on the request observer
+        // implies that this handler's response observer is already closed, as the underlying HTTP/2
+        // connection is tearing down.
+        //
+        // If we call `reportError(t)` here, it attempts to invoke `responseObserver.onError(t)`. This forces
+        // an illegal second close attempt and throws "IllegalStateException: call already closed" within the
+        // gRPC library code.
+        //
+        // Note: Application-level errors (e.g., validation failures) are handled safely via the
+        // FutureUnlessShutdown pipeline. Here, our only responsibility is to close our local pipe
+        // so that the downstream `GzipCompressorInputStream` gracefully halts.
+
+        Try(output.close()).discard
 
       override def onCompleted(): Unit =
         if (isFirst.get()) {
@@ -276,22 +301,54 @@ object GrpcStreamingUtils {
       fromByteString: FromByteString[T],
       processingTimeout: Duration = DefaultProcessingTimeouts.unbounded.duration,
       chunkSizeO: Option[Int] = None,
-  )(implicit ec: ExecutionContext): Unit = {
-    val context = io.grpc.Context
-      .current()
-      .withCancellation()
+  )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext): Unit = {
+    val context = io.grpc.Context.current().withCancellation()
+    val chunkSize = chunkSizeO.getOrElse(defaultChunkSize)
+    val pipedInput = new PipedInputStream(chunkSize)
+    // Introduced so that clients do not have to enclose calls in blocking
+    val blockingPipedOutput = new PipedOutputStream(pipedInput) {
+      override def write(b: Int): Unit = blocking(super.write(b))
 
-    val outputStream = new ByteArrayOutputStream()
+      override def write(b: Array[Byte], off: Int, len: Int): Unit = blocking {
+        super.write(b, off, len)
+      }
+
+      override def write(b: Array[Byte]): Unit = blocking(super.write(b))
+    }
+
+    def closeQuietly(c: java.io.Closeable): Unit = Try(c.close()).discard
+
     context.run { () =>
-      val processingResult = responseF(outputStream).map { _ =>
-        val chunkSize = chunkSizeO.getOrElse(defaultChunkSize)
-        val inputStream = new ByteArrayInputStream(outputStream.toByteArray)
+      // Close both piped streams on context cancellation so the producer unblocks promptly
+      context.addListener(
+        (_: Context) => {
+          closeQuietly(pipedInput)
+          closeQuietly(blockingPipedOutput)
+        },
+        (command: Runnable) => command.run(),
+      )
+
+      val consumerF =
         streamResponseChunks(context, responseObserver)(
-          new BufferedInputStream(inputStream),
+          pipedInput,
           chunkSize,
           fromByteString,
         )
+
+      val producerF = responseF(blockingPipedOutput).transform { result =>
+        val closeResult = Try(blockingPipedOutput.close())
+        result match {
+          case Success(_) => closeResult
+          case Failure(ex) =>
+            closeResult.forFailed(ex.addSuppressed(_))
+            result
+        }
       }
+
+      val processingResult = producerF
+        .flatMap(_ => consumerF)
+        .thereafter(_ => closeQuietly(pipedInput))
+
       finishStream(context, responseObserver)(processingResult, processingTimeout)
     }
   }
@@ -302,7 +359,7 @@ object GrpcStreamingUtils {
       fromByteString: FromByteString[T],
       processingTimeout: Duration = DefaultProcessingTimeouts.unbounded.duration,
       chunkSizeO: Option[Int] = None,
-  )(implicit ec: ExecutionContext): Unit = {
+  )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext): Unit = {
     val file = newTemporaryFile()
 
     val context = io.grpc.Context
@@ -310,7 +367,7 @@ object GrpcStreamingUtils {
       .withCancellation()
 
     context.run { () =>
-      val processingResult = responseF(file).map { _ =>
+      val processingResult = responseF(file).flatMap { _ =>
         val chunkSize = chunkSizeO.getOrElse(defaultChunkSize)
         streamResponseChunks(context, responseObserver)(
           file.newInputStream.buffered(chunkSize),
@@ -378,42 +435,123 @@ object GrpcStreamingUtils {
     read(Nil)
   }
 
-  private def streamResponseChunks[T](
+  private[util] def streamResponseChunks[T](
       context: Context.CancellableContext,
       responseObserver: StreamObserver[T],
   )(
       inputStream: InputStream,
       chunkSize: Int,
       fromByteString: FromByteString[T],
-  ): Unit =
-    inputStream.autoClosed { s =>
-      Iterator
-        .continually(s.readNBytes(chunkSize))
+  )(implicit
+      executionContext: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): Future[Unit] =
+    withServerCallStreamObserverF(responseObserver) { scso =>
+      val iter = Iterator
+        .continually(inputStream.readNBytes(chunkSize))
         // Before pushing new chunks to the stream, keep checking that the context has not been cancelled
         // This avoids the server reading the entire dump file for nothing if the client has already cancelled
         .takeWhile(_.nonEmpty && !context.isCancelled)
-        .foreach { byteArray =>
-          val chunk: ByteString = ByteString.copyFrom(byteArray)
-          responseObserver.onNext(fromByteString.toT(chunk))
-        }
+
+      val isWorkerRunning = new AtomicBoolean(false)
+      val allBytesWrittenPromise = Promise[Unit]()
+
+      def runWorkerInBackground(): Unit = FutureUtil.doNotAwait(
+        Future {
+          // Returns true if the stream was exhausted (EOF reached), false if the loop stopped
+          // because the observer is no longer ready
+          Try {
+            @tailrec
+            def sendChunks(): Boolean =
+              if (!scso.isReady) {
+                false
+              } else if (iter.hasNext) {
+                val byteArray = iter.next()
+                val chunk: ByteString = ByteString.copyFrom(byteArray)
+                responseObserver.onNext(fromByteString.toT(chunk))
+                sendChunks()
+              } else {
+                true
+              }
+            sendChunks()
+          } match {
+            case Failure(ex) =>
+              isWorkerRunning.set(false)
+              allBytesWrittenPromise.tryFailure(ex).discard
+            case Success(exhausted) =>
+              if (exhausted) {
+                allBytesWrittenPromise.trySuccess(()).discard
+              }
+              isWorkerRunning.set(false)
+              if (!exhausted) {
+                if (context.isCancelled) {
+                  allBytesWrittenPromise.trySuccess(()).discard
+                } else if (scso.isReady) {
+                  // this check is important in case the `onReadyHandler` gets triggered before setting `isWorkerRunning` to `false` above. Not triggering here would mean that the stream will stall.
+                  triggerWorker()
+                } else {
+                  // Fix for misbehaving observer - that never triggers onReady/onCancel
+                  DelayUtil
+                    .delay(100.millis)
+                    .foreach(_ => triggerWorker().discard)
+                }
+              }
+          }
+        },
+        "Cannot start streaming response to client",
+      )
+
+      def triggerWorker(): Future[Unit] = Future {
+        // Do not start a new worker once streaming is finished or the client has gone away,
+        // to avoid spinning up workers (and rescheduling them) for an already-completed stream.
+        if (context.isCancelled) {
+          allBytesWrittenPromise.trySuccess(()).discard
+        } else if (
+          !allBytesWrittenPromise.isCompleted && isWorkerRunning
+            .compareAndSet(false, true)
+        )
+          runWorkerInBackground()
+      }
+
+      scso.setOnReadyHandler(() => triggerWorker().discard)
+      scso.setOnCancelHandler { () =>
+        Try(inputStream.close()).discard
+        allBytesWrittenPromise.trySuccess(()).discard
+      }
+
+      triggerWorker().discard
+
+      allBytesWrittenPromise.future.thereafter(_ => Try(inputStream.close()).discard)
     }
 
   private def finishStream[T](
       context: Context.CancellableContext,
       responseObserver: StreamObserver[T],
-  )(f: Future[Unit], timeout: Duration): Unit =
-    Try(Await.result(f, timeout)) match {
-      case Failure(exception) =>
-        responseObserver.onError(exception)
-        context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
-        ()
-      case Success(_) =>
-        if (!context.isCancelled) responseObserver.onCompleted()
-        else {
-          context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
-          ()
-        }
+  )(f: Future[Unit], timeout: Duration): Unit = {
+    def cancelContext(): Unit = {
+      context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
+      ()
     }
+
+    try {
+      Await.result(f, timeout)
+      if (!context.isCancelled) responseObserver.onCompleted()
+      else cancelContext()
+    } catch {
+      case _: InterruptedException =>
+        // The serving thread was interrupted (e.g. node shutdown or call cancellation) while blocked
+        // in `Await.result`. Cancel the context to terminate the gRPC call exactly once (CANCELLED),
+        // and only restore the thread's interrupt status. We must NOT rethrow: letting the
+        // InterruptedException escape into the gRPC request handler makes it close the call a second
+        // time, writing to the already-terminated HTTP/2 stream, which Netty logs as
+        // "Stream closed before write could take place".
+        cancelContext()
+        Thread.currentThread().interrupt()
+      case NonFatal(exception) =>
+        responseObserver.onError(exception)
+        cancelContext()
+    }
+  }
 
   def futureUnlessShutdownToStreamObserver[A](
       fus: FutureUnlessShutdown[A],
@@ -426,6 +564,58 @@ object GrpcStreamingUtils {
     case Success(AbortedDueToShutdown) =>
       observer.onError(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError)
   }
+
+  private def withServerCallStreamObserverG[R, A](
+      observer: StreamObserver[R]
+  )(ifNotSupported: => A)(
+      handler: ServerCallStreamObserver[R] => A
+  )(implicit errorLoggingContext: ErrorLoggingContext): A =
+    observer match {
+      case serverCallStreamObserver: ServerCallStreamObserver[R] =>
+        handler(serverCallStreamObserver)
+      case other =>
+        val statusException =
+          Status.INTERNAL
+            .withDescription(s"Unknown stream observer request")
+            .asException()
+        errorLoggingContext.warn(
+          s"${statusException.getMessage} StreamObserver:(${other.getClass})",
+          statusException,
+        )
+        observer.onError(statusException)
+        ifNotSupported
+    }
+
+  /** Ensure the observer is a ServerCallStreamObserver, running `handler` if so. Otherwise reports
+    * an INTERNAL error to the observer. See `withServerCallStreamObserverG`.
+    *
+    * @param observer
+    *   underlying observer
+    * @param handler
+    *   handler requiring a ServerCallStreamObserver
+    */
+  def withServerCallStreamObserver[R](
+      observer: StreamObserver[R]
+  )(handler: ServerCallStreamObserver[R] => Unit)(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Unit =
+    withServerCallStreamObserverG(observer)(())(handler)
+
+  /** Ensure the observer is a ServerCallStreamObserver, running `handler` if so. Otherwise reports
+    * an INTERNAL error to the observer and returns a completed future. See
+    * `withServerCallStreamObserverG`.
+    *
+    * @param observer
+    *   underlying observer
+    * @param handler
+    *   handler requiring a ServerCallStreamObserver
+    */
+  def withServerCallStreamObserverF[R](
+      observer: StreamObserver[R]
+  )(handler: ServerCallStreamObserver[R] => Future[Unit])(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Future[Unit] =
+    withServerCallStreamObserverG(observer)(Future.unit)(handler)
 }
 
 // Define a type class for converting ByteString to the generic type T

@@ -71,12 +71,6 @@ private[lf] object Command {
       choiceId: ChoiceName,
       choiceArgument: SValue,
   ) extends ApiCommand
-
-  final case class LookupByKey(
-      templateId: Identifier,
-      contractKey: SValue,
-  ) extends Command
-
 }
 
 final case class InterfaceView(

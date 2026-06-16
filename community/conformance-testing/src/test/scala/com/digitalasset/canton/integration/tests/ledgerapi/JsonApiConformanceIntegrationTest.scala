@@ -13,7 +13,6 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   EnvVarTestOverrides,
   TestInclusions,
 }
-import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTestsFor34
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -21,7 +20,6 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.time.{Seconds, Span}
 
@@ -185,7 +183,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
       .prependConfigTransform(ConfigTransforms.enableHttpLedgerApi)
-      .addConfigTransforms(ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
@@ -193,12 +191,11 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
       }
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
-  private val additionalExclusions =
-    if (testedProtocolVersion == ProtocolVersion.v34) excludedTestsFor34 else Set.empty
-
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
-  override protected def exclusions: Set[String] = LedgerApiConformanceBase.excludedTests.toSet ++
-    (ExcludedTests.jsonApiExcludedTests ++ additionalExclusions).toSet
+  override protected def exclusions: Set[String] =
+    ExcludedTests.jsonApiExcludedTests.toSet ++ LedgerApiConformanceBase.excludedTests(
+      testedProtocolVersion
+    )
 
   protected def testCaseName = "pass the Ledger API conformance tests"
 }

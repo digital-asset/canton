@@ -219,10 +219,10 @@ class GrpcSequencerAdministrationService(
   override def onboardingState(
       request: v30.OnboardingStateRequest,
       responseObserver: StreamObserver[OnboardingStateResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => {
-        implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
         val res =
           for {
             memberOrTimestamp <- memberOrTimestamp(
@@ -247,14 +247,15 @@ class GrpcSequencerAdministrationService(
       responseObserver,
       byteString => OnboardingStateResponse(byteString),
     )
+  }
 
   override def onboardingStateV2(
       request: OnboardingStateV2Request,
       responseObserver: StreamObserver[OnboardingStateV2Response],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => {
-        implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
         val res = for {
           memberOrTimestamp <- memberOrTimestamp(
             request.request.sequencerUid,
@@ -298,6 +299,7 @@ class GrpcSequencerAdministrationService(
       responseObserver,
       byteString => OnboardingStateV2Response(byteString),
     )
+  }
 
   private def memberOrTimestamp(memberP: Option[String], timestampP: Option[Timestamp])(implicit
       traceContext: TraceContext

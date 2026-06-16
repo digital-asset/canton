@@ -98,6 +98,20 @@ final case class SubmissionRequest private (
   def updateMaxSequencingTime(maxSequencingTime: CantonTimestamp): SubmissionRequest =
     copy(maxSequencingTime = maxSequencingTime)
 
+  /** Sets the bound for the deferred decompression of the batch's envelopes. Does not affect
+    * serialization, so the memoized bytes are preserved.
+    */
+  def withMaxBytesToDecompress(maxBytesToDecompress: MaxBytesToDecompress): SubmissionRequest =
+    new SubmissionRequest(
+      sender,
+      messageId,
+      batch.map(_.withMaxBytesToDecompress(maxBytesToDecompress)),
+      maxSequencingTime,
+      topologyTimestamp,
+      aggregationRule,
+      submissionCost,
+    )(representativeProtocolVersion, deserializedFrom)
+
   @VisibleForTesting
   def copy(
       sender: Member = this.sender,

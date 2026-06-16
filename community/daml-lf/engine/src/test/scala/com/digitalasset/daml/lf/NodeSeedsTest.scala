@@ -146,11 +146,6 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
           fetch.interfaceId,
           fetch.coid,
         )
-      case lookup: Node.LookupByKey =>
-        command.ReplayCommand.LookupByKey(
-          lookup.templateId,
-          lookup.key.value,
-        )
       case _ =>
         sys.error("unexpected node")
     }
@@ -168,11 +163,11 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
         .consume(pcs = contracts, pkgs = packages)
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet
   }
-
-  val n = tx.nodes.iterator.collect { case (nid, _: Node.Action) =>
-    s"when run with $nid" in {
-      replay(nid) shouldBe projectCreates(nid)
-    }
+  val n = tx.nodes.iterator.collect {
+    case (nid, _: Node.Exercise | _: Node.Fetch | _: Node.Create) =>
+      s"when run with $nid" in {
+        replay(nid) shouldBe projectCreates(nid)
+      }
   }.size
 
   // We double check we have exactly 4 action nodes in the transaction

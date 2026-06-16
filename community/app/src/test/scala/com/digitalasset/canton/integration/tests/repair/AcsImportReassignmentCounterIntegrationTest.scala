@@ -31,10 +31,10 @@ sealed trait AcsImportReassignmentCounterIntegrationTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
             .replace(true)
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*

@@ -16,6 +16,7 @@ import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.{FiniteDuration, *}
 import scala.concurrent.{Future, Promise}
 import scala.util.Success
@@ -179,6 +180,118 @@ class StateCacheSpec
     verify(cache).putAll(Map("key" -> "value"))
     verifyNoMoreInteractions(cache)
     succeed
+  }
+
+  behavior of s"$className.putBatchCond"
+
+  it should "apply upserts and invalidations computed by the change function" in {
+    val stateCache = buildStateCache(10L)
+
+    // Pre-populate cache.
+    stateCache.putBatch(1L, Map("key1" -> "initial", "key2" -> "to-invalidate"))
+
+    stateCache.putBatchCond(
+      validAtEventSeqId = 2L,
+      keys = Set("key1", "key2", "key3"),
+      change = { cached =>
+        val upserts = Map(
+          "key1" -> s"${cached("key1")}-updated",
+          "key3" -> "created",
+        )
+        val invalidations = Set("key2")
+        (upserts, invalidations)
+      },
+    )
+
+    stateCache.get("key1") shouldBe Some("initial-updated")
+    stateCache.get("key2") shouldBe None
+    stateCache.get("key3") shouldBe Some("created")
+  }
+
+  it should "pass only entries from `keys` that are present in the cache to the change function" in {
+    val stateCache = buildStateCache(10L)
+    stateCache.putBatch(1L, Map("present-1" -> "v1", "present-2" -> "v2", "unrelated" -> "vU"))
+
+    val captured: AtomicReference[Option[Map[String, String]]] = new AtomicReference(None)
+    stateCache.putBatchCond(
+      validAtEventSeqId = 2L,
+      keys = Set("present-1", "missing"),
+      change = { cached =>
+        captured.set(Some(cached))
+        (Map.empty, Set.empty)
+      },
+    )
+
+    // Only keys passed to `keys` that are actually present get forwarded; `unrelated` must not leak in.
+    captured.get() shouldBe Some(Map("present-1" -> "v1"))
+  }
+
+  it should "not call invalidateAll when there are no invalidations" in {
+    val cache = mock[ConcurrentCache[String, String]]
+    val stateCache = StateCache[String, String](0L, "", cache, cacheUpdateTimer, loggerFactory)
+
+    when(cache.getIfPresent("k")).thenReturn(None)
+
+    stateCache.putBatchCond(
+      validAtEventSeqId = 1L,
+      keys = Set("k"),
+      change = _ => (Map("k" -> "v"), Set.empty),
+    )
+
+    verify(cache).getIfPresent("k")
+    verify(cache).putAll(Map("k" -> "v"))
+    verifyNoMoreInteractions(cache)
+    succeed
+  }
+
+  it should "not call putAll when there are no upserts" in {
+    val cache = mock[ConcurrentCache[String, String]]
+    val stateCache = StateCache[String, String](0L, "", cache, cacheUpdateTimer, loggerFactory)
+
+    when(cache.getIfPresent("k")).thenReturn(Some("v"))
+
+    stateCache.putBatchCond(
+      validAtEventSeqId = 1L,
+      keys = Set("k"),
+      change = _ => (Map.empty, Set("k")),
+    )
+
+    verify(cache).getIfPresent("k")
+    verify(cache).invalidateAll(Set("k"))
+    verifyNoMoreInteractions(cache)
+    succeed
+  }
+
+  it should "ignore stale putBatchCond at or before the current cache index and warn" in {
+    val stateCache = buildStateCache(10L)
+    stateCache.putBatchCond(
+      validAtEventSeqId = 2L,
+      keys = Set("k"),
+      change = _ => (Map("k" -> "first"), Set.empty),
+    )
+
+    loggerFactory.assertLogs(
+      within = {
+        stateCache.putBatchCond(
+          validAtEventSeqId = 1L,
+          keys = Set("k"),
+          change = _ => (Map("k" -> "stale-before"), Set.empty),
+        )
+        stateCache.putBatchCond(
+          validAtEventSeqId = 2L,
+          keys = Set("k"),
+          change = _ => (Map("k" -> "stale-equal"), Set.empty),
+        )
+      },
+      assertions = _.warningMessage should include(
+        "Ignoring incoming synchronous update at an index at event sequential ID(1) equal to or before the cache index (2)"
+      ),
+      _.warningMessage should include(
+        "Ignoring incoming synchronous update at an index at event sequential ID(2) equal to or before the cache index (2)"
+      ),
+    )
+
+    stateCache.get("k") shouldBe Some("first")
   }
 
   behavior of s"$className.reset"

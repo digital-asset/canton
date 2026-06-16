@@ -108,28 +108,30 @@ object DbParameterUtils {
     */
   def getDataBytesArrayResultsDb[A: ClassTag](
       deserialize: Array[Byte] => A
-  ): GetResult[Array[A]] = {
+  ): GetResult[Array[A]] =
+    GetResult(r => r.rs.getArray(r.skip.currentPos))
+      .andThen(byteArraysFromSqlArray)
+      .andThen(_.map(deserialize))
 
-    def toBlobBytes(obj: AnyRef): Array[Byte] = obj match {
-      case blob: java.sql.Blob => blob.getBytes(1, blob.length.toInt)
-      case invalid =>
+  /** Extracts an array of byte arrays from a JDBC array column.
+    */
+  def byteArraysFromSqlArray(sqlArray: java.sql.Array): Array[Array[Byte]] =
+    sqlArray.getArray match {
+      case arr: Array[Array[Byte]] => arr // Postgres
+      case arr: Array[AnyRef] => arr.map(toBlobBytes) // H2
+      case other =>
         throw new SQLNonTransientException(
-          s"Cannot convert object array element (of type ${invalid.getClass.getName}) to byte array"
+          s"Cannot convert object (of type ${other.getClass.getName}) to byte array array"
         )
     }
 
-    GetResult(r => r.rs.getArray(r.skip.currentPos))
-      .andThen { case (sqlArr: java.sql.Array) =>
-        sqlArr.getArray match {
-          case arr: Array[Array[Byte]] => arr // Postgres
-          case arr: Array[AnyRef] => arr.map(toBlobBytes(_)) // H2
-          case other =>
-            throw new SQLNonTransientException(
-              s"Cannot convert object (of type ${other.getClass.getName}) to byte array array"
-            )
-        }
-      }
-      .andThen(_.map(deserialize))
+  private def toBlobBytes(obj: AnyRef): Array[Byte] = obj match {
+    case blob: java.sql.Blob => blob.getBytes(1, blob.length.toInt)
+    case bytes: Array[Byte] => bytes
+    case invalid =>
+      throw new SQLNonTransientException(
+        s"Cannot convert object array element (of type ${invalid.getClass.getName}) to byte array"
+      )
   }
 
   /** Sets an Iterable of String as an array of string database parameter.

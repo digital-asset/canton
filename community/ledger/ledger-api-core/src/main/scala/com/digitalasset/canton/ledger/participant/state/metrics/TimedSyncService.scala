@@ -6,6 +6,7 @@ package com.digitalasset.canton.ledger.participant.state.metrics
 import cats.data.EitherT
 import com.daml.metrics.Timed
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
@@ -42,7 +43,6 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfGlobalKeyMapping, LfPartyId}
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -64,7 +64,6 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       transactionMeta: TransactionMeta,
       // Currently, the estimated interpretation cost is not used
       _estimatedInterpretationCost: Long,
-      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -79,7 +78,6 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
         submitterInfo,
         transactionMeta,
         _estimatedInterpretationCost,
-        keyResolver,
         processedDisclosedContracts,
       ),
     )
@@ -307,7 +305,6 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       transaction: LfVersionedTransaction,
       transactionMetadata: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -318,7 +315,6 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       transaction,
       transactionMetadata,
       submitterInfo,
-      keyResolver,
       disclosedContracts,
       costHints,
     )

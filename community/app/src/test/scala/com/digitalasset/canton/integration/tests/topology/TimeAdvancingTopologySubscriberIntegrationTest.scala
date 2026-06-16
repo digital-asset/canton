@@ -30,9 +30,10 @@ import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
 }
 import com.digitalasset.canton.sequencing.protocol.{
   AllMembersOfSynchronizer,
+  Batch,
   ClosedEnvelope,
+  DecompressedSequencedEvent,
   Deliver,
-  SequencedEvent,
   TimeProof,
 }
 import com.digitalasset.canton.synchronizer.sequencer.time.TimeAdvancingTopologySubscriber.TimeAdvanceBroadcastMessageIdPrefix
@@ -70,6 +71,8 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
         ConfigTransforms.updateAllSequencerConfigs_(
           _.focus(_.parameters.producePostOrderingTopologyTicks)
             .replace(false)
+            .focus(_.parameters.disableAggregationRuleSizeCheckForTesting)
+            .replace(true)
         ),
       )
       // Do not use a static time because this test requires a non-zero topology change delay
@@ -135,10 +138,10 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
         )
         .value
       p1SequencerClientInterceptor.setDelayPolicy(new SequencedEventDelayPolicy {
-        private def isBroadcastEvent(event: SequencedEvent[ClosedEnvelope]): Boolean =
+        private def isBroadcastEvent(event: DecompressedSequencedEvent[ClosedEnvelope]): Boolean =
           event match {
-            case deliver: Deliver[ClosedEnvelope] =>
-              deliver.envelopes.exists(
+            case deliver: Deliver[Batch[ClosedEnvelope]] =>
+              deliver.batch.envelopes.exists(
                 _.recipients.allRecipients.contains(AllMembersOfSynchronizer)
               )
             case _ => false

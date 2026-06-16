@@ -49,6 +49,30 @@ object BufPlugin extends AutoPlugin {
     }
 
   private val unscopedProjectSettings = Seq(
+    // TODO(#33465) Remove this task once the flaky protoc CI failure is resolved.
+    PB.generate := {
+      val log = streams.value.log
+      PB.generate.result.value match {
+        case Inc(cause) =>
+          val file = Incomplete
+            .allExceptions(cause)
+            .collectFirst {
+              case e: RuntimeException if e.getMessage.contains("program not found") =>
+                e.getMessage.split(":").head
+            }
+          file match {
+            case Some(file) =>
+              log.error(s"protoc failed because of program not found: $file")
+              Process(Seq("ls", "-la", file)).!
+              Process(Seq("cat", file)).!
+              Process(Seq("which", "sh")).!
+            case None =>
+              log.error(s"protoc failed for unknown reason")
+          }
+          throw cause
+        case Value(value) => value
+      }
+    },
     bufFormat := {
       run(Command.FormatOverwrite).value
     },

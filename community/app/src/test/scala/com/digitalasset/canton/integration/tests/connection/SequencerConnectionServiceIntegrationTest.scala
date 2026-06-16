@@ -125,6 +125,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
             old.sequencerLivenessMargin,
             old.submissionRequestAmplification,
             old.sequencerConnectionPoolDelays,
+            old.subscriptionLivenessLimits,
           )
         }
 
@@ -151,6 +152,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
               old.sequencerLivenessMargin,
               old.submissionRequestAmplification,
               old.sequencerConnectionPoolDelays,
+              old.subscriptionLivenessLimits,
             )
           },
           _.commandFailureMessage should include(

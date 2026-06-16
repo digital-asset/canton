@@ -29,9 +29,15 @@ Canton Network Documentation Snippets: Global Synchronizer Canton Console Advanc
 .. snippet:: cn_global_synchronizer_canton_console_advanced_operations
     .. hidden:: participant1.parties.disable(aliceParty)
     .. success:: val aliceParty = participant1.parties.enable("Alice")
+
+.. snippet:: cn_global_synchronizer_canton_console_advanced_operations 
     .. success:: participant1.topology.party_to_participant_mappings.propose(party = aliceParty, newParticipants = Seq((participant2.id, ParticipantPermission.Observation)))
 
 .. snippet:: cn_global_synchronizer_canton_console_advanced_operations
     .. success:: participant1.keys.secret.list()
+
+.. snippet:: cn_global_synchronizer_canton_console_advanced_operations
     .. success:: val newKey = participant1.keys.secret.generate_signing_key(name = "new-signing-key", usage = SigningKeyUsage.All)
+
+.. snippet:: cn_global_synchronizer_canton_console_advanced_operations
     .. success:: val newEncKey = participant1.keys.secret.generate_encryption_key(name = "new-encryption-key")

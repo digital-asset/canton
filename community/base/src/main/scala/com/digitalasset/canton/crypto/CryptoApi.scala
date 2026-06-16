@@ -177,6 +177,7 @@ trait CryptoPureApi
     with HashOps
     with RandomOps
     with PasswordBasedEncryptionOps
+    with JwksOps
 
 sealed trait CryptoPureApiError extends Product with Serializable with PrettyPrinting
 object CryptoPureApiError {

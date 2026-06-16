@@ -103,8 +103,8 @@ import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
-import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
+import com.digitalasset.canton.store.{GenericPendingOperationStore, PendingOperationStore}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
@@ -185,13 +185,20 @@ class CantonSyncService(
     with HasCloseContext
     with InternalIndexServiceProviderImpl {
 
-  private val pendingLsuOperationsStore: PendingLsuOperation.Store =
+  private[canton] val pendingLsuOperationsStore: PendingLsuOperation.Store =
     PendingOperationStore(
       syncPersistentStateManager.storage,
       timeouts,
       loggerFactory,
       PendingLsuOperation,
       PhysicalSynchronizerId.fromString,
+    )
+
+  private[canton] val genericPendingOperationStore: GenericPendingOperationStore =
+    GenericPendingOperationStore(
+      syncPersistentStateManager.storage,
+      timeouts,
+      loggerFactory,
     )
 
   private val connectionsManager = new SynchronizerConnectionsManager(
@@ -461,7 +468,6 @@ class CantonSyncService(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       _estimatedInterpretationCost: Long,
-      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -477,7 +483,6 @@ class CantonSyncService(
         transaction = transaction,
         submitterInfo = submitterInfo,
         transactionMeta = transactionMeta,
-        keyResolver = keyResolver,
         explicitlyDisclosedContracts = processedDisclosedContracts,
       )
     }.map(result =>
@@ -562,7 +567,6 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       explicitlyDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext
@@ -629,7 +633,6 @@ class CantonSyncService(
           synchronizerState = routingSynchronizerState,
           wfTransaction = wfTransaction,
           transactionMeta = transactionMeta,
-          keyResolver = keyResolver,
           explicitlyDisclosedContracts = explicitlyDisclosedContracts,
         )
       } yield submitted
@@ -1013,11 +1016,12 @@ class CantonSyncService(
                 SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId(psid)
               )
             _ <- Either.cond(
-              configForPsid.status != Active,
+              configForPsid.status == Active,
               (),
               SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(
                 configForPsid.config.synchronizerAlias,
                 Seq(configForPsid.configuredPsid -> configForPsid.status),
+                operation = "modify synchronizer",
               ),
             )
           } yield KnownPhysicalSynchronizerId(psid)
@@ -1353,12 +1357,14 @@ class CantonSyncService(
   def getSynchronizerConnectionConfigForAlias(
       synchronizerAlias: SynchronizerAlias,
       onlyActive: Boolean,
+      operation: String,
   )(implicit
       traceContext: TraceContext
   ): Either[SyncServiceError, StoredSynchronizerConnectionConfig] =
     connectionsManager.getSynchronizerConnectionConfigForAlias(
       synchronizerAlias,
       onlyActive = onlyActive,
+      operation = operation,
     )
 
   /** Perform a handshake with the given synchronizer. Does only the static (protocol version,
@@ -1820,7 +1826,6 @@ class CantonSyncService(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -1835,7 +1840,6 @@ class CantonSyncService(
         transaction,
         transactionMeta,
         submitterInfo,
-        keyResolver,
         disclosedContracts,
         costHints,
       )

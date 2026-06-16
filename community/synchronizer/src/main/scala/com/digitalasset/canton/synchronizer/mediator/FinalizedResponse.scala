@@ -24,8 +24,10 @@ final case class FinalizedResponse(
     override val request: MediatorConfirmationRequest,
     finalizationTime: CantonTimestamp,
     verdict: Verdict,
-)(val requestTraceContext: TraceContext)
-    extends ResponseAggregator {
+    override val firstResponseReceived: Option[CantonTimestamp],
+)(
+    val requestTraceContext: TraceContext
+) extends ResponseAggregator {
 
   override def version: CantonTimestamp = finalizationTime
   override def isFinalized: Boolean = true

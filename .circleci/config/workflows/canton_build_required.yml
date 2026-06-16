@@ -54,7 +54,7 @@ jobs:
         - package_community
 
 ##### Static analysis
-  - verify_circleci_config_and_compliance_label:
+  - verify_circleci_config:
       filters:
         branches:
           ignore:
@@ -274,24 +274,23 @@ jobs:
           only: /^v.*/
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
-# TODO(i33175): Enable again once fixed
-#  - protocol_continuity_test_latest:
-#      context:
-#        - datadog
-#        - artifactory
-#        - azure-self-cache
-#        - da-images
-#        - maven-mirror
-#        - aws_kms_testing
-#        - gcp_kms_testing
-#      filters:
-#        branches:
-#          ignore:
-#            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
-#        tags:
-#          only: /^v.*/
-#      requires:
-#        - compile # optional dependency, introduced to save credits in case of compile errors
+  - protocol_continuity_test_latest:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - da-images
+        - maven-mirror
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
   - scalafix:
       context:
         - datadog

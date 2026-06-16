@@ -164,9 +164,11 @@ class SequencerTest
         }
       )
 
-    def asDeliverEvent(event: SequencedEvent[ClosedEnvelope]): Deliver[ClosedEnvelope] =
+    def asDeliverEvent(
+        event: DecompressedSequencedEvent[ClosedEnvelope]
+    ): Deliver[Batch[ClosedEnvelope]] =
       event match {
-        case deliver: Deliver[ClosedEnvelope] => deliver
+        case deliver: Deliver[Batch[ClosedEnvelope]] => deliver
         case other => fail(s"Expected deliver event but got $other")
       }
 

@@ -112,8 +112,12 @@ private[mediator] class MediatorEventsProcessor(
   ): NonEmpty[Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])]] =
     events.map { tracedProtocolEvent =>
       implicit val traceContext: TraceContext = tracedProtocolEvent.traceContext
+      val rawEnvelopes = tracedProtocolEvent.value match {
+        case d: Deliver[Batch[DefaultOpenEnvelope]] => d.batch.envelopes
+        case _: DeliverError => Seq.empty
+      }
       val synchronizerEnvelopes = ProtocolMessage.filterSynchronizerEnvelopes(
-        tracedProtocolEvent.value.envelopes,
+        rawEnvelopes,
         tracedProtocolEvent.value.synchronizerId,
       ) { wrongMessages =>
         val wrongSynchronizerIds = wrongMessages.map(_.protocolMessage.psid)

@@ -11,7 +11,10 @@ import com.digitalasset.canton.http.json.v2.JsIdentityProviderCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
+  ApiUserManagementServiceSuppressionRule,
+  AuthStartupConfigSuppressionRule,
+}
 import com.digitalasset.canton.integration.tests.ledgerapi.auth.ServiceCallContext
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
@@ -41,6 +44,13 @@ class JsonUserApiTest
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override val defaultScope: String = ExpectedScope
+
+  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   val scopeBaseToken: StandardJWTPayload = StandardJWTPayload(
     issuer = None,

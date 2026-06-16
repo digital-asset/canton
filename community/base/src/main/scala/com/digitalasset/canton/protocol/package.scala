@@ -93,9 +93,6 @@ package object protocol {
   type LfFatContractInst = FatContractInstance { type CreatedAtTime <: CreationTime.CreatedAt }
   val LfFatContractInst: FatContractInstance.type = FatContractInstance
 
-  type LfThinContractInst = Value.VersionedThinContractInstance
-  val LfThinContractInst: Value.VersionedContractInstance.type = Value.VersionedContractInstance
-
   /** A contract instance with a known creation time */
   type ContractInstance =
     GenContractInstance { type InstCreatedAtTime <: CreationTime.CreatedAt }

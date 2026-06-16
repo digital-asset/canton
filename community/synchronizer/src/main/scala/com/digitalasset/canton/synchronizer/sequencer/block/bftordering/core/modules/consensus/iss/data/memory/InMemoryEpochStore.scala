@@ -31,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
@@ -300,12 +301,14 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
     }
 
   override def loadOrderedBlocks(
-      initialBlockNumber: BlockNumber
+      initialEpochNumber: EpochNumber,
+      limit: Int,
   )(implicit traceContext: TraceContext): E#FutureUnlessShutdownT[Seq[OrderedBlockForOutput]] =
-    createFuture(loadOrderedBlocksActionName(initialBlockNumber)) { () =>
+    createFuture(loadOrderedBlocksActionName(initialEpochNumber, limit)) { () =>
       blocks.view
-        .filter { case (blockNumber, _) =>
-          blockNumber >= initialBlockNumber
+        .filter { case (_, block) =>
+          val epochNumber = block.prePrepare.message.blockMetadata.epochNumber
+          epochNumber >= initialEpochNumber && epochNumber < EpochNumber(initialEpochNumber + limit)
         }
         .values
         .foldLeft[Try[Seq[OrderedBlockForOutput]]](Success(Seq.empty)) {
@@ -329,7 +332,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
                         prePrepare.message.viewNumber,
                         prePrepare.from,
                         isBlockLastInEpoch,
-                        OrderedBlockForOutput.Mode.FromConsensus,
+                        OrderingMode.Consensus,
                       )
                   )
                 case None =>
@@ -342,6 +345,18 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
             }
         }
         .map(_.sortBy(_.orderedBlock.metadata.blockNumber))
+    }
+
+  override def lastEpochWithCompletedBlock(lowerBound: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): E#FutureUnlessShutdownT[Option[EpochNumber]] =
+    createFuture(lastEpochWithCompletedBlockActionName) { () =>
+      Success(
+        blocks.view
+          .map(_._2.prePrepare.message.blockMetadata.epochNumber)
+          .filter(_ >= lowerBound)
+          .maxOption
+      )
     }
 
   @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))

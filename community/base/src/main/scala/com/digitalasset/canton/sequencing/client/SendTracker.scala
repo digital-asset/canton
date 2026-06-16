@@ -16,10 +16,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SendResult.{Error, Success, Timeout}
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  DecompressedSequencedEvent,
   Deliver,
   DeliverError,
+  Envelope,
   MessageId,
-  SequencedEvent,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficStateController
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
@@ -152,7 +154,7 @@ class SendTracker(
     * sends stored to be retried.
     */
   def update(
-      events: Seq[SequencedEventWithTraceContext[?]]
+      events: Seq[SequencedEventWithTraceContext[Batch[Envelope[?]]]]
   ): Unit = if (events.isEmpty) ()
   else {
     val maxTimestamp = events.foldLeft(CantonTimestamp.MinValue) { case (maxTs, event) =>
@@ -191,7 +193,7 @@ class SendTracker(
   }
 
   private def removePendingSend(
-      event: SequencedEvent[?]
+      event: DecompressedSequencedEvent[Envelope[?]]
   )(implicit traceContext: TraceContext): Unit =
     extractSendResult(event).foreach { case (messageId, sendResult) =>
       removePendingSendUnlessTimeout(
@@ -320,7 +322,7 @@ class SendTracker(
   }
 
   private def extractSendResult(
-      event: SequencedEvent[?]
+      event: DecompressedSequencedEvent[Envelope[?]]
   )(implicit traceContext: TraceContext): Option[(MessageId, SendResult)] =
     Option(event) collect {
       case deliver @ Deliver(_, _, _, Some(messageId), _, _, _) =>

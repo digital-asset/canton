@@ -35,6 +35,7 @@ object PartyReplicationTestInterceptor {
   sealed trait ProceedOrWait
   object Proceed extends ProceedOrWait
   object Wait extends ProceedOrWait
+  final case class Fail(reason: String) extends ProceedOrWait
 
   /** In production, always proceed as any type of disruptive or stalling behavior is to be used in
     * integration tests only.

@@ -344,7 +344,7 @@ trait ProcessingSteps[
   /** Phase 1, step 2:
     */
   def createSubmissionResult(
-      deliver: Deliver[Envelope[?]],
+      deliver: Deliver[Batch[Envelope[?]]],
       submissionResultArgs: PendingSubmissionData,
   ): SubmissionResult
 
@@ -584,7 +584,7 @@ trait ProcessingSteps[
     *   contracts from Phase 3 to be persisted to the contract store, and the event to be published
     */
   def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: requestType.PendingRequestData,
       pendingSubmissions: PendingSubmissions,

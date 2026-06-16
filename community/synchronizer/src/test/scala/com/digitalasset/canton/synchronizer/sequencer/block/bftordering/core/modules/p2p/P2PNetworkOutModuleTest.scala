@@ -124,7 +124,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
           context.selfMessages should contain theSameElementsInOrderAs
             Seq[P2PNetworkOut.Network](
-              P2PNetworkOut.Network.Connected(otherInitialEndpointsTupled._1.id),
+              P2PNetworkOut.Network.Connected(Some(otherInitialEndpointsTupled._1.id)),
               P2PNetworkOut.Network
                 .Authenticated(
                   endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
@@ -154,7 +154,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
           context.selfMessages should contain theSameElementsInOrderAs
             Seq[P2PNetworkOut.Network](
-              P2PNetworkOut.Network.Connected(otherInitialEndpointsTupled._2.id),
+              P2PNetworkOut.Network.Connected(Some(otherInitialEndpointsTupled._2.id)),
               P2PNetworkOut.Network.Authenticated(
                 endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
                 Some(otherInitialEndpointsTupled._2),
@@ -799,9 +799,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
   ): Unit =
     fakeClientP2PNetworkManager
       .nodeActions(endpoint)
-      .onConnect(
-        endpoint.id
-      )
+      .onConnect(Some(endpoint.id))
 
   private def disconnect(
       fakeClientP2PNetworkManager: FakeP2PNetworkManager,

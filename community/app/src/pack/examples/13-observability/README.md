@@ -17,7 +17,7 @@ in the official documentation.
   * From the **repository root**, build it with `sbt ledger-test-tool/assembly`.
   * Copy it as `lapitt.jar` into the release pack folder you are working from (created by `sbt packRelease`):
     ```sh
-    cp community/ledger-test-tool/target/scala-2.13/ledger-api-test-tool-2.2-*.jar \
+    cp community/ledger-test-tool/target/scala-2.13/ledger-api-test-tool-2.3-*.jar \
        community/app/target/release/canton-open-source-*/examples/13-observability/lapitt.jar
     ```
 

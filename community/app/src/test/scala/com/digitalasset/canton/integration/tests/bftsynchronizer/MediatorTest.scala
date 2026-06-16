@@ -180,11 +180,11 @@ sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironmen
       )
     }
 
-    loggerFactory.assertLogsSeq(
+    loggerFactory.assertEventuallyLogsSeq(
       SuppressionRule.forLogger[TransactionProcessor]
         && SuppressionRule.LoggerNameContains("participant2")
     )(
-      participant1.health.ping(participant2.id),
+      participant2.health.ping(participant1.id),
       atLeast(1, _) should (containMessage("ConfirmationResultMessage") and haveSignatureCount(2)),
     )
 

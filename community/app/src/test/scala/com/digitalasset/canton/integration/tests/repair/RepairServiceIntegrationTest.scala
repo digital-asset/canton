@@ -41,7 +41,6 @@ import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.TestEngine
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
-  LfVersioned,
   NeedsNewLfContractIds,
   ReassignmentCounter,
   SynchronizerAlias,
@@ -83,7 +82,7 @@ trait RepairServiceIntegrationTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
 
   override val defaultParticipant: String = "participant1"
@@ -858,7 +857,7 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
     import env.*
 
     // If multi-synchronizer support is enabled, the purge will be represented as an Unassigned event, otherwise as a synthetic Archive event
-    val multiSynchronizerSupport = participant1.config.parameters.alphaMultiSynchronizerSupport
+    val multiSynchronizerSupport = participant1.config.parameters.enableAllLedgerApiReassignments
 
     val eventFormat = EventFormat(
       filtersByParty =
@@ -1004,15 +1003,7 @@ sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTe
                 )
                 .value,
               Set.empty,
-            )
-
-            val contractInst = LfThinContractInst(
-              template = lfNoMaintainerTemplateId,
-              packageName = lfPackageName,
-              arg = LfVersioned(
-                ExampleTransactionFactory.serializationVersion,
-                ValueRecord(None, ImmArray(None -> ValueParty(alice.toLf))),
-              ),
+              LfSerializationVersion.V2,
             )
 
             val contractSalt = ContractSalt.createV1(pureCrypto)(
@@ -1024,13 +1015,18 @@ sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTe
               viewPosition = ViewPosition(List.empty),
             )
             val unsuffixedContractId = LfContractId.V1(ExampleTransactionFactory.lfHash(1337))
-            val unsuffixedCreateNode = LfNodeCreate(
-              coid = unsuffixedContractId,
-              contract = contractInst,
-              signatories = Set(alice.toLf),
-              stakeholders = Set(alice.toLf),
-              key = Some(keyWithMaintainers.unversioned),
-            )
+
+            val unsuffixedCreateNode =
+              LfNodeCreate(
+                unsuffixedContractId,
+                lfPackageName,
+                lfNoMaintainerTemplateId,
+                ValueRecord(None, ImmArray(None -> ValueParty(alice.toLf))),
+                Set(alice.toLf),
+                Set(alice.toLf),
+                Some(keyWithMaintainers.unversioned),
+                LfSerializationVersion.V2,
+              )
 
             val contractHash = TestEngine
               .syncContractHasher(loggerFactory, cantonTestsPath)
@@ -1098,24 +1094,24 @@ sealed trait WithMultiSynchronizerSupport extends RepairServiceIntegrationTest {
       .addConfigTransforms(
         ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(true)
+          _.focus(_.parameters.enableAllLedgerApiReassignments).replace(true)
         ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
 }
 
-/** Contains tests that ONLY work when alphaMultiSynchronizerSupport = true */
+/** Contains tests that ONLY work when enableAllLedgerApiReassignments = true */
 sealed trait RepairServiceMultiSynchronizerTests extends RepairServiceIntegrationTest {
 
   "RepairServiceMultiSynchronizerTests" must {
 
-    "run test only with enabled `alphaMultiSynchronizerSupport`" in { implicit env =>
+    "run test only with enabled `enableAllLedgerApiReassignments`" in { implicit env =>
       import env.*
 
       participants.local.foreach { participant =>
         assert(
-          participant.config.parameters.alphaMultiSynchronizerSupport,
-          s"alphaMultiSynchronizerSupport must be true for ${participant.name} in this test suite",
+          participant.config.parameters.enableAllLedgerApiReassignments,
+          s"enableAllLedgerApiReassignments must be true for ${participant.name} in this test suite",
         )
       }
     }

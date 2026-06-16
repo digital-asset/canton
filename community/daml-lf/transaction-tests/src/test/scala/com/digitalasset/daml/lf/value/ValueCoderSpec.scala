@@ -54,9 +54,9 @@ class ValueCoderSpec
       "LF value with null character",
       ValueText("->\u0000<-"),
       ValueOptional(Some(ValueText("\u0000"))),
-      ValueTextMap(SortedLookupList(Map("key\u0000" -> ValueInt64(0)))),
+      ValueTextMap(SortedLookupList.from(Map("key\u0000" -> ValueInt64(0)))),
       ValueTextMap(
-        SortedLookupList(Map("key\u0001" -> ValueInt64(1), "key\u0001\u0000" -> ValueInt64(2)))
+        SortedLookupList.from(Map("key\u0001" -> ValueInt64(1), "key\u0001\u0000" -> ValueInt64(2)))
       ),
     )
 

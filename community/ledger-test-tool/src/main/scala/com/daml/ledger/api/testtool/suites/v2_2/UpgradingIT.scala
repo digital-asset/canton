@@ -71,6 +71,7 @@ import scala.jdk.CollectionConverters.*
 
 class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
   import testDars.{
+    ModelTestDar,
     UpgradeFetchTestDar1_0_0,
     UpgradeFetchTestDar2_0_0,
     UpgradeIfaceDar,
@@ -82,6 +83,24 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
   private val Iface1_Ref = ScalaPbIdentifier.fromJavaProto(iface.Iface1.TEMPLATE_ID.toProto)
   private val UA_Ref = ScalaPbIdentifier.fromJavaProto(UA_V1.TEMPLATE_ID.toProto)
   private val UB_Ref = ScalaPbIdentifier.fromJavaProto(UB_V2.TEMPLATE_ID.toProto)
+
+  private implicit val upgradingUA_V1Companion
+      : ContractCompanion[UA_V1.Contract, UA_V1.ContractId, UA_V1] =
+    UA_V1.COMPANION.withPackageId(UpgradeTestDar1_0_0.packageId)
+  private implicit val upgradingUA_V2Companion
+      : ContractCompanion[UA_V2.Contract, UA_V2.ContractId, UA_V2] =
+    UA_V2.COMPANION.withPackageId(UpgradeTestDar2_0_0.packageId)
+  private implicit val upgradingUA_V3Companion
+      : ContractCompanion[UA_V3.Contract, UA_V3.ContractId, UA_V3] =
+    UA_V3.COMPANION.withPackageId(UpgradeTestDar3_0_0.packageId)
+  private implicit val upgradingUB_V2Companion
+      : ContractCompanion[UB_V2.Contract, UB_V2.ContractId, UB_V2] =
+    UB_V2.COMPANION.withPackageId(UpgradeTestDar2_0_0.packageId)
+  private implicit val upgradingUB_V3Companion
+      : ContractCompanion[UB_V3.Contract, UB_V3.ContractId, UB_V3] =
+    UB_V3.COMPANION.withPackageId(UpgradeTestDar3_0_0.packageId)
+  private implicit val dummyCompanion: ContractCompanion[Dummy.Contract, Dummy.ContractId, Dummy] =
+    Dummy.COMPANION.withPackageId(ModelTestDar.packageId)
 
   test(
     "USubscriptionsUnknownPackageNames",
@@ -195,22 +214,6 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
     "Template-id and interface-id resolution is updated on package upload during ongoing subscriptions",
     allocate(SingleParty),
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
-    implicit val upgradingUA_V1Companion
-        : ContractCompanion.WithoutKey[UA_V1.Contract, UA_V1.ContractId, UA_V1] =
-      UA_V1.COMPANION
-    implicit val upgradingUA_V2Companion
-        : ContractCompanion.WithoutKey[UA_V2.Contract, UA_V2.ContractId, UA_V2] =
-      UA_V2.COMPANION
-    implicit val upgradingUA_V3Companion
-        : ContractCompanion.WithoutKey[UA_V3.Contract, UA_V3.ContractId, UA_V3] =
-      UA_V3.COMPANION
-    implicit val upgradingUB_V2Companion
-        : ContractCompanion.WithoutKey[UB_V2.Contract, UB_V2.ContractId, UB_V2] =
-      UB_V2.COMPANION
-    implicit val upgradingUB_V3Companion
-        : ContractCompanion.WithoutKey[UB_V3.Contract, UB_V3.ContractId, UB_V3] =
-      UB_V3.COMPANION
-
     for {
       _ <- upload(ledger, UpgradeIfaceDar)
       // Upload 1.0.0 package (with the first implementation of UA)
@@ -309,7 +312,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
         ledger,
         party,
         payloadUA_3,
-        Some(PackageRef.Id(Ref.PackageId.assertFromString(UA_V1.PACKAGE_ID))),
+        Some(PackageRef.Id(Ref.PackageId.assertFromString(UpgradeTestDar1_0_0.packageId))),
       )
 
       acs_before_v3_upload <- acsF(ledger, party, SubInterface(Iface1_Ref))
@@ -369,7 +372,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           create: CreatedEvent,
           expectedInterfaceViewValue: Option[String] = None,
           expectedImplementationPackageId: Option[String] = None,
-      )(implicit companion: ContractCompanion[?, TCid, T]): Unit =
+      )(companion: ContractCompanion[?, TCid, T]): Unit =
         assertPayloadEquals(
           context,
           create,
@@ -379,7 +382,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           assertCreateArgs = expectedInterfaceViewValue.isEmpty,
           expectedInterfaceViewValue.toList
             .map(expectedViewValue =>
-              Identifier.fromProto(iface.Iface1.TEMPLATE_ID_WITH_PACKAGE_ID.toProto) -> {
+              iface.Iface1.TEMPLATE_ID.withPackageId(UpgradeIfaceDar.packageId) -> {
                 (record: DamlRecord) =>
                   assertEquals(
                     s"Iface1 view for create 1 - $context",
@@ -398,7 +401,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
         context = "GetEventsByContractId at v2",
         create = create1_fetched_by_contract_id_after_v2_upload.getCreated.getCreatedEvent,
         expectedInterfaceViewValue = Some("Iface1-UAv2"),
-        Some(UA_V2.PACKAGE_ID),
+        Some(UpgradeTestDar2_0_0.packageId),
       )
 
       assertCreate(
@@ -406,7 +409,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
         context = "GetEventsByContractId at v3",
         create = create1_fetched_by_contract_id_after_v3_upload.getCreated.getCreatedEvent,
         expectedInterfaceViewValue = Some("Iface1-UAv3"),
-        Some(UA_V3.PACKAGE_ID),
+        Some(UpgradeTestDar3_0_0.packageId),
       )
 
       // Assert interface subscriptions
@@ -416,21 +419,21 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "2 - IFace1 subscription at v1",
           create2,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
         assertCreate(
           payloadUA_3,
           "3 - IFace1 subscription at v1",
           create3,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
         assertCreate(
           payloadUA_4,
           "4 - IFace1 subscription at v1",
           create4,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
       }
 
@@ -441,21 +444,21 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
             "2 - IFace1 subscription after v1 create",
             create2,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
           assertCreate(
             payloadUA_3,
             "3 - IFace1 subscription after v1 create",
             create3,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
           assertCreate(
             payloadUA_4,
             "4 - IFace1 subscription after v1 create",
             create4,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
       }
 
@@ -466,28 +469,28 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
             "1 - Iface1 subscription at v2",
             create1,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
           assertCreate(
             payloadUA_2,
             "2 - Iface1 subscription at v2",
             create2,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
           assertCreate(
             payloadUA_3,
             "3 - Iface1 subscription at v2",
             create3,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
           assertCreate(
             payloadUA_4,
             "4 - Iface1 subscription at v2",
             create4,
             Some("Iface1-UAv2"),
-            Some(UA_V2.PACKAGE_ID),
+            Some(UpgradeTestDar2_0_0.packageId),
           )
       }
 
@@ -498,28 +501,28 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
             "1 - Iface1 subscription at v3",
             create1,
             Some("Iface1-UAv3"),
-            Some(UA_V3.PACKAGE_ID),
+            Some(UpgradeTestDar3_0_0.packageId),
           )
           assertCreate(
             payloadUA_2,
             "2 - Iface1 subscription at v3",
             create2,
             Some("Iface1-UAv3"),
-            Some(UA_V3.PACKAGE_ID),
+            Some(UpgradeTestDar3_0_0.packageId),
           )
           assertCreate(
             payloadUA_3,
             "3 - Iface1 subscription at v3",
             create3,
             Some("Iface1-UAv3"),
-            Some(UA_V3.PACKAGE_ID),
+            Some(UpgradeTestDar3_0_0.packageId),
           )
           assertCreate(
             payloadUA_4,
             "4 - Iface1 subscription at v2",
             create4,
             Some("Iface1-UAv3"),
-            Some(UA_V3.PACKAGE_ID),
+            Some(UpgradeTestDar3_0_0.packageId),
           )
       }
 
@@ -531,7 +534,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "1 - ACS after v2 upload",
           create1,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
       }
       inside(acs_before_v3_upload) { case Vector(create1, create2, create3) =>
@@ -540,21 +543,21 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "1 - ACS after create 3",
           create1,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
         assertCreate(
           payloadUA_2,
           "2 - ACS after create 3",
           create2,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
         assertCreate(
           payloadUA_3,
           "3 - ACS after create 3",
           create3,
           Some("Iface1-UAv2"),
-          Some(UA_V2.PACKAGE_ID),
+          Some(UpgradeTestDar2_0_0.packageId),
         )
       }
       inside(acs_after_v3_upload) { case Vector(create1, create2, create3) =>
@@ -563,21 +566,21 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "1 - ACS after v3 upload",
           create1,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
         assertCreate(
           payloadUA_2,
           "2 - ACS after v3 upload",
           create2,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
         assertCreate(
           payloadUA_3,
           "3 - ACS after v3 upload",
           create3,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
       }
       inside(acs_after_create_4) { case Vector(create1, create2, create3, create4) =>
@@ -586,28 +589,28 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "1 - ACS after create 4",
           create1,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
         assertCreate(
           payloadUA_2,
           "2 - ACS after create 4",
           create2,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
         assertCreate(
           payloadUA_3,
           "3 - ACS after create 4",
           create3,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
         assertCreate(
           payloadUA_4,
           "4 - ACS after create 4",
           create4,
           Some("Iface1-UAv3"),
-          Some(UA_V3.PACKAGE_ID),
+          Some(UpgradeTestDar3_0_0.packageId),
         )
       }
 
@@ -636,9 +639,6 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
     allocate(SingleParty),
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val dummy = new Dummy(party)
-    implicit val dummyCompanion
-        : ContractCompanion.WithoutKey[Dummy.Contract, Dummy.ContractId, Dummy] =
-      Dummy.COMPANION
 
     val dummyTemplateSubscriptions = new Subscriptions(
       "Dummy template",
@@ -703,9 +703,6 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
     allocate(SingleParty),
   )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
     val dummy = new Dummy(party)
-    implicit val dummyCompanion
-        : ContractCompanion.WithoutKey[Dummy.Contract, Dummy.ContractId, Dummy] =
-      Dummy.COMPANION
 
     val dummyTemplateSubscriptions = new Subscriptions(
       "Dummy template",
@@ -729,7 +726,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
         assertSingleton("Only one create in the ACS", acs).representativePackageId,
         // For create events stemming from command submissions,
         // the representative package-id is the same as the contract's package-id
-        Dummy.PACKAGE_ID,
+        ModelTestDar.packageId,
       )
 
       val acsDeltaTx = assertSingleton("Acs Delta transactions for Dummy template", acsDeltaTxs)
@@ -741,7 +738,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "ACS delta events",
           acsDeltaTx.events,
         ).event.created.value.representativePackageId,
-        Dummy.PACKAGE_ID,
+        ModelTestDar.packageId,
       )
 
       assertEquals(
@@ -750,7 +747,7 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
           "Ledger Effects events",
           ledgerFxTx.events,
         ).event.created.value.representativePackageId,
-        Dummy.PACKAGE_ID,
+        ModelTestDar.packageId,
       )
     }
   })
@@ -782,8 +779,8 @@ class UpgradingIT(testDars: TestDars) extends LedgerTestSuite {
         .transactions(LedgerEffects, party)
         .map(_.flatMap(exercisedEvents))
     } yield {
-      val v1TmplId = Fetcher_V1.TEMPLATE_ID_WITH_PACKAGE_ID
-      val v2TmplId = Fetcher_V2.TEMPLATE_ID_WITH_PACKAGE_ID
+      val v1TmplId = Fetcher_V1.TEMPLATE_ID.withPackageId(UpgradeFetchTestDar1_0_0.packageId)
+      val v2TmplId = Fetcher_V2.TEMPLATE_ID.withPackageId(UpgradeFetchTestDar2_0_0.packageId)
 
       // The first exercise reports template with package id per v1, and the second per v2
       assertEquals(toJavaProto(exercised1.templateId.value), v1TmplId.toProto)

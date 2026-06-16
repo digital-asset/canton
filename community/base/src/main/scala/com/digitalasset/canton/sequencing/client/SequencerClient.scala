@@ -1475,9 +1475,12 @@ class RichSequencerClientImpl(
           postAggregationHandler,
           syncCryptoClient.pureCrypto,
           config.eventInboxSize,
+          config.pastEventsCacheSize,
           loggerFactory,
-          MessageAggregationConfig(sequencerTransports.sequencerTrustThreshold),
+          MessageAggregationConfig.fromSequencerTransports(sequencerTransports),
           updateSendTracker = sendTracker.update,
+          notifyNewEvent =
+            event => sequencerSubscriptionPoolRef.get.foreach(_.checkLiveness(event)),
           timeouts,
           futureSupervisor,
         )
@@ -1601,13 +1604,13 @@ class RichSequencerClientImpl(
     * [[applicationHandlerFailure]] contains an error.
     */
   private def processEventBatch[
-      Box[+X <: Envelope[?]] <: ProcessingSequencedEvent[X],
+      Box[+B <: GenBatch[?]] <: ProcessingSequencedEvent[B],
       Env <: Envelope[?],
   ](
       eventHandler: UnthrottledApplicationHandler[Lambda[
-        `+X <: Envelope[_]` => Traced[Seq[Box[X]]]
+        `+X <: Envelope[_]` => Traced[Seq[Box[Batch[X]]]]
       ], Env],
-      eventBatch: Seq[Box[Env]],
+      eventBatch: Seq[Box[Batch[Env]]],
   ): EitherT[FutureUnlessShutdown, ApplicationHandlerFailure, Unit] =
     NonEmpty
       .from(eventBatch)
@@ -1646,7 +1649,7 @@ class RichSequencerClientImpl(
             //   the application handler.
             // - Ongoing invocations of this method are not affected by clearing the queue,
             //   because the events processed by the ongoing invocation have been drained from the queue before clearing.
-            sequencerAggregatorRef.get.foreach(_.eventQueue.clear())
+            sequencerAggregatorRef.get.foreach(_.clearEventQueue())
             failure
           }
 
@@ -1746,7 +1749,7 @@ class RichSequencerClientImpl(
       }
       sequencerAggregatorRef.get.foreach(
         _.changeMessageAggregationConfig(
-          MessageAggregationConfig(sequencerTransports.sequencerTrustThreshold)
+          MessageAggregationConfig.fromSequencerTransports(sequencerTransports)
         )
       )
       sequencersTransportState.changeTransport(sequencerTransports)
@@ -2276,6 +2279,7 @@ object SequencerClient {
       sequencerLivenessMargin: NonNegativeInt,
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
+      subscriptionLivenessLimits: SubscriptionLivenessLimits,
   )
 
   object SequencerTransports {
@@ -2284,12 +2288,14 @@ object SequencerClient {
         sequencerLivenessMargin: NonNegativeInt,
         submissionRequestAmplification: SubmissionRequestAmplification,
         sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
+        subscriptionLivenessLimits: SubscriptionLivenessLimits,
     ): SequencerTransports =
       SequencerTransports(
         sequencerTrustThreshold = sequencerSignatureThreshold,
         sequencerLivenessMargin = sequencerLivenessMargin,
         submissionRequestAmplification = submissionRequestAmplification,
         sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
+        subscriptionLivenessLimits = subscriptionLivenessLimits,
       )
 
     def default: SequencerTransports =
@@ -2298,6 +2304,7 @@ object SequencerClient {
         sequencerLivenessMargin = NonNegativeInt.zero,
         SubmissionRequestAmplification.NoAmplification,
         SequencerConnectionPoolDelays.default,
+        SubscriptionLivenessLimits.default,
       )
   }
 

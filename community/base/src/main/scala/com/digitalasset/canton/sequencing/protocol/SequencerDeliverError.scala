@@ -189,7 +189,7 @@ object SequencerErrors extends SequencerErrorGroup {
         id = "SEQUENCER_AGGREGATE_INVALID_RULE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    def invalidMediatorGroup(desc: String): SequencerDeliverError = apply(desc)
+    def invalid(desc: String): SequencerDeliverError = apply(desc)
   }
 
   @Explanation(
@@ -201,7 +201,7 @@ object SequencerErrors extends SequencerErrorGroup {
   case object AggregateSubmissionAlreadySent
       extends SequencerDeliverErrorCode(
         id = "SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT",
-        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       )
 
   @Explanation(

@@ -31,7 +31,10 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   DynamicSynchronizerParameterGetter,
 }
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
-import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
+import com.digitalasset.canton.platform.apiserver.services.admin.{
+  PartyAllocation,
+  PartyReplicationEndpoints,
+}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
@@ -100,6 +103,7 @@ object ApiServiceOwner {
         _ => None, // Used for Canton rate-limiting,
       authServices: Seq[AuthService],
       jwtVerifierLoader: JwtVerifierLoader,
+      partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
       userManagement: UserManagementServiceConfig = ApiServiceOwner.DefaultUserManagement,
       partyManagementServiceConfig: PartyManagementServiceConfig =
         ApiServiceOwner.DefaultPartyManagementServiceConfig,
@@ -211,6 +215,7 @@ object ApiServiceOwner {
         safeToPruneCommitmentState = safeToPruneCommitmentState,
         logger = loggerFactory.getTracedLogger(this.getClass),
         apiContractService = apiContractService,
+        partyReplicationEndpointsO = partyReplicationEndpointsO,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(

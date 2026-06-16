@@ -75,6 +75,7 @@ object ConfigValidations extends NamedLogging {
     List[Validation](
       alphaProtocolVersionRequiresNonStandard,
       dbSequencerRequiresNonStandard,
+      bftBlockOrderingStandaloneModeRequiresNonStandard,
       snapshotDirRequiresNonStandard,
       warnIfUnsafeMinProtocolVersion,
       adminTokenSafetyCheckParticipants,
@@ -312,6 +313,27 @@ object ConfigValidations extends NamedLogging {
 
   def dbSequencerRequiresNonStandardError(nodeName: String): String =
     s"Using DB sequencer config for sequencer $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
+
+  private def bftBlockOrderingStandaloneModeRequiresNonStandard(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val errors = if (!config.parameters.nonStandardConfig) {
+      config.sequencers.toSeq.mapFilter { case (name, config) =>
+        config.sequencer match {
+          case x: SequencerConfig.BftSequencer =>
+            if (x.config.standalone.isDefined)
+              Some(bftBlockOrderingStandaloneModeRequiresNonStandardError(name.unwrap))
+            else None
+          case _ => None
+        }
+      }
+    } else Nil
+
+    toValidated(errors)
+  }
+
+  def bftBlockOrderingStandaloneModeRequiresNonStandardError(nodeName: String): String =
+    s"Using BftBlockOrdering standalone mode for sequencer $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
 
   private def warnIfUnsafeMinProtocolVersion(
       config: CantonConfig

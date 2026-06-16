@@ -21,8 +21,8 @@ import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.pool.{SequencerConnection, SequencerConnectionPool}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
-  SequencedEventHandler,
-  SequencedSerializedEvent,
+  MaybeCompressedSequencedEventHandler,
+  MaybeCompressedSerializedEvent,
   SequencerClientRecorder,
 }
 import com.digitalasset.canton.time.Clock
@@ -323,7 +323,7 @@ class ReplayClientImpl(
 
   private def subscribe(
       request: SubscriptionRequest,
-      handler: SequencedEventHandler[NotUsed],
+      handler: MaybeCompressedSequencedEventHandler[NotUsed],
   ): Either[String, AutoCloseable] =
     for {
       connection <- getConnection("replay-client-subscribe")
@@ -415,7 +415,7 @@ class ReplayClientImpl(
       java.time.Duration.between(from.toInstant, Instant.now())
     }
 
-    private def updateMetrics(event: SequencedEvent[ClosedEnvelope]): Unit =
+    private def updateMetrics(event: SequencedEvent[GenBatch[ClosedEnvelope]]): Unit =
       withEmptyMetricsContext { implicit metricsContext =>
         val messageIdO: Option[MessageId] = event match {
           case Deliver(_, _, _, messageId, _, _, _) => messageId
@@ -431,7 +431,7 @@ class ReplayClientImpl(
       }
 
     private def handle(
-        event: SequencedSerializedEvent
+        event: MaybeCompressedSerializedEvent
     ): FutureUnlessShutdown[Either[NotUsed, Unit]] = {
       val content = event.signedEvent.content
 

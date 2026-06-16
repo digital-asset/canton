@@ -17,6 +17,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   EmptyAcsPublicationRequired,
   LsuTimeReached,
   ReassignmentAccepted,
+  ReceivedAcsCommitment,
   SequencedCommandRejected,
   SequencerIndexMoved,
   TopologyTransactionEffective,
@@ -50,7 +51,11 @@ import com.digitalasset.canton.platform.store.backend.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
-import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, LfValueTranslation}
+import com.digitalasset.canton.platform.store.dao.events.{
+  CompressionStrategy,
+  ContractStateEvent,
+  LfValueTranslation,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
@@ -392,6 +397,8 @@ object ParallelIndexerSubscription {
     * @param eventCount
     *   The number of events (event sequential id delta) in this batch. Used by ACHS maintenance to
     *   compute work distances.
+    * @param contractStateEvents
+    *   The contract state events (activations and deactivations) derived from the batch.
     */
   final case class Batch[+T](
       ledgerEnd: LedgerEnd,
@@ -403,6 +410,7 @@ object ParallelIndexerSubscription {
       eventCount: Long,
       batchTraceContext: TraceContext,
       usedInternalContractIds: Set[Long],
+      contractStateEvents: Vector[ContractStateEvent],
   )
 
   final case class SynCon(
@@ -635,6 +643,7 @@ object ParallelIndexerSubscription {
       case u: Update.LsuTimeReached => u
       case u: Update.SequencerIndexMoved => u
       case u: Update.TopologyTransactionEffective => u
+      case u: Update.ReceivedAcsCommitment => u
     }
 
     for {
@@ -726,6 +735,7 @@ object ParallelIndexerSubscription {
         input.iterator.map(_._2)
       )(logger),
       usedInternalContractIds = Set.empty, // will be filled later
+      contractStateEvents = Vector.empty, // will be filled later
     )
   }
 
@@ -742,6 +752,7 @@ object ParallelIndexerSubscription {
       eventCount = 0L, // will be populated later
       distinctRawStrings = Nil, // will be populated later
       usedInternalContractIds = Set.empty, // will be populated later
+      contractStateEvents = Vector.empty, // will be populated later
     )
 
   def seqMapper(
@@ -773,6 +784,7 @@ object ParallelIndexerSubscription {
 
         val missingDeactivatedActivationsBuilder =
           Map.newBuilder[SynCon, Option[ActivationRef]]
+
         def setActivation(dbDto: DbDto.EventActivate): Unit = {
           val synCon = dbDto.synCon
           val activationRef = dbDto.activationRef
@@ -868,6 +880,7 @@ object ParallelIndexerSubscription {
           missingDeactivatedActivations = missingDeactivatedActivationsBuilder.result(),
           eventCount = eventSeqId - previous.ledgerEnd.lastEventSeqId,
           distinctRawStrings = Nil, // not needed anymore
+          contractStateEvents = Vector.empty, // built later
         )
       },
     )
@@ -1006,11 +1019,38 @@ object ParallelIndexerSubscription {
     val dbBatch = batchF(finalDbDtos)
     val usedInternalContractIds =
       extractPersistedContracts(inBatch.offsetsUpdates).view.map(_._2.internalContractId).toSet
+    val contractStateEvents = buildContractStateEvents(finalDbDtos)
     inBatch.copy(
       batch = dbBatch,
       usedInternalContractIds = usedInternalContractIds,
+      contractStateEvents = contractStateEvents,
     )
   }
+
+  private def buildContractStateEvents(
+      dbDtos: Vector[DbDto]
+  ): Vector[ContractStateEvent] =
+    dbDtos.flatMap {
+      case activate: DbDto.EventActivate =>
+        Some(
+          ContractStateEvent.Activated(
+            contractId = activate.notPersistedContractId,
+            globalKey = activate.notPersistedContractKey,
+            eventSequentialId = activate.event_sequential_id,
+            isInitial = activate.event_type == PersistentEventType.Create.asInt,
+          )
+        )
+      case deactivate: DbDto.EventDeactivate =>
+        deactivate.deactivated_event_sequential_id.map { deactivatedEventSequentialId =>
+          ContractStateEvent.Deactivated(
+            contractId = deactivate.contract_id,
+            globalKey = deactivate.notPersistedContractKey,
+            deactivatedEventSequentialId = deactivatedEventSequentialId,
+            isFinal = deactivate.event_type == PersistentEventType.ConsumingExercise.asInt,
+          )
+        }
+      case _ => None
+    }
 
   def ingester[DbBatch](
       ingestFunction: (Connection, DbBatch) => Unit,
@@ -1273,6 +1313,7 @@ object ParallelIndexerSubscription {
     case (_, u: UnSequencedCommandRejected) => InsertWeight
     case (_, u: ReassignmentAccepted) =>
       (2 + u.reassignment.iterator.map(_.stakeholders.size + 1).sum) * InsertWeight
+    case (_, u: ReceivedAcsCommitment) => 2 // TODO(#33232): verify / correct
   }
 
   class ReferencedContractNotFoundException

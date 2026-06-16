@@ -39,6 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
@@ -392,7 +393,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
             prePrepare.viewNumber,
             originalLeader = commitCert.prePrepare.from,
             isLastInEpoch = true,
-            mode = OrderedBlockForOutput.Mode.FromStateTransfer,
+            orderingMode = OrderingMode.StateTransfer,
           )
         )
       )
@@ -433,7 +434,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   "cancel a timeout" when {
     "an epoch is transferred" in {
       val timeoutManager = mock[
-        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[ProgrammableUnitTestEnv], String]
+        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], String]
       ]
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](

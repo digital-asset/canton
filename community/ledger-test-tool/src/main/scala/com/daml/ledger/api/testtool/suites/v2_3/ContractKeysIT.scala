@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
@@ -40,8 +41,8 @@ import java.util.regex.Pattern
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
-final class ContractKeysIT extends LedgerTestSuite {
-  import ContractKeysCompanionImplicits.*
+final class ContractKeysIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.contractKeysCompanionImplicits.*
 
   test(
     "CKNoContractKey",
@@ -364,7 +365,7 @@ final class ContractKeysIT extends LedgerTestSuite {
       failureBeforeCreation <- ledger
         .exerciseByKey(
           party,
-          TextKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+          textKeyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
           expectedKey,
           "TextKeyChoice",
           new DamlRecord(),
@@ -373,7 +374,7 @@ final class ContractKeysIT extends LedgerTestSuite {
       _ <- ledger.create(party, new TextKey(party, keyString, List.empty.asJava))
       _ <- ledger.exerciseByKey(
         party,
-        TextKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+        textKeyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
         expectedKey,
         "TextKeyChoice",
         new DamlRecord(),
@@ -381,7 +382,7 @@ final class ContractKeysIT extends LedgerTestSuite {
       failureAfterConsuming <- ledger
         .exerciseByKey(
           party,
-          TextKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+          textKeyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID,
           expectedKey,
           "TextKeyChoice",
           new DamlRecord(),

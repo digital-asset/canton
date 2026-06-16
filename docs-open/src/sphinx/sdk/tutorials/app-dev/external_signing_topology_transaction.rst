@@ -119,7 +119,6 @@ For a terminal-based approach, install the following tools:
 - `openssl <https://www.openssl.org/>`_
 - `buf <https://buf.build/docs/cli/installation/>`_
 - `jq <https://jqlang.org/>`_
-- `xxd <https://linux.die.net/man/1/xxd>`_
 
 The tutorial uses a buf proto image to (de)serialize proto messages.
 

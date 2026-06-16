@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
@@ -36,10 +37,10 @@ import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
-class TransactionServiceVisibilityIT extends LedgerTestSuite {
+class TransactionServiceVisibilityIT(testDars: TestDars) extends LedgerTestSuite {
 
   import com.digitalasset.canton.BigDecimalImplicits.*
-  import CompanionImplicits.*
+  import testDars.companionImplicits.*
 
   implicit val iouTransferCompanion
       : ContractCompanion.WithoutKey[IouTransfer.Contract, IouTransfer.ContractId, IouTransfer] =

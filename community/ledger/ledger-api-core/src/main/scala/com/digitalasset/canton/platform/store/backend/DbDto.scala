@@ -18,6 +18,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   Party,
   UserId,
 }
+import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 sealed trait DbDto
@@ -55,6 +56,7 @@ object DbDto {
       notPersistedContractId: ContractId, // just needed for processing
       internal_contract_id: Long,
       create_key_hash: Option[String],
+      notPersistedContractKey: Option[GlobalKey], // just needed for processing
   ) extends DbDto {
     override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
       submitters.foreach(_.foreach(builder.addParty))
@@ -106,6 +108,7 @@ object DbDto {
       package_id: PackageId,
       stakeholders: Set[Party],
       ledger_effective_time: Option[Long],
+      notPersistedContractKey: Option[GlobalKey], // just needed for processing
   ) extends DbDto {
     override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
       submitters.foreach(_.foreach(builder.addParty))
@@ -323,6 +326,7 @@ object DbDto {
       notPersistedContractId: ContractId,
       internal_contract_id: Long,
       create_key_hash: Option[String],
+      notPersistedContractKey: Option[GlobalKey],
   )(stakeholders: Set[Party], template_id: NameTypeConRef): Iterator[DbDto] =
     Iterator(
       EventActivate(
@@ -350,6 +354,7 @@ object DbDto {
         notPersistedContractId = notPersistedContractId,
         internal_contract_id = internal_contract_id,
         create_key_hash = create_key_hash,
+        notPersistedContractKey = notPersistedContractKey,
       )
     ) ++ idFilters(
       event_sequential_id = event_sequential_id,
@@ -385,6 +390,7 @@ object DbDto {
       notPersistedContractId: ContractId,
       internal_contract_id: Long,
       create_key_hash: Option[String],
+      notPersistedContractKey: Option[GlobalKey],
   )(stakeholders: Set[Party], template_id: NameTypeConRef): Iterator[DbDto] =
     Iterator(
       EventActivate(
@@ -412,6 +418,7 @@ object DbDto {
         notPersistedContractId = notPersistedContractId,
         internal_contract_id = internal_contract_id,
         create_key_hash = create_key_hash,
+        notPersistedContractKey = notPersistedContractKey,
       )
     ) ++ idFilters(
       event_sequential_id = event_sequential_id,
@@ -453,6 +460,7 @@ object DbDto {
       package_id: PackageId,
       stakeholders: Set[Party],
       ledger_effective_time: Long,
+      notPersistedContractKey: Option[GlobalKey],
   ): Iterator[DbDto] =
     Iterator(
       EventDeactivate(
@@ -492,6 +500,7 @@ object DbDto {
         package_id = package_id,
         stakeholders = stakeholders,
         ledger_effective_time = Some(ledger_effective_time),
+        notPersistedContractKey = notPersistedContractKey,
       )
     ) ++ idFilters(
       event_sequential_id = event_sequential_id,
@@ -530,6 +539,7 @@ object DbDto {
       template_id: NameTypeConRef,
       package_id: PackageId,
       stakeholders: Set[Party],
+      notPersistedContractKey: Option[GlobalKey],
   ): Iterator[DbDto] =
     Iterator(
       EventDeactivate(
@@ -569,6 +579,7 @@ object DbDto {
         package_id = package_id,
         stakeholders = stakeholders,
         ledger_effective_time = None,
+        notPersistedContractKey = notPersistedContractKey,
       )
     ) ++ idFilters(
       event_sequential_id = event_sequential_id,

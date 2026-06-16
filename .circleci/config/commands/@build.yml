@@ -199,19 +199,11 @@ cleanup_test_job:
             name: Dump Postgres query stats (if any)
             when: always
             command: |
-              .ci/nix-exec .circleci/dump-pg-query-stats.sh
+              .ci/nix-exec scripts/ci/dump-pg-query-stats.sh
         - store_artifacts:
             name: Store Postgres query stats as artifacts (if any)
             path: postgres-query-stats.sql.gz
             destination: postgres/postgres-query-stats.sql.gz
-
-# On a branch will check for controlled files and fail if detected
-# On a PR will check for controlled files and add missing labels automatically
-check_pr_compliance_labels:
-  steps:
-    - run:
-        name: Compliance labels check for PR
-        command: scripts/ci/check-pr-compliance-labels.sh
 
 check_pr_skip_ci:
   steps:

@@ -21,7 +21,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{LfCommand, LfGlobalKeyMapping, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfCommand, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
@@ -53,7 +53,6 @@ object DAMLe {
   final case class ReInterpretationResult(
       transaction: LfVersionedTransaction,
       metadata: TransactionMetadata,
-      legacyKeyResolver: LfGlobalKeyMapping,
       usedPackages: UsedPackages,
       timeBoundaries: LedgerTimeBoundaries,
   )
@@ -304,7 +303,6 @@ class DAMLe(
       ReInterpretationResult(
         transaction = txNoRootRollback,
         metadata = TransactionMetadata.fromLf(ledgerTime, metadata),
-        legacyKeyResolver = metadata.globalKeyMapping,
         usedPackages = UsedPackages(
           // TODO(#29834): Optimization: Do not unnecessarily compute both sets if we know we only need one
           actionNodePackageIds = tx.nodes.values.view

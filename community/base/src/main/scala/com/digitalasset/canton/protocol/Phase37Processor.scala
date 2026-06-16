@@ -10,6 +10,7 @@ import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordO
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   Deliver,
   MediatorGroupRecipient,
   SignedContent,
@@ -66,7 +67,7 @@ trait Phase37Processor[RequestBatch, Event] {
     */
   def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit
       traceContext: TraceContext
   ): HandlerResult

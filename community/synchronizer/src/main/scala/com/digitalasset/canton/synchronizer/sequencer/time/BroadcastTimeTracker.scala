@@ -7,7 +7,13 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing.protocol.{Deliver, DeliverError, Envelope, SequencedEvent}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  DecompressedSequencedEvent,
+  Deliver,
+  DeliverError,
+  Envelope,
+}
 import com.digitalasset.canton.sequencing.{
   BoxedEnvelope,
   HandlerResult,
@@ -68,9 +74,11 @@ class BroadcastTimeTrackerImpl(override protected val loggerFactory: NamedLogger
     HandlerResult.done
   }
 
-  private def containsBroadcast[Env <: Envelope[?]](event: SequencedEvent[Env]): Boolean =
+  private def containsBroadcast[Env <: Envelope[?]](
+      event: DecompressedSequencedEvent[Env]
+  ): Boolean =
     event match {
-      case deliver: Deliver[?] => deliver.batch.isBroadcast
+      case deliver: Deliver[Batch[Env]] => deliver.batch.isBroadcast
       case _: DeliverError => false
     }
 

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -143,7 +144,21 @@ sealed trait SynchronizerConnectivityIntegrationTest
         participant2.synchronizers.list_connected().map(_.synchronizerAlias) shouldBe Seq(daName)
         participant2.synchronizers.disconnect_all()
         participant2.synchronizers.list_connected() shouldBe empty
+      }
+    }
 
+    "A participant" must {
+      "Be able to change the config" in { implicit env =>
+        import env.*
+
+        participant1.synchronizers.modify(daName, _.focus(_.priority).modify(_ + 1))
+        participant1.synchronizers.modify(
+          daName,
+          _.focus(_.priority).modify(_ + 1),
+          physicalSynchronizerId = Some(daId),
+        )
+
+        succeed
       }
     }
   }
@@ -408,6 +423,7 @@ sealed trait SynchronizerConnectivityIntegrationTest
               sequencerLivenessMargin = NonNegativeInt.zero,
               SubmissionRequestAmplification.NoAmplification,
               SequencerConnectionPoolDelays.default,
+              SubscriptionLivenessLimits.default,
             ),
           ),
           validation = SequencerConnectionValidation.ThresholdActive,

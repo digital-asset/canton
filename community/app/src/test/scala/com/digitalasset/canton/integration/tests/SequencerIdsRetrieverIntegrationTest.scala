@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -114,6 +115,7 @@ final class SequencerIdsRetrieverIntegrationTest
         sequencerLivenessMargin = NonNegativeInt.zero,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       ),
     )
 

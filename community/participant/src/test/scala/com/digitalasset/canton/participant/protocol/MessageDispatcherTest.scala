@@ -155,7 +155,7 @@ trait MessageDispatcherTest {
         when(
           processor.processResult(
             any[SequencerCounter],
-            any[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]],
+            any[WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
           )(anyTraceContext)
         )
           .thenReturn(processingResultHandlerF)
@@ -288,7 +288,7 @@ trait MessageDispatcherTest {
       ts: CantonTimestamp = CantonTimestamp.Epoch,
       messageId: Option[MessageId] = None,
       topologyTimestampO: Option[CantonTimestamp] = None,
-  ): Deliver[DefaultOpenEnvelope] =
+  ): Deliver[Batch[DefaultOpenEnvelope]] =
     Deliver.create(
       None,
       ts,
@@ -302,8 +302,8 @@ trait MessageDispatcherTest {
   private def rootHash(index: Int): RootHash = RootHash(TestHash.digest(index))
 
   private def signEvent[Env <: Envelope[?]](
-      event: SequencedEvent[Env]
-  ): SignedContent[SequencedEvent[Env]] =
+      event: DecompressedSequencedEvent[Env]
+  ): SignedContent[DecompressedSequencedEvent[Env]] =
     SequencerTestUtils.sign(event)
 
   private val dummySignature = SymbolicCrypto.emptySignature
@@ -526,7 +526,7 @@ trait MessageDispatcherTest {
     def checkProcessResult(processor: AnyProcessor): Assertion = {
       verify(processor).processResult(
         any[SequencerCounter],
-        any[WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]]],
+        any[WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]]],
       )(anyTraceContext)
       succeed
     }

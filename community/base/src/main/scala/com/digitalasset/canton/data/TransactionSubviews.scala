@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.data
 
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.BlindingCommand
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndexFromRoot}
@@ -97,7 +98,10 @@ final case class TransactionSubviews private[data] (
     *   function to generate the error message
     */
   def assertAllUnblinded(makeMessage: RootHash => String): Unit =
-    blindedElements.headOption.foreach(hash => throw new IllegalStateException(makeMessage(hash)))
+    allUnblinded(makeMessage).valueOr(err => throw new IllegalStateException(err))
+
+  private[data] def allUnblinded(makeMessage: RootHash => String): Either[String, Unit] =
+    blindedElements.headOption.map(hash => makeMessage(hash)).toLeft(())
 
 }
 
@@ -138,7 +142,7 @@ object TransactionSubviews {
   @VisibleForTesting
   object Optics {
     val subviewsUnsafe: Lens[TransactionSubviews, MerkleSeq[TransactionView]] =
-      GenLens[TransactionSubviews](_.subviews)
+      GenLens.apply[TransactionSubviews](_.subviews)
   }
 
 }

@@ -205,7 +205,7 @@ final case class TestingTopology(
       val existing = flags.getOrElse(participant, Seq.empty)
       flags.updated(
         participant,
-        (ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer +: existing).distinct,
+        (ParticipantTopologyFeatureFlag.EnableMultiSynchronizer +: existing).distinct,
       )
     })
 

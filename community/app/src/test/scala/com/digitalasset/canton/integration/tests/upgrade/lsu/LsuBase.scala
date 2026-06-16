@@ -8,6 +8,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -214,6 +215,7 @@ private[lsu] trait LsuBase
         sequencerLivenessMargin = NonNegativeInt.zero,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       ),
     )
   }

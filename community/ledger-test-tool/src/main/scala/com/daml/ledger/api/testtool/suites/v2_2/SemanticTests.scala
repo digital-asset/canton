@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
@@ -30,19 +31,21 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 import scala.util.Success
 
-final class SemanticTests extends LedgerTestSuite {
-  import CompanionImplicits.*
+final class SemanticTests(testDars: TestDars) extends LedgerTestSuite {
+  private val semanticTestsPackageId = testDars.SemanticTestDar.packageId
+
+  import testDars.companionImplicits.*
   implicit val delegationCompanion
-      : ContractCompanion.WithoutKey[Delegation.Contract, Delegation.ContractId, Delegation] =
-    Delegation.COMPANION
-  implicit val sharedContractCompanion: ContractCompanion.WithoutKey[
+      : ContractCompanion[Delegation.Contract, Delegation.ContractId, Delegation] =
+    Delegation.COMPANION.withPackageId(semanticTestsPackageId)
+  implicit val sharedContractCompanion: ContractCompanion[
     SharedContract.Contract,
     SharedContract.ContractId,
     SharedContract,
-  ] = SharedContract.COMPANION
+  ] = SharedContract.COMPANION.withPackageId(semanticTestsPackageId)
   implicit val paintOfferCompanion
-      : ContractCompanion.WithoutKey[PaintOffer.Contract, PaintOffer.ContractId, PaintOffer] =
-    PaintOffer.COMPANION
+      : ContractCompanion[PaintOffer.Contract, PaintOffer.ContractId, PaintOffer] =
+    PaintOffer.COMPANION.withPackageId(semanticTestsPackageId)
 
   private[this] val onePound = new Amount(BigDecimal.valueOf(1), "GBP")
   private[this] val twoPounds = new Amount(BigDecimal.valueOf(2), "GBP")
@@ -208,13 +211,15 @@ final class SemanticTests extends LedgerTestSuite {
       } yield {
         val agreement = assertSingleton(
           "SemanticPaintOffer",
-          createdEvents(tree).filter(_.getTemplateId == PaintAgree.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+          createdEvents(tree).filter(
+            _.getTemplateId == PaintAgree.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1
+          ),
         )
         assertEquals(
           "Paint agreement parameters",
           agreement.getCreateArguments,
           Record(
-            recordId = Some(PaintAgree.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+            recordId = Some(PaintAgree.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1),
             fields = Seq(
               RecordField("painter", Some(Value(Value.Sum.Party(painter)))),
               RecordField("houseOwner", Some(Value(Value.Sum.Party(houseOwner)))),
@@ -288,14 +293,14 @@ final class SemanticTests extends LedgerTestSuite {
         val agreement = assertSingleton(
           "SemanticPaintCounterOffer",
           createdEvents(tx).filter(
-            _.getTemplateId == PaintAgree.TEMPLATE_ID_WITH_PACKAGE_ID.toV1
+            _.getTemplateId == PaintAgree.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1
           ),
         )
         assertEquals(
           "Paint agreement parameters",
           agreement.getCreateArguments,
           Record(
-            recordId = Some(PaintAgree.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+            recordId = Some(PaintAgree.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1),
             fields = Seq(
               RecordField("painter", Some(Value(Value.Sum.Party(painter)))),
               RecordField("houseOwner", Some(Value(Value.Sum.Party(houseOwner)))),
@@ -386,7 +391,7 @@ final class SemanticTests extends LedgerTestSuite {
 
         tree <- alpha.exercise(houseOwner, offer.exercisePaintOffer_Accept(iou))
         (newIouEvents, agreementEvents) = createdEvents(tree).partition(
-          _.getTemplateId == Iou.TEMPLATE_ID_WITH_PACKAGE_ID.toV1
+          _.getTemplateId == Iou.TEMPLATE_ID.withPackageId(semanticTestsPackageId).toV1
         )
         newIouEvent <- Future(newIouEvents.headOption.value)
         agreementEvent <- Future(agreementEvents.headOption.value)

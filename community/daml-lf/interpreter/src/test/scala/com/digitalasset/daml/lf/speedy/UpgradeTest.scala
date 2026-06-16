@@ -1127,7 +1127,7 @@ class UpgradeTest
 
       val gtV10HahsingMethods = Table(
         "hashingMethod",
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 

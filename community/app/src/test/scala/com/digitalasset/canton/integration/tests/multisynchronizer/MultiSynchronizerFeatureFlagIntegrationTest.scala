@@ -258,7 +258,6 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
       participant1.ledger_api.completions
         .list(
           aliceId,
-          userId = "tests",
           atLeastNumCompletions = 1,
           beginOffsetExclusive = offsetBeforeSubmit,
         )

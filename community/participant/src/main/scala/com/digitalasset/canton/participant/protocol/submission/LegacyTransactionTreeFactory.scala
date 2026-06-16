@@ -42,7 +42,6 @@ import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.KeyInactive
 import com.digitalasset.daml.lf.transaction.Transaction.{
   KeyActive,
@@ -97,7 +96,6 @@ class LegacyTransactionTreeFactory(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      legacyKeyResolver: LfGlobalKeyMapping,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -109,7 +107,7 @@ class LegacyTransactionTreeFactory(
       mediator,
       transactionUuid,
       metadata.ledgerTime,
-      legacyKeyResolver.asCidOptionMap,
+      keyResolver = Map.empty,
     )
 
     // Create salts
@@ -507,16 +505,17 @@ class LegacyTransactionTreeFactory(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, LfNodeCreate] = {
 
-    val cantonContractInst = checked(
+    val suffixedArg = checked(
       LfTransactionUtil
-        .suffixContractInst(state.suffixOfCreatedContract)(createNode.versionedCoinst)
+        .suffixArg(state.suffixOfCreatedContract)(createNode.arg)
         .valueOr(cid =>
           throw new IllegalStateException(
             s"Invalid contract id $cid found in contract instance of create node"
           )
         )
-    ).unversioned
-    val createNodeWithSuffixedArg = createNode.copy(arg = cantonContractInst.arg)
+    )
+
+    val createNodeWithSuffixedArg = createNode.copy(arg = suffixedArg)
 
     val contractSalt = cantonContractIdVersion match {
       case _: CantonContractIdV1Version =>
@@ -852,7 +851,6 @@ class LegacyTransactionTreeFactory(
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      legacyKeyResolver: LfGlobalKeyMapping,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -873,11 +871,11 @@ class LegacyTransactionTreeFactory(
 
     val metadata = transaction.metadata
     val state = stateForValidation(
-      mediator,
-      transactionUuid,
-      metadata.ledgerTime,
-      viewSalts,
-      legacyKeyResolver.asCidOptionMap,
+      mediator = mediator,
+      transactionUUID = transactionUuid,
+      ledgerTime = metadata.ledgerTime,
+      salts = viewSalts,
+      keyResolver = Map.empty,
     )
 
     val decompositionsF =

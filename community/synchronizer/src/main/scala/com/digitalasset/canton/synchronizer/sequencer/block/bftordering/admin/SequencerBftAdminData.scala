@@ -370,6 +370,8 @@ object SequencerBftAdminData {
   final case class OrderingTopology(
       currentEpoch: Long,
       sequencerIds: Seq[SequencerId],
+      leaderSequencerIds: Seq[SequencerId],
+      blacklistedSequencerIds: Seq[SequencerId],
       sequencingParameters: topology.SequencingParameters,
   ) {
 
@@ -379,6 +381,8 @@ object SequencerBftAdminData {
         sequencerIds.map(SequencerNodeId.toBftNodeId),
         GetOrderingTopologyResponse.DynamicSequencingParameters
           .DynamicSequencingParametersPayload31(sequencingParameters.toProto31),
+        leaderSequencerIds.map(SequencerNodeId.toBftNodeId),
+        blacklistedSequencerIds.map(SequencerNodeId.toBftNodeId),
       )
   }
 
@@ -386,6 +390,20 @@ object SequencerBftAdminData {
 
     def fromProto(response: GetOrderingTopologyResponse): Either[String, OrderingTopology] = for {
       sequencers <- response.sequencerIds.map { sequencerIdString =>
+        for {
+          sequencerId <- SequencerId
+            .fromProtoPrimitive(sequencerIdString, "sequencerId")
+            .leftMap(_.toString)
+        } yield sequencerId
+      }.sequence
+      leaders <- response.leaderSequencerIds.map { sequencerIdString =>
+        for {
+          sequencerId <- SequencerId
+            .fromProtoPrimitive(sequencerIdString, "sequencerId")
+            .leftMap(_.toString)
+        } yield sequencerId
+      }.sequence
+      blacklisted <- response.blacklistedSequencerIds.map { sequencerIdString =>
         for {
           sequencerId <- SequencerId
             .fromProtoPrimitive(sequencerIdString, "sequencerId")
@@ -401,7 +419,7 @@ object SequencerBftAdminData {
           topology.SequencingParameters.fromProto31(value)
       }
       parameters <- parsedParameters.leftMap(_.toString)
-    } yield OrderingTopology(response.currentEpoch, sequencers, parameters)
+    } yield OrderingTopology(response.currentEpoch, sequencers, leaders, blacklisted, parameters)
   }
 
   final case class SequencingParameters(

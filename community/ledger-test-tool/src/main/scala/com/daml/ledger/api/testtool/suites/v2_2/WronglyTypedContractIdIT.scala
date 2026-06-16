@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
@@ -11,8 +12,8 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 
 import scala.jdk.CollectionConverters.*
 
-final class WronglyTypedContractIdIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+final class WronglyTypedContractIdIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test("WTExerciseFails", "Exercising on a wrong type fails", allocate(SingleParty))(
     implicit ec => { case Participants(Participant(ledger, Seq(party))) =>

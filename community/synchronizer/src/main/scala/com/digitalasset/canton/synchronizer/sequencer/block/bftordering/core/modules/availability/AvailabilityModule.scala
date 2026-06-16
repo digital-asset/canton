@@ -34,7 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingBlock,
   ProofOfAvailability,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderingMode
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   MessageAuthorizer,
@@ -551,7 +551,7 @@ final class AvailabilityModule[E <: Env[E]](
   )(implicit
       traceContext: TraceContext,
       context: E#ActorContextT[Availability.Message[E]],
-  ): Seq[BatchId] =
+  ): Map[EpochNumber, Set[BatchId]] =
     if (currentEpoch < lastKnownEpochNumber) {
       abort(
         s"Trying to update lastKnownEpochNumber in Availability module to $currentEpoch which is lower than the current value $lastKnownEpochNumber"
@@ -576,7 +576,7 @@ final class AvailabilityModule[E <: Env[E]](
       disseminationProtocolState.disseminationQuotas.expireEpoch(initialEpochNumber, expiredEpoch)
       val evictionEpoch = EpochNumber(expiredEpoch - batchValidityDuration)
       disseminationProtocolState.disseminationQuotas.evictBatches(evictionEpoch)
-    } else Seq.empty
+    } else Map.empty
 
   private def updateLastKnownEpochNumberAndEvictExpiredBatches(
       messageType: => String,
@@ -1137,7 +1137,7 @@ final class AvailabilityModule[E <: Env[E]](
                       fetchBatchDataFromNodes(
                         messageType,
                         proofOfAvailability,
-                        request.blockForOutput.mode,
+                        request.blockForOutput.orderingMode,
                       )
                     }
                 } else {
@@ -1234,7 +1234,7 @@ final class AvailabilityModule[E <: Env[E]](
               //  If these batches cannot be retrieved, e.g. because the topology has changed too much and/or
               //  the nodes in the PoA are unreachable indefinitely, we'll need to resort (possibly manually)
               //  to state transfer incl. the batch payloads (when it is implemented).
-              if (status.mode.isStateTransfer)
+              if (status.orderingMode.isStateTransfer)
                 extractNodes(None, useActiveTopology = true)
               else
                 extractNodes(Some(status.originalProof.acks))
@@ -1351,7 +1351,7 @@ final class AvailabilityModule[E <: Env[E]](
   private def fetchBatchDataFromNodes(
       actingOnMessageType: => String,
       proofOfAvailability: ProofOfAvailability,
-      mode: OrderedBlockForOutput.Mode,
+      orderingMode: OrderingMode,
   )(implicit
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
@@ -1367,7 +1367,7 @@ final class AvailabilityModule[E <: Env[E]](
       return
     }
     val (node, remainingNodes) =
-      if (mode.isStateTransfer)
+      if (orderingMode.isStateTransfer)
         extractNodes(acks = None, useActiveTopology = true)
       else
         extractNodes(Some(proofOfAvailability.acks))
@@ -1381,7 +1381,7 @@ final class AvailabilityModule[E <: Env[E]](
       remainingNodes,
       numberOfAttempts = 1,
       jitterStream = jitterConstructor(config, random),
-      mode,
+      orderingMode,
     )
     outputFetchProtocolState.localOutputMissingBatches.update(
       proofOfAvailability.batchId,

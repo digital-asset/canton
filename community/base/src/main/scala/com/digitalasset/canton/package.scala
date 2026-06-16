@@ -103,9 +103,6 @@ package object canton {
   type LfFetchByKeyCommand = LfCommand.FetchByKey
   val LfFetchByKeyCommand: LfCommand.FetchByKey.type = LfCommand.FetchByKey
 
-  type LfLookupByKeyCommand = LfCommand.LookupByKey
-  val LfLookupByKeyCommand: LfCommand.LookupByKey.type = LfCommand.LookupByKey
-
   type LfWorkflowId = Ref.WorkflowId
   val LfWorkflowId: Ref.WorkflowId.type = Ref.WorkflowId
 

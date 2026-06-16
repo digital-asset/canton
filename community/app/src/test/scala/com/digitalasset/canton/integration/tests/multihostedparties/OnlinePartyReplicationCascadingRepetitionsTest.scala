@@ -279,7 +279,7 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
     // Wait until the party is authorized for onboarding on the TP, before archiving replicated contracts.
     canSourceProceedWithOnPR = false
     eventually() {
-      val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
+      val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)
       logger.info(s"Waiting for $targetParticipant to be authorized: $tpStatus")
       tpStatus.authorizationO.nonEmpty shouldBe true
     }

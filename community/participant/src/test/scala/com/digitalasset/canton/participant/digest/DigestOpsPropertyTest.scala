@@ -44,8 +44,7 @@ class DigestOpsPropertyTest
           counterParticipant.toLf -> counterParticipantParties.map(_.toLf).toSet,
           otherCounterParticipant.toLf -> otherCounterParticipantParties.map(_.toLf).toSet,
         )
-      )
-      .map { case (k, v) => k -> v.toSeq },
+      ),
     participant = participant.toLf,
     counterParticipant = counterParticipant.toLf,
   )
@@ -53,7 +52,7 @@ class DigestOpsPropertyTest
   property("consistency between counter-participants") {
     forAll(consistencyTestInputs) { input =>
       val updateOnParticipant = AcsUpdate(
-        stakeholders = input.stakeholdersExcludingParticipant(input.participant),
+        stakeholders = input.stakeholders,
         locallyHostedStakeholders = input.locallyHostedStakeholders(input.participant),
         cid = contractId,
         rc = ReassignmentCounter.Genesis,
@@ -61,7 +60,7 @@ class DigestOpsPropertyTest
       )
 
       val updateOnCounterParticipant = AcsUpdate(
-        stakeholders = input.stakeholdersExcludingParticipant(input.counterParticipant),
+        stakeholders = input.stakeholders,
         locallyHostedStakeholders = input.locallyHostedStakeholders(input.counterParticipant),
         cid = contractId,
         rc = ReassignmentCounter.Genesis,
@@ -101,16 +100,10 @@ object DigestOpsPropertyTest {
   private val contractId = ExampleTransactionFactory.unsuffixedId(1)
 
   final case class ConsistencyTestInput(
-      stakeholders: Map[LfPartyId, Seq[LedgerParticipantId]],
+      stakeholders: Map[LfPartyId, Set[LedgerParticipantId]],
       participant: LedgerParticipantId,
       counterParticipant: LedgerParticipantId,
   ) {
-    def stakeholdersExcludingParticipant(
-        participant: LedgerParticipantId
-    ): Map[LfPartyId, Seq[LedgerParticipantId]] = stakeholders.map { case (party, participants) =>
-      party -> participants.filterNot(_ == participant)
-    }
-
     def locallyHostedStakeholders(participant: LedgerParticipantId): Seq[LfPartyId] =
       stakeholders.collect {
         case (party, participants) if participants.contains(participant) =>

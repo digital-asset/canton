@@ -7,7 +7,7 @@ package transaction
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
-import com.digitalasset.daml.lf.value.Value.{ContractId, VersionedThinContractInstance}
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value._
 
 /** Result of an external call made during contract execution.
@@ -131,37 +131,10 @@ object Node {
 
     def versionedArg: Value.VersionedValue = versioned(arg)
 
-    def coinst: Value.ThinContractInstance =
-      Value.ThinContractInstance(packageName, templateId, arg)
-
-    def versionedCoinst: Value.VersionedThinContractInstance = versioned(coinst)
-
     def versionedKey: Option[Versioned[GlobalKeyWithMaintainers]] = keyOpt.map(versioned(_))
 
     override def informeesOfNode: Set[Party] = stakeholders
     override def requiredAuthorizers: Set[Party] = signatories
-  }
-
-  object Create {
-
-    def apply(
-        coid: ContractId,
-        contract: VersionedThinContractInstance,
-        signatories: Set[Party],
-        stakeholders: Set[Party],
-        key: Option[GlobalKeyWithMaintainers],
-    ): Create =
-      Create(
-        coid = coid,
-        packageName = contract.unversioned.packageName,
-        templateId = contract.unversioned.template,
-        arg = contract.unversioned.arg,
-        signatories = signatories,
-        stakeholders = stakeholders,
-        keyOpt = key,
-        version = contract.version,
-      )
-
   }
 
   /** Denotes that the contract identifier `coid` needs to be active for the transaction to be valid. */

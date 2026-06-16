@@ -101,9 +101,9 @@ object LateLsuRequest {
     )
 
     _ <- Either.cond(
-      successorConfig.synchronizerId.forall(_ == successorPsid),
+      successorConfig.psid.forall(_ == successorPsid),
       (),
-      s"Config synchronizer ID (${successorConfig.synchronizerId}) does not match the requested successor ID ($successorPsid)",
+      s"Config synchronizer ID (${successorConfig.psid}) does not match the requested successor ID ($successorPsid)",
     )
   } yield ()
 }

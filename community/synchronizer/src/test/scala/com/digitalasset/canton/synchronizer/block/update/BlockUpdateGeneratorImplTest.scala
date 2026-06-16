@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.block.update
 
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.{
@@ -28,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimit
 import com.digitalasset.canton.topology.DefaultTestIdentities.{physicalSynchronizerId, sequencerId}
 import com.digitalasset.canton.topology.TestingIdentityFactory
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.TracedPossiblyPrevalidated
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, HasExecutorService}
 import org.scalatest.Assertion
@@ -42,7 +44,7 @@ class BlockUpdateGeneratorImplTest
     with HasExecutorService
     with HasTopologyTransactionTestFactory {
 
-  implicit val closeContext: CloseContext = CloseContext(
+  implicit lazy val closeContext: CloseContext = CloseContext(
     FlagCloseable.withCloseContext(logger, ProcessingTimeout())
   )
 
@@ -84,6 +86,14 @@ class BlockUpdateGeneratorImplTest
       }
     )
 
+  private lazy val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
+  private lazy val parameters = BlockProcessingParameters(
+    OrderingTimeFixMode.ValidateOnly,
+    lsuSequencingBounds = None,
+    parallelism = PositiveInt.two,
+    enablePrevalidation = true,
+  )
+
   "BlockUpdateGeneratorImpl.extractBlockEvents" should {
     "filter out events" when {
       "the sequencing time is before or at the minimum sequencing time" in {
@@ -102,20 +112,23 @@ class BlockUpdateGeneratorImplTest
             syncCryptoApiFake,
             sequencerId,
             rateLimitManagerMock,
-            OrderingTimeFixMode.ValidateOnly,
-            lsuSequencingBounds = Some(
-              LsuSequencingBounds
-                .unsafeCreate(
-                  sequencingTimeLowerBoundExclusive,
-                  sequencingTimeLowerBoundExclusive,
-                )
-            ),
             drSequencingTimeUpperBound = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
-            SequencerTestMetrics,
-            BatchingConfig(),
             consistencyChecks = true,
+            parameters = BlockProcessingParameters(
+              OrderingTimeFixMode.ValidateOnly,
+              lsuSequencingBounds = Some(
+                LsuSequencingBounds
+                  .unsafeCreate(
+                    sequencingTimeLowerBoundExclusive,
+                    sequencingTimeLowerBoundExclusive,
+                  )
+              ),
+              parallelism = PositiveInt.two,
+              enablePrevalidation = true,
+            ),
+            metrics,
             memberValidatorMock,
             loggerFactory,
           )
@@ -225,14 +238,12 @@ class BlockUpdateGeneratorImplTest
             syncCryptoApiFake,
             sequencerId,
             rateLimitManagerMock,
-            OrderingTimeFixMode.ValidateOnly,
-            lsuSequencingBounds = None,
             drSequencingTimeUpperBound = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
-            SequencerTestMetrics,
-            BatchingConfig(),
             consistencyChecks = true,
+            parameters = parameters,
+            metrics,
             memberValidatorMock,
             loggerFactory,
           )
@@ -280,14 +291,12 @@ class BlockUpdateGeneratorImplTest
               ),
             sequencerId,
             mock[SequencerRateLimitManager],
-            OrderingTimeFixMode.ValidateOnly,
-            lsuSequencingBounds = None,
             drSequencingTimeUpperBound = None,
             getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
-            SequencerTestMetrics,
-            BatchingConfig(),
             consistencyChecks = true,
+            parameters = parameters,
+            metrics,
             mock[SequencerMemberValidator],
             loggerFactory,
           )
@@ -327,8 +336,9 @@ class BlockUpdateGeneratorImplTest
                     1L,
                     0,
                     Seq(
-                      Traced(
-                        LedgerBlockEvent.Send(`sequencerAddressedEventTimestamp`, _, _, _)
+                      TracedPossiblyPrevalidated(
+                        LedgerBlockEvent.Send(`sequencerAddressedEventTimestamp`, _, _, _),
+                        _,
                       )
                     ),
                   ),
@@ -359,14 +369,12 @@ class BlockUpdateGeneratorImplTest
                 ),
               sequencerId,
               mock[SequencerRateLimitManager],
-              OrderingTimeFixMode.ValidateOnly,
-              lsuSequencingBounds = None,
               drSequencingTimeUpperBound = None,
               getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
-              SequencerTestMetrics,
-              BatchingConfig(),
               consistencyChecks = true,
+              parameters = parameters,
+              metrics,
               mock[SequencerMemberValidator],
               loggerFactory,
             )
@@ -402,8 +410,9 @@ class BlockUpdateGeneratorImplTest
                       1L,
                       0,
                       Seq(
-                        Traced(
-                          LedgerBlockEvent.Send(`sequencerAddressedEventTimestamp`, _, _, _)
+                        TracedPossiblyPrevalidated(
+                          LedgerBlockEvent.Send(`sequencerAddressedEventTimestamp`, _, _, _),
+                          _,
                         )
                       ),
                     ),
@@ -432,19 +441,17 @@ class BlockUpdateGeneratorImplTest
                 ),
               sequencerId,
               mock[SequencerRateLimitManager],
-              OrderingTimeFixMode.ValidateOnly,
-              lsuSequencingBounds = None,
               drSequencingTimeUpperBound = None,
               getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
-              SequencerTestMetrics,
-              BatchingConfig(),
               consistencyChecks = true,
+              parameters = parameters,
+              metrics,
               mock[SequencerMemberValidator],
               loggerFactory,
             )
 
-          val state = BlockUpdateGeneratorImpl.State(
+          val state = BlockUpdateGenerator.AccumulatedStateProcessingBlocks(
             lastBlockTs = aTimestamp.immediatePredecessor,
             lastChunkTs = aTimestamp,
             latestSequencerEventTimestamp = None,

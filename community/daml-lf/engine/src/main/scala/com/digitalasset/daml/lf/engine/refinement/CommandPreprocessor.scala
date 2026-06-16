@@ -6,7 +6,7 @@ package engine
 package refinement
 
 import com.digitalasset.daml.lf.data.Ref.PackageRef
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.value.Value
 import com.daml.scalautil.Statement.discard
@@ -154,17 +154,6 @@ private[lf] final class CommandPreprocessor(
       )
   }
 
-  @throws[Error.Preprocessing.Error]
-  private[refinement] def unsafePreprocessLookupByKey(
-      templateId: Ref.ValueRef,
-      contractKey: Value,
-      extendLocalIdForbiddanceToRelativeV2: Boolean,
-  ): speedy.Command.LookupByKey = {
-    val ckTtype = handleLookup(pkgInterface.lookupTemplateKey(templateId)).typ
-    val key = unsafeTranslateValue(ckTtype, contractKey, extendLocalIdForbiddanceToRelativeV2)
-    speedy.Command.LookupByKey(templateId, key)
-  }
-
   private[refinement] def unsafeResolveTyConId(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
       tyConRef: Ref.TypeConRef,
@@ -300,10 +289,6 @@ private[lf] final class CommandPreprocessor(
         val ckTtype = handleLookup(pkgInterface.lookupTemplateKey(templateId)).typ
         val sKey = unsafeTranslateValue(ckTtype, key, extendLocalIdForbiddanceToRelativeV2)
         speedy.Command.FetchByKey(templateId, sKey)
-      case command.ReplayCommand.LookupByKey(templateId, key) =>
-        val ckTtype = handleLookup(pkgInterface.lookupTemplateKey(templateId)).typ
-        val sKey = unsafeTranslateValue(ckTtype, key, extendLocalIdForbiddanceToRelativeV2)
-        speedy.Command.LookupByKey(templateId, sKey)
     }
   }
 

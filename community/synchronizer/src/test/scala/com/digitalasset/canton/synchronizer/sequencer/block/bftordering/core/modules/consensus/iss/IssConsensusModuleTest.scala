@@ -55,6 +55,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.{
   NodeActiveAt,
@@ -321,6 +322,7 @@ class IssConsensusModuleTest
             newEpochInfo,
             membership,
             cryptoProvider,
+            origin = OrderingMode.Consensus,
           )
         }
 
@@ -794,7 +796,7 @@ class IssConsensusModuleTest
                   prePrepare.viewNumber,
                   leaderOfBlock,
                   isLastBlockInEpoch,
-                  OrderedBlockForOutput.Mode.FromConsensus,
+                  OrderingMode.Consensus,
                 )
               )
             )

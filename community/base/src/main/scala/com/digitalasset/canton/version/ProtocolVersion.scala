@@ -266,7 +266,7 @@ object ProtocolVersion {
   )
 
   val alpha: NonEmpty[List[AlphaProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.dev)
+    NonEmpty.mk(List, ProtocolVersion.v36, ProtocolVersion.dev)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -313,6 +313,9 @@ object ProtocolVersion {
 
   lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
     ProtocolVersion.createStable(35)
+
+  lazy val v36: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    ProtocolVersion.createAlpha(36)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v34

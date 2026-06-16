@@ -12,8 +12,6 @@ import value.{CidContainer, Value}
 
 import scala.collection.immutable.TreeSet
 
-// This should replace value.ThinContractInstance in the whole daml/canton codespace
-// TODO: Rename to ContractInstance once value.ThinContractInstance is properly deprecated
 sealed abstract class FatContractInstance extends CidContainer[FatContractInstance] {
   type CreatedAtTime <: CreationTime
 
@@ -167,6 +165,14 @@ object FatContractInstance {
           inst
             .asInstanceOf[FatContractInstanceImpl[inst.CreatedAtTime]]
             .copy(createArg = newCreateArg)
+      )
+
+    val versionUnsafe: Lens[FatContractInstance, SerializationVersion] =
+      Lens[FatContractInstance, SerializationVersion](_.version)(newVersion =>
+        inst =>
+          inst
+            .asInstanceOf[FatContractInstanceImpl[inst.CreatedAtTime]]
+            .copy(version = newVersion)
       )
   }
 }

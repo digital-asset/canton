@@ -63,6 +63,8 @@ message SequencerConnections {
 
   // Configures the various delays used by the sequencer connection pool.
   SequencerConnectionPoolDelays sequencer_connection_pool_delays = 5;
+
+  SubscriptionLivenessLimits subscription_liveness_limits = 6;
 }
 
 message SubmissionRequestAmplification {
@@ -98,4 +100,15 @@ message SequencerConnectionPoolDelays {
   // Duration after which a warning is issued if a started connection still fails validation.
   // This value must be non-negative.
   google.protobuf.Duration warn_validation_delay = 4;
+}
+
+// Configuration to determine subscription liveness. Both limits must be exceeded for a subscription to be considered silent.
+// Setting both parameters to 0 disables the silent subscription detection.
+message SubscriptionLivenessLimits {
+  // Maximum difference between the latest aggregated event and the latest event provided by a subscription.
+  // This value must be non-negative.
+  google.protobuf.Duration max_timestamp_delta = 1;
+  // Maximum difference between the ordinal of the latest aggregated event and the ordinal of the latest event provided by a subscription.
+  // This value must be non-negative.
+  uint32 max_ordinal_delta = 2;
 }

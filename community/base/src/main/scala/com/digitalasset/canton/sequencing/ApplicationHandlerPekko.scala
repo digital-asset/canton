@@ -18,7 +18,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionErro
   ApplicationHandlerException,
   ApplicationHandlerPassive,
 }
-import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope}
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
@@ -100,7 +100,7 @@ class ApplicationHandlerPekko[F[+_], Context](
     }
 
   private def handleNextBatch(
-      tracedBatch: Traced[NonEmpty[Seq[PossiblyIgnoredSequencedEvent[ClosedEnvelope]]]],
+      tracedBatch: Traced[NonEmpty[Seq[PossiblyIgnoredSequencedEvent[Batch[ClosedEnvelope]]]]],
       killSwitch: KillSwitch,
   )(implicit
       closeContext: CloseContext

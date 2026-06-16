@@ -5,7 +5,9 @@ package com.daml.ledger.javaapi.data.codegen;
 
 import com.daml.ledger.javaapi.data.*;
 import com.daml.ledger.javaapi.data.DamlRecord;
+import com.daml.ledger.javaapi.data.codegen.ContractTypeCompanion;
 import com.daml.ledger.javaapi.data.codegen.json.JsonLfDecoder;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -39,7 +41,7 @@ public abstract class ContractCompanion<Ct, Id, Data>
   @Deprecated protected final Function<DamlRecord, Data> fromValue;
 
   /** @hidden */
-  private final ValueDecoder<Data> valueDecoder;
+  protected final ValueDecoder<Data> valueDecoder;
 
   @FunctionalInterface // Defines the function type which throws.
   public static interface FromJson<T> {
@@ -222,6 +224,27 @@ public abstract class ContractCompanion<Ct, Id, Data>
     public interface NewContract<Ct, Id, Data> {
       Ct newContract(Id id, Data data, Set<String> signatories, Set<String> observers);
     }
+
+    /**
+     * <strong>INTERNAL API</strong>: this is meant for use by <a
+     * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+     * and <em>should not be referenced directly</em>.
+     *
+     * @hidden
+     */
+    @Override
+    public ContractCompanion.WithoutKey<Ct, Id, Data> withPackageId(String packageId) {
+      var packageInfo = new ContractTypeCompanion.Package(packageId, PACKAGE_NAME, PACKAGE_VERSION);
+      return new WithoutKey(
+          packageInfo,
+          TEMPLATE_CLASS_NAME,
+          TEMPLATE_ID,
+          newContractId,
+          fromJson,
+          newContract,
+          new ArrayList<>(choices.values()),
+          valueDecoder);
+    }
   }
 
   /** @param <Key> {@code Data}'s key type as represented in Java codegen. */
@@ -328,6 +351,28 @@ public abstract class ContractCompanion<Ct, Id, Data>
     public interface NewContract<Ct, Id, Data, Key> {
       Ct newContract(
           Id id, Data data, Optional<Key> key, Set<String> signatories, Set<String> observers);
+    }
+
+    /**
+     * <strong>INTERNAL API</strong>: this is meant for use by <a
+     * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+     * and <em>should not be referenced directly</em>.
+     *
+     * @hidden
+     */
+    @Override
+    public ContractCompanion.WithKey<Ct, Id, Data, Key> withPackageId(String packageId) {
+      var packageInfo = new ContractTypeCompanion.Package(packageId, PACKAGE_NAME, PACKAGE_VERSION);
+      return new WithKey(
+          packageInfo,
+          TEMPLATE_CLASS_NAME,
+          TEMPLATE_ID,
+          newContractId,
+          fromJson,
+          newContract,
+          new ArrayList<>(choices.values()),
+          valueDecoder,
+          keyDecoder);
     }
   }
 }

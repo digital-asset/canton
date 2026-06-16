@@ -33,6 +33,7 @@ import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHan
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap.ParticipantServices
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
+import com.digitalasset.canton.participant.admin.party.{PartyReplicationEndpoints, PartyReplicator}
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.ledger.api.{
@@ -251,6 +252,7 @@ class ParticipantNodeBootstrap(
           dryRunSnapshot.getOrElse(PackageMetadata()),
           forceFlags,
           disableUpgradeValidation = parameters.disableUpgradeValidation,
+          protocolVersion = authorizedStore.protocolVersion,
         )
 
       override def checkCannotDisablePartyWithActiveContracts(
@@ -356,22 +358,14 @@ class ParticipantNodeBootstrap(
         Some(new RunningNode(bootstrapStageCallback, node))
       }
 
-    private def createPackageOps(manager: SyncPersistentStateManager): PackageOps = {
+    private def createPackageOps(
+        manager: SyncPersistentStateManager,
+        topologyLookup: TopologyLookup,
+    ): PackageOps = {
       val packageOps = new PackageOpsImpl(
         participantId = participantId,
         stateManager = manager,
-        topologyLookup = new TopologyLookup(
-          clock = clock,
-          topologyConfig = config.topology,
-          timeouts = timeouts,
-          futureSupervisor = futureSupervisor,
-          topologyManagerO = psid => cantonSyncService.get.flatMap(_.lookupTopologyManager(psid)),
-          psidLookup = lookupActivePsid,
-          topologyClientO = psid => cantonSyncService.get.flatMap(_.lookupTopologyClient(psid)),
-          syncPersistentStateO = psid =>
-            cantonSyncService.get.flatMap(_.syncPersistentStateManager.get(psid)),
-          loggerFactory = loggerFactory,
-        ),
+        topologyLookup = topologyLookup,
         initialProtocolVersion = ProtocolVersion.latest,
         loggerFactory = ParticipantNodeBootstrap.this.loggerFactory,
         timeouts = timeouts,
@@ -574,6 +568,19 @@ class ParticipantNodeBootstrap(
 
         ephemeralState = ParticipantNodeEphemeralState(inFlightSubmissionTracker)
 
+        topologyLookup = new TopologyLookup(
+          clock = clock,
+          topologyConfig = config.topology,
+          timeouts = timeouts,
+          futureSupervisor = futureSupervisor,
+          topologyManagerO = psid => cantonSyncService.get.flatMap(_.lookupTopologyManager(psid)),
+          psidLookup = lookupActivePsid,
+          topologyClientO = psid => cantonSyncService.get.flatMap(_.lookupTopologyClient(psid)),
+          syncPersistentStateO = psid =>
+            cantonSyncService.get.flatMap(_.syncPersistentStateManager.get(psid)),
+          loggerFactory = loggerFactory,
+        )
+
         packageService = PackageService(
           clock = clock,
           engine = engine,
@@ -581,7 +588,7 @@ class ParticipantNodeBootstrap(
           enableStrictDarValidation = parameters.enableStrictDarValidation,
           loggerFactory = loggerFactory,
           metrics = arguments.metrics,
-          packageOps = createPackageOps(syncPersistentStateManager),
+          packageOps = createPackageOps(syncPersistentStateManager, topologyLookup),
           timeouts = parameters.processingTimeouts,
         )
 
@@ -746,6 +753,35 @@ class ParticipantNodeBootstrap(
           connectedSynchronizerAcsCommitmentProcessorHealth.set(sync.acsCommitmentProcessorHealth)
         }
 
+        partyReplicatorContainerO = config.parameters.alphaOnlinePartyReplicationSupport.map(
+          config =>
+            new LifeCycleContainer[PartyReplicator](
+              stateName = "party-replicator",
+              create = () =>
+                FutureUnlessShutdown.pure(
+                  new PartyReplicator(
+                    participantId,
+                    sync,
+                    clock,
+                    config,
+                    parameters.batchingConfig,
+                    storage,
+                    futureSupervisor,
+                    parameters.exitOnFatalFailures,
+                    parameters.processingTimeouts,
+                    loggerFactory,
+                  )
+                ),
+              loggerFactory = loggerFactory,
+            )
+        )
+        _ <- partyReplicatorContainerO match {
+          // Initialize party replication only if configured and the participant is active
+          case Some(partyReplicatorContainer) if sync.isActive() =>
+            EitherT.right[String](partyReplicatorContainer.initializeNext())
+          case _ => EitherT.right[String](FutureUnlessShutdown.unit)
+        }
+
         ledgerApiServerContainer = new LifeCycleContainer[LedgerApiServer](
           stateName = "ledger-api-server",
           create = () =>
@@ -765,9 +801,18 @@ class ParticipantNodeBootstrap(
                 participantId = participantId.toLf,
                 participantNodePersistentState = persistentState,
                 sync = sync,
+                partyReplicationEndpointsO = partyReplicatorContainerO.map(container =>
+                  PartyReplicationEndpoints(
+                    container.asEval.value,
+                    sync,
+                    topologyLookup,
+                    parameters.processingTimeouts,
+                  )
+                ),
                 pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
                 updateServiceConfig = arguments.config.ledgerApi.updateService,
+                warnOnJwtScopeUsage = arguments.testingConfig.warnOnJwtScopeUsage,
               )
             ),
           loggerFactory = loggerFactory,
@@ -788,7 +833,7 @@ class ParticipantNodeBootstrap(
             clock,
             adminServerRegistry,
             adminTokenDispenser,
-            storage,
+            partyReplicatorContainerO.map(_.asEval),
             futureSupervisor,
             loggerFactory,
             tracerProvider,
@@ -882,6 +927,7 @@ class ParticipantNodeBootstrap(
         addCloseable(indexedStringStore)
         addCloseable(topologyDispatcher)
         addCloseable(schedulers)
+        partyReplicatorContainerO.foreach(_.currentAutoCloseable())
         addCloseable(ledgerApiServerContainer.currentAutoCloseable())
         addCloseable(ledgerApiDependentServices)
         addCloseable(mutablePackageMetadataView)
@@ -893,6 +939,7 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer = ledgerApiIndexerContainer,
           cantonSyncService = sync,
           schedulers = schedulers,
+          partyReplicatorContainerO = partyReplicatorContainerO,
           ledgerApiServerContainer = ledgerApiServerContainer,
           startableStoppableLedgerApiDependentServices = ledgerApiDependentServices,
           participantTopologyDispatcher = topologyDispatcher,
@@ -984,6 +1031,7 @@ object ParticipantNodeBootstrap {
       ledgerApiIndexerContainer: LifeCycleContainer[LedgerApiIndexer],
       cantonSyncService: CantonSyncService,
       schedulers: Schedulers,
+      partyReplicatorContainerO: Option[LifeCycleContainer[PartyReplicator]],
       ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer],
       startableStoppableLedgerApiDependentServices: StartableStoppableLedgerApiDependentServices,
       participantTopologyDispatcher: ParticipantTopologyDispatcher,

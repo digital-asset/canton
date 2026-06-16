@@ -21,6 +21,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionPoolDelays,
   SequencerConnectionValidation,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -311,6 +312,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
         sequencerLivenessMargin = NonNegativeInt.zero,
         SubmissionRequestAmplification.NoAmplification,
         SequencerConnectionPoolDelays.default,
+        SubscriptionLivenessLimits.default,
         SequencerConnectionValidation.All,
         None,
       )(mapArgs(args))
