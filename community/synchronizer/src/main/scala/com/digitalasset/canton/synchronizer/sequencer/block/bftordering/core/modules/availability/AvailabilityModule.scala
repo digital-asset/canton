@@ -551,7 +551,7 @@ final class AvailabilityModule[E <: Env[E]](
   )(implicit
       traceContext: TraceContext,
       context: E#ActorContextT[Availability.Message[E]],
-  ): Seq[BatchId] =
+  ): Map[EpochNumber, Set[BatchId]] =
     if (currentEpoch < lastKnownEpochNumber) {
       abort(
         s"Trying to update lastKnownEpochNumber in Availability module to $currentEpoch which is lower than the current value $lastKnownEpochNumber"
@@ -576,7 +576,7 @@ final class AvailabilityModule[E <: Env[E]](
       disseminationProtocolState.disseminationQuotas.expireEpoch(initialEpochNumber, expiredEpoch)
       val evictionEpoch = EpochNumber(expiredEpoch - batchValidityDuration)
       disseminationProtocolState.disseminationQuotas.evictBatches(evictionEpoch)
-    } else Seq.empty
+    } else Map.empty
 
   private def updateLastKnownEpochNumberAndEvictExpiredBatches(
       messageType: => String,

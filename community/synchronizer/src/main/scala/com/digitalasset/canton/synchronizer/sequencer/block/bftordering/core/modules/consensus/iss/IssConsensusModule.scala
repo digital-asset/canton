@@ -570,6 +570,9 @@ final class IssConsensusModule[E <: Env[E]](
 
       newEpochTopology match {
         case Some(Consensus.NewEpochTopology(newEpochNumber, newMembership, cryptoProvider)) =>
+          logger.info(
+            s"Completed epoch $completeEpochNumber, new epoch topology already available for epoch $newEpochNumber"
+          )
           emitEpochStartLatency()
           val currentEpochInfo = epochState.epoch.info
           val newEpochInfo = currentEpochInfo.next(
@@ -588,6 +591,9 @@ final class IssConsensusModule[E <: Env[E]](
             cryptoProvider,
           )
         case None =>
+          logger.info(
+            s"Completed epoch $completeEpochNumber, but no new epoch topology is available yet"
+          )
           // We don't have the new topology for the new epoch yet: wait for it to arrive from the output module.
           ()
       }

@@ -32,7 +32,7 @@ trait AvailabilityStore[E <: Env[E]] extends AutoCloseable {
   ): E#FutureUnlessShutdownT[FetchBatchesResult]
   protected val fetchBatchesActionName: String = "Fetch batches"
 
-  def gc(staleBatchIds: Seq[BatchId])(implicit
+  def gc(staleBatchIds: Map[EpochNumber, Set[BatchId]])(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Unit]
   protected def gcName: String = s"remove batches"

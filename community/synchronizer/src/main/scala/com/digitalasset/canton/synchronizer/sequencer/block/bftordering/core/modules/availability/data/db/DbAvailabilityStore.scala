@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.db
 
+import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.caching.{CaffeineCache, ConcurrentCache}
@@ -320,24 +321,28 @@ class DbAvailabilityStore(
 
   }
 
-  override def gc(staleBatchIds: Seq[BatchId])(implicit
+  override def gc(staleBatchIds: Map[EpochNumber, Set[BatchId]])(implicit
       traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[Unit] =
     PekkoFutureUnlessShutdown(
       gcName,
       () =>
-        NonEmpty.from(staleBatchIds) match {
-          case Some(oneOrMoreBatchIds) =>
-            import DbStorage.Implicits.BuilderChain.*
-            storage
-              .update_(
-                (sql"""delete from ord_availability_batch where """ ++ DbStorage
-                  .toInClause("id", oneOrMoreBatchIds)).asUpdate,
-                functionFullName,
-              )
-              .map(_ => lookupBatchCache.invalidateAll(staleBatchIds))
-          case None => FutureUnlessShutdown.unit
-        },
+        staleBatchIds.toSeq
+          .parTraverse { case (epochNumber, batchIds) =>
+            NonEmpty.from(batchIds) match {
+              case Some(oneOrMoreBatchIds) =>
+                import DbStorage.Implicits.BuilderChain.*
+                storage
+                  .update_(
+                    (sql"""delete from ord_availability_batch where epoch_number = $epochNumber and """ ++ DbStorage
+                      .toInClause("id", oneOrMoreBatchIds)).asUpdate,
+                    functionFullName,
+                  )
+                  .map(_ => lookupBatchCache.invalidateAll(batchIds))
+              case None => FutureUnlessShutdown.unit
+            }
+          }
+          .map(_ => ()),
       orderingStage = Some(functionFullName),
     )
 

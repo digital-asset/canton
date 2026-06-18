@@ -88,7 +88,7 @@ private[dao] final class UpdateReader(
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val futureSource =
-      getEventSeqIdRange(startInclusive, endInclusive)
+      getEventSeqIdRange(startInclusive, endInclusive, skipPruningChecks = skipPruningChecks)
         .map(queryRange =>
           updatesStreamReader.streamUpdates(
             queryRange = queryRange,
@@ -160,16 +160,9 @@ private[dao] final class UpdateReader(
   private def getEventSeqIdRange(
       startInclusive: Offset,
       endInclusive: Offset,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] =
-    queryValidRange.withRangeNotPruned(
-      minOffsetInclusive = startInclusive,
-      maxOffsetInclusive = endInclusive,
-      errorPruning = (prunedOffset: Offset) =>
-        s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
-      errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-        s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
-            .fold(0L)(_.unwrap)}",
-    )(dispatcher.executeSql(dbMetrics.getEventSeqIdRange) { connection =>
+      skipPruningChecks: Boolean,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] = {
+    def calculateRange() = dispatcher.executeSql(dbMetrics.getEventSeqIdRange) { connection =>
       EventsRange(
         startInclusiveOffset = startInclusive,
         startInclusiveEventSeqId =
@@ -178,8 +171,22 @@ private[dao] final class UpdateReader(
         endInclusiveEventSeqId =
           eventStorageBackend.maxEventSequentialId(Some(endInclusive))(connection),
       )
-    })
+    }
 
+    if (skipPruningChecks) {
+      calculateRange()
+    } else {
+      queryValidRange.withRangeNotPruned(
+        minOffsetInclusive = startInclusive,
+        maxOffsetInclusive = endInclusive,
+        errorPruning = (prunedOffset: Offset) =>
+          s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+        errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
+          s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
+              .fold(0L)(_.unwrap)}",
+      )(calculateRange())
+    }
+  }
 }
 
 private[dao] object UpdateReader {

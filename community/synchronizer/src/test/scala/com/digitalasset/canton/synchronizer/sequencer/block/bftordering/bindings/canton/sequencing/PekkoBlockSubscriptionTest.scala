@@ -34,7 +34,7 @@ class PekkoBlockSubscriptionTest
       val blockSubscription =
         new PekkoBlockSubscription[PekkoEnv](
           BlockNumber(0),
-          fakeModuleExpectingSilence,
+          () => fakeModuleExpectingSilence,
           timeouts,
           loggerFactory,
           SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
@@ -72,7 +72,7 @@ class PekkoBlockSubscriptionTest
       val blockSubscription =
         new PekkoBlockSubscription[PekkoEnv](
           BlockNumber(0),
-          outputMock,
+          () => outputMock,
           timeouts,
           loggerFactory,
           SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
@@ -84,7 +84,7 @@ class PekkoBlockSubscriptionTest
         )(x => fail(x))(parallelExecutionContext, implicitly[Materializer])
 
       always() {
-        blockSubscription.sequencerCoreIsSlow shouldBe false
+        blockSubscription.isSequencerCoreSlow shouldBe false
       }
 
       val unblockConsumerPromise = scala.concurrent.Promise[Unit]()
@@ -99,13 +99,13 @@ class PekkoBlockSubscriptionTest
         .foreach(blockSubscription.receiveBlock)
 
       eventually() {
-        blockSubscription.sequencerCoreIsSlow shouldBe true
+        blockSubscription.isSequencerCoreSlow shouldBe true
       }
 
       unblockConsumerPromise.success(())
 
       eventually() {
-        blockSubscription.sequencerCoreIsSlow shouldBe false
+        blockSubscription.isSequencerCoreSlow shouldBe false
       }
       verify(outputMock, timeout(millis = 1_000).atLeastOnce())
         .asyncSend(eqTo(Output.ProcessNewEpochTopologyMessagesIfPossible))(

@@ -8,23 +8,17 @@ _Write summary of release_
 
 ## What’s New
 
-### Topic A
-Template for a bigger topic
-#### Background
-#### Specific Changes
-#### Impact and Migration
-
-### Minor Improvements
-- improvement
-
-#### Dependencies of vetted packages can be unvetted (PV35+)
+### Dependencies of vetted packages can be unvetted (PV35+)
 On synchronizers running protocol versions 35 and above, vetting state change operations on the API (e.g. via ``/package-vetting/update``)
 allow dependencies of vetted packages to be unvetted safely, without requiring the use of a force flag.
 This is consistent with the transaction protocol, which does not require the dependencies of a Daml transaction node package to be vetted in PV35+.
 **Note**: For protocol versions 34 and below, the package dependency vetting restrictions remain unchanged.
 
-### Preview Features
-- preview feature
+### Minor Improvements
+
+- Updated docker base image from 1.0.8 to 1.0.9, which bumps grpc-health-probe to v0.4.52.
+- Reduce memory footprint with streaming of large gRPC responses by avoiding buffering the whole response.
+- Improve log message in the sequencer in case queuing the event signal is not possible due to a closed subscription and not describe that case as an error.
 
 ## Bugfixes
 
@@ -69,9 +63,4 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
-
-
-## What's Coming
-
-We are currently working on
 

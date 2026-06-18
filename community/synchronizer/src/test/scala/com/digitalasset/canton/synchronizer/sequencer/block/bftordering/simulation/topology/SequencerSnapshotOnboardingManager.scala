@@ -76,26 +76,34 @@ class SequencerSnapshotOnboardingManager(
       forNode: BftNodeId,
   ): BftOnboardingData = {
     val snapshot = nodeToSequencerSnapshotAdditionalInfo.get(forNode)
-    val blockFromSnapshotOrGenesis =
+    val pruningLowerBound = for {
+      storeForNode <- stores.get(forNode)
+      simulationOutputStore = storeForNode.outputStore.asInstanceOf[SimulationOutputMetadataStore]
+      lowerBound <- simulationOutputStore.lowerBoundForTesting()
+    } yield lowerBound.blockNumber
+    val snapshotLowerBound =
       snapshot
         .flatMap {
           // technically the block we want is somewhere later than this, but this is good enough
           _.nodeActiveAt.get(forNode).flatMap(_.firstBlockNumberInStartEpoch)
         }
+    val lowerBound =
+      pruningLowerBound
+        .orElse(snapshotLowerBound)
         .getOrElse(BlockNumber(0L))
     BftOnboardingData(
       reasonForProvide match {
         case ReasonForProvide.ProvideForInit =>
-          blockFromSnapshotOrGenesis
+          lowerBound
         case ReasonForProvide.ProvideForRestart =>
           val upperBound = model
             .lastSequencerAcknowledgedBlock(forNode)
-            .getOrElse(blockFromSnapshotOrGenesis)
+            .getOrElse(lowerBound)
 
           BlockNumber(
             // the sequencer should be somewhere in between these two points
             random.between(
-              blockFromSnapshotOrGenesis,
+              lowerBound,
               upperBound + 1L, // make it inclusive
             )
           )

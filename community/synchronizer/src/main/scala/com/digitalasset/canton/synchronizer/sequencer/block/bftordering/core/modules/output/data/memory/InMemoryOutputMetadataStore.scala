@@ -19,6 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
@@ -252,6 +253,8 @@ abstract class GenericInMemoryOutputMetadataStore[E <: Env[E]] extends OutputMet
   ): E#FutureUnlessShutdownT[Option[OutputMetadataStore.LowerBound]] =
     createFuture(getLowerBoundActionName)(() => Success(lowerBound.get()))
 
+  @VisibleForTesting
+  def lowerBoundForTesting(): Option[OutputMetadataStore.LowerBound] = lowerBound.get()
   def latestBlock(): Option[BlockNumber] = blocks.keySet.maxOption
 }
 

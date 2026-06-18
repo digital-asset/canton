@@ -13,6 +13,7 @@ import org.apache.pekko.stream.{KillSwitch, KillSwitches}
 class EmptyBlockSubscription extends BlockSubscription {
 
   @volatile private var _sequencerCoreIsSlow: Boolean = false
+  @volatile private var _bufferSize: Int = 0
 
   override def subscription(): Source[Traced[BlockFormat.Block], KillSwitch] =
     Source.empty.viaMat(KillSwitches.single)(Keep.right)
@@ -22,7 +23,12 @@ class EmptyBlockSubscription extends BlockSubscription {
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     ()
 
-  override def sequencerCoreIsSlow: Boolean = _sequencerCoreIsSlow
+  override def isSequencerCoreSlow: Boolean = _sequencerCoreIsSlow
 
-  def setSequencerCoreIsSlow(slow: Boolean): Unit = _sequencerCoreIsSlow = slow
+  override def bufferSize: Int = _bufferSize
+
+  def setSequencerCoreIsSlow(slow: Boolean, bufferSize: Int): Unit = {
+    _sequencerCoreIsSlow = slow
+    _bufferSize = bufferSize
+  }
 }

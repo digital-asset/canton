@@ -336,7 +336,9 @@ final class BftBlockOrderer(
   private lazy val blockSubscription =
     new PekkoBlockSubscription[PekkoEnv](
       BlockNumber(sequencerSubscriptionInitialHeight),
-      outputModuleRef,
+      // Passing the output module reference as a closure because, due to Scala init shenanigans with lazy vals,
+      //  else it would be _often_ `null`.
+      () => outputModuleRef,
       timeouts,
       loggerFactory,
       metrics,

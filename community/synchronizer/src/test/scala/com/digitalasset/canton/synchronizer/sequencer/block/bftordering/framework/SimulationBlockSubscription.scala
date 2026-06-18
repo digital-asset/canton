@@ -25,5 +25,7 @@ class SimulationBlockSubscription(
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     queue.addOne(thisNode -> Traced(block))
 
-  override def sequencerCoreIsSlow: Boolean = false
+  override def isSequencerCoreSlow: Boolean = false
+
+  override def bufferSize: Int = 0
 }

@@ -18,6 +18,10 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.TryUtil.*
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.*
+import org.apache.pekko.stream.SubscriptionWithCancelException.{
+  NoMoreElementsNeeded,
+  StageWasCompleted,
+}
 import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.ConcurrentHashMap
@@ -77,10 +81,17 @@ class LocalSequencerStateEventSignaller(
             // the queue was closed, so let's remove the entry
             queues.remove(tracedQueue).discard
           case QueueOfferResult.Failure(ex) =>
-            logger.info(
-              s"Unable to queue signal for member $member, because the queue failed with an error.",
-              ex,
-            )(tracedQueue.traceContext)
+            ex match {
+              case NoMoreElementsNeeded | StageWasCompleted =>
+                logger.info(
+                  s"Not queuing event notification for member $member, because subscription was closed."
+                )(tracedQueue.traceContext)
+              case _ =>
+                logger.info(
+                  s"Unable to queue signal for member $member, because the queue failed with an error.",
+                  ex,
+                )(tracedQueue.traceContext)
+            }
             queues.remove(tracedQueue).discard
         }
       }

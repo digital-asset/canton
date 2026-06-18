@@ -46,6 +46,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultOutputFetchMinimumDelay,
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
+  DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
   DefaultSequencerCoreSubscriptionConfig,
   P2PNetworkConfig,
   SequencerCoreSubscriptionConfig,
@@ -187,6 +188,7 @@ final case class BftBlockOrdererConfig(
     outputFetchTimeoutCap: FiniteDuration = DefaultOutputFetchTimeoutCap,
     outputEnqueueMaxRetries: Int = DefaultOutputEnqueueMaxRetries,
     outputEnqueueMaxRetryDelay: FiniteDuration = DefaultOutputEnqueueMaxRetryDelay,
+    outputSizeOfChunkOfEpochsToLoadAtStart: Int = DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
     blockingDbReadTimeout: FiniteDuration = DefaultBlockingDbReadTimeout,
     initialNetwork: Option[P2PNetworkConfig] = None,
     standalone: Option[BftBlockOrderingStandaloneNetworkConfig] = None,
@@ -234,6 +236,7 @@ object BftBlockOrdererConfig {
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
+  val DefaultOutputSizeOfChunkOfEpochsToLoadAtStart: Int = 10
   val DefaultBlockingDbReadTimeout: FiniteDuration = 1.minute
 
   val DefaultDedicatedExecutionContextDivisor: Option[Int] = None
