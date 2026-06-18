@@ -99,7 +99,6 @@ import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LoggerUtil, RoseTre
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LedgerSubmissionId,
-  LfGlobalKeyMapping,
   LfPartyId,
   RequestCounter,
   SequencerCounter,
@@ -205,7 +204,6 @@ class TransactionProcessingSteps(
     val SubmissionParam(
       submitterInfo,
       transactionMeta,
-      keyResolver,
       wfTransaction,
       disclosedContracts,
     ) = submissionParam
@@ -236,7 +234,6 @@ class TransactionProcessingSteps(
       tracked = new TrackedTransactionSubmission(
         submitterInfo,
         transactionMeta,
-        keyResolver,
         wfTransaction,
         mediator,
         recentSnapshot,
@@ -294,7 +291,6 @@ class TransactionProcessingSteps(
   private class TrackedTransactionSubmission(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       mediator: MediatorGroupRecipient,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -412,7 +408,6 @@ class TransactionProcessingSteps(
               wfTransaction,
               submitterInfoWithDedupPeriod,
               transactionMeta.workflowId.map(WorkflowId(_)),
-              keyResolver,
               mediator,
               recentSnapshot,
               approximateTimestampForSigning,
@@ -593,7 +588,7 @@ class TransactionProcessingSteps(
   }
 
   override def createSubmissionResult(
-      deliver: Deliver[Envelope[?]],
+      deliver: Deliver[Batch[Envelope[?]]],
       pendingSubmissionData: None.type,
   ): TransactionSubmitted =
     TransactionSubmitted
@@ -686,7 +681,8 @@ class TransactionProcessingSteps(
         protocolVersion,
         crypto.pureCrypto,
         topLevelOnly = true,
-        decryptedViewsWithSignatures,
+        // TODO(#32393): wire ciphertext ID
+        decryptedViewsWithSignatures.map(view => (view, None)),
       )
 
     val incompleteLightViewTreeErrors = incompleteLightViewTrees.map {
@@ -1337,7 +1333,7 @@ class TransactionProcessingSteps(
     } yield commitAndContractsAndEvent
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: RequestType#PendingRequestData,
       pendingSubmissionMap: PendingSubmissions,
@@ -1549,7 +1545,6 @@ object TransactionProcessingSteps {
   final case class SubmissionParam(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
   )

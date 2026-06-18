@@ -28,7 +28,7 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TransactionBuilder}
 import com.digitalasset.daml.lf.transaction.{SerializationVersion as LfSerializationVersion, *}
 import com.digitalasset.daml.lf.value.Value as LfValue
-import com.digitalasset.daml.lf.value.Value.{ContractId, ThinContractInstance, ValueText}
+import com.digitalasset.daml.lf.value.Value.{ContractId, ValueText}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.{AsyncTestSuite, OptionValues}
 
@@ -151,14 +151,6 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
 
   private[this] val txVersion = LfSerializationVersion.V1
   private[this] def newBuilder(): NodeIdTransactionBuilder = new NodeIdTransactionBuilder
-
-  protected final val someContractInstance =
-    ThinContractInstance(
-      packageName = somePackageName,
-      template = someTemplateId,
-      arg = someContractArgument,
-    )
-  protected final val someVersionedContractInstance = Versioned(txVersion, someContractInstance)
 
   protected final val otherTemplateId = testIdentifier("Dummy")
   protected final val otherTemplateIdFull =

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
   TrafficControlParameters,
 }
@@ -120,6 +121,7 @@ class SynchronizerConfiguration(
             sequencerLivenessMargin,
             SubmissionRequestAmplification.NoAmplification,
             SequencerConnectionPoolDelays.default,
+            SubscriptionLivenessLimits.default,
           )
           .getOrElse(sys.error("Failed to create sequencer connection"))
       } else {

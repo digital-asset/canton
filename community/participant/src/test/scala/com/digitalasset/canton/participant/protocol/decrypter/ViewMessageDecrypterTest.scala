@@ -57,12 +57,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Obser
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{
-  BaseTestWordSpec,
-  HasExecutionContext,
-  LfGlobalKeyMapping,
-  WorkflowId,
-}
+import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, WorkflowId}
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 
@@ -258,7 +253,6 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
               transactionUuid: UUID,
               _topologySnapshot: TopologySnapshot,
               _contractOfId: ContractInstanceOfId,
-              _keyResolver: LfGlobalKeyMapping,
               _maxSequencingTime: CantonTimestamp,
               validatePackageVettings: Boolean,
           )(implicit
@@ -276,7 +270,6 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
               topologySnapshot: TopologySnapshot,
               contractOfId: ContractInstanceOfId,
               _rbContext: RollbackContext,
-              _keyResolver: LfGlobalKeyMapping,
               _absolutizer: ContractIdAbsolutizer,
           )(implicit traceContext: TraceContext): EitherT[
             FutureUnlessShutdown,

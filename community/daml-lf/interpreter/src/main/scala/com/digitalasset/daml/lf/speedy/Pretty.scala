@@ -351,7 +351,8 @@ private[lf] object Pretty {
         text("rollback")
       case create: Node.Create =>
         partiesAction(create.signatories, "creates", "create") &
-          prettyContractInst(create.coinst)
+          (prettyIdentifier(create.templateId) / text("with:") &
+            prettyValue(verbose = false)(create.arg)).nested(4)
       case fetch: Node.Fetch =>
         partiesAction(fetch.actingParties, "fetches", "fetch") &
           prettyContractId(fetch.coid)
@@ -453,7 +454,8 @@ private[lf] object Pretty {
       case create: Node.Create =>
         val d =
           partiesAction(create.signatories, "creates", "create") &
-            prettyContractInst(create.coinst)
+            (prettyIdentifier(create.templateId) / text("with:") &
+              prettyValue(verbose = false)(create.arg)).nested(4)
         create.keyOpt match {
           case None => d
           case Some(key) => d / text("key") & prettyKeyWithMaintainers(key)
@@ -537,10 +539,6 @@ private[lf] object Pretty {
 
   def prettyEventId(n: EventId): Doc =
     text(n.toLedgerString)
-
-  def prettyContractInst(coinst: ThinContractInstance): Doc =
-    (prettyIdentifier(coinst.template) / text("with:") &
-      prettyValue(false)(coinst.arg)).nested(4)
 
   def prettyTypeConId(tycon: TypeConId): Doc =
     text(tycon.qualifiedName.toString) + char('@') + prettyPackageId(tycon.packageId)

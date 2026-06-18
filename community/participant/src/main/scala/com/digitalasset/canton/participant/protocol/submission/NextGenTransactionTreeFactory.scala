@@ -40,7 +40,6 @@ import io.scalaland.chimney.dsl.*
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
-import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.math.Ordered.orderingToOrdered
@@ -70,7 +69,6 @@ class NextGenTransactionTreeFactory(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      legacyKeyResolver: LfGlobalKeyMapping,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -310,13 +308,11 @@ class NextGenTransactionTreeFactory(
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var viewKeyMaintainers = Map.empty[LfGlobalKey, LfVersioned[Set[LfPartyId]]]
 
-    // TODO(#31527): SPM can this be made a mutable.Map
-    val observedKeyContractIds = TrieMap.empty[LfGlobalKey, mutable.LinkedHashSet[LfContractId]]
+    val observedKeyContractIds = mutable.Map.empty[LfGlobalKey, mutable.LinkedHashSet[LfContractId]]
 
     def buildResolvedKeys(
         createdContractIds: Set[LfContractId]
     ): Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] =
-      // TODO(#31527): SPM will need to consider whether this is sufficient for NUCK
       viewKeyMaintainers.transform { (key, versioned) =>
         versioned.map { maintainers =>
           val cids = observedKeyContractIds
@@ -359,7 +355,6 @@ class NextGenTransactionTreeFactory(
           )
             .map { v =>
               childViewsBuilder += v
-              // TODO(#31527): SPM consider what to do when different nodes have different serialization versions
               v.viewParticipantData.tryUnwrap.keyResolution.foreach { case (key, resolution) =>
                 viewKeyMaintainers = viewKeyMaintainers + (key -> resolution.map(_.maintainers))
                 val observed =
@@ -493,16 +488,17 @@ class NextGenTransactionTreeFactory(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, LfNodeCreate] = {
 
-    val cantonContractInst = checked(
+    val suffixedArg = checked(
       LfTransactionUtil
-        .suffixContractInst(state.suffixOfCreatedContract)(createNode.versionedCoinst)
+        .suffixArg(state.suffixOfCreatedContract)(createNode.arg)
         .valueOr(cid =>
           throw new IllegalStateException(
             s"Invalid contract id $cid found in contract instance of create node"
           )
         )
-    ).unversioned
-    val createNodeWithSuffixedArg = createNode.copy(arg = cantonContractInst.arg)
+    )
+
+    val createNodeWithSuffixedArg = createNode.copy(arg = suffixedArg)
 
     val contractSalt = cantonContractIdVersion match {
       case _: CantonContractIdV1Version =>
@@ -729,7 +725,6 @@ class NextGenTransactionTreeFactory(
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      legacyKeyResolver: LfGlobalKeyMapping,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -868,7 +863,6 @@ object NextGenTransactionTreeFactory {
     }
   }
 
-  // TODO(#31527): SPM add test for RolledBackEffect
   private def transactionEffectful(tx: LfVersionedTransaction): Boolean =
     tx.nodes.values.exists {
       case n: LfActionNode => LfTransactionUtil.isEffectful(n)

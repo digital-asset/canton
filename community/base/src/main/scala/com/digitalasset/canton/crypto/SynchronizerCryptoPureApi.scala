@@ -161,4 +161,7 @@ final class SynchronizerCryptoPureApi(
   )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
     pureCrypto.signBytes(bytes, signingKey, usage, signingAlgorithmSpec)
 
+  override def toJwk(publicKey: SigningPublicKey): Either[JwksError, Jwk] =
+    pureCrypto.toJwk(publicKey)
+
 }

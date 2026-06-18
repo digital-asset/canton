@@ -21,7 +21,7 @@ import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.Assertion
 
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, unused}
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -200,9 +200,9 @@ class UpgradesMatrixCases(
       languageVersion = langVersion,
     )
 
-  // TODO[#32409] delete dead code or adapt to NUCK since featureLegacyLookupByKey.enabledIn is always false
-  def ifLookupByKeys[A](ifTrue: => A, ifFalse: => A): A =
-    if (LanguageVersion.featureLegacyLookupByKey.enabledIn(langVersion)) ifTrue else ifFalse
+  // TODO[#32409] delete dead code or adapt to NUCK since legacy lookup by key is no longer supported
+  def ifLookupByKeys[A](@unused ifTrue: => A, ifFalse: => A): A =
+    ifFalse
   def whenLookupByKeysOtherwiseEmpty[A](a: => A)(implicit m: Monoid[A]) = ifLookupByKeys(a, m.empty)
 
   val serializationVersion =

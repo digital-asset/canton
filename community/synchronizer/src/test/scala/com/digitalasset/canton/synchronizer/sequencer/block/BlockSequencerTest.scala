@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveDouble
+import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{
   CachingConfigs,
   DefaultProcessingTimeouts,
@@ -29,6 +29,7 @@ import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager.Chu
 import com.digitalasset.canton.synchronizer.block.data.memory.InMemorySequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, BlockInfo}
 import com.digitalasset.canton.synchronizer.block.update.{
+  BlockProcessingParameters,
   BlockUpdate,
   BlockUpdateGenerator,
   OrderedBlockUpdate,
@@ -192,11 +193,12 @@ final class BlockSequencerTest
         health = None,
         clock = new SimClock(loggerFactory = loggerFactory),
         blockRateLimitManager = defaultRateLimiter,
-        orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-        lsuSequencingBounds = None,
-        metrics = SequencerMetrics.noop(this.getClass.getName),
-        loggerFactory = loggerFactory,
-        runtimeReady = FutureUnlessShutdown.unit,
+        blockProcessingParameters = BlockProcessingParameters(
+          orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
+          lsuSequencingBounds = None,
+          parallelism = PositiveInt.two,
+          enablePrevalidation = true,
+        ),
         parameters = SequencerNodeParameters(
           general = MockedNodeParameters.cantonNodeParameters(
             ProcessingTimeout()
@@ -211,7 +213,11 @@ final class BlockSequencerTest
           timeAdvancingTopology = TimeAdvancingTopologyConfig(),
           delayRequestsBeforeLsuTrafficInit = false,
           lsuConfig = SequencerLsuConfig(),
+          enablePrevalidation = true,
         ),
+        metrics = SequencerMetrics.noop(this.getClass.getName),
+        loggerFactory = loggerFactory,
+        runtimeReady = FutureUnlessShutdown.unit,
       )
 
     override def close(): Unit = {
@@ -288,11 +294,14 @@ final class BlockSequencerTest
     ): Flow[Traced[BlockUpdate], Traced[CantonTimestamp], NotUsed] =
       Flow[Traced[BlockUpdate]].map(_.map(_ => CantonTimestamp.MinValue))
 
-    override def getHeadState: BlockSequencerStateManager.HeadState =
-      BlockSequencerStateManager.HeadState(
+    override def getPersistenceHeadState
+        : BlockSequencerStateManager.AccumulatedStatePersistingBlocks =
+      BlockSequencerStateManager.AccumulatedStatePersistingBlocks(
         BlockInfo.initial,
         ChunkState.initial(BlockEphemeralState.empty),
       )
+
+    override def getProcessingHeadState: BlockUpdateGenerator.AccumulatedStateProcessingBlocks = ???
 
     override protected def timeouts: ProcessingTimeout = BlockSequencerTest.this.timeouts
     override protected def logger: TracedLogger = BlockSequencerTest.this.logger

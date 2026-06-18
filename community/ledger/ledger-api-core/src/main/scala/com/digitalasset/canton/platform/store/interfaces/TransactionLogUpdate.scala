@@ -134,6 +134,12 @@ object TransactionLogUpdate {
     def contractId: ContractId
   }
 
+  final case class KeyInfo(
+      value: LfValue.VersionedValue,
+      hash: Hash,
+      maintainers: Set[Party],
+  )
+
   final case class CreatedEvent(
       eventOffset: Offset,
       updateId: String,
@@ -147,15 +153,13 @@ object TransactionLogUpdate {
       packageVersion: Option[Ref.PackageVersion],
       commandId: String,
       workflowId: String,
-      contractKey: Option[LfValue.VersionedValue],
+      keyInfo: Option[KeyInfo],
       treeEventWitnesses: Set[Party],
       flatEventWitnesses: Set[Party],
       submitters: Set[Party],
       createArgument: LfValue.VersionedValue,
       createSignatories: Set[Party],
       createObservers: Set[Party],
-      createKeyHash: Option[Hash],
-      createKeyMaintainers: Option[Set[Party]],
       authenticationData: Bytes,
   ) extends Event {
     def witnesses(transactionShape: TransactionShape): Set[Party] =
@@ -177,8 +181,7 @@ object TransactionLogUpdate {
       interfaceId: Option[Identifier],
       commandId: String,
       workflowId: String,
-      contractKey: Option[LfValue.VersionedValue],
-      contractKeyHash: Option[Hash],
+      keyInfo: Option[KeyInfo],
       treeEventWitnesses: Set[Party],
       flatEventWitnesses: Set[Party],
       submitters: Set[Party],

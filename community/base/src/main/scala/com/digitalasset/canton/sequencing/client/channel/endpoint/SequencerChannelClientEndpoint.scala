@@ -29,6 +29,7 @@ import com.digitalasset.canton.util.{
   ByteStringUtil,
   EitherTUtil,
   ErrorUtil,
+  MaxBytesToDecompress,
   MonadUtil,
   SingleUseCell,
 }
@@ -67,6 +68,9 @@ import scala.concurrent.ExecutionContext
   *   Provides the crypto API for symmetric and asymmetric encryption operations.
   * @param protocolVersion
   *   Used for the proto messages versioning.
+  * @param maxBytesToDecompress
+  *   Upper bound on the decompressed size of payloads received via the channel, derived from the
+  *   synchronizer `maxRequestSize` parameter.
   * @param timestamp
   *   Determines the public key for asymmetric encryption.
   * @param onSentMessage
@@ -81,6 +85,7 @@ private[channel] final class SequencerChannelClientEndpoint(
     isSessionKeyOwner: Boolean,
     timestamp: CantonTimestamp,
     protocolVersion: ProtocolVersion,
+    maxBytesToDecompress: MaxBytesToDecompress,
     context: CancellableContext,
     parentHasRunOnClosing: HasRunOnClosing,
     protected val timeouts: ProcessingTimeout,
@@ -103,7 +108,13 @@ private[channel] final class SequencerChannelClientEndpoint(
     val initialStage = new ChannelStageBootstrap(
       isSessionKeyOwner,
       connectTo,
-      ChannelStage.InternalData(security, protocolVersion, processor, loggerFactory),
+      ChannelStage.InternalData(
+        security,
+        protocolVersion,
+        processor,
+        maxBytesToDecompress,
+        loggerFactory,
+      ),
     )
     new AtomicReference[ChannelStage](initialStage)
   }

@@ -261,6 +261,7 @@ protocol_continuity_test_latest:
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   steps:
+    - use_new_sequencer_aggregator
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
@@ -369,14 +370,8 @@ generate_transaction_snapshot:
       default: "https://github.com/DACH-NY/canton-network-apps.git"
       type: string
   steps:
-    - checkout_and_restore_caches
     - attach_workspace:
         at: /tmp/workspace
-    - run:
-        command: |
-          echo "export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION" >> $BASH_ENV
-        environment:
-          SNAPSHOT_VERSION: << parameters.git_commit >>
     - run:
         name: Clone and Build Daml project from Github URL, then save test dar files
         command: |
@@ -385,14 +380,22 @@ generate_transaction_snapshot:
           BASE_REPOSITORY_URL=$(echo << parameters.repository_url >> | cut -c 9-)
 
           if [ -z "<< parameters.git_commit >>" ]; then
-            git clone --depth 1 https://canton-machine:${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+            git clone --depth 1 https://${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
           else
-            git clone --depth 1 --revision << parameters.git_commit >> https://canton-machine:${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+            git clone --depth 1 --revision << parameters.git_commit >> https://${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
           fi
 
           cd $(basename << parameters.repository_url >> .git)
+          direnv allow .
+          eval "$(direnv export bash)"
+          unset TMP TMPDIR
+          export SNAPSHOT_VERSION=$(git rev-parse --short HEAD)
+          export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION
+          echo "export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION" >> $BASH_ENV
           dpm build --all
+          mkdir -p $SNAPSHOT_DIR/dars
           find . -regex ".*/test/\.daml/.*\.dar" -print -exec cp {} $SNAPSHOT_DIR/dars \;
+    - checkout_and_restore_caches
     - run:
         command: |
           export DAR_DIR=$SNAPSHOT_DIR/dars
@@ -412,7 +415,7 @@ benchmark_transaction_snapshot:
   parameters:
     snapshot_version:
       type: string
-      default: "53ab9995a"
+      default: "94db88e"
     min_transaction_nodes:
       type: integer
       default: 0
@@ -478,6 +481,7 @@ benchmark_transaction_snapshot:
         destination: log
         name: Store log directory as artifacts (if any)
         path: log
+    - post_transaction_snapshot_metrics
     - slack_red_main_with_volunteer:
         fixed_volunteer: U03K3A3UAGY # Carl
 

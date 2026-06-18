@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.{LoggingConfig, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.*
@@ -50,7 +50,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -58,7 +57,7 @@ import java.util.UUID
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 
-class TransactionConfirmationRequestFactoryTest
+trait TransactionConfirmationRequestFactoryTest
     extends AsyncWordSpec
     with ProtocolVersionChecksAsyncWordSpec
     with BaseTest
@@ -129,12 +128,13 @@ class TransactionConfirmationRequestFactoryTest
     }
 
   // Input factory
-  private val transactionFactory: ExampleTransactionFactory =
+  protected val transactionFactory: ExampleTransactionFactory =
     new ExampleTransactionFactory()(ledgerTime = ledgerTime)
 
   // Device under test
   private def confirmationRequestFactory(
-      transactionTreeFactoryResult: Either[TransactionTreeConversionError, GenTransactionTree]
+      transactionTreeFactoryResult: Either[TransactionTreeConversionError, GenTransactionTree],
+      useNewEncryptionAlgorithm: Boolean,
   ): TransactionConfirmationRequestFactory = {
 
     val transactionTreeFactory: TransactionTreeFactory = new TransactionTreeFactory {
@@ -150,7 +150,6 @@ class TransactionConfirmationRequestFactoryTest
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: ContractInstanceOfId,
-          legacyKeyResolver: LfGlobalKeyMapping,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
       )(implicit
@@ -185,7 +184,6 @@ class TransactionConfirmationRequestFactoryTest
           topologySnapshot: TopologySnapshot,
           contractOfId: ContractInstanceOfId,
           _rbContext: RollbackContext,
-          legacyKeyResolver: LfGlobalKeyMapping,
           _absolutizer: ContractIdAbsolutizer,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
@@ -203,6 +201,7 @@ class TransactionConfirmationRequestFactoryTest
       LoggingConfig(),
       loggerFactory,
       parallel = false,
+      useNewEncryptionAlgorithm = useNewEncryptionAlgorithm,
     )(
       transactionTreeFactory,
       seedGenerator,
@@ -255,13 +254,28 @@ class TransactionConfirmationRequestFactoryTest
       .replace(orderedTvm)
   }
 
-  // Expected output factory
+  /* Currently, there are two different ways we can encrypt views. The first is by directly encrypting the views and
+   * using the view-hash as a reference for subviews, knowing that there are currently no guarantees during
+   * decryption that a view-hash is unique, which can raise some concerns. The second way is to use ciphertext IDs
+   * (computed from the hash of the resulting encrypted view ciphertext) as references for subviews,
+   * which is more robust and guarantees uniqueness.
+   */
+  protected def encryptViews(
+      example: ExampleTransaction,
+      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      lightTransactionTreeWithRecipients: Seq[
+        (Recipients, (LightTransactionViewTree, Option[Signature]))
+      ],
+      hashToKeyMap: Map[ViewHash, (Recipients, SecureRandomness)],
+  )(implicit
+      traceContext: TraceContext
+  ): Seq[(EncryptedViewMessage[TransactionViewType.type], Recipients)]
+
   def expectedConfirmationRequest(
       example: ExampleTransaction,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit traceContext: TraceContext): TransactionConfirmationRequest = {
     val cryptoPureApi = cryptoSnapshot.pureCrypto
-    val viewEncryptionScheme = cryptoPureApi.defaultSymmetricKeyScheme
 
     /* We create a new crypto api to reset the randomness counter for each test, so that keys generated
      * match those of the actual test.
@@ -298,7 +312,6 @@ class TransactionConfirmationRequestFactoryTest
 
           val (recipients, _) = hashToKeyMap(tree.viewHash)
 
-          // TODO(#32835): adapt so encryption uses either a lightweight view tree referencing view hash or ciphertextId
           (
             recipients,
             (
@@ -314,100 +327,8 @@ class TransactionConfirmationRequestFactoryTest
           )
         }
 
-    val encryptedViewMessages: Seq[(EncryptedViewMessage[TransactionViewType.type], Recipients)] =
-      if (testedProtocolVersion >= ProtocolVersion.v35) {
-        val lightTreesByRecipientsE
-            : Seq[(Recipients, Seq[(LightTransactionViewTree, Option[Signature])])] = {
-          val groupedOrdered = lightTransactionTreeWithRecipients.groupMap(_._1)(_._2)
-          val recipientsInOrder = lightTransactionTreeWithRecipients.map(_._1).distinct
-
-          recipientsInOrder.flatMap { recipients =>
-            groupedOrdered.get(recipients).map(recipients -> _)
-          }
-        }
-
-        lightTreesByRecipientsE.flatMap { case (recipients, lightTrees) =>
-          val (firstTree, signature) = lightTrees.head
-
-          val (_, sessionKeyRandomness) = hashToKeyMap(firstTree.viewHash)
-
-          val sessionKey = cryptoPureApi
-            .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
-            .valueOrFail("fail to create symmetric key from randomness")
-
-          val participants = firstTree.informees
-            .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
-            .flatMap(_.keySet)
-
-          val encryptedViews = EncryptedMultipleViews
-            .compressAndEncryptViews(
-              cryptoPureApi,
-              sessionKey,
-              TransactionViewType,
-            )(
-              NonEmptyUtil.fromUnsafe(lightTrees.map(_._1)),
-              defaultMaxBytesToDecompress,
-            )
-            .valueOr(err => fail(s"fail to encrypt view tree: $err"))
-
-          val randomnessMapNE = NonEmpty
-            .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
-            .valueOrFail("session key randomness map is empty")
-
-          val messages = Seq(
-            EncryptedMultipleViewsMessage(
-              encryptedViews = encryptedViews,
-              viewHashes = NonEmptyUtil.fromUnsafe(lightTrees.map(_._1.viewHash)),
-              viewEncryptionKeyRandomness = randomnessMapNE,
-              synchronizerId = transactionFactory.psid,
-              viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
-              submittingParticipantSignature = signature,
-              protocolVersion = testedProtocolVersion,
-            )
-          )
-
-          messages.map((_, recipients))
-        }
-      } else {
-        lightTransactionTreeWithRecipients.map { case (recipients, (ltvt, signatureO)) =>
-          val (_, sessionKeyRandomness) = hashToKeyMap(ltvt.viewHash)
-
-          val sessionKey = cryptoPureApi
-            .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
-            .valueOrFail("fail to create symmetric key from randomness")
-
-          val participants = ltvt.informees
-            .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
-            .flatMap(_.keySet)
-
-          val randomnessMapNE = NonEmpty
-            .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
-            .valueOrFail("session key randomness map is empty")
-
-          val encryptedView = EncryptedView
-            .compressed(
-              cryptoPureApi,
-              sessionKey,
-              TransactionViewType,
-            )(
-              ltvt,
-              defaultMaxBytesToDecompress,
-            )
-            .valueOr(err => fail(s"fail to encrypt view tree: $err"))
-
-          val message = EncryptedSingleViewMessage(
-            signatureO,
-            ltvt.viewHash,
-            randomnessMapNE,
-            encryptedView,
-            transactionFactory.psid,
-            SymmetricKeyScheme.Aes128Gcm,
-            testedProtocolVersion,
-          )
-
-          (message, recipients)
-        }
-      }
+    val encryptedViewMessages =
+      encryptViews(example, cryptoSnapshot, lightTransactionTreeWithRecipients, hashToKeyMap)
 
     val expectedTransactionViewMessages = encryptedViewMessages.map {
       case (viewMessage, recipients) =>
@@ -460,7 +381,9 @@ class TransactionConfirmationRequestFactoryTest
     )
   }
 
-  "A ConfirmationRequestFactory" when {
+  protected def transactionConfirmationRequestFactoryTest(
+      useNewEncryptionAlgorithm: Boolean
+  ): Unit = {
     "everything is ok" can {
 
       forEvery(
@@ -468,7 +391,10 @@ class TransactionConfirmationRequestFactoryTest
         transactionFactory.standardHappyCases.filterNot(_ == transactionFactory.EmptyTransaction)
       ) { example =>
         s"create a transaction confirmation request for: $example" in {
-          val factory = confirmationRequestFactory(Right(example.transactionTree))
+          val factory = confirmationRequestFactory(
+            Right(example.transactionTree),
+            useNewEncryptionAlgorithm = useNewEncryptionAlgorithm,
+          )
 
           ResourceUtil.withResourceM(
             new SessionKeyStoreWithInMemoryCache(
@@ -482,7 +408,6 @@ class TransactionConfirmationRequestFactoryTest
                 example.wellFormedUnsuffixedTransaction,
                 submitterInfo,
                 workflowId,
-                example.keyResolver,
                 mediator,
                 newCryptoSnapshot,
                 wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -503,7 +428,10 @@ class TransactionConfirmationRequestFactoryTest
 
       "use the same session encryption key if view recipients tree is the same" in {
         val multipleRoots = transactionFactory.MultipleRoots
-        val factory = confirmationRequestFactory(Right(multipleRoots.transactionTree))
+        val factory = confirmationRequestFactory(
+          Right(multipleRoots.transactionTree),
+          useNewEncryptionAlgorithm,
+        )
         val store = SessionKeyStoreDisabled
 
         factory
@@ -511,7 +439,6 @@ class TransactionConfirmationRequestFactoryTest
             multipleRoots.wellFormedUnsuffixedTransaction,
             submitterInfo,
             workflowId,
-            multipleRoots.keyResolver,
             mediator,
             newCryptoSnapshot,
             wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -534,7 +461,8 @@ class TransactionConfirmationRequestFactoryTest
       }
 
       s"use different session key after key is revoked between two requests" in {
-        val factory = confirmationRequestFactory(Right(singleFetch.transactionTree))
+        val factory =
+          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
 
         def getSessionKeyFromConfirmationRequest(
             cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -545,7 +473,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               cryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -596,7 +523,8 @@ class TransactionConfirmationRequestFactoryTest
       val emptyCryptoSnapshot = createCryptoSnapshot(Map.empty)
 
       "be rejected" in {
-        val factory = confirmationRequestFactory(Right(singleFetch.transactionTree))
+        val factory =
+          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -610,7 +538,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               emptyCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -640,7 +567,8 @@ class TransactionConfirmationRequestFactoryTest
         createCryptoSnapshot(defaultTopology, permission = Confirmation)
 
       "be rejected" in {
-        val factory = confirmationRequestFactory(Right(singleFetch.transactionTree))
+        val factory =
+          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -654,7 +582,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               confirmationOnlyCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -681,7 +608,7 @@ class TransactionConfirmationRequestFactoryTest
     "transactionTreeFactory fails" must {
       "be rejected" in {
         val error = ContractLookupError(ExampleTransactionFactory.suffixedId(-1, -1), "foo")
-        val factory = confirmationRequestFactory(Left(error))
+        val factory = confirmationRequestFactory(Left(error), useNewEncryptionAlgorithm)
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -695,7 +622,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               newCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled
@@ -719,7 +645,8 @@ class TransactionConfirmationRequestFactoryTest
         createCryptoSnapshot(Map(submittingParticipant -> Seq(submitter)))
 
       "be rejected" in {
-        val factory = confirmationRequestFactory(Right(singleFetch.transactionTree))
+        val factory =
+          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -733,7 +660,6 @@ class TransactionConfirmationRequestFactoryTest
               singleFetch.wellFormedUnsuffixedTransaction,
               submitterInfo,
               workflowId,
-              singleFetch.keyResolver,
               mediator,
               submitterOnlyCryptoSnapshot,
               wallClock.now, // not needed for unit tests; session signing keys disabled

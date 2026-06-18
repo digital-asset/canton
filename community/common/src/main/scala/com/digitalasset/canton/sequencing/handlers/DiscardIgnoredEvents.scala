@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.handlers
 import cats.syntax.alternative.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.protocol.Envelope
+import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope}
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
   BoxedEnvelope,
@@ -46,8 +46,8 @@ class DiscardIgnoredEvents[Env <: Envelope[?], +A](
   ): GenericHandlerResult[A] = {
     val filtered = tracedEvents.mapWithTraceContext { implicit batchTraceContext => events =>
       val classified = events.map {
-        case e: OrdinarySequencedEvent[Env] => Right(e)
-        case e: IgnoredSequencedEvent[Env] => Left(e)
+        case e: OrdinarySequencedEvent[Batch[Env]] => Right(e)
+        case e: IgnoredSequencedEvent[Batch[Env]] => Left(e)
       }
       val (ignored, ordinary) = classified.separate
       // We merely log a warning for now rather than fail the application handler.

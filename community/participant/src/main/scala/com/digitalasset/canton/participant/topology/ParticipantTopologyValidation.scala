@@ -33,6 +33,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -46,6 +47,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
       dryRunSnapshot: PackageMetadata,
       forceFlags: ForceFlags,
       disableUpgradeValidation: Boolean,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -63,6 +65,8 @@ trait ParticipantTopologyValidation extends NamedLogging {
           packageMetadataSnapshot,
           dryRunSnapshot,
           forceFlags,
+          // Protocol versions 35 and above do not require anymore that a vetted package's dependencies are themselves vetted as well
+          checkDependenciesVetting = protocolVersion <= ProtocolVersion.v34,
         )
       _ <- EitherT.fromEither[FutureUnlessShutdown] {
         if (
@@ -256,6 +260,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
       packageMetadataSnapshot: PackageMetadata,
       dryRunSnapshot: PackageMetadata,
       forceFlags: ForceFlags,
+      checkDependenciesVetting: Boolean,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -291,7 +296,10 @@ trait ParticipantTopologyValidation extends NamedLogging {
       val unvettedDeps = (dependenciesOfAdded -- vettedPackagesTarget) ++ removedDeps
       if (unknownToBeAdded.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnknownPackage))
         Left(CannotVetDueToMissingPackages.Missing(unknownToBeAdded))
-      else if (unvettedDeps.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnvettedDependencies))
+      else if (
+        checkDependenciesVetting && !forceFlags
+          .permits(ForceFlag.AllowUnvettedDependencies) && unvettedDeps.nonEmpty
+      )
         Left(DependenciesNotVetted.Reject(unvettedDeps))
       else Right(())
     })

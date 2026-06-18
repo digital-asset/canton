@@ -187,6 +187,7 @@ object Synchronizer {
 
   /** Parses a string protobuf field to either a logical or physical synchronizer ID. Fails if the
     * string can't be parsed to either.
+    *
     * @param value
     *   value to parse
     * @param fieldName
@@ -202,6 +203,16 @@ object Synchronizer {
         PhysicalSynchronizerId
           .fromProtoPrimitive(value, fieldName)
       )
+
+  implicit val getResultSynchronizer: GetResult[Synchronizer] = GetResult { r =>
+    val str = r.nextString()
+    fromLogicalOrPhysicalString(str, "synchronizer_id").valueOr(err =>
+      throw new DbDeserializationException(err.message)
+    )
+  }
+
+  implicit val setParameterSynchronizer: SetParameter[Synchronizer] = (v: Synchronizer, pp) =>
+    pp >> v.toProtoPrimitive
 }
 
 final case class SynchronizerId(uid: UniqueIdentifier) extends Synchronizer with Identity {

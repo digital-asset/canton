@@ -8,8 +8,6 @@ import scalaz.std.tuple.*
 import scalaz.syntax.traverse.*
 import scalaz.{Applicative, Equal, Order, Traverse}
 
-import scala.collection.immutable.HashMap
-
 import ScalazEqual.{equalBy, orderBy}
 
 /** We use this container to pass around Daml-LF text maps as flat lists in various parts of the
@@ -31,8 +29,6 @@ final class SortedLookupList[+X] private (entries: ImmArray[(String, X)]) extend
   def values: ImmArray[X] = entries.map(_._2)
 
   def iterator: Iterator[(String, X)] = entries.iterator
-
-  def toHashMap: HashMap[String, X] = HashMap(entries.toSeq*)
 
   def foreach(f: ((String, X)) => Unit): Unit = entries.foreach(f)
 
@@ -75,7 +71,7 @@ object SortedLookupList extends SortedLookupListInstances {
       case Some(_) => Left(s"the entries $entries are not sorted by key")
     }
 
-  def apply[X](entries: Map[String, X]): SortedLookupList[X] =
+  def from[X](entries: Iterable[(String, X)]): SortedLookupList[X] =
     new SortedLookupList[X](entries.to(ImmArray.ImmArraySeq).sorted(EntryOrdering).toImmArray)
 
   def Empty: SortedLookupList[Nothing] = new SortedLookupList(ImmArray.Empty)

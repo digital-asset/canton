@@ -163,6 +163,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
             // Make the warning delay large to avoid these warnings in the test
             sequencerConnectionPoolDelays =
               old.sequencerConnectionPoolDelays.copy(warnValidationDelay = 1.day),
+            subscriptionLivenessLimits = old.subscriptionLivenessLimits,
           )
         }
       }

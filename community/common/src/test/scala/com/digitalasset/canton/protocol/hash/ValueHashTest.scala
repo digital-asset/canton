@@ -179,7 +179,7 @@ class ValueHashTest extends BaseTest with AnyWordSpecLike with HashUtilsTest {
     "encode text map value" in {
       assertEncode(
         Value.ValueTextMap(
-          SortedLookupList(
+          SortedLookupList.from(
             Map(
               "foo" -> Value.ValueNumeric(data.Numeric.assertFromString("31380.0")),
               "bar" -> Value.ValueText("1284"),

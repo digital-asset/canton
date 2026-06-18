@@ -8,11 +8,8 @@ import com.daml.ledger.api.v2.state_service.ActiveContract as LapiActiveContract
 import com.digitalasset.canton.data.Counter
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.digitalasset.canton.{LfPackageId, ReassignmentCounter}
 import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
-import com.google.protobuf.ByteString
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
 /** A contract to add/import with admin repairs.
   */
@@ -30,22 +27,6 @@ final case class RepairContract(
 }
 
 object RepairContract {
-
-  /** Takes an ACS snapshot that has been created with `export_acs` command and converts to a list
-    * of contracts.
-    */
-  def loadAcsSnapshot(
-      acsSnapshot: ByteString
-  ): Either[String, List[RepairContract]] =
-    for {
-      contracts <- ResourceUtil.withResource(
-        // TODO(i28137): This is vulnerable to zip bombs.
-        new GzipCompressorInputStream(acsSnapshot.newInput())
-      ) { decompressed =>
-        GrpcStreamingUtils.parseDelimitedFromTrusted[ActiveContract](decompressed, ActiveContract)
-      }
-      repairContracts <- contracts.traverse(c => fromLapiActiveContract(c.contract))
-    } yield repairContracts
 
   def fromLapiActiveContract(contract: LapiActiveContract): Either[String, RepairContract] =
     for {

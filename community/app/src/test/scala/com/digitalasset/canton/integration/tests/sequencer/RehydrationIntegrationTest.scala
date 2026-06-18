@@ -14,6 +14,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.*
@@ -197,6 +198,7 @@ abstract class RehydrationIntegrationTest
       sequencerLivenessMargin = NonNegativeInt.zero,
       SubmissionRequestAmplification.NoAmplification,
       SequencerConnectionPoolDelays.default,
+      SubscriptionLivenessLimits.default,
     )
 
     // stop mediator1 and copy it over to the fresh mediator2
@@ -296,6 +298,7 @@ abstract class RehydrationIntegrationTest
       sequencerLivenessMargin = NonNegativeInt.zero,
       SubmissionRequestAmplification.NoAmplification,
       SequencerConnectionPoolDelays.default,
+      SubscriptionLivenessLimits.default,
     )
 
     loggerFactory.assertLogsUnorderedOptional(

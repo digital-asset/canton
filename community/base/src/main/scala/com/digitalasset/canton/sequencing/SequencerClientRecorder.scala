@@ -38,7 +38,7 @@ class SequencerClientRecorder(
   def recordSubmission(submission: SubmissionRequest): Unit =
     submissionRecorder.record(submission)
 
-  def recordEvent(event: SequencedSerializedEvent): Unit =
+  def recordEvent(event: MaybeCompressedSerializedEvent): Unit =
     eventRecorder.record(event)
 
   override protected def onClosed(): Unit = {
@@ -58,8 +58,11 @@ object SequencerClientRecorder {
 
   def loadEvents(path: Path, logger: TracedLogger)(implicit
       traceContext: TraceContext
-  ): List[SequencedSerializedEvent] =
-    MessageRecorder.load[SequencedSerializedEvent](withExtension(path, Extensions.Events), logger)
+  ): List[MaybeCompressedSerializedEvent] =
+    MessageRecorder.load[MaybeCompressedSerializedEvent](
+      withExtension(path, Extensions.Events),
+      logger,
+    )
 
   object Extensions {
     val Submissions = "submissions"

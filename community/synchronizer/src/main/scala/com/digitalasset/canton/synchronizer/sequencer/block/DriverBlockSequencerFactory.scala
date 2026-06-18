@@ -4,11 +4,13 @@
 package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
+import com.digitalasset.canton.synchronizer.block.update.BlockProcessingParameters
 import com.digitalasset.canton.synchronizer.block.{
   BlockSequencerStateManager,
   SequencerDriverFactory,
@@ -107,9 +109,10 @@ class DriverBlockSequencerFactory[C](
       health: Option[SequencerHealthConfig],
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
-      orderingTimeFixMode: OrderingTimeFixMode,
-      synchronizerLoggerFactory: NamedLoggerFactory,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      parallelism: PositiveInt,
+      enablePrevalidation: Boolean,
+      synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
       ec: ExecutionContextExecutor,
@@ -132,12 +135,16 @@ class DriverBlockSequencerFactory[C](
       health,
       clock,
       rateLimitManager,
-      orderingTimeFixMode,
-      lsuSequencingBounds,
+      BlockProcessingParameters(
+        orderingTimeFixMode,
+        lsuSequencingBounds,
+        parallelism = parallelism,
+        enablePrevalidation = enablePrevalidation,
+      ),
+      nodeParameters,
       metrics,
       synchronizerLoggerFactory,
       runtimeReady = runtimeReady,
-      nodeParameters,
     )
 }
 

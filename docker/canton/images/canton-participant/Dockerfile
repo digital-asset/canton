@@ -7,8 +7,6 @@ ARG oci_path
 FROM ${oci_path}canton-base:${base_version}
 
 ARG base_version=latest
-LABEL org.opencontainers.image.base.name=canton-base:${base_version}
-LABEL org.opencontainers.image.ref.name=canton-participant:${base_version}
 
 EXPOSE 5001
 EXPOSE 5002

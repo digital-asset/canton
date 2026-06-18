@@ -18,9 +18,18 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
-### Minor Improvements
+### Reassignment store database migration
 
+On upgrade, a participant database migration updates the reassignment store: it backfills the new
+`stakeholders` column from the persisted contracts and drops the old `contracts` column. This runs
+automatically as part of the startup migration step. Its duration scales with the number of
+reassignments in the store, taking roughly 1 second per 10,000 reassignments.
+
+
+### Minor Improvements
 -
+- The concurrency limit interceptor `ActiveRequestInterceptor` now caches rejection responses instead of generating a new error (and thereby filling the stack trace) for each
+rejected response, once the concurrency limit is filled.
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
   of an onboarding party.
 - OpenAPI and AsyncAPI files are now included in the API archive, and the bundle is published as a Maven artifact on
@@ -36,12 +45,19 @@ Template for a bigger topic
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 - *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
+- *BREAKING*: The submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also be returned during
+  the synchronous submission of the sequencer, as the state of the aggregation is also checked before ordering. In
+  addition, the GRPC error code has been modified from `FAILED_PRECONDITION` to `ALREADY_EXISTS` to better reflect the
+  nature of the error. Clients should be updated to handle this error code accordingly.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
 
+- Fixed a bug in the sequencer node bootstrap workflow method `initSequencerNodeServer` to ensure that `maxRequestSize` is
+computed and applied correctly during node initialization, based on the configuration or a topology transaction,
+with a fallback default value of 10 MB.
 - When the AcsCommitmentProcessor is initializing, read stakeholder groups from the snapshot in batches of size
   `canton.parameters.general.batching.max-stakeholder-groups-batch-size` (default 1000), rather than all at once.
   This allows early termination of this initialization if the node is shutting down.
@@ -64,6 +80,14 @@ Template for a bigger topic
 
 #### Recommendation
 
+## Deprecations
+
+### Reminder: Support for scope-based access tokens will be removed in version 3.7.
+- "Scope-based" access tokens, i.e. JWTs without any audience specified, have been deprecated in version 3.5.
+- Versions 3.5 and 3.6 allow configurations using the default or explicitly configured target audiences, and log a warning for non-compliant configurations.
+- In release 3.7, support for "scope-based" tokens will be removed entirely to enforce a valid `aud` field in every incoming JWT.
+  The `scope` field will be repurposed to serve exclusively as an additional, optional claim for fine-grained permissions.
+
 ## Compatibility
 
 The following Canton protocol versions are supported:
@@ -78,4 +102,3 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
-

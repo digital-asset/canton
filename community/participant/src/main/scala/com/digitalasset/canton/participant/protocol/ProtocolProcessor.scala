@@ -945,7 +945,7 @@ abstract class ProtocolProcessor[
         snapshot.ipsSnapshot
           .participantsWithSupportedFeature(
             Set(participantId),
-            ParticipantTopologyFeatureFlag.EnableAlphaMultiSynchronizer,
+            ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
           )
           .map(_.headOption.nonEmpty)
       )
@@ -1443,7 +1443,7 @@ abstract class ProtocolProcessor[
 
   override def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val content = event.event.content
     val ts = content.timestamp
@@ -1475,7 +1475,7 @@ abstract class ProtocolProcessor[
 
   @VisibleForTesting
   private[protocol] def processResultInternal1(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1575,7 +1575,7 @@ abstract class ProtocolProcessor[
     * confirmation result. The inner `EitherT` corresponds to the subsequent async stage.
     */
   private[this] def processResultInternal2(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1700,7 +1700,7 @@ abstract class ProtocolProcessor[
   // Assigning the internal contract ids to the contracts requires that all the contracts are
   // already persisted in the contract store.
   private[this] def processResultInternal3(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       requestId: RequestId,
       resultTs: CantonTimestamp,

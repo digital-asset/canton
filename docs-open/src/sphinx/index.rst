@@ -224,8 +224,6 @@ Canton documentation
   docs-cn/global-synchronizer-extension-synchronizers-private-synchronizers
   docs-cn/global-synchronizer-extension-synchronizers-private-validators
 
-  docs-cn/global-synchronizer-production-operations-logging
-
 .. toctree::
   :maxdepth: 2
   :caption: Synchronizer

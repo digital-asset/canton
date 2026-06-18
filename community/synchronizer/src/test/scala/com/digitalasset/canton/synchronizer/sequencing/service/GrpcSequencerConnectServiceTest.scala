@@ -63,7 +63,7 @@ class GrpcSequencerConnectServiceTest
       ),
       sanitizePublicErrorMessages = false,
       disableReleaseVersionHandshakeCheck = false,
-      SequencerTestMetrics,
+      SequencerTestMetrics(this.getClass.getSimpleName),
       loggerFactory,
     )(parallelExecutionContext)
 

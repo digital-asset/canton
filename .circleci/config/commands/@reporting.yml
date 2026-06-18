@@ -57,3 +57,28 @@ post_benchmark_metrics:
         label: "Post benchmark metrics to Datadog"
         data: "$BENCHMARK"
         when: always
+
+post_transaction_snapshot_metrics:
+  steps:
+    - run:
+        name: Read transaction snapshot benchmark metrics from JMH test report
+        when: always
+        command: |
+          TIMESTAMP=$(date +%s)
+          echo "Timestamp: $TIMESTAMP"
+          HASH=$(git log -1 --pretty=%h)
+          echo "Commit hash (abbreviated): $HASH"
+
+          for obj in $(jq -c '.[] | {params:.params, primaryMetric:.primaryMetric, secondaryMetrics:.secondaryMetrics}' $BENCHMARKING_RESULT_FILE); do
+            CHOICE_NAME=$(echo $obj |jq -r '.params.choiceName'  |sed 's/^[0-9a-fA-F]*://')
+            CONTRACT_ID_VERSION=$(echo $obj |jq -r '.params.contractIdVersion')
+            GAS_ON=$(echo $obj |jq -r '.params.gasOn')
+            BENCHMARK=$(echo $obj |jq -r '.primaryMetric.score')
+            STEP_COUNT=$(echo $obj |jq -r '.secondaryMetrics.stepCount.score')
+            FETCH_NODE_COUNT=$(echo $obj |jq -r '.secondaryMetrics.fetchNodeCount.score')
+            TRANSACTION_NODE_COUNT=$(echo $obj |jq -r '.secondaryMetrics.transactionNodeCount.score')
+            TAGS=$(jo -a "branch:$CIRCLE_BRANCH" "hash:$HASH" "workflow:$CIRCLE_WORKFLOW_ID" "job:$CIRCLE_JOB" "build:$CIRCLE_BUILD_NUM" "url:$CIRCLE_BUILD_URL" "container:$CIRCLE_NODE_INDEX" "snapshotVersion:$SNAPSHOT_VERSION" "choiceName:$CHOICE_NAME" "contractIdVersion:$CONTRACT_ID_VERSION" "gasOn:$GAS_ON")
+
+            ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" rate "$TAGS" "transaction.snapshot.benchmark=$BENCHMARK"
+            ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" count "$TAGS" "transaction.snapshot.stepCount=$STEP_COUNT" "transaction.snapshot.fetchNodeCount=$FETCH_NODE_COUNT" "transaction.snapshot.nodeCount=$TRANSACTION_NODE_COUNT"
+          done

@@ -76,6 +76,7 @@ class GrpcMediatorInspectionServiceTest
             )
           )
           .toVerdict(testedProtocolVersion),
+      firstResponseReceived = None,
     )(TraceContext.empty)
 
   private implicit val actorSystem: ActorSystem =

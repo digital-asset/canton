@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.CryptoKeyFormat.Raw
 import com.digitalasset.canton.crypto.CryptoTestHelper.TestMessage
-import com.digitalasset.canton.crypto.SigningKeySpec.EcSecp256k1
+import com.digitalasset.canton.crypto.SigningKeySpec.{EcSecp256k1, MlDsa65}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
@@ -39,7 +39,8 @@ class JceCryptoTest
     with RandomTest
     with PublicKeyValidationTest
     with PrivateKeyValidationTest
-    with CryptoKeyFormatMigrationTest {
+    with CryptoKeyFormatMigrationTest
+    with JwksTest {
 
   "JceCrypto" must {
 
@@ -252,6 +253,12 @@ class JceCryptoTest
       Jce.encryptionKeys.supported,
       Jce.supportedCryptoKeyFormats,
       jceCrypto().failOnShutdown,
+    )
+
+    behave like jwksProvider(
+      supportedSigningKeySpecs = Jce.signingKeys.supported.filter(_ != MlDsa65),
+      unsupportedSigningKeySpecs = Set(MlDsa65),
+      newCrypto = jceCrypto(),
     )
   }
 }

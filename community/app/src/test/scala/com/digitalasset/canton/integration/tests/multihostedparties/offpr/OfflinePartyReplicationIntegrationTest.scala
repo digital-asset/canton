@@ -25,11 +25,8 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParametersWithValidity,
 }
 import com.digitalasset.canton.time.DelegatingSimClock
-import com.digitalasset.canton.topology.transaction.{
-  ParticipantPermission,
-  ParticipantPermission as PP,
-}
-import com.digitalasset.canton.topology.{Party, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.{Party, PartyKind, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, HasTempDirectory, SynchronizerAlias, config}
@@ -54,6 +51,19 @@ trait OfflinePartyReplicationIntegrationTestBase
   protected var target: LocalParticipantReference = _
   protected var alice: Party = _
   protected var bob: Party = _
+
+  // As an external party you actually do not want the participant to have the permission to submit (for you).
+  // Therefore, resolve permissions based on the active `PartyKind`.
+  protected def targetPermission: ParticipantPermission = partiesKind match {
+    case PartyKind.External(_) => ParticipantPermission.Confirmation
+    case PartyKind.Local => ParticipantPermission.Submission
+  }
+
+  // Determine if the current party type has submission rights on the target
+  protected def canSubmitOnTarget: Boolean = partiesKind match {
+    case PartyKind.External(_) => false
+    case PartyKind.Local => true
+  }
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
@@ -90,12 +100,15 @@ trait OfflinePartyReplicationIntegrationTestBase
     participant.ledger_api.state.acs
       .active_contracts_of_party(alice) should have size expectedNumActiveContracts
 
-    // Archive contract and create another one to assert regular operation after the completed party replication
-    val iou = participant.ledger_api.javaapi.state.acs.filter(M.iou.Iou.COMPANION)(alice).head
-    IouSyntax.archive(participant)(iou, alice)
+    // Archive contract and create another one to assert regular operation after the completed party replication.
+    // Note: This is skipped for External parties on the target participant as they lack submission permission.
+    if (canSubmitOnTarget || participant == source) {
+      val iou = participant.ledger_api.javaapi.state.acs.filter(M.iou.Iou.COMPANION)(alice).head
+      IouSyntax.archive(participant)(iou, alice)
 
-    (1 to numOfContractCreations).foreach { num =>
-      IouSyntax.createIou(participant)(alice, bob, s"${num}42.95".toDouble).discard
+      (1 to numOfContractCreations).foreach { num =>
+        IouSyntax.createIou(participant)(alice, bob, s"${num}42.95".toDouble).discard
+      }
     }
   }
 
@@ -126,7 +139,7 @@ trait OfflinePartyReplicationIntegrationTestBase
     target.topology.party_to_participant_mappings
       .propose_delta(
         party = party.partyId,
-        adds = Seq(target.id -> ParticipantPermission.Submission),
+        adds = Seq(target.id -> targetPermission),
         store = synchronizerId,
         requiresPartyToBeOnboarded = true,
       )
@@ -140,7 +153,7 @@ trait OfflinePartyReplicationIntegrationTestBase
     // Authorize the PTP update from the party
     party.topology.party_to_participant_mappings.propose_delta(
       source,
-      adds = Seq(target.id -> ParticipantPermission.Submission),
+      adds = Seq(target.id -> targetPermission),
       store = synchronizerId,
       requiresPartyToBeOnboarded = true,
     )
@@ -297,7 +310,7 @@ final class OfflinePartyReplicationIntegrationTest
     target.topology.party_to_participant_mappings
       .propose_delta(
         party = alice,
-        adds = Seq(target.id -> ParticipantPermission.Submission),
+        adds = Seq(target.id -> targetPermission),
         store = daId,
         requiresPartyToBeOnboarded = true,
       )
@@ -318,7 +331,7 @@ final class OfflinePartyReplicationIntegrationTest
     // Alice also needs to authorize the transaction
     alice.topology.party_to_participant_mappings.propose_delta(
       source,
-      adds = Seq(target.id -> ParticipantPermission.Submission),
+      adds = Seq(target.id -> targetPermission),
       store = daId,
       requiresPartyToBeOnboarded = true,
     )
@@ -364,19 +377,23 @@ final class OfflinePartyReplicationIntegrationTest
     )
 
     // Assert contract archival and creation (submission) does NOT work
-    // while the onboarding flag has not been cleared yet.
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      assertAcsAndContinuedOperation(
-        target,
-        expectedNumActiveContracts = 2,
-        numOfContractCreations = 7,
-      ),
-      _.shouldBeCantonErrorCode(
-        TransactionProcessor.SubmissionErrors.PartyCurrentlyOnboarding
-          .Rejection(Seq(alice.toLf))
-          .code
-      ),
-    )
+    // while the onboarding flag has not been cleared yet (local parties only).
+    if (canSubmitOnTarget) {
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        assertAcsAndContinuedOperation(
+          target,
+          expectedNumActiveContracts = 2,
+          numOfContractCreations = 7,
+        ),
+        _.shouldBeCantonErrorCode(
+          TransactionProcessor.SubmissionErrors.PartyCurrentlyOnboarding
+            .Rejection(Seq(alice.toLf))
+            .code
+        ),
+      )
+    } else {
+      assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 2)
+    }
 
     // Advance time to allow the asynchronous onboarding flag clearance to complete
     advanceTimeAndPing(clock, Duration.ofMinutes(2).plusSeconds(10), source, target)
@@ -506,8 +523,8 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
         alice,
         PositiveInt.one,
         Set(
-          (source.id, PP.Submission),
-          (target.id, PP.Submission),
+          (source.id, targetPermission),
+          (target.id, targetPermission),
         ),
       )(executionContext, env)
 

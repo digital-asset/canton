@@ -7,6 +7,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   Deliver,
   DeliverError,
   Envelope,
@@ -26,7 +27,7 @@ object SendResult {
     * are delivered. Accordingly, the [[com.digitalasset.canton.sequencing.protocol.Deliver]] event
     * may contain an empty batch.
     */
-  final case class Success(deliver: Deliver[Envelope[?]]) extends SendResult
+  final case class Success(deliver: Deliver[Batch[Envelope[?]]]) extends SendResult
 
   /** Send caused an event that indicates that the submission was not and never will be sequenced */
   sealed trait NotSequenced extends SendResult

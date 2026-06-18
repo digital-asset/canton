@@ -215,7 +215,6 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
         result.commandInterpretationResult.submitterInfo,
         result.commandInterpretationResult.transactionMeta,
         result.commandInterpretationResult.interpretationTimeNanos,
-        result.commandInterpretationResult.globalKeyMapping,
         result.commandInterpretationResult.processedDisclosedContracts,
       )
   }

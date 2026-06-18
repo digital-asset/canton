@@ -110,7 +110,7 @@ abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeInteg
           .updateTargetTimestampForwardTolerance(
             config.targetTimestampForwardTolerance.duration
           ),
-        ConfigTransforms.enableAlphaMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .addConfigTransforms(additionalConfigTransforms*)
       .withSetup(setUp)

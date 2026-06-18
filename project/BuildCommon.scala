@@ -1135,6 +1135,7 @@ object BuildCommon {
         DamlProjects.`testing-utils` % Test,
         blake2b,
         `community-base`,
+        `community-admin-api`,
         `wartremover-annotations`,
         `community-testing` % Test,
         `wartremover-extension` % "test->test",
@@ -1174,6 +1175,15 @@ object BuildCommon {
         ),
         enablePublishLibrary,
         addFilesToHeaderCheck("*.daml", "daml", Compile),
+        // Flyway Scala-based migrations are frozen historical artifacts whose checksums are verified
+        // by FlywayChecksumsTest. Exclude them from the automatic license-header update so the yearly
+        // copyright bump does not modify their content and break the recorded checksum.
+        Compile / headerSources / excludeFilter := HiddenFileFilter || new SimpleFileFilter(
+          _.getCanonicalPath.contains(
+            Seq("db", "migration", "canton")
+              .mkString(File.separator, File.separator, File.separator)
+          )
+        ),
       )
 
     lazy val `community-synchronizer` = project
@@ -1306,7 +1316,8 @@ object BuildCommon {
         // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
         Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
-            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto"
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/admin/scalapb/package.proto",
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/topology/admin/scalapb/package.proto",
           ),
         addProtobufFilesToHeaderCheck(Compile),
       )
@@ -1356,7 +1367,7 @@ object BuildCommon {
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
         libraryDependencies ++= Seq(
           testcontainers,
           testcontainers_postgresql,
@@ -1395,7 +1406,7 @@ object BuildCommon {
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
       )
 
     lazy val microbench = project
@@ -1407,7 +1418,7 @@ object BuildCommon {
         // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
         // by ensuring this task never runs in assembly plugin in debug mode.
         assembly / logLevel := Level.Info,
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
         Compile / compile / wartremoverErrors ~= (_.filterNot(
           _.clazz == "com.digitalasset.canton.EnforceVisibleForTesting"
         )),
@@ -2272,7 +2283,7 @@ object BuildCommon {
         // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
         assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
-        assembly / assemblyJarName := s"ledger-api-test-tool-2.2-${version.value}.jar",
+        assembly / assemblyJarName := s"ledger-api-test-tool-2.3-${version.value}.jar",
         assembly / assemblyMergeStrategy := {
           case PathList("logback.xml") => MergeStrategy.last
           case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last
@@ -3714,6 +3725,16 @@ object BuildCommon {
             "com.daml.lf.testing.snapshot.java",
           )
         ),
+        Test / testOptions += Tests.Setup { () =>
+          // daml-lf-snapshot needs to receive a ConfigMap in its test suite constructors. Due to bugs in the implementation
+          // of org.scalatest.ConfigMapWrapperSuite, this is not currently possible, hence we explicitly set damlVersion and
+          // dpmRegistry using system properties.
+          // Ref:
+          // - https://github.com/scalatest/scalatest/issues/1704
+          // - https://github.com/scalatest/scalatest/pull/600
+          System.setProperty("damlVersion", Dependencies.daml_libraries_version)
+          System.setProperty("dpmRegistry", Dependencies.dpm_registry)
+        },
       )
 
     lazy val `daml-lf-interpreter` = project

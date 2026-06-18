@@ -26,12 +26,19 @@ import com.digitalasset.canton.{ProtoDeserializationError, checkedToByteString}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
+/** Common interface for a decompressed [[Batch]] and a still-compressed [[CompressedBatch]]. */
+sealed trait GenBatch[+Env <: Envelope[?]] extends Product with Serializable with PrettyPrinting {
+  private[protocol] def toProtoV30: v30.CompressedBatch
+  private[protocol] def toProtoV31: v31.CompressedBatch
+}
+
 /** A '''batch''' is a list of `n` tuples `(m`,,i,,` , recipients`,,i,,), where `m`,,i,, is a
   * message, and `recipients`,,i,, is the list of recipients of m,,i,,, for `0 <= i < n`.
   */
 final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[Batch.type]
 ) extends HasProtocolVersionedWrapper[Batch[Envelope[?]]]
+    with GenBatch[Env]
     with PrettyPrinting {
 
   @transient override protected lazy val companionObj: Batch.type = Batch
@@ -55,7 +62,7 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
 
   lazy val isBroadcast: Boolean = allRecipients.contains(AllMembersOfSynchronizer)
 
-  private[protocol] def toProtoV30: v30.CompressedBatch = {
+  override private[protocol] def toProtoV30: v30.CompressedBatch = {
     // We can call the unsafe method here, because for v30 the envelopes are not compressed
     val batch =
       v30.Batch(envelopes = envelopes.map(_.toClosedUncompressedEnvelopeUnsafe.toProtoV30))
@@ -68,7 +75,7 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
     )
   }
 
-  private[protocol] def toProtoV31: v31.CompressedBatch = {
+  override private[protocol] def toProtoV31: v31.CompressedBatch = {
     val decompressedRecipients =
       v31.CompressedBatch.DecompressedRecipients(envelopes.map(_.recipients.toProtoV30))
 
@@ -101,6 +108,36 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
   def toClosedUncompressedBatchResult: ParsingResult[Batch[ClosedUncompressedEnvelope]] = for {
     uncompressedEnvelopes <- envelopes.traverse(_.toClosedUncompressedEnvelopeResult)
   } yield Batch(uncompressedEnvelopes)(representativeProtocolVersion)
+}
+
+/** A batch that has been received but not yet decompressed. It intentionally retains the original
+  * wire proto so that decompression can be deferred until a
+  * [[com.digitalasset.canton.util.MaxBytesToDecompress]] bound, derived from the topology snapshot
+  * at the event's timestamp, is available. Re-serialization simply hands the retained proto back.
+  */
+final case class CompressedBatch(proto: ProtoBatch) extends GenBatch[Nothing] {
+  override private[protocol] def toProtoV30: v30.CompressedBatch =
+    proto match {
+      case ProtoBatchV30(wrapped) => wrapped
+      case ProtoBatchV31(_) =>
+        throw new IllegalStateException("CompressedBatch v31 cannot be serialized as v30")
+    }
+  override private[protocol] def toProtoV31: v31.CompressedBatch =
+    proto match {
+      case ProtoBatchV31(wrapped) => wrapped
+      case ProtoBatchV30(_) =>
+        throw new IllegalStateException("CompressedBatch v30 cannot be serialized as v31")
+    }
+
+  def decompress(
+      maxBytesToDecompress: MaxBytesToDecompress
+  ): ParsingResult[Batch[ClosedEnvelope]] =
+    proto match {
+      case ProtoBatchV30(wrapped) => Batch.fromProtoV30(maxBytesToDecompress, wrapped)
+      case ProtoBatchV31(wrapped) => Batch.fromProtoV31(maxBytesToDecompress, wrapped)
+    }
+
+  override protected def pretty: Pretty[CompressedBatch.this.type] = prettyOfClass()
 }
 
 object Batch

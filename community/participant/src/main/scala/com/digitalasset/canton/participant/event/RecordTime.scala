@@ -5,10 +5,12 @@ package com.digitalasset.canton.participant.event
 
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.CantonTimestamp.{getResultOptionTimestamp, getResultTimestamp}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import slick.jdbc.GetResult
 
 /** Canton-internal record time
   * @param timestamp
@@ -43,6 +45,18 @@ object RecordTime {
 
   implicit val recordTimeOrdering: Ordering[RecordTime] =
     Ordering.by(rt => (rt.timestamp -> rt.tieBreaker))
+
+  implicit val getResultRecordTime: GetResult[RecordTime] = GetResult { pr =>
+    val timestamp = getResultTimestamp(pr)
+    val tieBreaker = pr.nextLong()
+    RecordTime(timestamp, tieBreaker)
+  }
+
+  implicit val getRecordTimeO: GetResult[Option[RecordTime]] = GetResult { pr =>
+    val tsO = getResultOptionTimestamp(pr)
+    val tieBreakerO = pr.nextLongOption()
+    tsO.map(ts => RecordTime(ts, tieBreakerO.getOrElse(0)))
+  }
 
   def fromTimeOfChange(toc: TimeOfChange): RecordTime =
     TimeOfChange.withMinAsNoneRepairCounter(toc) { case (ts, rc) =>

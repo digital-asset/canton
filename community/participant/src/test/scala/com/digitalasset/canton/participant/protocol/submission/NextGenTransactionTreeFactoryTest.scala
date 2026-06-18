@@ -4,10 +4,12 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.GenTransactionTree
+import com.digitalasset.canton.crypto.{TestHash, TestSalt}
+import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
+import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
+import com.digitalasset.canton.data.{GenTransactionTree, ViewPosition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
@@ -30,8 +32,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.CantonOnly
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
-import com.digitalasset.daml.lf.transaction.{ExternalCallResult, LegacyContractStateMachine}
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
+import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -144,7 +146,6 @@ final class NextGenTransactionTreeFactoryTest
           treeFactory: TransactionTreeFactory,
           transaction: WellFormedTransaction[WithoutSuffixes],
           contractInstanceOfId: ContractInstanceOfId,
-          keyResolver: LegacyContractStateMachine.KeyResolver,
           actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
           snapshot: TopologySnapshot = factory.topologySnapshot,
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -159,7 +160,6 @@ final class NextGenTransactionTreeFactoryTest
             transactionUuid = factory.transactionUuid,
             topologySnapshot = snapshot,
             contractOfId = contractInstanceOfId,
-            legacyKeyResolver = keyResolver.fmap(_.toList.toVector),
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
           )
@@ -177,7 +177,6 @@ final class NextGenTransactionTreeFactoryTest
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
               ).value.flatMap(_ should equal(Right(example.transactionTree)))
             }
           }
@@ -200,7 +199,6 @@ final class NextGenTransactionTreeFactoryTest
                 ),
               ),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               tree.rootViews.unblindedElements should have size 2
@@ -245,7 +243,6 @@ final class NextGenTransactionTreeFactoryTest
                 ImmArray(externalCallResult, externalCallResult),
               ),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               val view1 = tree.rootViews.unblindedElements.drop(1).headOption.value
@@ -273,7 +270,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               withExternalCallResults(example, externalCallNodeId, ImmArray(externalCallResult)),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               tree.rootViews.unblindedElements should have size 3
@@ -307,7 +303,6 @@ final class NextGenTransactionTreeFactoryTest
                 ),
               ),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               tree.rootViews.unblindedElements should have size 2
@@ -341,7 +336,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult)),
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.map { result =>
               val tree = result.value
               val view = tree.rootViews.unblindedElements.loneElement
@@ -362,7 +356,7 @@ final class NextGenTransactionTreeFactoryTest
             val externalCallNodeId = LfNodeId(5)
             val transaction =
               withExternalCallResults(example, externalCallNodeId, ImmArray(externalCallResult))
-            val (_, (reinterpretedTx, reinterpretedMetadata, reinterpretedKeyResolver), _) =
+            val (_, (reinterpretedTx, reinterpretedMetadata, _), _) =
               example.reinterpretedSubtransactions(1)
             val reinterpretedTransaction = withExternalCallResults(
               reinterpretedTx,
@@ -375,7 +369,6 @@ final class NextGenTransactionTreeFactoryTest
               submittingTreeFactory,
               transaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
             ).value.flatMap { result =>
               val tree = result.value
               val submittedView = tree.rootViews.unblindedElements.drop(1).headOption.value
@@ -391,7 +384,6 @@ final class NextGenTransactionTreeFactoryTest
                   topologySnapshot = factory.topologySnapshot,
                   contractOfId = successfulLookup(example),
                   rbContext = RollbackContext.empty,
-                  legacyKeyResolver = reinterpretedKeyResolver,
                   absolutizer = factory.absolutizer(tree.updateId),
                 )
                 .failOnShutdown
@@ -422,7 +414,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               failedLookup(errorMessage),
-              example.keyResolver.asCidOptionMap,
             ).value.flatMap(
               _ shouldEqual Left(
                 ContractLookupError(example.absolutizedContractId, errorMessage)
@@ -440,7 +431,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               actAs = List.empty,
             ).value
               .flatMap(
@@ -457,7 +447,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               snapshot = defaultTestingTopology.withPackages(Map.empty).build().topologySnapshot(),
             ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
           }
@@ -468,7 +457,6 @@ final class NextGenTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               snapshot = defaultTestingIdentityFactory.topologySnapshot(
                 packageDependencyResolver = TestPackageDependencyResolver
               ),
@@ -482,7 +470,6 @@ final class NextGenTransactionTreeFactoryTest
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
                 snapshot = defaultTestingIdentityFactory.topologySnapshot(
                   packageDependencyResolver = MisconfiguredPackageDependencyResolver
                 ),
@@ -497,7 +484,52 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
         }
+
+        "an effectful rollback is encountered" must {
+          val treeFactory = createTransactionTreeFactory()
+          val create = ExampleContractFactory
+            .build()
+            .toLf
+            .copy(coid = contractIdVersion match {
+              case _: CantonContractIdV1Version => LfContractId.V1(ExampleContractFactory.lfHash(1))
+              case _: CantonContractIdV2Version =>
+                LfContractId.V2(ExampleContractFactory.lfHash(1).bytes, Bytes.Empty)
+            })
+
+          "reject the transaction" in {
+            val tx = TreeTransactionBuilder.toVersionedTransaction(create)
+            val meta = TransactionMetadata(
+              ledgerTime = factory.ledgerTime,
+              preparationTime = factory.ledgerTime,
+              seeds = tx.nodes.view.mapValues(_ => ExampleContractFactory.lfHash(2)).toMap,
+            )
+            val wft = WellFormedTransaction.createUnsafe(tx, meta)
+
+            val expected = ViewPosition(List(MerkleSeqIndex(List(Direction.Left, Direction.Right))))
+            treeFactory
+              .tryReconstruct(
+                transaction = wft,
+                rootPosition = expected,
+                mediator = factory.mediatorGroup,
+                submittingParticipantO = Some(ExampleTransactionFactory.submittingParticipant),
+                salts = Iterator.range(0, 2).map(TestSalt.generateSalt).to(Iterable),
+                transactionUuid = factory.transactionUuid,
+                topologySnapshot = factory.topologySnapshot,
+                contractOfId = cid => EitherT.leftT(ContractLookupError(cid, "")),
+                rbContext = RollbackContext.empty.enterRollback,
+                absolutizer = factory.absolutizer(UpdateId(TestHash.digest(1))),
+              )
+              .value
+              .map { result =>
+                inside(result) { case Left(RolledBackEffect(_, actual)) =>
+                  actual shouldBe expected
+                }
+              }
+              .failOnShutdown
+          }
+        }
       }
+
     }
   }
 

@@ -52,7 +52,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         testedProtocolVersion,
         sequencerId,
         params,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         loggerFactory,
       )
 
@@ -91,7 +91,9 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      disableAggregationRuleSizeCheckForTesting = true,
       lsuConfig = SequencerLsuConfig(),
+      enablePrevalidation = true,
     )
 
   "Reference sequencer" when runSequencerApiTests()

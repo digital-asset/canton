@@ -59,7 +59,7 @@ import monocle.macros.syntax.lens.*
 final case class EnvironmentDefinition(
     baseConfig: CantonConfig,
     testingConfig: TestingConfigInternal =
-      TestingConfigInternal(warnOnAcsCommitmentDegradation = false),
+      TestingConfigInternal(warnOnAcsCommitmentDegradation = false, warnOnJwtScopeUsage = false),
     setups: List[TestConsoleEnvironment => Unit] = Nil,
     teardown: Unit => Unit = _ => (),
     configTransforms: Seq[ConfigTransform] = ConfigTransforms.defaults,
@@ -462,6 +462,12 @@ object EnvironmentDefinition extends LazyLogging {
   lazy val P1S1M1_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
     numParticipants = 1,
     numSequencers = 1,
+    numMediators = 1,
+  )
+
+  lazy val P1S4M1_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
+    numParticipants = 1,
+    numSequencers = 4,
     numMediators = 1,
   )
 

@@ -165,8 +165,10 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
           // restart Canton with overrideMaxRequestSize, so that max request size can be increased
           setOverrideMaxRequestSizeWithNewEnv(env, overrideMaxRequestSize) { implicit newEnv =>
             import newEnv.*
-            // we verify that the dynamic parameter is still set to the low value
-
+            // we verify that the dynamic parameter is still set to the low value.
+            // The environment teardown kills the node processes but leaves
+            // the topology store intact, so the newly booted node finds the latest
+            // transaction and returns the value from there.
             forAll(nodes.all)(
               _.topology.synchronizer_parameters.latest(daId).maxRequestSize == lowMaxRequestSize
             )

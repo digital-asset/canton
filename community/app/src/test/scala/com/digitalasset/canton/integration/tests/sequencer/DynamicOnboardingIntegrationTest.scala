@@ -48,6 +48,7 @@ import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import monocle.macros.syntax.lens.*
 import org.scalatest
 import org.slf4j.event.Level
 
@@ -75,7 +76,12 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       numMediators = 1,
     ).withNetworkBootstrap { implicit env =>
       new NetworkBootstrapper(EnvironmentDefinition.S1M1)
-    }.addConfigTransforms(ConfigTransforms.setExitOnFatalFailures(false))
+    }.addConfigTransforms(
+      ConfigTransforms.setExitOnFatalFailures(false),
+      ConfigTransforms.updateAllSequencerConfigs_(
+        _.focus(_.parameters.disableAggregationRuleSizeCheckForTesting).replace(true)
+      ),
+    )
 
   private def modifyConnection(
       participant: ParticipantReference,

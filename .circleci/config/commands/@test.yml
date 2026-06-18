@@ -534,6 +534,14 @@ enable_session_signing_keys:
           echo 'export SESSION_SIGNING_KEYS_ENABLED=true' >> "$BASH_ENV"
           echo "Session signing keys enabled for tests"
 
+use_new_sequencer_aggregator:
+  steps:
+    - run:
+        name: Use new sequencer aggregator
+        command: |
+          echo 'export USE_NEW_SEQUENCER_AGGREGATOR=true' >> "$BASH_ENV"
+          echo "Using new sequencer aggregator for tests"
+
 test_flake_fix_many_times_command:
   parameters:
     test_repetitions_per_runner:

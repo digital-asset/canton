@@ -38,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   CommitCertificate,
   OrderedBlock,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
@@ -358,7 +359,7 @@ class StateTransferBehaviorTest
       succeed
     }
 
-    "receiving a new epoch stored message" should {
+    "receiving an internal new epoch stored message" should {
       "set the epoch state, communicate the membership to the P2P output module, " +
         "clean up the postponed message queue, and start state-transferring the epoch" in {
           val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
@@ -389,6 +390,7 @@ class StateTransferBehaviorTest
               anEpochInfo,
               aMembership,
               aFakeCryptoProviderInstance,
+              origin = OrderingMode.StateTransfer,
             )
           )
 
@@ -418,6 +420,63 @@ class StateTransferBehaviorTest
           succeed
         }
     }
+
+    "receiving a delayed new epoch stored message originated in consensus" should {
+      "just clean up the postponed message queue" in {
+        val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
+        val p2pNetworkOutputBuffer = new collection.mutable.ArrayBuffer[P2PNetworkOut.Message]
+        val (context, stateTransferBehavior) =
+          createStateTransferBehavior(
+            maybeStateTransferManager = Some(stateTransferManagerMock),
+            p2pNetworkOutModuleRef = fakeRecordingModule(p2pNetworkOutputBuffer),
+          )
+        implicit val ctx: ContextType = context
+
+        val underlyingMessage = mock[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]
+        when(underlyingMessage.blockMetadata).thenReturn(
+          BlockMetadata(
+            EpochNumber(anEpochInfo.number - 1L), // outdated message
+            BlockNumber.First,
+          )
+        )
+        val signedMessage = underlyingMessage.fakeSign
+        stateTransferBehavior.postponedConsensusMessages
+          .enqueue(
+            otherId,
+            Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(signedMessage),
+          )
+
+        stateTransferBehavior.receive(
+          Consensus.NewEpochStored(
+            anEpochInfo,
+            aMembership,
+            aFakeCryptoProviderInstance,
+            origin = OrderingMode.Consensus,
+          )
+        )
+
+        p2pNetworkOutputBuffer should contain only P2PNetworkOut.Network.TopologyUpdate(
+          aMembership
+        )
+
+        // Should have set the new epoch state.
+        stateTransferBehavior should matchPattern {
+          case StateTransferBehavior(
+                _,
+                _,
+                _,
+                `anEpochInfo`,
+                _,
+              ) =>
+        }
+
+        stateTransferBehavior.postponedConsensusMessages.dump shouldBe empty
+
+        verifyNoMoreInteractions(stateTransferManagerMock)
+
+        succeed
+      }
+    }
   }
 
   "receiving a 'GetOrderingTopology' message" should {
@@ -436,6 +495,8 @@ class StateTransferBehaviorTest
           Consensus.Admin.GetOrderingTopologyResponse(
             Bootstrap.BootstrapEpochNumber,
             aMembership.orderingTopology.nodes,
+            aMembership.leaders,
+            aMembership.blacklistedNodes,
             aMembership.orderingTopology.sequencingParameters,
           )
         )

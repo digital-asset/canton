@@ -211,8 +211,6 @@ private[daml] class AstRewriter(
       case UpdateLedgerTimeLT(time) => UpdateLedgerTimeLT(apply(time))
       case UpdateFetchByKey(rbk) =>
         UpdateFetchByKey(apply(rbk))
-      case UpdateLookupByKey(rbk) =>
-        UpdateLookupByKey(apply(rbk))
       case UpdateQueryNByKey(templateId) =>
         UpdateQueryNByKey(apply(templateId))
       case UpdateEmbedExpr(typ, body) =>

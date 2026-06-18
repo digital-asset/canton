@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands
 import com.digitalasset.canton.admin.api.client.data.{
+  PendingOperationMetadata,
   SequencerConnectionValidation,
   SynchronizerConnectionConfig,
 }
@@ -32,7 +33,12 @@ import com.digitalasset.canton.participant.admin.data.{
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  PartyId,
+  PhysicalSynchronizerId,
+  Synchronizer,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -119,6 +125,63 @@ class ParticipantRepairAdministration(
         )
       }
     }
+
+  object pending_operations {
+    @Help.Summary("List all pending operation for the given filters", FeatureFlag.Repair)
+    @Help.Description(
+      """Lists pending operations matching the provided filters.
+        |
+        |Parameters:
+        |- filterOperationName: Optional filter, restricts results to a specific operation type.
+        |- filterSynchronizer: Optional filter, restricts results to a specific synchronizer.
+        |- filterOperationKey: Optional filter, restricts results to a specific operation key.
+        |
+        |Returns:
+        |- A sequence of pending operation metadata entries.
+    """
+    )
+    def list(
+        filterOperationName: Option[String] = None,
+        filterSynchronizer: Option[Synchronizer] = None,
+        filterOperationKey: Option[String] = None,
+    ): Seq[PendingOperationMetadata] =
+      check(FeatureFlag.Repair) {
+        consoleEnvironment.run {
+          runner.adminCommand(
+            ParticipantAdminCommands.ParticipantRepairManagement
+              .ListPendingOperations(filterOperationName, filterSynchronizer, filterOperationKey)
+          )
+        }
+      }
+
+    @Help.Summary("Delete pending operation for the given filters", FeatureFlag.Repair)
+    @Help.Description(
+      """Delete pending operation matching the provided filters.
+        |
+        |Parameters:
+        |- operationName: restricts results to a specific operation type. Mandatory parameter.
+        |- synchronizer: restricts results to a specific synchronizer. Mandatory parameter.
+        |- operationKey: restricts results to a specific operation key. Mandatory parameter.
+        |
+        |Returns:
+        |- Unit if the pending operation was successfully deleted, otherwise an error is raised.
+    """
+    )
+    def delete(
+        operationName: String,
+        synchronizer: Synchronizer,
+        operationKey: String,
+    ): Unit =
+      check(FeatureFlag.Repair) {
+        consoleEnvironment.run {
+          runner.adminCommand(
+            ParticipantAdminCommands.ParticipantRepairManagement
+              .DeletePendingOperation(operationName, synchronizer, operationKey)
+          )
+        }
+      }
+
+  }
 
   @Help.Summary("Change assignation of contracts from one synchronizer to another")
   @Help.Description(

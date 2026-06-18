@@ -501,6 +501,39 @@ final class RateLimitingInterceptorChecksSpec
     underTest.calculateCollectionUsageThreshold(101000) shouldBe 100000 // 101000 - 1000
   }
 
+  it should "sanitize client IP and send cached responses on rejection" in {
+    val waitService = new WaitService()
+
+    // Set the concurrency limit to 1
+    withChannel(
+      metrics,
+      waitService,
+      config,
+      loggerFactory,
+      requestLimits = Map(testRpcName -> 1),
+    ).use { channel =>
+      val fHelloStatus1 = singleHelloWithTrailers(channel, logger)
+      val fHelloStatus2 = singleHelloWithTrailers(channel, logger)
+      for {
+        (status, trailers) <- fHelloStatus2
+        _ = waitService.completeSingle()
+        (status1, _) <- fHelloStatus1
+      } yield {
+        // Assert the 1st call was accepted and the 2nd call was blocked
+        status.getCode shouldBe Code.ABORTED
+        status1.getCode shouldBe Code.OK
+
+        // Reconstruct the exception and decode the binary protobuf payload
+        val statusRuntimeException = status.asRuntimeException(trailers)
+        val decodedRpcStatus = io.grpc.protobuf.StatusProto.fromThrowable(statusRuntimeException)
+        val rpcStatusStr = decodedRpcStatus.toString
+        rpcStatusStr should include("redacted-ip")
+        rpcStatusStr shouldNot include("127.0.0.1")
+        rpcStatusStr shouldNot include("localhost")
+      }
+    }
+  }
+
 }
 
 object RateLimitingInterceptorChecksSpec extends MockitoSugar {
@@ -682,6 +715,30 @@ object RateLimitingInterceptorChecksSpec extends MockitoSugar {
     init.future.map(f =>
       (f, () => clientCall.cancel("Test cancel", new IOException("network down")))
     )
+  }
+
+  def singleHelloWithTrailers(
+      channel: Channel,
+      logger: TracedLogger,
+  ): Future[(Status, Metadata)] = {
+    val promise = Promise[(Status, Metadata)]()
+    val clientCall = channel.newCall(protobuf.HelloServiceGrpc.METHOD_HELLO, CallOptions.DEFAULT)
+
+    clientCall.start(
+      new ClientCall.Listener[protobuf.Hello.Response] {
+        override def onClose(grpcStatus: Status, trailers: Metadata): Unit = {
+          logger.underlying.debug(s"Single closed with $grpcStatus and trailers")
+          promise.success((grpcStatus, trailers))
+        }
+      },
+      new Metadata(),
+    )
+
+    clientCall.sendMessage(protobuf.Hello.Request("foo"))
+    clientCall.halfClose()
+    clientCall.request(1)
+
+    promise.future
   }
 
 }

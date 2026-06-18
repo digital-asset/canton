@@ -243,7 +243,7 @@ class SequencerConnectionSuccessorListener(
           syncPersistentStateManager,
           metrics,
         )
-    } yield logger.info(s"Successfully copied topology from predecessor to $successorPsid"))
+    } yield ())
       .valueOr { error =>
         logger.warn(s"Failed to copy topology from predecessor to $successorPsid: $error")
       }

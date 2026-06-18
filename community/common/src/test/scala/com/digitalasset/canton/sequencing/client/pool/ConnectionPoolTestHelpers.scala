@@ -24,6 +24,7 @@ import com.digitalasset.canton.sequencer.api.v30 as SequencerService
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.sequencer.api.v30.SequencerServiceGrpc.SequencerServiceStub
+import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.pool.Connection.{
   ConnectionConfig,
@@ -40,15 +41,17 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.
   SequencerSubscriptionPoolHealth,
 }
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
+import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandlerTrait.SubscriptionLivenessStatus
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.client.{
   SequencedEventValidator,
   SequencerClientSubscriptionError,
 }
 import com.digitalasset.canton.sequencing.{
-  ProcessingSerializedEvent,
+  MaybeCompressedSerializedEvent,
   SequencerConnectionPoolDelays,
   SequencerConnections,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{
@@ -61,7 +64,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.{Mutex, PekkoUtil, ResourceUtil}
+import com.digitalasset.canton.util.{EitherTUtil, Mutex, PekkoUtil, ResourceUtil}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -274,6 +277,8 @@ trait ConnectionPoolTestHelpers {
     SequencerSubscriptionPoolConfig(
       livenessMargin = livenessMargin,
       subscriptionRequestDelay = poolDelays.subscriptionRequestDelay,
+      maxTimestampDelta = SubscriptionLivenessLimits.default.maxTimestampDelta,
+      maxOrdinalDelta = SubscriptionLivenessLimits.default.maxOrdinalDelta,
     )
 
   protected def withSubscriptionPool[V](
@@ -290,12 +295,15 @@ trait ConnectionPoolTestHelpers {
       timeouts = timeouts,
       loggerFactory = loggerFactory,
     )
+    val subscriptionStartProvider = new SubscriptionStartProvider {
+      override def getLatestProcessedEventO: Option[EventAndOrdinal] = None
+    }
     val subscriptionPool = subscriptionPoolFactory.create(
       initialConfig = config,
       connectionPool = connectionPool,
       member = testMember,
       initialSubscriptionEventO = None,
-      mock[SubscriptionStartProvider],
+      subscriptionStartProvider,
     )
 
     val listener = new TestHealthListener(subscriptionPool.health)
@@ -412,28 +420,40 @@ protected object ConnectionPoolTestHelpers {
     override def create(
         connection: SequencerConnection,
         member: Member,
-        preSubscriptionEventO: Option[ProcessingSerializedEvent],
+        preSubscriptionEventO: Option[EventAndOrdinal],
         subscriptionHandlerFactory: SubscriptionHandlerFactory,
         parent: HasUnlessClosing,
     )(implicit
         traceContext: TraceContext,
         ec: ExecutionContext,
-    ): SequencerSubscriptionImpl[SequencerClientSubscriptionError] =
+    ): SequencerSubscriptionImpl = {
+      val subscriptionHandler = new SubscriptionHandlerTrait {
+        override def handleEvent(
+            serializedEvent: MaybeCompressedSerializedEvent
+        ): FutureUnlessShutdown[Either[SequencerClientSubscriptionError, Unit]] =
+          EitherTUtil.unitUS.value
+
+        override def getLivenessStatus(
+            latest: EventAndOrdinal
+        ): Option[SubscriptionLivenessStatus] = None
+      }
+
       new SequencerSubscriptionImpl(
         connection = connection,
         member = member,
         startingTimestampO = None,
-        handler = _ => FutureUnlessShutdown.pure(Right(())),
+        handler = subscriptionHandler,
         parent = parent,
         timeouts = timeouts,
         loggerFactory = loggerFactory,
       )
+    }
   }
 
   private object TestSubscriptionHandlerFactory extends SubscriptionHandlerFactory {
     override def create(
         eventValidator: SequencedEventValidator,
-        initialPriorEvent: Option[ProcessingSerializedEvent],
+        initialPriorEventO: Option[EventAndOrdinal],
         sequencerAlias: SequencerAlias,
         sequencerId: SequencerId,
         loggerFactory: NamedLoggerFactory,

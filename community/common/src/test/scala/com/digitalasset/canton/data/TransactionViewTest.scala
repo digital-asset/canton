@@ -5,10 +5,10 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.{HashOps, Salt}
+import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
-import com.digitalasset.canton.protocol.{v32, *}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -22,6 +22,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
+import com.digitalasset.daml.lf.value.Value.VersionedValue
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ListSet
@@ -36,7 +37,7 @@ class TransactionViewTest
 
   private val hashOps: HashOps = factory.cryptoOps
 
-  private val contractInst: LfThinContractInst = ExampleTransactionFactory.contractInstance()
+  private val contractArg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue
 
   private val cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1
   private val createdId: LfContractId =
@@ -89,9 +90,22 @@ class TransactionViewTest
       checkingParties = externalCallCheckingParties.toSeq.sorted,
     )
 
+  /** Traverses all unblinded subviews `v1, v2, v3, ...` in pre-order and yields `f(...f(f(z, v1), *
+    * v2)..., vn)`
+    */
+  private def viewsInPreOrder(main: TransactionView): Seq[TransactionView] = {
+    val builder = Seq.newBuilder[TransactionView]
+    def go(view: TransactionView): Unit = {
+      builder += view
+      view.subviews.unblindedElements.foreach(go)
+    }
+    go(main)
+    builder.result()
+  }
+
   private val defaultActionDescription: ActionDescription =
     ActionDescription.tryFromLfActionNode(
-      ExampleTransactionFactory.createNode(createdId, contractInst),
+      ExampleTransactionFactory.createNode(createdId, contractArg),
       Some(ExampleTransactionFactory.lfHash(5)),
       defaultPackagePreference,
     )
@@ -112,10 +126,7 @@ class TransactionViewTest
       forEvery(example.viewWithSubviews.zipWithIndex) { case ((view, subviews), index) =>
         s"processing $index-th view" can {
           "be folded" in {
-            val foldedSubviews =
-              view.foldLeft(Seq.newBuilder[TransactionView])((acc, v) => acc += v)
-
-            foldedSubviews.result() should equal(subviews)
+            viewsInPreOrder(view) should equal(subviews)
           }
 
           "be flattened" in {
@@ -130,7 +141,7 @@ class TransactionViewTest
     val firstSubviewIndex = TransactionSubviews.indices(1).head.toString
 
     "a child view has the same view common data" must {
-      val view = factory.SingleCreate(seed = ExampleTransactionFactory.lfHash(3)).view0
+      val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
       val subViews = TransactionSubviews(Seq(view))(testedProtocolVersion, factory.cryptoOps)
       "reject creation" in {
         TransactionView.create(hashOps)(
@@ -208,6 +219,178 @@ class TransactionViewTest
       }
 
     }
+
+    "has resolved keys" must {
+
+      def keyTest(
+          parentCoreInput: Option[GenContractInstance] = None,
+          childCoreInput: Option[GenContractInstance] = None,
+          resolution: Option[Map[LfGlobalKey, LfVersioned[
+            KeyResolutionWithMaintainers
+          ]]] = None,
+      ): Either[String, Unit] = {
+
+        val keyResolution = resolution.getOrElse(
+          Seq(parentCoreInput, childCoreInput).flatten
+            .groupBy(_.contractKeyWithMaintainers.value)
+            .map { case (k, c) =>
+              k.globalKey ->
+                LfVersioned(
+                  c.map(_.inst.version).toSet.loneElement,
+                  KeyResolutionWithMaintainers(
+                    contracts = c.map(_.contractId),
+                    maintainers = k.maintainers,
+                  ),
+                )
+            }
+        )
+
+        val base = factory
+          .SingleExercise(seed = ExampleTransactionFactory.lfHash(3))
+          .view0
+
+        def addViewContracts(
+            coreInputO: Option[GenContractInstance]
+        ): TransactionView => TransactionView =
+          TransactionView.Optics.viewParticipantDataUnsafe
+            .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+            .andThen(ViewParticipantData.Optics.coreInputsUnsafe)
+            .modify(coreInputs =>
+              coreInputs ++ coreInputO.toList.map { coreInput =>
+                coreInput.contractId -> InputContract(
+                  coreInput,
+                  consumed = false,
+                )
+              }.toMap
+            )
+
+        val addKeyResolution: TransactionView => TransactionView =
+          TransactionView.Optics.viewParticipantDataUnsafe
+            .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+            .andThen(ViewParticipantData.Optics.keyResolutionUnsafe)
+            .replace(keyResolution)
+
+        val parent = (addViewContracts(parentCoreInput) andThen addKeyResolution)(base)
+
+        val childBase = TransactionView.Optics.viewCommonDataUnsafe
+          .andThen(MerkleTree.Optics.unblinded[ViewCommonData])
+          .modify(_.copy(salt = TestSalt.generateSalt(1)))
+          .apply(base)
+
+        val child =
+          addViewContracts(childCoreInput)(childBase)
+
+        val subViews = TransactionSubviews(Seq(child))(
+          testedProtocolVersion,
+          factory.cryptoOps,
+        )
+
+        TransactionView
+          .create(hashOps)(
+            parent.viewCommonData,
+            parent.viewParticipantData,
+            subViews,
+            testedProtocolVersion,
+          )
+          .map(_ => ())
+
+      }
+
+      // Will be enabled from ProtocolVersion.v36
+      if (testedProtocolVersion > ProtocolVersion.v35) {
+
+        "allow the parent view to reference input contracts from this view or any subview - same key" in {
+
+          val key: Option[LfGlobalKeyWithMaintainers] =
+            Some(ExampleContractFactory.buildKeyWithMaintainers())
+
+          val parentCoreInput = ExampleContractFactory.build(keyOpt = key)
+          val childCoreInput = ExampleContractFactory.build(keyOpt = key)
+
+          keyTest(
+            Some(parentCoreInput),
+            Some(childCoreInput),
+          ) shouldBe Either.unit
+        }
+
+        "allow the parent view to reference input contracts from this view or any subview - different key" in {
+
+          def key(): Option[LfGlobalKeyWithMaintainers] =
+            Some(ExampleContractFactory.buildKeyWithMaintainers())
+
+          val parentCoreInput = ExampleContractFactory.build(keyOpt = key())
+          val childCoreInput = ExampleContractFactory.build(keyOpt = key())
+
+          keyTest(
+            Some(parentCoreInput),
+            Some(childCoreInput),
+          ) shouldBe Either.unit
+
+        }
+
+        "disallow the view if a referenced contract is not an input contract" in {
+
+          val expected = ExampleContractFactory.buildContractId()
+          val resolution = Map(
+            ExampleContractFactory.buildKeyWithMaintainers().globalKey ->
+              LfVersioned(
+                LfSerializationVersion.V2,
+                KeyResolutionWithMaintainers(
+                  contracts = Seq(expected),
+                  maintainers = Set(ExampleTransactionFactory.signatory),
+                ),
+              )
+          )
+          inside(keyTest(resolution = Some(resolution))) { case Left(error) =>
+            error should (include regex s"Failed to find key resolution contract.*${expected.coid}")
+          }
+        }
+
+        "disallow the view if the referenced contract does not have a key" in {
+
+          val parentCoreInput = ExampleContractFactory.build()
+          val key = ExampleTransactionFactory.globalKeyWithMaintainers().unversioned.globalKey
+          val resolution = Map(
+            key ->
+              LfVersioned(
+                LfSerializationVersion.V2,
+                KeyResolutionWithMaintainers(
+                  contracts = Seq(parentCoreInput.contractId),
+                  maintainers = Set(ExampleTransactionFactory.signatory),
+                ),
+              )
+          )
+          inside(keyTest(parentCoreInput = Some(parentCoreInput), resolution = Some(resolution))) {
+            case Left(error) =>
+              error should (include regex s"Contract ${parentCoreInput.contractId.coid} resolved for key.*does not have a matching key in the contract instance")
+          }
+        }
+
+        "disallow the view if the referenced contract has a mismatching key" in {
+
+          val resolutionKey = ExampleContractFactory.buildKeyWithMaintainers()
+          val contractKey = ExampleContractFactory.buildKeyWithMaintainers()
+          val parentCoreInput = ExampleContractFactory.build(keyOpt = Some(contractKey))
+
+          val resolution = Map(
+            resolutionKey.globalKey ->
+              LfVersioned(
+                LfSerializationVersion.V2,
+                KeyResolutionWithMaintainers(
+                  contracts = Seq(parentCoreInput.contractId),
+                  maintainers = Set(ExampleTransactionFactory.signatory),
+                ),
+              )
+          )
+          inside(keyTest(parentCoreInput = Some(parentCoreInput), resolution = Some(resolution))) {
+            case Left(error) =>
+              error should (include regex s"Contract ${parentCoreInput.contractId.coid} resolved for key.*does not have a matching key in the contract instance")
+          }
+        }
+
+      }
+    }
+
   }
 
   "A view participant data" when {

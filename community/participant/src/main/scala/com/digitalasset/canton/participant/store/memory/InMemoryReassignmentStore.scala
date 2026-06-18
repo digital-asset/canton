@@ -241,13 +241,10 @@ class InMemoryReassignmentStore(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
     val newEntry = ReassignmentEntry(
-      assignmentData.reassignmentId,
-      assignmentData.sourceSynchronizer,
-      assignmentData.contracts.contracts.map(_.contract),
-      None,
-      None,
-      CantonTimestamp.Epoch,
-      None,
+      assignmentData,
+      reassignmentGlobalOffset = None,
+      unassignmentTs = CantonTimestamp.Epoch,
+      tsCompletion = None,
     )
 
     val result: Either[ReassignmentStoreError, Unit] = MapsUtil
@@ -309,7 +306,7 @@ class InMemoryReassignmentStore(
     def filter(entry: ReassignmentEntry): Boolean =
       sourceSynchronizer.forall(_ == entry.sourceSynchronizer) &&
         incompleteReassignment(entry) && {
-          val entryStakeholders = entry.contracts.forgetNE.flatMap(_.metadata.stakeholders)
+          val entryStakeholders = entry.stakeholders
           stakeholders.forall(_.exists(entryStakeholders.contains(_)))
         }
 

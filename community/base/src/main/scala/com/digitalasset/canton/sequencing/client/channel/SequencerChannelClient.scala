@@ -22,6 +22,7 @@ import com.digitalasset.canton.sequencing.client.channel.endpoint.SequencerChann
 import com.digitalasset.canton.sequencing.protocol.channel.SequencerChannelId
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MaxBytesToDecompress
 import io.grpc.Context.CancellableContext
 
 import scala.concurrent.ExecutionContext
@@ -85,7 +86,7 @@ final class SequencerChannelClient(
       isSessionKeyOwner: Boolean,
       topologyTs: CantonTimestamp,
       onSentMessage: Option[OnSentMessageForTesting] = None,
-  )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, String, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
 
     // Callback to remove channel tracking state and notify the processor of the channel close
     def closeChannelEndpoint(
@@ -95,34 +96,54 @@ final class SequencerChannelClient(
       processor.handleClose(s"Sequencer channel endpoint $channelId", closeReasonTry)
     }
 
-    EitherT(synchronizeWithClosingSync("connectToSequencerChannel") {
-      def mkEndpoint(
-          context: CancellableContext,
-          hasRunOnClosing: HasRunOnClosing,
-      ): SequencerChannelClientEndpoint =
-        new SequencerChannelClientEndpoint(
-          channelId,
-          member,
-          connectTo,
-          processor,
-          synchronizerCryptoApi,
-          isSessionKeyOwner,
-          topologyTs,
-          synchronizerParameters.protocolVersion,
-          context,
-          hasRunOnClosing,
-          timeouts,
-          loggerFactory
-            .append("sequencerId", sequencerId.uid.toString)
-            .append("channel", channelId.unwrap),
-          onSentMessage,
-        )
+    def connect(
+        maxBytesToDecompress: MaxBytesToDecompress
+    ): UnlessShutdown[Either[String, Unit]] =
+      synchronizeWithClosingSync("connectToSequencerChannel") {
+        def mkEndpoint(
+            context: CancellableContext,
+            hasRunOnClosing: HasRunOnClosing,
+        ): SequencerChannelClientEndpoint =
+          new SequencerChannelClientEndpoint(
+            channelId,
+            member,
+            connectTo,
+            processor,
+            synchronizerCryptoApi,
+            isSessionKeyOwner,
+            topologyTs,
+            synchronizerParameters.protocolVersion,
+            maxBytesToDecompress,
+            context,
+            hasRunOnClosing,
+            timeouts,
+            loggerFactory
+              .append("sequencerId", sequencerId.uid.toString)
+              .append("channel", channelId.unwrap),
+            onSentMessage,
+          )
 
-      clientState.connectToSequencer(sequencerId, processor, mkEndpoint).map { endpoint =>
-        endpoint.closeReason.onComplete(closeChannelEndpoint)
+        clientState.connectToSequencer(sequencerId, processor, mkEndpoint).map { endpoint =>
+          endpoint.closeReason.onComplete(closeChannelEndpoint)
+        }
       }
-    })
+
+    for {
+      maxBytesToDecompress <- EitherT.right(maxBytesToDecompress(topologyTs))
+      _ <- EitherT(FutureUnlessShutdown.lift(connect(maxBytesToDecompress)))
+    } yield ()
   }
+
+  private def maxBytesToDecompress(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[MaxBytesToDecompress] =
+    synchronizerCryptoApi
+      .snapshot(timestamp)
+      .flatMap(
+        _.ipsSnapshot
+          .findDynamicSynchronizerParametersOrDefault(synchronizerParameters.protocolVersion)
+          .map(parameters => MaxBytesToDecompress(parameters.maxRequestSize.value))
+      )
 
   /** Ping the sequencer to check if the sequencer with the provided SequencerId supports sequencer
     * channels.

@@ -44,7 +44,7 @@ import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
-import com.digitalasset.canton.util.{MonadUtil, Mutex, PekkoUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, Mutex, PekkoUtil, SingleUseCell}
 import com.google.common.annotations.VisibleForTesting
 import io.circe.Encoder
 import io.circe.generic.semiauto.deriveEncoder
@@ -366,6 +366,7 @@ class Environment(
           runner
           writePortsFile()
         } // write ports after the runner has completed
+
         // log results
         startup
           .leftMap(error => logger.error(s"Failed to start ${error.name}: ${error.message}"))
@@ -418,12 +419,19 @@ class Environment(
           }
           EitherT.rightT(())
         case Some(node) =>
-          node
-            .reconnectSynchronizersIgnoreFailures(isTriggeredManually = false)
-            .leftMap(err => StartFailed(instance.name.unwrap, err.toString))
-            .onShutdown(Left(StartFailed(instance.name.unwrap, "aborted due to shutdown")))
-
+          if (node.config.parameters.connectToSynchronizersOnStartup)
+            node
+              .reconnectSynchronizersIgnoreFailures(isTriggeredManually = false)
+              .leftMap(err => StartFailed(instance.name.unwrap, err.toString))
+              .onShutdown(Left(StartFailed(instance.name.unwrap, "aborted due to shutdown")))
+          else {
+            logger.info(
+              s"Not reconnecting $node to synchronizers because reconnect on startup is disabled"
+            )
+            EitherTUtil.unit
+          }
       }
+
     config.parameters.timeouts.processing.unbounded.await("reconnect-participants")(
       MonadUtil
         .parTraverseWithLimit_(config.parameters.getStartupParallelism(numThreads))(

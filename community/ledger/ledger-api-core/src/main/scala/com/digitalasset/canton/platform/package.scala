@@ -20,9 +20,6 @@ package object platform {
   private[platform] type Value = lfval.VersionedValue
   private[platform] type FatContract = LfFatContractInst
   private[platform] val FatContract: lfTrans.FatContractInstance.type = lfTrans.FatContractInstance
-  private[platform] type ThinContract = lfval.VersionedThinContractInstance
-  private[platform] val ThinContract: lfval.VersionedContractInstance.type =
-    lfval.VersionedContractInstance
 
   import com.digitalasset.daml.lf.transaction as lftx
   private[platform] type NodeId = lftx.NodeId

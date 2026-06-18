@@ -30,4 +30,3 @@ subtrees:
       - file: global-synchronizer-extension-synchronizers-linking-validator-multi-sync
       - file: global-synchronizer-extension-synchronizers-private-synchronizers
       - file: global-synchronizer-extension-synchronizers-private-validators
-      - file: global-synchronizer-production-operations-logging

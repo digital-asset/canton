@@ -39,6 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
@@ -243,7 +244,13 @@ final class IssConsensusModule[E <: Env[E]](
             newEpochInfo,
             newMembership,
             newCryptoProvider: CryptoProvider[E],
+            orderingMode: OrderingMode,
           ) =>
+        if (orderingMode.isStateTransfer)
+          abort(
+            s"Internal invariant violated: received `NewEpochStored` originated in the state transfer behavior"
+          )
+
         // Despite being generated internally by Consensus, we delay this event (a) for uniformity with other
         // Output module events, and (b) to prevent tests from bypassing the delayed queue when sending this event
         ifInitCompleted(newEpochStored) { _ =>
@@ -347,6 +354,8 @@ final class IssConsensusModule[E <: Env[E]](
           GetOrderingTopologyResponse(
             epochState.epoch.info.number,
             activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.leaders,
+            activeTopologyInfo.currentMembership.blacklistedNodes,
             activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
           )
         )
@@ -513,7 +522,7 @@ final class IssConsensusModule[E <: Env[E]](
                 commitCertificate.prePrepare.message.viewNumber,
                 blockSegment.originalLeader,
                 blockNumber == epochState.epoch.info.lastBlockNumber,
-                OrderedBlockForOutput.Mode.FromConsensus,
+                OrderingMode.Consensus,
               )
             )
           )
@@ -568,6 +577,9 @@ final class IssConsensusModule[E <: Env[E]](
 
       newEpochTopology match {
         case Some(Consensus.NewEpochTopology(newEpochNumber, newMembership, cryptoProvider)) =>
+          logger.info(
+            s"Completed epoch $completeEpochNumber, new epoch topology already available for epoch $newEpochNumber"
+          )
           emitEpochStartLatency()
           val currentEpochInfo = epochState.epoch.info
           val newEpochInfo = currentEpochInfo.next(
@@ -586,6 +598,9 @@ final class IssConsensusModule[E <: Env[E]](
             cryptoProvider,
           )
         case None =>
+          logger.info(
+            s"Completed epoch $completeEpochNumber, but no new epoch topology is available yet"
+          )
           // We don't have the new topology for the new epoch yet: wait for it to arrive from the output module.
           ()
       }
@@ -651,7 +666,12 @@ final class IssConsensusModule[E <: Env[E]](
       pipeToSelf(epochStore.startEpoch(newEpochInfo)) {
         case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
         case Success(_) =>
-          Consensus.NewEpochStored(newEpochInfo, newMembership, cryptoProvider)
+          Consensus.NewEpochStored(
+            newEpochInfo,
+            newMembership,
+            cryptoProvider,
+            origin = OrderingMode.Consensus,
+          )
       }
     } else {
       logger.info(

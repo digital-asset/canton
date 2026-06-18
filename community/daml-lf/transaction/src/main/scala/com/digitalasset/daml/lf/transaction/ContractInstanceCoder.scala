@@ -6,13 +6,13 @@ package transaction
 
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.value.{DecodeError, EncodeError, Value}
+import com.digitalasset.daml.lf.value.{DecodeError, EncodeError}
 import com.google.protobuf.{ByteString, ProtocolStringList}
 
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.annotation.nowarn
 import scala.collection.immutable.TreeSet
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object ContractInstanceCoder extends ContractInstanceCoder(allowNullCharacters = false)
 
@@ -20,26 +20,6 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
 
   private[this] val ValueCoder =
     new value.ValueCoder(allowNullCharacters = allowNullCharacters).internal
-
-  /** Decode a contract instance from wire format
-    *
-    * @param protoCoinst protocol buffer encoded contract instance
-    * @return contract instance value
-    */
-  def decodeContractInstance(
-      protoCoinst: TransactionOuterClass.ThinContractInstance
-  ): Either[DecodeError, Versioned[Value.ThinContractInstance]] =
-    ensuresNoUnknownFieldsThenDecode(protoCoinst)(internal.decodeContractInstance)
-
-  /** Encodes a contract instance with the help of the contractId encoding function
-    *
-    * @param coinst the contract instance to be encoded
-    * @return protobuf wire format contract instance
-    */
-  def encodeContractInstance(
-      coinst: Versioned[Value.ThinContractInstance]
-  ): Either[EncodeError, TransactionOuterClass.ThinContractInstance] =
-    internal.encodeContractInstance(coinst)
 
   def decodeFatContractInstance(bytes: ByteString): Either[DecodeError, FatContractInstance] =
     internal.decodeFatContractInstance(bytes)
@@ -73,19 +53,6 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
 
   private[transaction] object internal {
 
-    private[ContractInstanceCoder] def encodeContractInstance(
-        coinst: Versioned[Value.ThinContractInstance]
-    ): Either[EncodeError, TransactionOuterClass.ThinContractInstance] =
-      for {
-        value <- ValueCoder.encodeVersionedValue(coinst.version, coinst.unversioned.arg)
-      } yield {
-        val builder = TransactionOuterClass.ThinContractInstance.newBuilder()
-        discard(builder.setPackageName(coinst.unversioned.packageName))
-        discard(builder.setTemplateId(ValueCoder.encodeIdentifier(coinst.unversioned.template)))
-        discard(builder.setArgVersioned(value))
-        builder.build()
-      }
-
     def decodePackageName(s: String): Either[DecodeError, Ref.PackageName] =
       Either
         .cond(
@@ -99,15 +66,6 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
             .left
             .map(err => DecodeError(s"Invalid package name '$s': $err"))
         )
-
-    private[ContractInstanceCoder] def decodeContractInstance(
-        protoCoinst: TransactionOuterClass.ThinContractInstance
-    ): Either[DecodeError, Versioned[Value.ThinContractInstance]] =
-      for {
-        id <- ValueCoder.decodeIdentifier(protoCoinst.getTemplateId)
-        value <- ValueCoder.decodeVersionedValue(protoCoinst.getArgVersioned)
-        pkgName <- decodePackageName(protoCoinst.getPackageName)
-      } yield value.map(arg => Value.ThinContractInstance(pkgName, id, arg))
 
     private[transaction] def encodeKeyWithMaintainers(
         version: SerializationVersion,
@@ -134,15 +92,17 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
         templateId: Ref.TypeConId,
         packageName: Ref.PackageName,
         msg: TransactionOuterClass.KeyWithMaintainers,
-    ): Either[DecodeError, GlobalKeyWithMaintainers] = {
+    ): Either[DecodeError, GlobalKeyWithMaintainers] =
       for {
         maintainers <- toPartySet(msg.getMaintainersList)
         // Contracts written with SerializationVersion.V1 should never contain a key, because canton >=3.5 uses
-        // V2 for contracts with keys, and canton <3.5 doesn't support keys. However, the decoding of keys was
-        // present without a serialization version check in canton <3.5, and we preserve that behavior in order for
-        // all canton versions to fail consistently with an upgrade error when receiving a V1 fat contract instance
-        // with a key, rather than failing with a deserialization error in canton >=3.5 and an upgrade error in
-        // canton <3.5.
+        // V2 for contracts with keys, and canton <3.5 doesn't support keys.
+        // However, as this "lenient parsing" has been released as part of Canton 3.5, it cannot be changed anymore within PV35.
+        // Currently, if a participant sends a contract key at SerializationVersion V1,
+        // the model conformance check fails and the view (as well as all ancestors) get rolled back.
+        // If we failed the same situation already at this point, it would result in a parse error.
+        // Due to EncryptedMultiViews that would result in discarding all members of the same MultiView.
+        // So a model conformance failure and a parse error have different consequences and can therefore not be done interchangeably within PV35.
         keyValue <- ValueCoder.decodeValue(version, msg.getKey)
         hash <-
           if (version >= SerializationVersion.V2)
@@ -158,10 +118,9 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
                 DecodeError(s"unexpected hash field in KeyWithMaintainers for version $version"),
               )
               .flatMap(_ =>
-                // In canton <3.5, this legacy hash function was used when constructing a GlobalKey, so we preserve
-                // that behavior fot the reasons state above.
+                // Ok to call unsafe hash function, as this will fail anyway during the model conformance check, as stated above.
                 crypto.Hash
-                  .hashContractKey(templateId, packageName, keyValue)
+                  .hashContractKeyUnsafe(templateId, packageName, keyValue)
                   .left
                   .map(hashErr => DecodeError(hashErr.msg))
               )
@@ -170,7 +129,6 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
           .left
           .map(hashErr => DecodeError(hashErr.msg))
       } yield GlobalKeyWithMaintainers(gkey, maintainers)
-    }
 
     private[transaction] def strictDecodeKeyWithMaintainers(
         version: SerializationVersion,
@@ -251,7 +209,7 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
     private[ContractInstanceCoder] def encodeFatContractInstanceInternal(
         contractInstance: FatContractInstance
     ): Either[EncodeError, TransactionOuterClass.FatContractInstance] = {
-      import contractInstance._
+      import contractInstance.*
       for {
         encodedArg <- ValueCoder.encodeValue(version, createArg)
         encodedKeyOpt <- contractKeyWithMaintainers match {

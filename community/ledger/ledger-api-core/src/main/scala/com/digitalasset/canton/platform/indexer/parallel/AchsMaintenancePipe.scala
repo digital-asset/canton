@@ -54,7 +54,7 @@ object AchsMaintenancePipe {
       initialWork = initialWork,
       bumpAchsValidAt = bumpAchsValidAt(
         storeAchsValidAt = storeAchsState(
-          storeAchsStateFunction = parameterStorageBackend.updateACHSValidAt(_: Long),
+          storeAchsStateFunction = parameterStorageBackend.updateAchsValidAt(_: Long),
           dbDispatcher = dbDispatcher,
           metrics = metrics,
           logger = logger,
@@ -86,7 +86,7 @@ object AchsMaintenancePipe {
       removalParallelism = removalParallelism,
       updateAchsLastPointers = storeAchsLastPointersF(
         persistAchsLastPointersF = storeAchsState(
-          storeAchsStateFunction = parameterStorageBackend.updateACHSLastPointers,
+          storeAchsStateFunction = parameterStorageBackend.updateAchsLastPointers,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
           logger = logger,

@@ -99,7 +99,6 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         ("uexbykey1", uexbykey1),
         ("uexbykey2", uexbykey2),
         ("ufetchbykey", ufetchbykey),
-        ("ulookupbykey", ulookupbykey),
         ("uembed", uembed),
         ("utrycatchV1A", utrycatchV1A),
         ("utrycatchV2B", utrycatchV1B),
@@ -202,7 +201,6 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
   private def uexbykey1 = (x: Expr) => EUpdate(UpdateExerciseByKey(tcon, choice, x, exp))
   private def uexbykey2 = (x: Expr) => EUpdate(UpdateExerciseByKey(tcon, choice, exp, x))
   private def ufetchbykey = (x: Expr) => EApp(EUpdate(UpdateFetchByKey(tcon)), x)
-  private def ulookupbykey = (x: Expr) => EApp(EUpdate(UpdateLookupByKey(tcon)), x)
   private def uembed = (x: Expr) => EUpdate(UpdateEmbedExpr(ty, x))
   private def utrycatchV1A = (x: Expr) => EUpdate(UpdateTryCatchV1(ty, x, varname, exp))
   private def utrycatchV1B = (x: Expr) => EUpdate(UpdateTryCatchV1(ty, exp, varname, x))

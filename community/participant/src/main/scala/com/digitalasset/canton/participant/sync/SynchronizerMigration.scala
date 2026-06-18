@@ -136,7 +136,7 @@ class SynchronizerMigration(
       sourceConnection <- EitherT.fromEither[FutureUnlessShutdown](sourceConnectionE).map(Source(_))
 
       // check that synchronizer id (in config) matches observed synchronizer id
-      _ <- target.unwrap.synchronizerId.traverse_ { expectedSynchronizerId =>
+      _ <- target.unwrap.psid.traverse_ { expectedSynchronizerId =>
         EitherT.cond[FutureUnlessShutdown](
           expectedSynchronizerId.logical == targetSynchronizerId.unwrap,
           (),
@@ -200,7 +200,7 @@ class SynchronizerMigration(
           sequencerInfoLoader
             .loadAndAggregateSequencerEndpoints(
               synchronizerConnectionConfig.synchronizerAlias,
-              synchronizerConnectionConfig.synchronizerId,
+              synchronizerConnectionConfig.psid,
               synchronizerConnectionConfig.sequencerConnections,
               SequencerConnectionValidation.Active,
             )(traceContext, CloseContext(this))

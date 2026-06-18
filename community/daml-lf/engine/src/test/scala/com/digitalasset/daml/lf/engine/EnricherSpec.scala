@@ -201,8 +201,8 @@ class EnricherSpec
       ),
       (
         TTextMap(TBool),
-        ValueTextMap(SortedLookupList(Map("0" -> ValueTrue, "1" -> ValueFalse))),
-        ValueTextMap(SortedLookupList(Map("0" -> ValueTrue, "1" -> ValueFalse))),
+        ValueTextMap(SortedLookupList.from(Map("0" -> ValueTrue, "1" -> ValueFalse))),
+        ValueTextMap(SortedLookupList.from(Map("0" -> ValueTrue, "1" -> ValueFalse))),
       ),
       (
         TOptional(TText),
@@ -280,9 +280,13 @@ class EnricherSpec
         "type" -> "LF value with null character",
         TText -> ValueText("->\u0000<-"),
         TOptional(TText) -> ValueOptional(Some(ValueText("\u0000"))),
-        TTextMap(TInt64) -> ValueTextMap(SortedLookupList(Map("key\u0000" -> ValueInt64(0)))),
         TTextMap(TInt64) -> ValueTextMap(
-          SortedLookupList(Map("key\u0001" -> ValueInt64(1), "key\u0001\u0000" -> ValueInt64(2)))
+          SortedLookupList.from(Map("key\u0000" -> ValueInt64(0)))
+        ),
+        TTextMap(TInt64) -> ValueTextMap(
+          SortedLookupList.from(
+            Map("key\u0001" -> ValueInt64(1), "key\u0001\u0000" -> ValueInt64(2))
+          )
         ),
       )
 

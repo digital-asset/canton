@@ -174,7 +174,7 @@ class GrpcSequencerServiceTest
     val service =
       new GrpcSequencerService(
         sequencer,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         loggerFactory,
         new AuthenticationCheck.MatchesAuthenticatedMember {
           override def lookupCurrentMember(): Option[Member] = member.some

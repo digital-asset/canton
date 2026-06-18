@@ -298,7 +298,7 @@ final class GeneratorsProtocol(
     )
   )
 
-  private implicit val deliverArbitrary: Arbitrary[Deliver[Envelope[?]]] = Arbitrary(
+  private implicit val deliverArbitrary: Arbitrary[Deliver[Batch[Envelope[?]]]] = Arbitrary(
     for {
       synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       batch <- batchArb.arbitrary
@@ -306,8 +306,11 @@ final class GeneratorsProtocol(
     } yield deliver
   )
 
-  implicit val sequencedEventArb: Arbitrary[SequencedEvent[Envelope[?]]] =
+  implicit val sequencedEventArb: Arbitrary[DecompressedSequencedEvent[Envelope[?]]] =
     Arbitrary(Gen.oneOf(deliverErrorArb.arbitrary, deliverArbitrary.arbitrary))
+
+  implicit val sequencedEventGenBatchArb: Arbitrary[SequencedEvent[GenBatch[?]]] =
+    Arbitrary(sequencedEventArb.arbitrary.map(identity[SequencedEvent[GenBatch[?]]]))
 
   implicit val signedContent: Arbitrary[SignedContent[HasCryptographicEvidence]] = Arbitrary(
     for {
@@ -348,7 +351,7 @@ final class GeneratorsProtocol(
   def deliverGen[Env <: Envelope[?]](
       synchronizerId: PhysicalSynchronizerId,
       batch: Batch[Env],
-  ): Gen[Deliver[Env]] = for {
+  ): Gen[Deliver[Batch[Env]]] = for {
     previousTimestamp <- Arbitrary.arbitrary[Option[CantonTimestamp]]
     timestamp <- Arbitrary.arbitrary[CantonTimestamp]
     messageIdO <- Gen.option(Arbitrary.arbitrary[MessageId])

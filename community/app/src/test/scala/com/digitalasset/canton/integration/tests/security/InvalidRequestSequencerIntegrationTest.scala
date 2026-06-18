@@ -238,8 +238,123 @@ trait InvalidRequestSequencerIntegrationTest
   }
 }
 
+// Proof that the gRPC layer (Netty) enforces message size limits prior to restart
+trait InvalidRequestSequencerDefaultLimitsIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with SecurityTestSuite {
+
+  private var daChannel: ManagedChannel = _
+  private var sequencerServiceStub: SequencerServiceStub = _
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P2_S1M1
+      .withSetup { implicit env =>
+        import env.*
+
+        participants.all.synchronizers.connect_local(sequencer1, daName)
+
+        daChannel = SequencerTestHelper.createChannel(
+          sequencer1,
+          loggerFactory,
+          executionContext,
+        )
+
+        requestNewToken()
+      }
+
+  private def requestNewToken()(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+
+    val token =
+      SequencerTestHelper
+        .requestToken(
+          daChannel,
+          daId,
+          participant1.id,
+          SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1),
+          testedProtocolVersion,
+          loggerFactory,
+        )
+        .value
+        .futureValueUS
+        .value
+
+    sequencerServiceStub = new SequencerServiceStub(daChannel).withCallCredentials(
+      SequencerTestHelper.mkCallCredentials(daId, participant1.id, token)
+    )
+  }
+
+  override def afterAll(): Unit = {
+    Option(daChannel).foreach { channel =>
+      // Force kill the channel instantly
+      channel.shutdownNow()
+      SequencerTestHelper.closeChannel(
+        channel,
+        logger,
+        classOf[InvalidRequestSequencerDefaultLimitsIntegrationTest].getSimpleName,
+      )
+    }
+    super.afterAll()
+  }
+
+  private lazy val availability = SecurityTest(
+    property = Availability,
+    asset = "sequencer server",
+  )
+
+  "A grpc sequencer server rejects large payloads at the network level even before restart" taggedAs availability
+    .setAttack(
+      attack = Attack(
+        actor = "a malicious synchronizer member or participant",
+        threat = "crash the sequencer server with a large payload",
+        mitigation = "reject the request",
+      )
+    ) in { implicit env =>
+    import env.*
+
+    // create a message payload of size 500MB (incompressible random data)
+    // A repeating payload does not work, as it gets compressed before being sent
+    val randomBytes = new Array[Byte](500 * 1024 * 1024)
+    scala.util.Random.nextBytes(randomBytes)
+
+    val bigEnvelope =
+      ClosedUncompressedEnvelope.create(
+        ByteString.copyFrom(randomBytes),
+        Recipients.cc(participant2.id),
+        Seq.empty,
+        testedProtocolVersion,
+      )
+
+    val request = SequencerTestHelper
+      .mkSubmissionRequest(participant1.id)
+      .focus(_.batch.envelopes)
+      .replace(List(bigEnvelope))
+
+    // the default limit applied by the application layer service is 10MB
+    val defaultAppLimit = 10485760
+
+    val responseF = SequencerTestHelper.sendSubmissionRequest(sequencerServiceStub, request)
+
+    inside(responseF.failed.futureValue) { case ex: io.grpc.StatusRuntimeException =>
+      // assert the error response on the client side, inside the rejection message
+      ex.getStatus.getCode shouldBe io.grpc.Status.Code.RESOURCE_EXHAUSTED
+      // assert no response from the application layer
+      ex.getMessage shouldNot include(s"The limit is $defaultAppLimit bytes.")
+      // If the rejection is by the Netty gRPC server, we should see RESOURCE_EXHAUSTED.
+      ex.getMessage should include("RESOURCE_EXHAUSTED")
+    }
+  }
+}
+
 class InvalidRequestSequencerBftOrderingIntegrationTestPostgres
     extends InvalidRequestSequencerIntegrationTest {
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+}
+
+class InvalidRequestSequencerDefaultLimitsIntegrationTestPostgres
+    extends InvalidRequestSequencerDefaultLimitsIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

@@ -31,6 +31,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SequencerStatus,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   TemplateId,
 }
 import com.digitalasset.canton.concurrent.Threading
@@ -768,6 +769,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
                 sequencerLivenessMargin,
                 mediatorRequestAmplification,
                 SequencerConnectionPoolDelays.default,
+                SubscriptionLivenessLimits.default,
               ),
               // if we run bootstrap ourselves, we should have been able to reach the nodes
               // so we don't want the bootstrapping to fail spuriously here in the middle of

@@ -48,6 +48,8 @@ import org.apache.pekko.Done
 import org.apache.pekko.stream.KillSwitch
 import org.apache.pekko.stream.scaladsl.Source
 
+import scala.concurrent.Future
+
 /** Errors from pruning */
 sealed trait PruningError {
   def message: String
@@ -265,6 +267,18 @@ trait Sequencer
   def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit]
+
+  /** Apply a lock to prevent post processing of events
+    *
+    * The sequencer should run checks on the write side (malicious or racy participant) or on the
+    * post processing side (malicious or racy sequencer).
+    *
+    * In order to test the behaviour, we need to be able to control the timing of when transactions
+    * are really applied during post-processing.
+    */
+  @VisibleForTesting
+  def applyPostProcessingLockForTesting(continueAfter: Future[Unit]): Unit = ???
+
 }
 
 /** Sequencer pruning interface.
@@ -339,6 +353,7 @@ trait SequencerPruning {
   def pruningStatus(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SequencerPruningStatus]
+
 }
 
 object Sequencer extends HasLoggerName {

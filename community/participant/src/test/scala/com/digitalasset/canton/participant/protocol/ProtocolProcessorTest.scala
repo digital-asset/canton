@@ -1160,7 +1160,7 @@ class ProtocolProcessorTest
         .processResultInternal1(
           NoOpeningErrors(
             SignedContent(
-              mock[Deliver[DefaultOpenEnvelope]],
+              mock[Deliver[Batch[DefaultOpenEnvelope]]],
               Signature.noSignature,
               None,
               testedProtocolVersion,

@@ -15,10 +15,8 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfHashSyntax.*
 import com.digitalasset.canton.protocol.RefIdentifierSyntax.*
 import com.digitalasset.canton.protocol.{
-  GlobalKeySerialization,
   LfActionNode,
   LfContractId,
-  LfGlobalKey,
   LfHash,
   LfNodeCreate,
   LfNodeExercises,
@@ -32,7 +30,6 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.value.{Value, ValueCoder, ValueOuterClass}
 import com.google.common.annotations.VisibleForTesting
@@ -232,20 +229,6 @@ object ActionDescription {
     } yield actionDescription
   }
 
-  private def fromLookupByKeyProtoV30(
-      k: v30.ActionDescription.LookupByKeyActionDescription
-  ): ParsingResult[LookupByKeyActionDescription] = {
-    val v30.ActionDescription.LookupByKeyActionDescription(keyP) = k
-    for {
-      key <- ProtoConverter
-        .required("key", keyP)
-        .flatMap(GlobalKeySerialization.fromProtoV30)
-      actionDescription <- LookupByKeyActionDescription
-        .create(key)
-        .leftMap(err => OtherError(err.message))
-    } yield actionDescription
-  }
-
   private def fromFetchProtoV30(
       f: v30.ActionDescription.FetchActionDescription
   ): ParsingResult[FetchActionDescription] = {
@@ -274,7 +257,6 @@ object ActionDescription {
       case Create(create) => fromCreateProtoV30(create)
       case Exercise(exercise) => fromExerciseProtoV30(exercise)
       case Fetch(fetch) => fromFetchProtoV30(fetch)
-      case LookupByKey(lookup) => fromLookupByKeyProtoV30(lookup)
       case Empty => Left(FieldNotSet("description"))
     }
   }
@@ -468,6 +450,8 @@ object ActionDescription {
         GenLens[ExerciseActionDescription].apply(_.templateId)
       val choiceUnsafe: Lens[ExerciseActionDescription, LfChoiceName] =
         GenLens[ExerciseActionDescription].apply(_.choice)
+      val inputContractIdUnsafe: Lens[ExerciseActionDescription, LfContractId] =
+        GenLens[ExerciseActionDescription].apply(_.inputContractId)
     }
   }
 
@@ -507,47 +491,6 @@ object ActionDescription {
       paramIfTrue("by key", _.byKey),
       paramIfDefined("interface id", _.interfaceId),
     )
-  }
-
-  final case class LookupByKeyActionDescription(key: LfVersioned[LfGlobalKey])
-      extends ActionDescription {
-
-    private val serializedKey =
-      GlobalKeySerialization
-        .toProtoV30(key)
-        .valueOr(err => throw InvalidActionDescription(s"Failed to serialize key: $err"))
-
-    override def byKey: Boolean = true
-
-    override def seedOption: Option[LfHash] = None
-
-    protected def toProtoDescriptionV30: v30.ActionDescription.Description.LookupByKey =
-      v30.ActionDescription.Description.LookupByKey(
-        v30.ActionDescription.LookupByKeyActionDescription(
-          key = Some(serializedKey)
-        )
-      )
-
-    override protected def toProtoDescriptionV31: v31.ActionDescription.Description =
-      throw InvalidActionDescription(
-        s"LookupByKey is not supported as root view action in ${ProtocolVersion.v35} or above"
-      )
-
-    override protected def pretty: Pretty[LookupByKeyActionDescription] = prettyOfClass(
-      param("key", _.key)
-    )
-
-  }
-
-  object LookupByKeyActionDescription {
-    def tryCreate(key: LfVersioned[LfGlobalKey]): LookupByKeyActionDescription =
-      new LookupByKeyActionDescription(key)
-
-    def create(
-        key: LfVersioned[LfGlobalKey]
-    ): Either[InvalidActionDescription, LookupByKeyActionDescription] =
-      Either.catchOnly[InvalidActionDescription](tryCreate(key))
-
   }
 
   @VisibleForTesting

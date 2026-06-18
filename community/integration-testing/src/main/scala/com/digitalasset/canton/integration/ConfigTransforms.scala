@@ -29,6 +29,7 @@ import com.digitalasset.canton.participant.config.{
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
+import com.digitalasset.canton.sequencing.SequencerAggregatorTesting
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
@@ -155,6 +156,7 @@ object ConfigTransforms {
       _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(Some(10000)),
       // disable exit on fatal error in tests
       ConfigTransforms.setExitOnFatalFailures(false),
+      ConfigTransforms.useNewAggregator(SequencerAggregatorTesting.useNewAggregatorForTests),
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
@@ -942,7 +944,7 @@ object ConfigTransforms {
       )
     )
 
-  def enableAlphaMultiSynchronizerTopologyFeatureFlag: ConfigTransform = {
+  def enableMultiSynchronizerTopologyFeatureFlag: ConfigTransform = {
     (cantonConfig: CantonConfig) =>
       cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
   }.compose(
@@ -956,4 +958,15 @@ object ConfigTransforms {
     updateAllMediatorConfigs_(
       _.focus(_.topology.validateInitialTopologySnapshot).replace(false)
     )
+
+  def useNewAggregator(value: Boolean): ConfigTransform =
+    updateAllParticipantConfigs_ {
+      _.focus(_.sequencerClient.useNewAggregator).replace(value)
+    }
+      .compose(updateAllMediatorConfigs_ {
+        _.focus(_.sequencerClient.useNewAggregator).replace(value)
+      })
+      .compose(updateAllSequencerConfigs_ {
+        _.focus(_.sequencerClient.useNewAggregator).replace(value)
+      })
 }

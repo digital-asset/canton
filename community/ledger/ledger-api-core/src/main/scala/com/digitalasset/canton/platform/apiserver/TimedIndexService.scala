@@ -25,7 +25,6 @@ import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
-import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.apache.pekko.NotUsed
@@ -91,15 +90,6 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
     Timed.future(
       metrics.services.index.lookupActiveContract,
       delegate.lookupActiveContract(readers, contractId),
-    )
-
-  override def lookupContractKey(
-      readers: Set[Ref.Party],
-      key: GlobalKey,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Value.ContractId]] =
-    Timed.future(
-      metrics.services.index.lookupContractKey,
-      delegate.lookupContractKey(readers, key),
     )
 
   override def lookupMaximumLedgerTimeAfterInterpretation(
@@ -178,15 +168,15 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       delegate.getEventsByContractId(contractId, eventFormat),
     )
 
-  override def lookupNonUniqueContractKey(
+  override def lookupContractKey(
       readers: Set[Party],
       key: Key,
       pageToken: Option[Long],
       limit: Int,
   )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
     Timed.future(
-      metrics.services.index.lookupNonUniqueContractKey,
-      delegate.lookupNonUniqueContractKey(readers, key, pageToken, limit),
+      metrics.services.index.lookupContractKey,
+      delegate.lookupContractKey(readers, key, pageToken, limit),
     )
 
   // TODO(i16065): Re-enable getEventsByContractKey tests

@@ -3,9 +3,8 @@
 
 package com.digitalasset.transcode.daml_lf
 
+import com.digitalasset.daml.lf.archive.DarSchemaDecoder
 import com.digitalasset.transcode.DamlExamples
-import com.digitalasset.transcode.daml_lf.Util
-import com.digitalasset.transcode.daml_lf.synonyms.DarDecoder
 import com.digitalasset.transcode.schema.*
 import zio.test.*
 import zio.test.diff.Diff.DiffOps
@@ -15,9 +14,10 @@ import scala.collection.mutable
 import scala.language.implicitConversions
 
 trait SchemaProcessorSpecDefault extends ZIOSpecDefault:
-  private val dar = DarDecoder.assertReadArchiveFromFile(DamlExamples.darPath.toFile)
+  // DarSchemaDecoder skips decoding non-serializable types (e.g. Void)
+  // This is useful to test unknown types
   private val packages =
-    dar.all.map((pkgId, pkg) => pkgId -> Util.toSignature(pkg)).toMap
+    DarSchemaDecoder.assertReadArchiveFromFile(DamlExamples.darPath.toFile).all.toMap
   private val dictionary =
     LfSchemaProcessor
       .process(packages, IdentifierFilter.AcceptAll)(DescriptorVisitor)
@@ -152,6 +152,25 @@ trait SchemaProcessorSpecDefault extends ZIOSpecDefault:
           )
         case (left: Descriptor.ContractId, right: Descriptor.ContractId) =>
           go(left.value, right.value)
+        case (left: Descriptor.Unknown, right: Descriptor.Unknown) =>
+          DiffResult.Nested(
+            "Unknown",
+            List(
+              Some("id") -> left.id.diffed(right.id),
+              Some("args") -> DiffResult.Nested(
+                "$",
+                left.args.toList
+                  .map(Option.apply)
+                  .zipAll(right.args.toList.map(Option.apply), None, None)
+                  .collect {
+                    case (Some(l), Some(r)) => go(l, r)
+                    case (None, Some(r)) => DiffResult.Added(r)
+                    case (Some(l), None) => DiffResult.Removed(l)
+                  }
+                  .map(None -> _),
+              ),
+            ),
+          )
         case (left, right) =>
           DiffResult.Different(left, right)
 

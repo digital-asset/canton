@@ -42,9 +42,8 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTrack
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
-import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkRange
 import com.digitalasset.canton.platform.indexer.parallel.NoOpReassignmentOffsetPersistence
-import com.digitalasset.canton.platform.indexer.{Indexer, IndexerConfig, JdbcIndexer}
+import com.digitalasset.canton.platform.indexer.{Indexer, IndexerConfig, IndexerParams, JdbcIndexer}
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DbConfig}
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
@@ -90,8 +89,6 @@ import com.digitalasset.daml.lf.transaction.{CommittedTransaction, CreationTime,
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueParty
 import com.google.protobuf.ByteString
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Suite
 import org.scalatest.concurrent.PatienceConfiguration
@@ -311,12 +308,8 @@ trait IndexComponentTest
   private def jdbcIndexerResourceOwner(
       config: IndexerConfig,
       serviceConfig: IndexServiceConfig,
-      achsInitInterceptor: scaladsl.Source[AchsWorkRange, NotUsed] => scaladsl.Source[
-        AchsWorkRange,
-        NotUsed,
-      ],
   ): ResourceOwner[
-    (Indexer, Option[() => Unit], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
+    (Indexer, LedgerApiContractStoreImpl, DbSupport, InMemoryState)
   ] =
     for {
       dbStorage <- ResourceOwner
@@ -378,7 +371,7 @@ trait IndexComponentTest
           ),
           loggerFactory = loggerFactory,
         )
-      (indexer, killSwitch) <- new JdbcIndexer.Factory(
+      indexer <- new JdbcIndexer.Factory(
         participantId = participantId,
         participantDataSourceConfig = DbSupport.ParticipantDataSourceConfig(jdbcUrl),
         config = config,
@@ -397,9 +390,8 @@ trait IndexComponentTest
         postProcessor = (_, _) => Future.unit,
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
-        achsInitInterceptor = achsInitInterceptor,
       ).initialized()
-    } yield (indexer, killSwitch, participantContractStore, dbSupport, inMemoryState)
+    } yield (indexer, participantContractStore, dbSupport, inMemoryState)
 
   private def indexResourceOwner(
       config: IndexerConfig,
@@ -410,9 +402,13 @@ trait IndexComponentTest
     (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
   ] =
     for {
-      (indexerF, _, participantContractStore, dbSupport, inMemoryState) <-
-        jdbcIndexerResourceOwner(config, serviceConfig, achsInitInterceptor = identity)
-      indexerFutureQueueConsumer <- ResourceOwner.forFuture(() => indexerF(repairMode)(_ => ()))
+      (indexerF, participantContractStore, dbSupport, inMemoryState) <-
+        jdbcIndexerResourceOwner(config, serviceConfig)
+      indexerFutureQueueConsumer <- ResourceOwner.forFuture(() =>
+        indexerF(
+          IndexerParams(repairMode = repairMode, commit = _ => (), shutdownRequested = () => false)
+        ).flatMap(identity)
+      )
       indexer <- ResourceOwner.forReleasable(() =>
         new IndexingFutureQueue(indexerFutureQueueConsumer)
       ) { indexer =>
@@ -465,15 +461,10 @@ trait IndexComponentTest
     } yield (indexService, indexer, participantContractStore, dbSupport, inMemoryState)
 
   protected def indexerResourceOwner(
-      config: IndexerConfig,
-      achsInitInterceptor: scaladsl.Source[AchsWorkRange, NotUsed] => scaladsl.Source[
-        AchsWorkRange,
-        NotUsed,
-      ],
-  ): ResourceOwner[(Indexer, Option[() => Unit], DbSupport)] =
-    jdbcIndexerResourceOwner(config, indexServiceConfig, achsInitInterceptor).map {
-      case (indexer, killSwitch, _, dbSupport, _) =>
-        (indexer, killSwitch, dbSupport)
+      config: IndexerConfig
+  ): ResourceOwner[(Indexer, DbSupport)] =
+    jdbcIndexerResourceOwner(config, indexServiceConfig).map { case (indexer, _, dbSupport, _) =>
+      (indexer, dbSupport)
     }
 
   protected def acquireServices(

@@ -169,7 +169,7 @@ object ValueGenerators {
       list <- Gen.listOf(for {
         k <- Gen.asciiPrintableStr; v <- valueGen(allowContractIds)
       } yield k -> v)
-    } yield ValueTextMap(SortedLookupList(Map(list*)))
+    } yield ValueTextMap(SortedLookupList.from(Map(list*)))
 
   private def internalValueGenMapGen(allowContractIds: Boolean): Gen[ValueGenMap] =
     Gen

@@ -49,6 +49,20 @@ object PartyReplicationTestInterceptorImpl {
       ): PartyReplicationTestInterceptor.ProceedOrWait = proceedIf(canProceed(progress))
     }
 
+  /** Create a test interceptor that proceeds or waits by evaluating the given function (based on
+    * the contents of the target participant store).
+    */
+  def targetParticipantEvaluates(
+      evaluate: PartyReplicationStatus.AcsReplicationProgress => PartyReplicationTestInterceptor.ProceedOrWait
+  ): PartyReplicationTestInterceptorImpl =
+    new PartyReplicationTestInterceptorImpl {
+      override def onTargetParticipantProgress(
+          progress: PartyReplicationStatus.AcsReplicationProgress
+      )(implicit
+          traceContext: TraceContext
+      ): PartyReplicationTestInterceptor.ProceedOrWait = evaluate(progress)
+    }
+
   private def proceedIf(canProceed: Boolean): PartyReplicationTestInterceptor.ProceedOrWait =
     if (canProceed) PartyReplicationTestInterceptor.Proceed
     else PartyReplicationTestInterceptor.Wait

@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package testing.snapshot
 
+import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.{
@@ -98,9 +99,17 @@ abstract class GenerateSnapshotsBase
     snapshotFiles.size() should be(1)
   }
 
-  private def runScript(scriptDarPath: Path, host: String, port: Port): Unit = {
-    assert(sys.env.contains("DAML_VERSION"), "DAML_VERSION environment variable is not set")
+  private def getEnv(name: String, default: String): String =
+    sys.props.get(name) match {
+      case Some(value) =>
+        // on CI we should get the value from the configMap
+        value
+      case None =>
+        logger.warn(s"Using default value for $name: $default.")
+        default
+    }
 
+  private def runScript(scriptDarPath: Path, host: String, port: Port): Unit = {
     println(s"Generating snapshot data using script code in $scriptDarPath")
 
     val cmd = List(
@@ -114,18 +123,56 @@ abstract class GenerateSnapshotsBase
       List("--upload-dar", "true"),
     ).flatten
 
+    val env = Seq(
+      "DAML_VERSION" -> getEnv("damlVersion", BuildInfo.damlLibrariesVersion),
+      "DPM_REGISTRY" -> getEnv("dpmRegistry", "europe-docker.pkg.dev/da-images/public-unstable"),
+    )
+    val stdout = new StringBuilder
     val stderr = new StringBuilder
-    val tmpDir = Files.createTempDirectory("dpm-script").toFile
+    val tmpDir = Files.createTempDirectory("dpm-script")
+    val dummyProjectFile =
+      """override-components:
+        |  daml-script:
+        |    version: $DAML_VERSION
+        |""".stripMargin
 
     try {
-      val logger = sys.process.ProcessLogger(_ => (), stderr.append(_).append("\n"))
-      sys.process.Process(cmd, cwd = Some(tmpDir)) ! logger
+      Files.write(tmpDir.resolve("daml.yaml"), dummyProjectFile.getBytes)
+
+      val logger =
+        sys.process.ProcessLogger(stdout.append(_).append("\n"), stderr.append(_).append("\n"))
+      val exitCode = sys.process.Process(cmd, cwd = Some(tmpDir.toFile), env*) ! logger
+
+      exitCode match {
+        case 1 =>
+          // Check that all daml script test failures are due to GetTime calls and duplicate party allocation failures
+          assert(
+            stdout
+              .toString()
+              .split("\n")
+              .filter(_.contains("FAILURE"))
+              .forall { line =>
+                line.contains(
+                  "UNIMPLEMENTED: Method not found: com.daml.ledger.api.v2.testing.TimeService/GetTime"
+                )
+                || line.contains("Party already exists")
+              },
+            s"dpm script failed with exit code 1: \n" + stdout.toString(),
+          )
+        case 0 =>
+        // do nothing
+        case _ =>
+          throw new java.lang.AssertionError(
+            s"dpm script failed with exit code $exitCode: \n" + stdout.toString()
+          )
+      }
     } catch {
       case scala.util.control.NonFatal(cause) =>
         throw new Error(s"daml script failed: ${cause.getMessage}\n" + stderr.toString(), cause)
     } finally {
       // The call should not create any files
-      tmpDir.delete()
+      tmpDir.resolve("daml.yaml").toFile.delete()
+      tmpDir.toFile.delete()
     }
   }
 }

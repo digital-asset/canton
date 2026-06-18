@@ -26,11 +26,10 @@ import com.digitalasset.daml.lf.engine.Enricher
 import com.digitalasset.daml.lf.transaction.{
   ContractInstanceCoder,
   FatContractInstance,
-  GlobalKey,
   SubmittedTransaction,
 }
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.value.{Value, ValueCoder}
+import com.digitalasset.daml.lf.value.ValueCoder
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -72,7 +71,6 @@ private[interactive] sealed trait EnrichedTransactionData {
   private[codec] def submitterInfo: state.SubmitterInfo
   private[codec] def transactionMeta: state.TransactionMeta
   private[codec] def transaction: SubmittedTransaction
-  private[codec] def globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]]
   private[codec] def inputContracts: Map[ContractId, ExternalInputContract]
   private[codec] def synchronizer: Synchronizer
   private[codec] def mediatorGroup: Int
@@ -116,7 +114,6 @@ final case class PrepareTransactionData(
     private[codec] val submitterInfo: state.SubmitterInfo,
     private[codec] val transactionMeta: state.TransactionMeta,
     private[codec] val transaction: SubmittedTransaction,
-    private[codec] val globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]],
     private[codec] val inputContracts: Map[ContractId, ExternalInputContract],
     private[codec] val synchronizer: Synchronizer,
     private[codec] val mediatorGroup: Int,
@@ -132,7 +129,6 @@ final case class ExecuteTransactionData(
     private[codec] val submitterInfo: state.SubmitterInfo,
     private[codec] val transactionMeta: state.TransactionMeta,
     private[codec] val transaction: SubmittedTransaction,
-    private[codec] val globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]],
     private[codec] val inputContracts: Map[ContractId, ExternalInputContract],
     private[codec] val synchronizer: Synchronizer,
     private val externallySignedSubmission: ExternallySignedSubmission,
@@ -150,7 +146,6 @@ final case class ExecuteTransactionData(
       transaction = SubmittedTransaction(normalizedTransaction),
       dependsOnLedgerTime = transactionMeta.timeBoundaries != LedgerTimeBoundaries.unconstrained,
       interpretationTimeNanos = 0L, // Irrelevant here as interpretation was done during prepare,
-      globalKeyMapping = globalKeyMapping,
       // Make sure to use the original contract instance here. No need to impoverish it as it hasn't been enriched
       processedDisclosedContracts = ImmArray.from(inputContracts.values.map(_.originalContract)),
       optSynchronizerId = Some(synchronizer.logical),

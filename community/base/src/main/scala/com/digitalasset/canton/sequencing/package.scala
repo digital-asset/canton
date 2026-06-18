@@ -7,14 +7,14 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   ClosedEnvelope,
+  DecompressedSequencedEvent,
   Envelope,
-  SequencedEvent,
+  GenBatch,
   SignedContent,
 }
 import com.digitalasset.canton.store.SequencedEventStore.{
-  OrdinarySequencedEvent,
-  PossiblyIgnoredSequencedEvent,
   ProcessingSequencedEvent,
   SequencedEventWithTraceContext,
 }
@@ -52,8 +52,9 @@ package object sequencing {
   /** Default box for signed batches of events The outer `Traced` contains a trace context for the
     * entire batch.
     */
-  type OrdinaryEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[OrdinarySequencedEvent[E]]]
-  type SequencedEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[SequencedEventWithTraceContext[E]]]
+  type OrdinaryEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[EnvelopeBox.OrdinarySequencedEventOf[E]]]
+  type SequencedEnvelopeBox[+E <: Envelope[?]] =
+    Traced[Seq[SequencedEventWithTraceContext[Batch[E]]]]
   type OrdinaryApplicationHandler[-E <: Envelope[?]] =
     UnthrottledApplicationHandler[OrdinaryEnvelopeBox, E]
   type SequencedApplicationHandler[-E <: Envelope[?]] =
@@ -63,12 +64,14 @@ package object sequencing {
     * term "raw" indicates that the trace context is missing. Try to use the box
     * [[OrdinarySerializedEvent]] instead.
     */
-  type RawSignedContentEnvelopeBox[+Env <: Envelope[?]] = SignedContent[SequencedEvent[Env]]
+  type RawSignedContentEnvelopeBox[+Env <: Envelope[?]] =
+    SignedContent[DecompressedSequencedEvent[Env]]
 
   /** A batch of traced protocol events (without a signature) with the assigned counter. The outer
     * `Traced` contains a trace context for the entire batch.
     */
-  type UnsignedEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[WithCounter[Traced[SequencedEvent[E]]]]]
+  type UnsignedEnvelopeBox[+E <: Envelope[?]] =
+    Traced[Seq[WithCounter[Traced[DecompressedSequencedEvent[E]]]]]
   type UnsignedApplicationHandler[-E <: Envelope[?]] =
     UnthrottledApplicationHandler[UnsignedEnvelopeBox, E]
   type UnsignedProtocolEventHandler = UnsignedApplicationHandler[DefaultOpenEnvelope]
@@ -76,7 +79,8 @@ package object sequencing {
   /** Default box for `PossiblyIgnoredProtocolEvents`. The outer `Traced` contains a trace context
     * for the entire batch.
     */
-  type PossiblyIgnoredEnvelopeBox[+E <: Envelope[?]] = Traced[Seq[PossiblyIgnoredSequencedEvent[E]]]
+  type PossiblyIgnoredEnvelopeBox[+E <: Envelope[?]] =
+    Traced[Seq[EnvelopeBox.PossiblyIgnoredSequencedEventOf[E]]]
   type PossiblyIgnoredApplicationHandler[-E <: Envelope[?]] =
     UnthrottledApplicationHandler[PossiblyIgnoredEnvelopeBox, E]
 
@@ -87,14 +91,16 @@ package object sequencing {
   /** Default type for serialized events. Contains trace context and signature.
     */
 
-  type ProcessingSerializedEvent = BoxedEnvelope[ProcessingSequencedEvent, ClosedEnvelope]
+  type ProcessingSerializedEvent = ProcessingSequencedEvent[Batch[ClosedEnvelope]]
 
-  type SequencedSerializedEvent = BoxedEnvelope[SequencedEventWithTraceContext, ClosedEnvelope]
+  type SequencedSerializedEvent = SequencedEventWithTraceContext[Batch[ClosedEnvelope]]
 
-  type OrdinarySerializedEvent = BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]
+  type MaybeCompressedSerializedEvent = SequencedEventWithTraceContext[GenBatch[ClosedEnvelope]]
+
+  type OrdinarySerializedEvent = EnvelopeBox.OrdinarySequencedEventOf[ClosedEnvelope]
 
   type PossiblyIgnoredSerializedEvent =
-    BoxedEnvelope[PossiblyIgnoredSequencedEvent, ClosedEnvelope]
+    EnvelopeBox.PossiblyIgnoredSequencedEventOf[ClosedEnvelope]
 
   type OrdinaryEventOrError = Either[SequencedEventError, OrdinarySerializedEvent]
 
@@ -106,18 +112,18 @@ package object sequencing {
 
   /** Default type for deserialized events. Includes a signature and a trace context.
     */
-  type SequencedProtocolEvent = BoxedEnvelope[SequencedEventWithTraceContext, DefaultOpenEnvelope]
+  type SequencedProtocolEvent = SequencedEventWithTraceContext[Batch[DefaultOpenEnvelope]]
 
-  type OrdinaryProtocolEvent = BoxedEnvelope[OrdinarySequencedEvent, DefaultOpenEnvelope]
+  type OrdinaryProtocolEvent = EnvelopeBox.OrdinarySequencedEventOf[DefaultOpenEnvelope]
 
   /** Deserialized event with optional payload. */
   type PossiblyIgnoredProtocolEvent =
-    BoxedEnvelope[PossiblyIgnoredSequencedEvent, DefaultOpenEnvelope]
+    EnvelopeBox.PossiblyIgnoredSequencedEventOf[DefaultOpenEnvelope]
 
   /** Default type for deserialized events. The term "raw" indicates that the trace context is
     * missing. Try to use `TracedProtocolEvent` instead.
     */
-  type RawProtocolEvent = BoxedEnvelope[SequencedEvent, DefaultOpenEnvelope]
+  type RawProtocolEvent = BoxedEnvelope[DecompressedSequencedEvent, DefaultOpenEnvelope]
 
   /** Deserialized event with a trace context. Use this when you are really sure that a signature
     * will never be needed.
@@ -139,6 +145,9 @@ package object sequencing {
 
   type SequencedEventHandler[Err] =
     SequencedSerializedEvent => FutureUnlessShutdown[Either[Err, Unit]]
+
+  type MaybeCompressedSequencedEventHandler[Err] =
+    MaybeCompressedSerializedEvent => FutureUnlessShutdown[Either[Err, Unit]]
   type SequencedEventOrErrorHandler[Err] =
     SequencedEventOrError => FutureUnlessShutdown[Either[Err, Unit]]
 }

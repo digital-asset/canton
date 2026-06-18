@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.v2.command_service.SubmitAndWaitRequest
@@ -16,9 +17,8 @@ import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success}
 
-final class ContractKeysCommandDeduplicationIT extends LedgerTestSuite {
-
-  import ContractKeysCompanionImplicits.*
+final class ContractKeysCommandDeduplicationIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.contractKeysCompanionImplicits.*
 
   test(
     s"StopOnCompletionFailure",

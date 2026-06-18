@@ -52,8 +52,8 @@ trait AchsIntegrationTest extends CommunityIntegrationTest with SharedEnvironmen
       storageBackendFactory.createParameterStorageBackend(ledgerApiStore.stringInterningView)
     ledgerApiStore.ledgerApiDbSupport.dbDispatcher
       .executeSql(
-        DatabaseMetrics.ForTesting("fetchACHSState")
-      )(parameterStorageBackend.fetchACHSState)(
+        DatabaseMetrics.ForTesting("fetchAchsState")
+      )(parameterStorageBackend.fetchAchsState)(
         LoggingContextWithTrace.empty
       )
       .futureValue

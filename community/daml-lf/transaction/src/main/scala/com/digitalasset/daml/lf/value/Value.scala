@@ -335,41 +335,6 @@ object Value {
   /** The data constructors of a variant or enum, if defined. */
   type LookupVariantEnum = Identifier => Option[ImmArray[Name]]
 
-  /** A contract instance is a value plus the template that originated it. */
-  // Prefer to use transaction.FatContractInstance
-  final case class ThinContractInstance(
-      packageName: Ref.PackageName,
-      template: Identifier,
-      arg: Value,
-  ) extends CidContainer[ThinContractInstance] {
-
-    def map(f: Value => Value): ThinContractInstance =
-      copy(arg = f(arg))
-
-    def mapCid(f: ContractId => ContractId): ThinContractInstance =
-      copy(arg = arg.mapCid(f))
-  }
-
-  type VersionedThinContractInstance = transaction.Versioned[ThinContractInstance]
-
-  object VersionedContractInstance {
-    def apply(
-        packageName: Ref.PackageName,
-        template: Identifier,
-        arg: VersionedValue,
-    ): VersionedThinContractInstance =
-      arg.map(ThinContractInstance(packageName, template, _))
-
-    @deprecated("use the version with 3 argument", since = "2.9.0")
-    def apply(
-        version: transaction.SerializationVersion,
-        packageName: Ref.PackageName,
-        template: Identifier,
-        arg: Value,
-    ): VersionedThinContractInstance =
-      transaction.Versioned(version, ThinContractInstance(packageName, template, arg))
-  }
-
   type NodeIdx = Int
 
   sealed abstract class ContractId extends Product with Serializable with CidContainer[ContractId] {

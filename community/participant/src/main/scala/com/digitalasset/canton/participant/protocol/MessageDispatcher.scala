@@ -185,7 +185,7 @@ trait MessageDispatcher { this: NamedLogging =>
     */
   protected def processBatch(
       sequencerCounter: SequencerCounter,
-      eventE: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      eventE: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): ProcessingResult = {
     val deliver = eventE.event.content
     // TODO(#13883) Validate the topology timestamp
@@ -256,7 +256,7 @@ trait MessageDispatcher { this: NamedLogging =>
     )
 
   private def processTransactionAndReassignmentMessages(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
       envelopes: Seq[DefaultOpenEnvelope],
@@ -680,11 +680,12 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       msgId: Option[MessageId],
-      err: WithOpeningErrors[SequencedEvent[DefaultOpenEnvelope]],
+      err: WithOpeningErrors[DecompressedSequencedEvent[DefaultOpenEnvelope]],
   )(implicit traceContext: TraceContext): Unit =
     logger.info(
       show"Skipping faulty event at sc=$sc, ts=$ts${withMsgId(msgId)}, with errors=${err.openingErrors
-          .map(_.message)} and contents=${err.event.envelopes
+          .map(_.message)} and contents=${SequencedEvent
+          .envelopesOf(err.event)
           .map(_.protocolMessage)}"
     )
 
@@ -692,16 +693,17 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       msgId: Option[MessageId],
-      evt: SignedContent[SequencedEvent[DefaultOpenEnvelope]],
-  )(implicit traceContext: TraceContext): Unit =
+      evt: SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]],
+  )(implicit traceContext: TraceContext): Unit = {
+    val envelopes = SequencedEvent.envelopesOf(evt.content)
     if (logger.underlying.isDebugEnabled)
       logger.debug(
-        show"Processing event at sc=$sc, ts=$ts${withMsgId(msgId)}, with contents=${evt.content.envelopes
+        show"Processing event at sc=$sc, ts=$ts${withMsgId(msgId)}, with contents=${envelopes
             .map(_.protocolMessage)}"
       )
     else {
       val maxDisplay = 10 // whoever needs more should use debug logging
-      val dense = evt.content.envelopes.take(maxDisplay).map(c => (c, c.protocolMessage)).map {
+      val dense = envelopes.take(maxDisplay).map(c => (c, c.protocolMessage)).map {
         case (env, message: UnsignedProtocolMessage) =>
           message match {
             case RootHashMessage(rootHash, _, _, _, _) => s"root-hash=$rootHash"
@@ -721,13 +723,14 @@ trait MessageDispatcher { this: NamedLogging =>
             case other => other.toString
           }
       }
-      val numEnvs = evt.content.envelopes.size
+      val numEnvs = envelopes.size
       logger.info(
         show"Processing event at sc=$sc, ts=$ts${withMsgId(msgId)}, with $numEnvs envelopes"
           + (if (dense.nonEmpty) "\n  " + dense.mkString("\n  ") else "")
           + (if (numEnvs > maxDisplay) "\n  ..." else "")
       )
     }
+  }
 
   protected def logDeliveryError(
       sc: SequencerCounter,

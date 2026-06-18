@@ -625,7 +625,6 @@ object BaseTest {
     )
 
   lazy val defaultMaxBytesToDecompress: MaxBytesToDecompress = MaxBytesToDecompress(
-    // TODO(i29003): Define our own param for this.
     DynamicSynchronizerParameters.defaultMaxRequestSize.value
   )
 

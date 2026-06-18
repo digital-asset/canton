@@ -706,6 +706,16 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         withClue(s"for $participant")(transactions shouldBe empty)
     }
 
+    lazy val awaitUnassignments: Map[ParticipantReference, Seq[UnassignedWrapper]] =
+      unassignments.map { case (participant, unassignmentF) =>
+        participant -> withClue(s"for $participant")(unassignmentF.futureValue)
+      }
+
+    lazy val awaitAssignments: Map[ParticipantReference, Seq[AssignedWrapper]] =
+      assignments.map { case (participant, assignmentF) =>
+        participant -> withClue(s"for $participant")(assignmentF.futureValue)
+      }
+
     def allCreated[TC](
         companion: ContractCompanion[TC, ?, ?]
     )(
@@ -727,6 +737,12 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
           javaapi.data.Transaction.fromProto(toJavaProto(tx))
         )
       )
+
+    def allUnassigned(participant: ParticipantReference): Seq[String] =
+      awaitUnassignments(participant).flatMap(_.events).map(_.contractId)
+
+    def allAssigned(participant: ParticipantReference): Seq[String] =
+      awaitAssignments(participant).flatMap(_.events).map(_.createdEvent.value.contractId)
   }
 }
 

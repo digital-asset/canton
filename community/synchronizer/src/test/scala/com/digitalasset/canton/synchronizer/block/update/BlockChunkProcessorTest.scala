@@ -4,7 +4,8 @@
 package com.digitalasset.canton.synchronizer.block.update
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.sequencing.protocol.{
@@ -55,12 +56,15 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
             syncCryptoApiFake,
             sequencerId,
             rateLimitManagerMock,
-            OrderingTimeFixMode.ValidateOnly,
-            None,
-            BatchingConfig(),
-            loggerFactory,
-            SequencerTestMetrics,
+            BlockProcessingParameters(
+              OrderingTimeFixMode.ValidateOnly,
+              None,
+              parallelism = PositiveInt.two,
+              enablePrevalidation = true,
+            ),
+            SequencerTestMetrics(this.getClass.getSimpleName),
             memberValidatorMock,
+            loggerFactory,
           )
 
         def emitTick(
@@ -68,7 +72,7 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
         ) =
           blockChunkProcessor
             .emitTick(
-              state = BlockUpdateGeneratorImpl.State(
+              state = BlockUpdateGenerator.AccumulatedStateProcessingBlocks(
                 lastBlockTs = aTimestamp,
                 lastChunkTs = aTimestamp,
                 latestSequencerEventTimestamp = None,

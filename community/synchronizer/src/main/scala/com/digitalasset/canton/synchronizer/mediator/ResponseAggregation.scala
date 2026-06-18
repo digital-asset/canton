@@ -64,6 +64,7 @@ final case class ResponseAggregation[VKEY](
     state: Either[MediatorVerdict, Map[VKEY, ViewState]],
     @VisibleForTesting
     finalizedPromise: PromiseUnlessShutdown[Unit],
+    override val firstResponseReceived: Option[CantonTimestamp],
 )(
     val requestTraceContext: TraceContext,
     val participantResponseDeadlineTick: Option[SynchronizerTimeTracker.TickRequest],
@@ -94,6 +95,7 @@ final case class ResponseAggregation[VKEY](
         request,
         version,
         verdict.toVerdict(protocolVersion),
+        firstResponseReceived,
       )(requestTraceContext)
     }
 
@@ -152,7 +154,7 @@ final case class ResponseAggregation[VKEY](
       val updatedState = MonadUtil.foldLeftM(statesOfViews, viewPositionsAndParties)(
         progressView(_, _, sender, localVerdict)
       )
-      copy(version = responseTimestamp, state = updatedState)
+      copy(version = responseTimestamp, state = updatedState, responseReceived = true)
     }).value
   }
 
@@ -349,6 +351,7 @@ final case class ResponseAggregation[VKEY](
       decisionTime: CantonTimestamp = decisionTime,
       version: CantonTimestamp = version,
       state: Either[MediatorVerdict, Map[VKEY, ViewState]] = state,
+      responseReceived: Boolean = false,
   ): ResponseAggregation[VKEY] =
     ResponseAggregation(
       requestId,
@@ -358,6 +361,7 @@ final case class ResponseAggregation[VKEY](
       version,
       state,
       finalizedPromise,
+      firstResponseReceived.orElse(Option.when(responseReceived)(version)),
     )(
       requestTraceContext,
       participantResponseDeadlineTick,
@@ -587,6 +591,7 @@ object ResponseAggregation {
         requestId.unwrap,
         Right(initialState),
         finalizePromise,
+        firstResponseReceived = None,
       )(requestTraceContext, participantResponseDeadlineTick)
     }
 

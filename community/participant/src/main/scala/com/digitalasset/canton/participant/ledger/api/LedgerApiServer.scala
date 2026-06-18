@@ -61,7 +61,7 @@ import com.digitalasset.canton.participant.{
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.ratelimiting.RateLimitingInterceptorFactory
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
-import com.digitalasset.canton.platform.apiserver.services.admin.Utils
+import com.digitalasset.canton.platform.apiserver.services.admin.{PartyReplicationEndpoints, Utils}
 import com.digitalasset.canton.platform.apiserver.{
   ApiServiceOwner,
   InProcessGrpcName,
@@ -88,6 +88,7 @@ import com.digitalasset.canton.platform.{
   ResourceOwnerOps,
 }
 import com.digitalasset.canton.time.{Clock, RemoteClock, SimClock}
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, TracerProvider}
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
@@ -118,6 +119,7 @@ class LedgerApiServer(
     testingTimeService: Option[TimeServiceBackend],
     adminTokenDispenser: CantonAdminTokenDispenser,
     participantContractStore: Eval[LedgerApiContractStore],
+    partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
     enableCommandInspection: Boolean,
     tracerProvider: TracerProvider,
     grpcApiMetrics: LedgerApiServerMetrics,
@@ -129,6 +131,7 @@ class LedgerApiServer(
     ledgerApiIndexer: Eval[LedgerApiIndexer],
     pruningConfig: ParticipantStoreConfig,
     updateServiceConfig: UpdateServiceConfig,
+    warnOnJwtScopeUsage: Boolean,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
@@ -176,6 +179,7 @@ class LedgerApiServer(
               serverConfig.jwksCacheConfig,
               serverConfig.jwtTimestampLeeway,
               loggerFactory,
+              warnOnJwtScopeUsage,
               serverConfig.maxTokenLifetime,
             )
           )
@@ -322,6 +326,28 @@ class LedgerApiServer(
               skipPruningChecks = false,
             )
             .mapConcat(_.update.topologyTransaction)
+
+        override def acsUpdates(synchronizerId: SynchronizerId, fromExclusive: Offset)(implicit
+            traceContext: TraceContext
+        ): Source[InternalIndexService.AcsUpdateContainer, NotUsed] =
+          throw new UnsupportedOperationException() // TODO(#33232): Implement
+
+        override def acs(
+            synchronizerId: SynchronizerId,
+            activeAt: Offset,
+            stakeholders1: Set[Party],
+            stakeholders2: Set[Party],
+        )(implicit
+            traceContext: TraceContext
+        ): Source[InternalIndexService.ActiveContract, NotUsed] =
+          throw new UnsupportedOperationException() // TODO(#33232): Implement
+
+        override def counterParties(
+            synchronizerId: SynchronizerId,
+            activeAt: Offset,
+            party: Option[Party],
+        ): Source[LfPartyId, NotUsed] =
+          throw new UnsupportedOperationException() // TODO(#33232): Implement
       })
       userManagementStore = getUserManagementStore(dbSupport, loggerFactory)
       partyRecordStore = new PersistentPartyRecordStore(
@@ -390,6 +416,7 @@ class LedgerApiServer(
         port = serverConfig.port,
         seeding = cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
         syncService = timedSyncService,
+        partyReplicationEndpointsO = partyReplicationEndpointsO,
         healthChecks = new HealthChecks(
           // TODO(i21015): Possible issues with health check reporting: disconnected sequencer can be reported as healthy; possibly reporting protocol processing/CantonSyncService general health needed
           "write" -> (() => syncService.currentWriteHealth()),
@@ -582,9 +609,11 @@ object LedgerApiServer {
       participantId: LedgerParticipantId,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       sync: CantonSyncService,
+      partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
       pruningConfig: ParticipantStoreConfig,
       tracerProvider: TracerProvider,
       updateServiceConfig: UpdateServiceConfig,
+      warnOnJwtScopeUsage: Boolean,
   )(implicit
       actorSystem: ActorSystem,
       executionContext: ExecutionContextIdlenessExecutorService,
@@ -620,6 +649,7 @@ object LedgerApiServer {
       participantContractStore = participantNodePersistentState.map(state =>
         LedgerApiContractStoreImpl(state.contractStore, loggerFactory, metrics)
       ),
+      partyReplicationEndpointsO = partyReplicationEndpointsO,
       enableCommandInspection = config.ledgerApi.enableCommandInspection,
       tracerProvider = tracerProvider,
       grpcApiMetrics = metrics,
@@ -638,6 +668,7 @@ object LedgerApiServer {
       loggerFactory = loggerFactory,
       pruningConfig = pruningConfig,
       updateServiceConfig = updateServiceConfig,
+      warnOnJwtScopeUsage = warnOnJwtScopeUsage,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)
       .acquireFlagCloseable("Ledger API Server")

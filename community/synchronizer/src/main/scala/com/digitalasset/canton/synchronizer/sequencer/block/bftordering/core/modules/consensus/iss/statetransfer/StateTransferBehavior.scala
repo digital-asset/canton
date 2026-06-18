@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BftNodeId,
   EpochNumber,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderingMode
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
@@ -234,27 +235,42 @@ final class StateTransferBehavior[E <: Env[E]](
           )
         }
 
-      case Consensus.NewEpochStored(newEpochInfo, membership, cryptoProvider: CryptoProvider[E]) =>
+      case Consensus.NewEpochStored(
+            newEpochInfo,
+            membership,
+            cryptoProvider: CryptoProvider[E],
+            origin,
+          ) =>
         // Mainly so that the onboarding state transfer start epoch is not set as the latest completed epoch initially.
         // A new event can be introduced to avoid branching.
         if (newEpochInfo != epochState.epoch.info) {
-          logger.debug(
+          logger.info(
             s"$messageType: setting new epoch ${newEpochInfo.number} during $stateTransferType state transfer"
           )
           setNewEpochState(newEpochInfo, membership, cryptoProvider)
         }
+
         cleanUpPostponedMessageQueue()
-        stateTransferManager.stateTransferNewEpoch(
-          newEpochInfo.number,
-          membership,
-          initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
-        )(abort)
+
+        if (!origin.isStateTransfer) {
+          logger.info(
+            s"$messageType: state transfer transitioned back to consensus and then immediately to state transfer again"
+          )
+        } else {
+          stateTransferManager.stateTransferNewEpoch(
+            newEpochInfo.number,
+            membership,
+            initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
+          )(abort)
+        }
 
       case Consensus.Admin.GetOrderingTopology(callback) =>
         callback(
           Consensus.Admin.GetOrderingTopologyResponse(
             epochState.epoch.info.number,
             activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.leaders,
+            activeTopologyInfo.currentMembership.blacklistedNodes,
             activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
           )
         )
@@ -317,7 +333,12 @@ final class StateTransferBehavior[E <: Env[E]](
       case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
       case Success(_) =>
         logger.debug(s"$messageType: stored start epoch $startEpochNumber")
-        Consensus.NewEpochStored(startEpochInfo, membership, cryptoProvider)
+        Consensus.NewEpochStored(
+          startEpochInfo,
+          membership,
+          cryptoProvider,
+          origin = OrderingMode.StateTransfer,
+        )
     }
   }
 
@@ -412,7 +433,12 @@ final class StateTransferBehavior[E <: Env[E]](
         logger.debug(
           s"$messageType: stored completed epoch $currentEpochNumber and new epoch $newEpochNumber"
         )
-        Consensus.NewEpochStored(newEpochInfo, newMembership, newCryptoProvider)
+        Consensus.NewEpochStored(
+          newEpochInfo,
+          newMembership,
+          newCryptoProvider,
+          origin = OrderingMode.StateTransfer,
+        )
     }
   }
 
@@ -463,28 +489,29 @@ final class StateTransferBehavior[E <: Env[E]](
         latestCompletedEpoch,
         sequencerSnapshotAdditionalInfo = None,
       )
-    val consensusBehavior = new IssConsensusModule[E](
-      consensusInitialState,
-      epochStore,
-      clock,
-      metrics,
-      segmentModuleRefFactory,
-      new RetransmissionsManager[E](
-        thisNode,
-        dependencies.p2pNetworkOut,
-        abort,
-        previousEpochsCommitCerts = Map.empty,
-        metrics,
+    val consensusBehavior =
+      new IssConsensusModule[E](
+        consensusInitialState,
+        epochStore,
         clock,
+        metrics,
+        segmentModuleRefFactory,
+        new RetransmissionsManager[E](
+          thisNode,
+          dependencies.p2pNetworkOut,
+          abort,
+          previousEpochsCommitCerts = Map.empty,
+          metrics,
+          clock,
+          loggerFactory,
+        ),
+        random,
+        dependencies,
         loggerFactory,
-      ),
-      random,
-      dependencies,
-      loggerFactory,
-      timeouts,
-      futurePbftMessageQueue = initialState.pbftMessageQueue,
-      postponedConsensusMessageQueue = Some(postponedConsensusMessages),
-    )()(catchupDetector)
+        timeouts,
+        futurePbftMessageQueue = initialState.pbftMessageQueue,
+        postponedConsensusMessageQueue = Some(postponedConsensusMessages),
+      )()(catchupDetector)
 
     context.become(consensusBehavior)
 

@@ -17,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficConfig,
@@ -81,6 +82,7 @@ class BftOrderingSequencerWithTrafficControlApiTestPostgres
           synchronizerSyncCryptoApi: SynchronizerCryptoClient,
           protocolVersion: ProtocolVersion,
           trafficConfig: SequencerTrafficConfig,
+          lsuSequencingBounds: Option[LsuSequencingBounds],
       ): SequencerRateLimitManager = rateLimitManager
     }
 }

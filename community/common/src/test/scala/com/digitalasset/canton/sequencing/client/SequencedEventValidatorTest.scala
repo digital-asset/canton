@@ -5,18 +5,27 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent}
-import com.digitalasset.canton.store.SequencedEventStore.IgnoredSequencedEvent
+import com.digitalasset.canton.sequencing.protocol.{
+  ClosedEnvelope,
+  DecompressedSequencedEvent,
+  SequencedEvent,
+}
+import com.digitalasset.canton.sequencing.{MaybeCompressedSerializedEvent, SequencedSerializedEvent}
+import com.digitalasset.canton.store.SequencedEventStore.{
+  IgnoredSequencedEvent,
+  SequencedEventWithTraceContext,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.PekkoUtil.noOpKillSwitch
 import com.digitalasset.canton.util.PekkoUtilTest.withNoOpKillSwitch
-import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.util.{MaxBytesToDecompress, ResourceUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
@@ -39,6 +48,39 @@ class SequencedEventValidatorTest
         futureSupervisor,
       )
     )(env => withFixture(test.toNoArgTest(env)))
+
+  /** Re-serializes a (decompressed) event and parses it back keeping the batch compressed, so that
+    * the validator actually has to decompress it (and can hit the decompression bound).
+    */
+  private def toCompressed(event: SequencedSerializedEvent): MaybeCompressedSerializedEvent = {
+    val compressedSignedEvent = event.signedEvent
+      .traverse(se => SequencedEvent.fromTrustedByteStringCompressed(se.toByteString))
+      .valueOr(err => fail(s"failed to re-parse keeping the batch compressed: $err"))
+    SequencedEventWithTraceContext(compressedSignedEvent)(event.traceContext)
+  }
+
+  "decompressEvent" should {
+    "decompress a compressed event within the bound" in { fixture =>
+      import fixture.*
+      val event = createEvent().futureValueUS
+      val decompressed = SequencedEventValidator
+        .decompressEvent(toCompressed(event), MaxBytesToDecompress.HardcodedDefault)
+        .value
+      decompressed.timestamp shouldBe event.timestamp
+    }
+
+    "fail with DecompressionFailed when the batch exceeds the bound" in { fixture =>
+      import fixture.*
+      val event = createEvent().futureValueUS
+      SequencedEventValidator
+        .decompressEvent(
+          toCompressed(event),
+          MaxBytesToDecompress(NonNegativeInt.one),
+        )
+        .left
+        .value shouldBe a[DecompressionFailed]
+    }
+  }
 
   "validate on reconnect" should {
     "accept the prior event" in { fixture =>
@@ -161,8 +203,8 @@ class SequencedEventValidatorTest
 
       def assertFork[E](err: SequencedEventValidationError[E])(
           timestamp: CantonTimestamp,
-          suppliedEvent: SequencedEvent[ClosedEnvelope],
-          expectedEvent: Option[SequencedEvent[ClosedEnvelope]],
+          suppliedEvent: DecompressedSequencedEvent[ClosedEnvelope],
+          expectedEvent: Option[DecompressedSequencedEvent[ClosedEnvelope]],
       ): Assertion =
         err match {
           case ForkHappened(timestampRes, suppliedEventRes, expectedEventRes) =>

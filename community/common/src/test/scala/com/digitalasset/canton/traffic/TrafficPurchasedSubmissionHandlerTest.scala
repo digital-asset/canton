@@ -116,7 +116,7 @@ class TrafficPurchasedSubmissionHandlerTest
       Try(callbackCapture.getValue).isSuccess shouldBe true
     }
     callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
-      UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Envelope[?]]]))
+      UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Batch[Envelope[?]]]]))
     )
     timestampsCapture.getValue.maxSequencingTime shouldBe clock.now.plusSeconds(
       trafficParams.setBalanceRequestSubmissionWindowSize.duration.toSeconds
@@ -199,7 +199,7 @@ class TrafficPurchasedSubmissionHandlerTest
     }
     callbackCapture.getAllValues.asScala.foreach {
       _.asInstanceOf[SendCallback.CallbackFuture](
-        UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Envelope[?]]]))
+        UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Batch[Envelope[?]]]]))
       )
     }
 

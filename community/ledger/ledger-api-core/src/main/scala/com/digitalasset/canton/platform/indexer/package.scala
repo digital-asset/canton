@@ -10,8 +10,30 @@ import scala.concurrent.Future
 
 package object indexer {
 
-  /** Indexer is a factory for indexing. Future[Unit] is the completion Future, as it completes
-    * indexing is completed with results accordingly (Success/Failure)
+  /** Indexer is a factory for indexing. The outer `Future` completes when initialization is done up
+    * to the point where the indexer is wirable for shutdown. The inner `Future` completes when
+    * initialization finishes completely and yields the ready FutureQueueConsumer.
     */
-  type Indexer = Boolean => Commit => Future[FutureQueueConsumer[Update]]
+  type Indexer = indexer.IndexerParams => Future[Future[FutureQueueConsumer[Update]]]
+
+}
+
+package indexer {
+
+  import com.digitalasset.canton.util.PekkoUtil.ShutdownInProgress
+
+  /** Parameters for creating an indexer instance.
+    *
+    * @param repairMode
+    *   whether the indexer is running in repair mode
+    * @param commit
+    *   callback to confirm successful processing of an element
+    * @param shutdownRequested
+    *   probe to check whether shutdown has been requested
+    */
+  final case class IndexerParams(
+      repairMode: Boolean,
+      commit: Commit,
+      shutdownRequested: ShutdownInProgress,
+  )
 }

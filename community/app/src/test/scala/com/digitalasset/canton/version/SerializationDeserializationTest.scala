@@ -203,6 +203,17 @@ final class SerializationDeserializationTest
         // Generated sequenced events get quite big because each batched envelope has recipient trees
         // of quadratic size breadth * depth, so this test takes longer than other tests.
         testContext(SequencedEvent, defaultMaxBytesToDecompress, version)
+        // Also cover the deferred-decompression path: parse keeping the batch compressed, then
+        // decompress separately.
+        testProtocolVersionedCommon[SequencedEvent[GenBatch[?]], SequencedEvent[
+          Batch[ClosedEnvelope]
+        ]](
+          SequencedEvent,
+          bytes =>
+            SequencedEvent
+              .fromTrustedByteStringCompressed(bytes)
+              .flatMap(SequencedEvent.decompress(_, defaultMaxBytesToDecompress)),
+        )
         test(SignedContent, version)
         testContext(TransactionView, (TestHash, version), version)
         testContext(FullInformeeTree, (TestHash, version), version)
@@ -244,6 +255,11 @@ final class SerializationDeserializationTest
       unfilteredRequiredTests.filterNot(ignoreAnnotation.isAssignableFrom).map(_.getName).toSet
 
     val exceptions = Set(
+      // Parallel deserializer for the same wire format as SequencedEvent, keeping the batch
+      // compressed. The wire format is already covered by the SequencedEvent round-trip above, and
+      // CompressedSequencedEventTest checks that the two versioning tables stay in sync.
+      "com.digitalasset.canton.sequencing.protocol.CompressedSequencedEvent$",
+
       // TODO(#26599) Remove this exception
       "com.digitalasset.canton.participant.admin.data.ActiveContract$",
 

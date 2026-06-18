@@ -17,6 +17,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
   TemplateId,
 }
@@ -176,6 +177,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
             sequencerLivenessMargin = NonNegativeInt.zero,
             submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
             sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+            subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
           )
           participant.synchronizers.connect_by_config(
             SynchronizerConnectionConfig(
@@ -317,10 +319,10 @@ sealed trait OnlinePartyReplicationNegotiationTest
       // Clearing the onboarding flag takes up to max-decision-timeout (initial value of 60s),
       // so wait at least 1 minute.
       eventually(timeUntilSuccess = 2.minutes) {
-        val tpStatus = targetParticipant.parties.get_add_party_status(
+        val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
           addPartyRequestId = addPartyRequestId
         )
-        val spStatus = sourceParticipant.parties.get_add_party_status(
+        val spStatus = sourceParticipant.ledger_api.parties.get_add_party_status(
           addPartyRequestId = addPartyRequestId
         )
         logger.info(s"TP status: $tpStatus")

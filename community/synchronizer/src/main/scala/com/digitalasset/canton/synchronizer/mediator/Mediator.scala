@@ -28,7 +28,14 @@ import com.digitalasset.canton.protocol.{DynamicSynchronizerParametersWithValidi
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, OpenEnvelope, SequencedEvent}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  Deliver,
+  DeliverError,
+  OpenEnvelope,
+  SequencedEvent,
+}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
@@ -361,7 +368,7 @@ private[mediator] class Mediator(
       }
 
       override def apply(
-          tracedEvents: Traced[Seq[BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]]]
+          tracedEvents: Traced[Seq[OrdinarySequencedEvent[Batch[ClosedEnvelope]]]]
       ): HandlerResult =
         tracedEvents.withTraceContext { implicit traceContext => events =>
           // update the delay logger using the latest event we've been handed
@@ -384,7 +391,12 @@ private[mediator] class Mediator(
                 val alarm = MediatorError.MalformedMessage.Reject(cause)
                 alarm.report()
 
-                val rootHashMessages = openEvent.envelopes.mapFilter(
+                val openEnvelopes = openEvent match {
+                  case d: Deliver[Batch[OpenEnvelope[ProtocolMessage]] @unchecked] =>
+                    d.batch.envelopes
+                  case _: DeliverError => Seq.empty
+                }
+                val rootHashMessages = openEnvelopes.mapFilter(
                   ProtocolMessage.select[RootHashMessage[SerializedRootHashMessagePayload]]
                 )
 

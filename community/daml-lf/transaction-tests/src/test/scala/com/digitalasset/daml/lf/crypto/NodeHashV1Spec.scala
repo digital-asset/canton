@@ -370,14 +370,14 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
 
     "explain encoding" in {
       {
-      val hashTracer = HashTracer.StringHashTracer()
-      val hash = hashCreateNode(createNode, hashTracer = hashTracer)
-      hash shouldBe defaultHash
-      hashTracer.result shouldBe s"""'00' # 00 (Value Encoding Version)
+        val hashTracer = HashTracer.StringHashTracer()
+        val hash = hashCreateNode(createNode, hashTracer = hashTracer)
+        hash shouldBe defaultHash
+        hashTracer.result shouldBe s"""'00' # 00 (Value Encoding Version)
                              |'07' # 07 (Value Encoding Purpose)
                              |$createNodeEncoding
                              |""".stripMargin
-      assertStringTracer(hashTracer, hash)
+        assertStringTracer(hashTracer, hash)
       }
     }
   }
@@ -763,10 +763,10 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
 
     "explain encoding" in {
       {
-      val hashTracer = HashTracer.StringHashTracer()
-      val hash = hashRollbackNode(rollbackNode, hashTracer = hashTracer)
-      hash shouldBe defaultHash
-      hashTracer.result shouldBe s"""'00' # 00 (Value Encoding Version)
+        val hashTracer = HashTracer.StringHashTracer()
+        val hash = hashRollbackNode(rollbackNode, hashTracer = hashTracer)
+        hash shouldBe defaultHash
+        hashTracer.result shouldBe s"""'00' # 00 (Value Encoding Version)
                                       |'07' # 07 (Value Encoding Purpose)
                                       |'01' # 01 (Node Encoding Version)
                                       |# Rollback Node
@@ -777,7 +777,7 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
                                       |'$exerciseNodeHash' # (Hashed Inner Node)
                                       |""".stripMargin
 
-      assertStringTracer(hashTracer, hash)
+        assertStringTracer(hashTracer, hash)
       }
     }
   }
@@ -785,9 +785,9 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
   "ValueBuilder" should {
     def withValueBuilder(f: (Hash.ValueHashBuilder, HashTracer.StringHashTracer) => Assertion) = {
       {
-    val hashTracer = HashTracer.StringHashTracer()
-    val builder = Hash.valueBuilderForV1Node(hashTracer)
-    f(builder, hashTracer)
+        val hashTracer = HashTracer.StringHashTracer()
+        val builder = Hash.valueBuilderForV1Node(hashTracer)
+        f(builder, hashTracer)
       }
     }
 
@@ -919,7 +919,7 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
     "encode text map value" in {
       assertEncode(
         Value.ValueTextMap(
-          SortedLookupList(
+          SortedLookupList.from(
             Map(
               "foo" -> Value.ValueNumeric(data.Numeric.assertFromString("31380.0")),
               "bar" -> Value.ValueText("1284"),
@@ -1080,13 +1080,13 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
 
     "explain encoding" in {
       {
-      val hashTracer = HashTracer.StringHashTracer()
-      val hash = Hash.hashTransactionV1(
-        transaction,
-        defaultNodeSeedsMap,
-        hashTracer = hashTracer,
-      )
-      hashTracer.result shouldBe s"""# Serialization Version
+        val hashTracer = HashTracer.StringHashTracer()
+        val hash = Hash.hashTransactionV1(
+          transaction,
+          defaultNodeSeedsMap,
+          hashTracer = hashTracer,
+        )
+        hashTracer.result shouldBe s"""# Serialization Version
                                       |'00000003' # 3 (int)
                                       |'322e31' # 2.1 (string)
                                       |# Root Nodes
@@ -1094,7 +1094,7 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
                                       |'$createNodeHash' # (Hashed Inner Node)
                                       |'$rollbackNodeHash' # (Hashed Inner Node)
                                       |""".stripMargin
-      assertStringTracer(hashTracer, hash)
+        assertStringTracer(hashTracer, hash)
       }
     }
   }

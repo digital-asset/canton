@@ -861,6 +861,9 @@ class JcePureCrypto(
           }
     }
 
+  override def toJwk(publicKey: SigningPublicKey): Either[JwksError, Jwk] =
+    JceJwks.toJwk(publicKey)
+
 }
 
 object JcePureCrypto {

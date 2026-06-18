@@ -11,7 +11,7 @@ import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parsePositiveInt}
+import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseNonNegativeInt}
 import com.digitalasset.canton.util.RoseTree
 import com.digitalasset.canton.version.*
 import monocle.PLens
@@ -26,7 +26,7 @@ import scala.collection.mutable
   * unblinded if and only if the unblinded view is a root view.
   *
   * @param subviewReferencesAndKeys
-  *   contains the hashes of direct subviews together with their view encryption keys. The view
+  *   contains references of direct subviews together with their view encryption keys. The view
   *   encryption keys are already sent as part of
   *   [[com.digitalasset.canton.protocol.messages.EncryptedViewMessage]]. They need to be sent again
   *   as part of this class, because a participant that receives this view but does not host an
@@ -47,15 +47,10 @@ sealed abstract case class LightTransactionViewTree private[data] (
     with HasProtocolVersionedWrapper[LightTransactionViewTree]
     with PrettyPrinting {
 
-  // TODO(#32952): change the type of subviewHashes Seq[SubviewReference]
-  override val subviewHashes: Seq[ViewHash] = subviewReferencesAndKeys.map {
-    case SubviewReferenceAndKey(ByViewHash(viewHash), _) => viewHash
-    case SubviewReferenceAndKey(ByCiphertextId(_, _), _) =>
-      // TODO(#32393): enable after fully implementing CiphertextId-based subview references in LightTransactionViewTree
-      throw new NotImplementedError(
-        "CiphertextId-based subview references are not supported in LightTransactionViewTree yet."
-      )
-  }
+  // This sequence contains the references of the direct subviews.
+  // By definition, all these subviews are blinded, therefore we can only store their references.
+  // Depending on the protocol version, the reference can either be a view hash or a ciphertext ID (PV36+).
+  val subviewReferences: Seq[ViewReference] = subviewReferencesAndKeys.map(_.subviewReference)
 
   @tailrec
   private[data] override def findTheView(
@@ -81,13 +76,26 @@ sealed abstract case class LightTransactionViewTree private[data] (
 
   override def validated: Either[String, this.type] = for {
     _ <- super[TransactionViewTree].validated
-    // Check that the subview hashes are consistent with the tree
-    _ <- Either.cond(
-      view.subviewHashesConsistentWith(subviewHashes),
-      (),
-      s"The provided subview hashes are inconsistent with the provided view (view: ${view.viewHash} " +
-        s"at position: $viewPosition, subview hashes: $subviewHashes)",
-    )
+    // Check subview hashes only if subview references include view hashes.
+    _ <-
+      if (
+        representativeProtocolVersion <= LightTransactionViewTree.protocolRepViewHashEncryption
+        // TODO(#32393): remove dev pv check
+        || representativeProtocolVersion == LightTransactionViewTree.protocolRepDev
+      ) {
+        val subviewHashes = subviewReferences.collect { case ByViewHash(vh) => vh }
+        if (subviewHashes.sizeCompare(subviewReferences) != 0)
+          throw new IllegalStateException(
+            "Expected all subview references to be view hashes for protocol versions <= v35, " +
+              s"but found a different type of reference."
+          )
+        Either.cond(
+          view.subviewHashesConsistentWith(subviewHashes),
+          (),
+          s"The provided subview hashes are inconsistent with the provided view (view: ${view.viewHash} " +
+            s"at position: $viewPosition, subview hashes: $subviewHashes)",
+        )
+      } else Right(())
   } yield this
 
   @transient override protected lazy val companionObj: LightTransactionViewTree.type =
@@ -146,6 +154,14 @@ object LightTransactionViewTree
     ),*/
   )
 
+  // v35 is the last protocol version where view hashes are used for encryption.
+  // From v36 onwards, ciphertext IDs are introduced instead.
+  private val protocolRepViewHashEncryption =
+    LightTransactionViewTree.protocolVersionRepresentativeFor(ProtocolVersion.v35)
+  // TODO(#32393): remove this dev pv reference
+  private val protocolRepDev =
+    LightTransactionViewTree.protocolVersionRepresentativeFor(ProtocolVersion.dev)
+
   final case class InvalidLightTransactionViewTree(message: String)
       extends RuntimeException(message)
 
@@ -157,7 +173,11 @@ object LightTransactionViewTree
       subviewReferencesAndKeys: Seq[SubviewReferenceAndKey],
       protocolVersion: ProtocolVersion,
   ): LightTransactionViewTree =
-    create(tree, subviewReferencesAndKeys, protocolVersionRepresentativeFor(protocolVersion))
+    create(
+      tree,
+      subviewReferencesAndKeys,
+      protocolVersionRepresentativeFor(protocolVersion),
+    )
       .valueOr(err => throw InvalidLightTransactionViewTree(err))
 
   def create(
@@ -208,7 +228,7 @@ object LightTransactionViewTree
         case v31.CiphertextIdAndKey(ciphertextIdT, indexT, keyT) =>
           for {
             ciphertextId <- Hash.fromProtoPrimitive(ciphertextIdT)
-            index <- parsePositiveInt("index", indexT)
+            index <- parseNonNegativeInt("index", indexT)
             key <- SecureRandomness
               .fromByteString(expectedLength)(keyT)
               .leftMap[ProtoDeserializationError](
@@ -239,7 +259,7 @@ object LightTransactionViewTree
     * @param topLevelOnly
     *   whether to return only top-level full view trees
     * @param lightViewTrees
-    *   the light transaction view trees to convert
+    *   the light transaction view trees to convert with optional ciphertext IDs (PV36+)
     */
   def toFullViewTrees[A, B, C](
       lens: PLens[A, B, (LightTransactionViewTree, C), (FullTransactionViewTree, RoseTree[C])],
@@ -247,60 +267,80 @@ object LightTransactionViewTree
       hashOps: HashOps,
       // TODO(#23971) we don't need this parameter any more, only the true case is used.
       topLevelOnly: Boolean,
-      lightViewTrees: Seq[A],
+      // For PV36+, during decryption we assign a reference to each [[LightTransactionViewTree]]
+      // based on the ciphertext ID (hash) containing it and its relative position within that ciphertext.
+      // This identifier can then be used to reconstruct the corresponding
+      // [[FullTransactionViewTree]]. For PV35-, where no ciphertext ID is available,
+      // we must use the view hash instead.
+      // We prefer ciphertext IDs over view hashes because view hashes are not guaranteed
+      // to be unique during decryption.
+      lightViewTrees: Seq[(A, Option[ByCiphertextId])],
   ): ToFullViewTreesResult[A, B] = {
 
-    val lightViewTreesBoxedInPostOrder = lightViewTrees
-      .sortBy(lens.get(_)._1.viewPosition)(ViewPosition.orderViewPosition.toOrdering)
-      .reverse
+    val validateKeys = TransactionView.ValidateKeys(protocolVersion)
+
+    val lightViewTreesBoxedInPostOrder = lightViewTrees.sortBy { case (a, _) =>
+      lens.get(a)._1.viewPosition
+    }(ViewPosition.orderViewPosition.toOrdering).reverse
 
     // All reconstructed full views
-    val fullViewByHash = mutable.Map.empty[ViewHash, (TransactionView, RoseTree[C])]
-    // All reconstructed full view trees, boxed, paired with their view hashes.
-    val allFullViewTreesInPreorderB = mutable.ListBuffer.empty[(ViewHash, B)]
+    val fullViewByReference = mutable.Map.empty[ViewReference, (TransactionView, RoseTree[C])]
+    // All reconstructed full view trees, boxed, paired with their view reference.
+    val allFullViewTreesInPreorderB = mutable.ListBuffer.empty[(ViewReference, B)]
     // All light view trees, boxed, that could not be reconstructed to full view trees, due to missing descendants
     val invalidLightViewTreesB = Seq.newBuilder[A]
     // All duplicate light view trees, boxed.
     val duplicateLightViewTreesB = Seq.newBuilder[A]
-    // All hashes of non-toplevel full view trees that could be reconstructed
-    val subviewHashesB = Set.newBuilder[ViewHash]
+    // All references of non-top level full view trees that could be reconstructed
+    val subviewReferencesB = Set.newBuilder[ViewReference]
 
-    for (lightViewTreeBoxed <- lightViewTreesBoxedInPostOrder) {
+    for ((lightViewTreeBoxed, ciphertextIdO) <- lightViewTreesBoxedInPostOrder) {
       val (lightViewTree, c) = lens.get(lightViewTreeBoxed)
-      val subviewHashes = lightViewTree.subviewHashes.toSet
-      val missingSubviews = subviewHashes -- fullViewByHash.keys
+      val subviewReferences = lightViewTree.subviewReferences.toSet
+      val missingSubviews = subviewReferences -- fullViewByReference.keys
 
       if (missingSubviews.isEmpty) {
-        val (fullSubviewsSeq, subviewCs) = lightViewTree.subviewHashes.map(fullViewByHash).unzip
+        val (fullSubviewsSeq, subviewCs) =
+          lightViewTree.subviewReferences.map(fullViewByReference).unzip
         val fullSubviews = TransactionSubviews(fullSubviewsSeq)(protocolVersion, hashOps)
-        val fullView = lightViewTree.view.tryCopy(subviews = fullSubviews)
+        val fullView =
+          lightViewTree.view.tryCopy(validateKeys = validateKeys, subviews = fullSubviews)
         val fullViewTree = FullTransactionViewTree.tryCreate(
-          lightViewTree.tree.mapUnblindedRootViews(_.replace(fullView.viewHash, fullView))
+          lightViewTree.tree.mapUnblindedRootViews(
+            _.replace(fullView.viewHash, fullView, validateKeys)
+          )
         )
         val cs = RoseTree(c, subviewCs*)
         val fullViewTreeBoxed = lens.replace(fullViewTree -> cs)(lightViewTreeBoxed)
 
-        if (topLevelOnly)
-          subviewHashesB ++= subviewHashes
-        if (fullViewByHash.contains(fullViewTree.viewHash)) {
+        if (topLevelOnly) {
+          subviewReferencesB ++= subviewReferences
+        }
+
+        val fullViewReference: ViewReference = ciphertextIdO match {
+          case Some(ciphertextId) => ciphertextId
+          case None => ByViewHash(fullView.viewHash)
+        }
+
+        if (fullViewByReference.contains(fullViewReference)) {
           // Deduplicate views
           duplicateLightViewTreesB += lightViewTreeBoxed
         } else {
-          (fullViewTree.viewHash -> fullViewTreeBoxed) +=: allFullViewTreesInPreorderB
-          fullViewByHash += fullView.viewHash -> (fullView -> cs)
+          (fullViewReference -> fullViewTreeBoxed) +=: allFullViewTreesInPreorderB
+          fullViewByReference += fullViewReference -> (fullView -> cs)
         }
       } else {
         invalidLightViewTreesB += lightViewTreeBoxed
       }
     }
 
-    val allSubviewHashes = subviewHashesB.result()
+    val allSubviewReferences = subviewReferencesB.result()
     val allFullViewTreesInPreorder =
       allFullViewTreesInPreorderB
         .result()
         .collect {
-          case (viewHash, fullViewTreeBoxed)
-              if !topLevelOnly || !allSubviewHashes.contains(viewHash) =>
+          case (viewReference, fullViewTreeBoxed)
+              if !topLevelOnly || !allSubviewReferences.contains(viewReference) =>
             fullViewTreeBoxed
         }
 
@@ -337,9 +377,11 @@ object LightTransactionViewTree
       byCiphertextIdMapO: Option[Map[ViewHash, ByCiphertextId]],
       protocolVersion: ProtocolVersion,
   ): Either[String, LightTransactionViewTree] = {
-    val withBlindedSubviews = tvt.view.tryCopy(subviews = tvt.view.subviews.blindFully)
+    val validateKeys = TransactionView.ValidateKeys(protocolVersion)
+    val withBlindedSubviews =
+      tvt.view.tryCopy(validateKeys = validateKeys, subviews = tvt.view.subviews.blindFully)
     val genTransactionTree =
-      tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, withBlindedSubviews))
+      tvt.tree.mapUnblindedRootViews(_.replace(tvt.viewHash, withBlindedSubviews, validateKeys))
     // you must have one key for each subview (to be able to decrypt them)
     for {
       _ <- Either.cond(
@@ -419,6 +461,6 @@ object LightTransactionViewTree
   *   derive the symmetric key.
   */
 final case class SubviewReferenceAndKey(
-    subviewReference: SubviewReference,
+    subviewReference: ViewReference,
     viewEncryptionKeyRandomness: SecureRandomness,
 )

@@ -770,7 +770,7 @@ class AvailabilityModuleDisseminationTest
       )
 
       // the batch got evicted
-      verify(availabilityStore).gc(Seq(ABatchId))
+      verify(availabilityStore).gc(Map(anEpochNumber -> Set(ABatchId)))
     }
   }
 

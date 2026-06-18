@@ -30,15 +30,7 @@ import com.daml.ledger.api.v2.package_service.{
   TopologyStateFilter,
 }
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
-import com.daml.ledger.test.java.vetting_alt.alt.AltT
-import com.daml.ledger.test.java.vetting_dep.dep.DepT
-import com.daml.ledger.test.java.vetting_main_1_0_0.main.{
-  MainT as MainT_1_0_0,
-  MainTSimple as MainTSimple_1_0_0,
-}
-import com.daml.ledger.test.java.vetting_main_2_0_0.main.MainT as MainT_2_0_0
-import com.daml.ledger.test.java.vetting_main_3_0_0.main.MainT as MainT_3_0_0
-import com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0.main.DifferentMainT as MainT_Split_Lineage_2_0_0
+import com.daml.ledger.test.java.vetting_main_1_0_0.main.MainTSimple as MainTSimple_1_0_0
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.{
@@ -73,14 +65,13 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
     VettingMainDar_Split_Lineage_2_0_0,
   }
 
-  private val vettingDepPkgId = Ref.PackageId.assertFromString(DepT.PACKAGE_ID)
-  private val vettingAltPkgId = Ref.PackageId.assertFromString(AltT.PACKAGE_ID)
-  private val vettingMainPkgIdV1 = Ref.PackageId.assertFromString(MainT_1_0_0.PACKAGE_ID)
-  private val vettingMainPkgIdV2 = Ref.PackageId.assertFromString(MainT_2_0_0.PACKAGE_ID)
-  private val vettingMainPkgIdV2SplitLineage =
-    Ref.PackageId.assertFromString(MainT_Split_Lineage_2_0_0.PACKAGE_ID)
+  private val vettingDepPkgId = testDars.VettingDepDar.packageId
+  private val vettingAltPkgId = testDars.VettingAltDar.packageId
+  private val vettingMainPkgIdV1 = testDars.VettingMainDar_1_0_0.packageId
+  private val vettingMainPkgIdV2 = testDars.VettingMainDar_2_0_0.packageId
+  private val vettingMainPkgIdV2SplitLineage = testDars.VettingMainDar_Split_Lineage_2_0_0.packageId
   private val vettingMainPkgIdV3UpgradeIncompatible =
-    Ref.PackageId.assertFromString(MainT_3_0_0.PACKAGE_ID)
+    testDars.VettingMainDar_3_0_0_Incompatible.packageId
 
   private val vettingDepName = "vetting-dep"
   private val vettingMainName = "vetting-main"
@@ -274,7 +265,7 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
       alternativeSynchronizer: Option[String] = None,
       expectedTopologySerial: Option[PriorTopologySerial] = None,
       allowVetIncompatibleUpgrades: Boolean = false,
-      allowUnvettedDependencies: Boolean = false,
+      allowUnvettedDependenciesForceFlag: Boolean = false,
   ): UpdateVettedPackagesRequest =
     UpdateVettedPackagesRequest(
       operations.map(VettedPackagesChange(_)),
@@ -285,7 +276,7 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
         UpdateVettedPackagesForceFlag.UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_VET_INCOMPATIBLE_UPGRADES
       ).filter(_ => allowVetIncompatibleUpgrades) ++ Seq(
         UpdateVettedPackagesForceFlag.UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES
-      ).filter(_ => allowUnvettedDependencies),
+      ).filter(_ => allowUnvettedDependenciesForceFlag),
     )
 
   private def changeOpRequest(
@@ -309,7 +300,7 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
       alternativeSynchronizer = alternativeSynchronizer,
       expectedTopologySerial = expectedTopologySerial,
       allowVetIncompatibleUpgrades = allowVetIncompatibleUpgrades,
-      allowUnvettedDependencies = allowUnvettedDependencies,
+      allowUnvettedDependenciesForceFlag = allowUnvettedDependencies,
     )
 
   private def vetPkgsMatchingRef(
@@ -975,42 +966,76 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
 
   test(
     "PVCheckUnvettedPackagesExceptWithForceFlag",
-    """Unvetted packages are checked, including during dry run, except when UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES is set.""",
+    "Unvetted packages are checked, including during dry run, except when UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES is set.",
     allocate(NoParties),
     runConcurrently = false,
   )(implicit ec => { case Participants(Participant(participant, _)) =>
+    packageDependencyUnvetting(participant, supportUnvettingPackageDependencies = false)
+  })
+
+  test(
+    "PVUnvettedDependenciesSupported",
+    "Unvetting package dependencies is supported even when UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES is not set (starting with PV 35)",
+    allocate(NoParties),
+    runConcurrently = false,
+  )(implicit ec => { case Participants(Participant(participant, _)) =>
+    packageDependencyUnvetting(participant, supportUnvettingPackageDependencies = true)
+  })
+
+  // This configurable test is intended to be used in two test cases, toggled based on the protocol version under test.
+  // For example, supportUnvettingPackageDependencies should be false when testing PVs < 35, and true when testing PVs >= 35.
+  //
+  // Ideally, the test logic would toggle dynamically based on the protocol version of the target synchronizer.
+  // However, since the protocol version of synchronizers is not exposed via the Ledger API, we rely on test exclusions in the Ledger API conformance test suites instead.
+  private def packageDependencyUnvetting(
+      participant: ParticipantTestContext,
+      supportUnvettingPackageDependencies: Boolean,
+  )(implicit ec: ExecutionContext) = {
+    def unlessUnvettingPackageDependenciesIsSupported(f: => Future[Unit]): Future[Unit] =
+      if (supportUnvettingPackageDependencies) Future.unit else f
+
     for {
       _ <- setNodeIds(participant)
       _ <- participant.uploadDarFile(uploadDarFileDontVetRequest(VettingDepDar))
       _ <- participant.uploadDarFile(uploadDarFileDontVetRequest(VettingMainDar_2_0_0))
 
       vetMainWithoutDepRequest = vetPkgIdsRequest(Seq(vettingMainPkgIdV2))
-      forceFlags = Seq(
-        UpdateVettedPackagesForceFlag.UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES
-      )
+      forceFlags =
+        // No force flags should be set if unvetting package dependencies is supported
+        Option
+          .unless(supportUnvettingPackageDependencies)(
+            UpdateVettedPackagesForceFlag.UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES
+          )
+          .toList
 
-      // Dry-run vetting without dependencies (should fail)
-      _ <- participant
-        .updateVettedPackages(vetMainWithoutDepRequest.copy(dryRun = true))
-        .mustFailWith(
-          "Vetting a package without its dependencies in a dry run should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
-          ParticipantTopologyManagerError.DependenciesNotVetted,
-        )
+      _ <-
+        unlessUnvettingPackageDependenciesIsSupported {
+          // Dry-run vetting without dependencies (should fail)
+          participant
+            .updateVettedPackages(vetMainWithoutDepRequest.copy(dryRun = true))
+            .mustFailWith(
+              "Vetting a package without its dependencies in a dry run should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
+              ParticipantTopologyManagerError.DependenciesNotVetted,
+            )
+        }
 
-      // Vet without dependencies (should fail)
-      _ <- participant
-        .updateVettedPackages(vetMainWithoutDepRequest)
-        .mustFailWith(
-          "Vetting a package without its dependencies should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
-          ParticipantTopologyManagerError.DependenciesNotVetted,
-        )
+      _ <-
+        unlessUnvettingPackageDependenciesIsSupported {
+          // Vet without dependencies (should fail)
+          participant
+            .updateVettedPackages(vetMainWithoutDepRequest)
+            .mustFailWith(
+              "Vetting a package without its dependencies should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
+              ParticipantTopologyManagerError.DependenciesNotVetted,
+            )
+        }
 
-      // Dry-run vetting without dependencies with force flag (should succeed)
+      // Dry-run vetting without dependencies should succeed
       _ <- participant.updateVettedPackages(
         vetMainWithoutDepRequest.copy(dryRun = true, updateVettedPackagesForceFlags = forceFlags)
       )
 
-      // Vet without dependencies with force flag (should succeed)
+      // Vet without dependencies should succeed
       _ <- participant.updateVettedPackages(
         vetMainWithoutDepRequest.copy(updateVettedPackagesForceFlags = forceFlags)
       )
@@ -1028,21 +1053,25 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
           ),
         )
 
-      // Dry run vet a package while unvetting its dependencies (should fail)
-      _ <- participant
-        .updateVettedPackages(changeOpsRequest(vetMainWhileUnvettingDepOps))
-        .mustFailWith(
-          "Vetting a package while unvetting its dependencies should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
-          ParticipantTopologyManagerError.DependenciesNotVetted,
-        )
+      _ <- unlessUnvettingPackageDependenciesIsSupported {
+        // Dry run vet a package while unvetting its dependencies (should fail)
+        participant
+          .updateVettedPackages(changeOpsRequest(vetMainWhileUnvettingDepOps))
+          .mustFailWith(
+            "Vetting a package while unvetting its dependencies should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
+            ParticipantTopologyManagerError.DependenciesNotVetted,
+          )
+      }
 
-      // Vet a package while unvetting its dependencies (should fail)
-      _ <- participant
-        .updateVettedPackages(changeOpsRequest(vetMainWhileUnvettingDepOps))
-        .mustFailWith(
-          "Vetting a package while unvetting its dependencies should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
-          ParticipantTopologyManagerError.DependenciesNotVetted,
-        )
+      _ <- unlessUnvettingPackageDependenciesIsSupported {
+        // Vet a package while unvetting its dependencies (should fail)
+        participant
+          .updateVettedPackages(changeOpsRequest(vetMainWhileUnvettingDepOps))
+          .mustFailWith(
+            "Vetting a package while unvetting its dependencies should give TOPOLOGY_DEPENDENCIES_NOT_VETTED",
+            ParticipantTopologyManagerError.DependenciesNotVetted,
+          )
+      }
 
       // Vet a package while unvetting its dependencies, dry run, with force flag (should succeed)
       _ <- participant
@@ -1050,19 +1079,22 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
           changeOpsRequest(
             vetMainWhileUnvettingDepOps,
             dryRun = true,
-            allowUnvettedDependencies = true,
+            allowUnvettedDependenciesForceFlag = !supportUnvettingPackageDependencies,
           )
         )
 
       // Vet a package while unvetting its dependencies, with force flag (should succeed)
       _ <- participant
         .updateVettedPackages(
-          changeOpsRequest(vetMainWhileUnvettingDepOps, allowUnvettedDependencies = true)
+          changeOpsRequest(
+            vetMainWhileUnvettingDepOps,
+            allowUnvettedDependenciesForceFlag = !supportUnvettingPackageDependencies,
+          )
         )
 
       _ <- unvetAllDARMains(participant)
     } yield ()
-  })
+  }
 
   test(
     "PVCheckUpgradeInvariantsExceptWithForceFlag",

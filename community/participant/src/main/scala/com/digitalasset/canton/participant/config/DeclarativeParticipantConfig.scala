@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Namespace, PartyId, UniqueIdentifier}
@@ -320,6 +321,7 @@ final case class DeclarativeConnectionConfig(
         sequencerLivenessMargin = livenessMargin,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       )
 
     sequencerConnectionsE.map { sequencerConnections =>

@@ -9,12 +9,11 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.util.{
-  ContinueAfterFailure,
+  FailureMode,
   GarbageCollectedShardedSequentialProcessingQueue,
   LoggerUtil,
   NonGarbageCollectedShardedSequentialProcessingQueue,
   ShardedSequentialProcessingQueue,
-  StopAfterFailure,
 }
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
@@ -232,7 +231,7 @@ final class NonGarbageCollectedShardedSequentialProcessingQueueTest
       timeouts = timeouts,
       loggerFactory = loggerFactory,
       logTaskTiming = false,
-      failureMode = StopAfterFailure,
+      failureMode = FailureMode.StopAfterFailure,
     )
 
   "ShardedSequentialProcessingQueue" should {
@@ -284,7 +283,7 @@ final class NonGarbageCollectedShardedSequentialProcessingQueueTest
         timeouts = timeouts,
         loggerFactory = loggerFactory,
         logTaskTiming = false,
-        failureMode = ContinueAfterFailure,
+        failureMode = FailureMode.ContinueAfterFailure,
       )
       val id = "error-test"
 

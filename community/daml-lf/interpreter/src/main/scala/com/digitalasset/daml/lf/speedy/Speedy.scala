@@ -696,8 +696,6 @@ private[lf] object Speedy {
             s"in fetch-by-key command ${prettyTypeId(tmplId)} on key ${prettyValue(key)}."
           case Command.CreateAndExercise(tmplId, _, choiceId, _) =>
             s"in create-and-exercise command ${prettyTypeId(tmplId)}:$choiceId."
-          case Command.LookupByKey(tmplId, key) =>
-            s"in lookup-by-key command ${prettyTypeId(tmplId)} on key ${prettyValue(key)}."
         }
         .foreach(addLine)
       stringBuilder.result()

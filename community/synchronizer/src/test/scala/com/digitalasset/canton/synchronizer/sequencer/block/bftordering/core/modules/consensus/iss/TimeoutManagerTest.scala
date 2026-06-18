@@ -37,6 +37,7 @@ class TimeoutManagerTest extends AsyncWordSpec with BftSequencerBaseTest {
           loggerFactory,
           BftBlockOrdererConfig().consensusBlockCompletionTimeout,
           timeoutId = BlockNumber.First,
+          timeoutMetric = None,
         )
       val context = new ProgrammableUnitTestContext[ConsensusSegment.Message]()
 

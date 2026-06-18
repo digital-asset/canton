@@ -96,7 +96,7 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
           "ExplicitDisclosureIT:EDDuplicates",
         )
       else Seq.empty
-    LedgerApiConformanceBase.excludedTests ++ perReleaseExclusions
+    perReleaseExclusions ++ LedgerApiConformanceBase.excludedTests(testedProtocolVersion)
   }
 
 }

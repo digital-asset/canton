@@ -133,4 +133,13 @@ public abstract class ContractTypeCompanion<Ct, Id, ContractType, Data> {
   public final Id toContractId(ContractId<ContractType> parameterizedContractId) {
     return newContractId.apply(parameterizedContractId.contractId);
   }
+
+  /**
+   * <strong>INTERNAL API</strong>: this is meant for use by <a
+   * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+   * and <em>should not be referenced directly</em>.
+   *
+   * @hidden
+   */
+  public abstract ContractTypeCompanion<Ct, Id, ContractType, Data> withPackageId(String packageId);
 }

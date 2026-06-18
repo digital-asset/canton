@@ -9,7 +9,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BatchId,
   ProofOfAvailability,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
+  OrderedBlockForOutput,
+  OrderingMode,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.Jitter
 
@@ -51,7 +54,7 @@ final case class MissingBatchStatus(
     remainingNodesToTry: Seq[BftNodeId],
     numberOfAttempts: Int,
     jitterStream: JitterStream,
-    mode: OrderedBlockForOutput.Mode,
+    orderingMode: OrderingMode,
 ) {
   def calculateTimeout(): FiniteDuration = jitterStream.next(numberOfAttempts)
 }

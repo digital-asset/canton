@@ -56,7 +56,9 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      disableAggregationRuleSizeCheckForTesting = true, // remove after PV34 is gone
       lsuConfig = SequencerLsuConfig(),
+      enablePrevalidation = true,
     )
 
   override final def createSequencer(crypto: SynchronizerCryptoClient)(implicit
@@ -76,7 +78,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         testedProtocolVersion,
         sequencerId,
         params,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         new ExecutorServiceMetrics(NoOpMetricsFactory),
         loggerFactory,
         None,

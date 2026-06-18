@@ -28,6 +28,7 @@ ADMIN_API_CANTON_PROTO_PATH=$ADMIN_API_PROTO_PATH/com/digitalasset/canton
 PROTOCOL_PROTO_PATH=$COMMUNITY_CANTON_PROTO_PATH/protocol/v30
 CRYPTO_PROTO_PATH=$COMMUNITY_CANTON_PROTO_PATH/crypto/v30
 TOPOLOGY_ADMIN_PROTO_PATH=$COMMUNITY_CANTON_PROTO_PATH/topology/admin/v30
+ADMIN_API_TOPOLOGY_ADMIN_PROTO_PATH=$ADMIN_API_CANTON_PROTO_PATH/topology/admin/v30
 LEDGER_API_V2_PATH=$LEDGER_API_PROTO_PATH/com/daml/ledger/api/v2
 
 # Simple utility method
@@ -52,25 +53,34 @@ download_if_not_exists "https://raw.githubusercontent.com/googleapis/googleapis/
 
 # Generate python code for protobuf messages
 generate_grpc_code() {
-  local proto_path=$1
+  local proto_paths=$1
   local proto_file=$2
   local grpc_out_flag=${3:-false}
 
   echo "Generating python code for $proto_file"
 
+  # Build -I flags from colon-separated list of include paths
+  local include_flags=()
+  local IFS=':'
+  for p in $proto_paths; do
+    [ -n "$p" ] && include_flags+=("-I$p")
+  done
+  unset IFS
+  include_flags+=("-I.")
+
   if [ "$grpc_out_flag" = true ]; then
-    python -m grpc_tools.protoc -I"$proto_path" -I. --python_out=. --pyi_out=. --grpc_python_out=. "$proto_file"
+    python -m grpc_tools.protoc "${include_flags[@]}" --python_out=. --pyi_out=. --grpc_python_out=. "$proto_file"
   else
-    python -m grpc_tools.protoc -I"$proto_path" -I. --python_out=. --pyi_out=. "$proto_file"
+    python -m grpc_tools.protoc "${include_flags[@]}" --python_out=. --pyi_out=. "$proto_file"
   fi
 }
 
 # Generate python code for protobuf messages + gRPC services
 generate_grpc_service() {
-  local proto_path=$1
+  local proto_paths=$1
   local proto_file=$2
 
-  generate_grpc_code "$proto_path" "$proto_file" true
+  generate_grpc_code "$proto_paths" "$proto_file" true
 }
 
 # Generate gRPC client code and proto classes for python
@@ -90,7 +100,7 @@ generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/package_referen
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/transaction/v1/interactive_submission_data.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/interactive_submission_common_data.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/topology.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$TOPOLOGY_ADMIN_PROTO_PATH/common.proto"
+generate_grpc_code "$ADMIN_API_PROTO_PATH" "$ADMIN_API_TOPOLOGY_ADMIN_PROTO_PATH/common.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/synchronizer_parameters.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$COMMUNITY_CANTON_PROTO_PATH/version/v1/untyped_versioned_message.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/traffic_control_parameters.proto"
@@ -106,8 +116,8 @@ generate_grpc_code "." "com/daml/ledger/api/v2/value.proto"
 
 # gRPC services
 generate_grpc_service "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/admin/party_management_service.proto"
-generate_grpc_service "$COMMUNITY_PROTO_PATH" "$TOPOLOGY_ADMIN_PROTO_PATH/topology_manager_write_service.proto"
-generate_grpc_service "$COMMUNITY_PROTO_PATH" "$TOPOLOGY_ADMIN_PROTO_PATH/topology_manager_read_service.proto"
+generate_grpc_service "$COMMUNITY_PROTO_PATH:$ADMIN_API_PROTO_PATH" "$TOPOLOGY_ADMIN_PROTO_PATH/topology_manager_write_service.proto"
+generate_grpc_service "$COMMUNITY_PROTO_PATH:$ADMIN_API_PROTO_PATH" "$TOPOLOGY_ADMIN_PROTO_PATH/topology_manager_read_service.proto"
 generate_grpc_service "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/interactive_submission_service.proto"
 generate_grpc_service "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/update_service.proto"
 generate_grpc_service "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/command_completion_service.proto"

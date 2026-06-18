@@ -46,6 +46,7 @@ import org.slf4j.event.Level
 import java.time.Duration
 import java.util.UUID
 import scala.annotation.nowarn
+import scala.concurrent.Promise
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 abstract class SequencerApiTest
@@ -453,6 +454,39 @@ abstract class SequencerApiTest
           }
       }
 
+      "bounce on write path aggregate submissions dedup" onlyRunWhen testAggregation in { env =>
+        import env.*
+
+        val messageContent = "bounce-sender-dedup-message"
+        // TODO(i10412): See above
+        val aggregationRule =
+          AggregationRule.senderDedup(p6, testedProtocolVersion)
+
+        val request1 = createSendRequest(
+          p6,
+          messageContent,
+          Recipients.cc(p10),
+          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofMinutes(1)),
+          aggregationRule = Some(aggregationRule),
+        )
+
+        val signed = sign(request1)
+        for {
+          // first succeeds
+          _ <- sequencer
+            .sendAsyncSigned(signed)
+            .valueOrFail("Sent async for participant1")
+          _ <- readForMembers(Seq(p6), sequencer)
+          // second bounces
+          deduped <- sequencer
+            .sendAsyncSigned(signed)
+            .leftOrFail("A sendAsync of duplicate aggregation submission")
+        } yield {
+          deduped.code.id shouldBe SequencerErrors.AggregateSubmissionAlreadySent.id
+          succeed
+        }
+      }
+
       "bounce on read path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregation in {
         env =>
           import env.*
@@ -546,36 +580,42 @@ abstract class SequencerApiTest
             testedProtocolVersion,
           )
 
+        val lockP = Promise[Unit]()
+
         for {
           envs1 <- envelopes.parTraverse(signEnvelope(p11Crypto, _))
           request1 = mkRequest(p11, messageId1, envs1)
           envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _))
           request2 = mkRequest(p12, messageId2, envs2)
+          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
+          request3 = mkRequest(p13, messageId3, envs3)
           _ <- sequencer
             .sendAsyncSigned(sign(request1))
             .valueOrFail("Sent async for participant11")
           reads11 <- readForMembers(Seq(p11), sequencer)
+          _ = sequencer.applyPostProcessingLockForTesting(lockP.future)
           _ <- sequencer
             .sendAsyncSigned(sign(request2))
             .valueOrFail("Sent async for participant13")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request3))
+            .valueOrFail("Sent async for participant13")
+          _ = lockP.success(())
           reads12 <- readForMembers(Seq(p12, p13), sequencer)
           reads12a <- readForMembers(
             Seq(p11),
             sequencer,
             startTimestamp = firstEventTimestamp(p11)(reads11).map(_.immediateSuccessor),
           )
-
-          // participant13 is late to the party and its request is refused
-          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
-          request3 = mkRequest(p13, messageId3, envs3)
-          _ <- sequencer
-            .sendAsyncSigned(sign(request3))
-            .valueOrFail("Sent async for participant13")
           reads13 <- readForMembers(
             Seq(p13),
             sequencer,
             startTimestamp = firstEventTimestamp(p13)(reads12).map(_.immediateSuccessor),
           )
+          // if participant13 sends after processing, he'll see the already sent error
+          _ <- sequencer
+            .sendAsyncSigned(sign(request3))
+            .leftOrFail("Send async should fail with already sent")
         } yield {
           checkMessages(
             Seq(

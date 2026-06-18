@@ -1290,12 +1290,6 @@ class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersPrivateValidators
       File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     )
 
-class DocsCantonNetworkGlobalSynchronizerProductionOperationsLoggingTest
-    extends SnippetGenerator(
-      File("docs-open/src/sphinx/docs-cn/global-synchronizer-production-operations-logging.rst"),
-      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
-    )
-
 class DocsCantonNetworkGlobalSynchronizerReferenceCantonConsoleReferenceTest
     extends SnippetGenerator(
       File(

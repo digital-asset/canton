@@ -27,6 +27,7 @@ import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.EventCostD
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumedManager.NotEnoughTraffic
 import com.digitalasset.canton.sequencing.{GroupAddressResolver, TrafficControlParameters}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitError.SequencingCostValidationError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerRateLimitError,
@@ -59,6 +60,7 @@ class SequencerRateLimitManagerImpl(
     sequencerMemberRateLimiterFactory: TrafficConsumedManagerFactory =
       DefaultTrafficConsumedManagerFactory,
     eventCostCalculator: EventCostCalculator,
+    lsuSequencingBounds: Option[LsuSequencingBounds],
 )(implicit executionContext: ExecutionContext)
     extends SequencerRateLimitManager
     with NamedLogging
@@ -615,17 +617,14 @@ class SequencerRateLimitManagerImpl(
             FutureUnlessShutdown,
             SequencerRateLimitError,
             TrafficConsumedManager,
-          ](
-            getOrCreateTrafficConsumedManager(sender)
-          )
+          ](getOrCreateTrafficConsumedManager(sender))
+
         trafficPurchased <- getTrafficPurchased(
           sequencingTime,
           latestSequencerEventTimestamp,
           warnIfApproximate,
-        )(
-          sender
-        )
-          .leftWiden[SequencerRateLimitError]
+        )(sender).leftWiden[SequencerRateLimitError]
+
         currentTrafficConsumed = rateLimiter.getTrafficConsumed
         currentTrafficConsumedTs = currentTrafficConsumed.sequencingTimestamp
         // If the sequencing timestamp is after the current state, go ahead and try to consume
@@ -833,10 +832,24 @@ class SequencerRateLimitManagerImpl(
 
   override def resetStateTo(
       timestampExclusive: CantonTimestamp
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    trafficConsumedStore
-      .deleteRecordsPastTimestamp(timestampExclusive)
-      .map(_ => trafficConsumedPerMember.clear())
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+
+    // See https://github.com/DACH-NY/canton/issues/33473 for context
+    // TODO(#33472) This should be revisited
+    val shouldResetState = lsuSequencingBounds.forall(_.upgradeTime <= timestampExclusive)
+
+    if (shouldResetState)
+      trafficConsumedStore
+        .deleteRecordsPastTimestamp(timestampExclusive)
+        .map(_ => trafficConsumedPerMember.clear())
+    else {
+      logger.info(
+        s"Not resetting state because timestamp $timestampExclusive is before upgrade time (${lsuSequencingBounds
+            .map(_.upgradeTime)})"
+      )
+      FutureUnlessShutdown.unit
+    }
+  }
 }
 
 object SequencerRateLimitManagerImpl {

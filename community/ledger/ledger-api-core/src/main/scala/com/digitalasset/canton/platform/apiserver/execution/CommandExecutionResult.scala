@@ -8,8 +8,7 @@ import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerStat
 import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
-import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.transaction.SubmittedTransaction
 
 /** The result of command execution.
   *
@@ -29,10 +28,6 @@ import com.digitalasset.daml.lf.value.Value
   *   interpretation.
   * @param interpretationTimeNanos
   *   Wall-clock time that interpretation took for the engine.
-  * @param globalKeyMapping
-  *   Input key mapping inferred by interpretation. The map should contain all contract keys that
-  *   were used during interpretation. A value of None means no contract was found with this
-  *   contract key.
   * @param processedDisclosedContracts
   *   The disclosed contracts used as part of command interpretation. Note that this may be a subset
   *   of the `disclosed_contracts` provided as part of the command submission by the client, as
@@ -44,7 +39,6 @@ private[canton] final case class CommandInterpretationResult(
     transaction: SubmittedTransaction,
     dependsOnLedgerTime: Boolean,
     interpretationTimeNanos: Long,
-    globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]],
     processedDisclosedContracts: ImmArray[LfFatContractInst],
     // TODO(#25385): Consider removing the prescribed synchronizer decision from command interpreter
     //               and factor this field out of here as well.

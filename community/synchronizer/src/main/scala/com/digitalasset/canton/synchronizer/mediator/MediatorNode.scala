@@ -81,7 +81,6 @@ import com.digitalasset.canton.version.{
 }
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
-import monocle.Lens
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.ActorSystem
 
@@ -387,7 +386,7 @@ class MediatorNodeBootstrap(
               connectionPoolFactory
                 .createFromOldConfig(
                   request.sequencerConnections,
-                  expectedPsidO = None,
+                  expectedPsidO = Some(request.synchronizerId),
                   tracingConfig = parameters.tracing,
                   name = "temp",
                 )
@@ -409,6 +408,7 @@ class MediatorNodeBootstrap(
               staticParameters,
               request.sequencerConnections,
             )
+
             _ <- EitherT.right(synchronizerConfigurationStore.saveConfiguration(configToStore))
           } yield (
             staticParameters,
@@ -626,6 +626,7 @@ class MediatorNodeBootstrap(
       connectionPoolAndSequencerConnections <-
         GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValidWithPool(
           connectionPoolFactory = connectionPoolFactory,
+          psid = psid,
           tracingConfig = parameters.tracing,
           flagCloseable = this,
           loadConfig = getSequencerConnectionFromStore,
@@ -650,13 +651,9 @@ class MediatorNodeBootstrap(
 
       sequencerClientRef =
         GrpcSequencerConnectionService
-          .setup[MediatorSynchronizerConfiguration](
+          .setup(
             adminServerRegistry,
-            () => synchronizerConfigurationStore.fetchConfiguration(),
-            config => synchronizerConfigurationStore.saveConfiguration(config),
-            Lens[MediatorSynchronizerConfiguration, SequencerConnections](_.sequencerConnections)(
-              connection => conf => conf.copy(sequencerConnections = connection)
-            ),
+            synchronizerConfigurationStore,
             connectionPoolFactory,
             sequencerClient,
             parameters.tracing,

@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencing.authentication.grpc
 import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, DefaultProcessingTimeouts}
+import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -60,7 +61,11 @@ class SequencerAuthenticationServerInterceptorTest
     lazy val service = new GrpcHelloService()
 
     lazy val store: MemberAuthenticationStore =
-      new MemberAuthenticationStore(PositiveInt.tryCreate(10), loggerFactory)
+      new MemberAuthenticationStore(
+        PositiveInt.tryCreate(10),
+        PositiveInt.tryCreate(10),
+        loggerFactory,
+      )
     lazy val synchronizerId = SynchronizerId(
       UniqueIdentifier.tryFromProtoPrimitive("popo::pipi")
     ).toPhysical
@@ -120,7 +125,14 @@ class SequencerAuthenticationServerInterceptorTest
     "fail request if client does not use interceptor to add auth metadata" in
       loggerFactory.suppressWarningsAndErrors(new GrpcContext {
         store
-          .saveToken(StoredAuthenticationToken(participantId, neverExpire, token.token))
+          .saveToken(
+            StoredAuthenticationToken(
+              participantId,
+              neverExpire,
+              token.token,
+              Fingerprint.tryFromString("test-static-token-key-fingerprint"),
+            )
+          )
 
         channel = InProcessChannelBuilder.forName(channelName).build()
         val client = HelloServiceGrpc.stub(channel)
@@ -133,7 +145,14 @@ class SequencerAuthenticationServerInterceptorTest
 
     "succeed request if participant use interceptor with correct token information" in new GrpcContext {
       store
-        .saveToken(StoredAuthenticationToken(participantId, neverExpire, token.token))
+        .saveToken(
+          StoredAuthenticationToken(
+            participantId,
+            neverExpire,
+            token.token,
+            Fingerprint.tryFromString("test-static-token-key-fingerprint"),
+          )
+        )
 
       val tokenFetcher =
         ((_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](token)): TokenFetcher
@@ -157,7 +176,14 @@ class SequencerAuthenticationServerInterceptorTest
 
     "fail request if participant use interceptor with incorrect token information" in new GrpcContext {
       store
-        .saveToken(StoredAuthenticationToken(participantId, neverExpire, token.token))
+        .saveToken(
+          StoredAuthenticationToken(
+            participantId,
+            neverExpire,
+            token.token,
+            Fingerprint.tryFromString("test-static-token-key-fingerprint"),
+          )
+        )
 
       val tokenFetcher = (
           (_: TraceContext) => EitherT.pure[FutureUnlessShutdown, Status](incorrectToken)

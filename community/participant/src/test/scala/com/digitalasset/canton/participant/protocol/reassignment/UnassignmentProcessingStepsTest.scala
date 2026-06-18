@@ -1052,7 +1052,7 @@ final class UnassignmentProcessingStepsTest
       )
       .futureValueUS
 
-    val deliver: Deliver[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]] = {
+    val deliver: Deliver[Batch[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]]] = {
       val batch: Batch[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]] =
         Batch.of(testedProtocolVersion, (signedResult, Recipients.cc(submittingParticipant)))
       Deliver.create(

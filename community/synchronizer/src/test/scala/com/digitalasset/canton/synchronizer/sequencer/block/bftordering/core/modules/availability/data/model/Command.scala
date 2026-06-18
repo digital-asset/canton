@@ -15,7 +15,7 @@ object Command {
 
   final case class FetchBatches(batches: Seq[BatchIdAndEpochNumber]) extends Command
 
-  final case class GC(staleBatchIds: Seq[BatchId]) extends Command
+  final case class GC(staleBatchIds: Map[EpochNumber, Set[BatchId]]) extends Command
 
   final case class Prune(epoch: EpochNumber) extends Command
 }

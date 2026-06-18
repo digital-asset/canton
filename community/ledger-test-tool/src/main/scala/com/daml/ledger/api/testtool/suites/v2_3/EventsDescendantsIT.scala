@@ -3,15 +3,14 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, TransactionHelpers}
-import com.daml.ledger.api.testtool.suites.v2_2.CompanionImplicits.*
 import com.daml.ledger.api.testtool.suites.v2_3.EventsDescendantsIT.isDescendant
 import com.daml.ledger.api.v2.event.Event
 import com.daml.ledger.api.v2.event.Event.Event.Exercised
-import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.daml.ledger.test.java.experimental.exceptions.ExceptionTester
 import com.daml.ledger.test.java.model.test.{
   Agreement,
@@ -29,8 +28,8 @@ import org.scalatest.matchers.should.Matchers.{fail as _, *}
 
 import scala.jdk.CollectionConverters.*
 
-class EventsDescendantsIT extends LedgerTestSuite {
-  import EventsDescendantsIT.CompanionImplicits.*
+class EventsDescendantsIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "SingleConsumingExercisedDescendants",
@@ -419,13 +418,5 @@ object EventsDescendantsIT {
     val lastDescendantNodeId = of.event.exercised.fold(nodeId)(_.lastDescendantNodeId)
 
     who >= nodeId && who <= lastDescendantNodeId
-  }
-
-  private object CompanionImplicits {
-    implicit val exceptionTesterCompanion: ContractCompanion.WithoutKey[
-      ExceptionTester.Contract,
-      ExceptionTester.ContractId,
-      ExceptionTester,
-    ] = ExceptionTester.COMPANION
   }
 }

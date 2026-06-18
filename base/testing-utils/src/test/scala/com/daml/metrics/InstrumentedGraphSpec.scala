@@ -124,7 +124,7 @@ final class InstrumentedGraphSpec
     val counter = new SamplingCounter(10.millis)
     Source(List.fill(1000)("element"))
       .throttle(producerMaxSpeed, FiniteDuration(10, "millis"))
-      .buffered(counter, 100)
+      .buffered(counter, 30)
       .throttle(consumerMaxSpeed, FiniteDuration(10, "millis"))
       .run()
       .map(_ => counter.finishSampling())
@@ -135,13 +135,15 @@ final class InstrumentedGraphSpec
   def samplePercentage(samples: List[Long])(filter: Long => Boolean): Double =
     samples.count(filter).toDouble / samples.size.toDouble * 100.0
 
+  // These thresholds were established empirically and are tuned to still work
+  // even when the test is slowed down in CI by a busy CPU running many tests.
   it should "signal mostly full buffer if slow consumer" in {
     throttledTest(
       producerMaxSpeed = 10,
       consumerMaxSpeed = 5,
     ) map { samples =>
-      sampleAverage(samples) should be > 75.0
-      samplePercentage(samples)(_ == 100) should be > 75.0
+      sampleAverage(samples) should be > 25.0
+      samplePercentage(samples)(_ == 30) should be > 80.0
     }
   }
 
@@ -161,7 +163,7 @@ final class InstrumentedGraphSpec
       consumerMaxSpeed = 10,
     ) map { samples =>
       sampleAverage(samples) should be < 10.0
-      samplePercentage(samples)(_ == 0) should be > 90.0
+      samplePercentage(samples)(_ <= 1) should be > 90.0
     }
   }
 }

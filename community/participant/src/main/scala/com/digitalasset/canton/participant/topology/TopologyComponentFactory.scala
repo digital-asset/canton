@@ -205,12 +205,13 @@ class TopologyComponentFactory(
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
         validatePackageVetting(
-          currentlyVettedPackages,
-          nextPackageIds,
-          packageMetadataView,
-          dryRunSnapshot.getOrElse(PackageMetadata()),
-          forceFlags,
-          disableUpgradeValidation,
+          currentlyVettedPackages = currentlyVettedPackages,
+          nextPackageIds = nextPackageIds,
+          packageMetadataView = packageMetadataView,
+          dryRunSnapshot = dryRunSnapshot.getOrElse(PackageMetadata()),
+          forceFlags = forceFlags,
+          disableUpgradeValidation = disableUpgradeValidation,
+          protocolVersion = store.protocolVersion,
         )
 
       override def checkCannotDisablePartyWithActiveContracts(

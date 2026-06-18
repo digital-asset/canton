@@ -31,7 +31,10 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 }
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.store.ReassignmentStore.*
-import com.digitalasset.canton.protocol.ExampleTransactionFactory.{contractInstance, suffixedId}
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
+  defaultVersionedValue,
+  suffixedId,
+}
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ContractMetadata,
@@ -254,7 +257,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             store.addAssignmentDataIfAbsent(updatedAssignmentData)
           )("addAssignmentDataIfAbsent")
           entry <- store.findReassignmentEntry(data.reassignmentId).value
-        } yield entry.map(_.contracts) shouldBe Right(data.contractsBatch.contracts.map(_.contract))
+        } yield entry.map(_.stakeholders) shouldBe Right(data.contractsBatch.stakeholders.all)
       }
 
       "AddAssignmentData doesn't update the entry once the reassignment data is inserted" in {
@@ -314,13 +317,10 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           )
           entry1 shouldBe Right(
             ReassignmentEntry(
-              data.reassignmentId,
-              data.sourcePsid,
-              NonEmpty.mk(Seq, contract),
-              None,
-              None,
-              CantonTimestamp.Epoch,
-              None,
+              assignmentData,
+              reassignmentGlobalOffset = None,
+              unassignmentTs = CantonTimestamp.Epoch,
+              tsCompletion = None,
             )
           )
           lookup2 shouldBe Left(ReassignmentCompleted(unassignmentData.reassignmentId, ts))
@@ -1381,18 +1381,18 @@ object ReassignmentStoreTest extends EitherValues with NoTracing {
   private def contract(id: LfContractId, signatory: LfPartyId): ContractInstance =
     ExampleTransactionFactory.asContractInstance(
       contractId = id,
-      contractInstance = contractInstance(),
+      arg = defaultVersionedValue,
       ledgerTime = CreationTime.CreatedAt(LfTimestamp.Epoch),
       metadata = ContractMetadata.tryCreate(Set(signatory), Set(signatory), None),
-    )()
+    )
 
   val coidAbs1 = suffixedId(1, 0)
   val coidAbs2 = suffixedId(2, 0)
   val contract = ExampleTransactionFactory.asContractInstance(
     contractId = coidAbs1,
-    contractInstance = contractInstance(),
+    arg = defaultVersionedValue,
     ledgerTime = CreationTime.CreatedAt(LfTimestamp.Epoch),
-  )()
+  )
 
   val synchronizer1 = SynchronizerId(
     UniqueIdentifier.tryCreate("synchronizer1", "SYNCHRONIZER1")

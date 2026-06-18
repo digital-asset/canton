@@ -114,14 +114,22 @@ sealed abstract class SValue extends AnyRef {
         case SOptional(mbV) =>
           V.ValueOptional(mbV.map(go(_, nextMaxNesting)))
         case SMap(true, entries) =>
-          V.ValueTextMap(SortedLookupList(entries.map {
-            case (SText(t), v) => toText(t) -> go(v, nextMaxNesting)
-            case (_, _) =>
-              throw SError.SErrorCrash(
-                NameOf.qualifiedNameOfCurrentFunc,
-                "SValue.toValue: TextMap with non text key",
+          V.ValueTextMap(
+            data.assertRight(
+              SortedLookupList.fromOrderedImmArray(
+                entries.view
+                  .map {
+                    case (SText(t), v) => toText(t) -> go(v, nextMaxNesting)
+                    case (_, _) =>
+                      throw SError.SErrorCrash(
+                        NameOf.qualifiedNameOfCurrentFunc,
+                        "SValue.toValue: TextMap with non text key",
+                      )
+                  }
+                  .to(ImmArray)
               )
-          }))
+            )
+          )
         case SMap(false, entries) =>
           V.ValueGenMap(
             entries.view

@@ -32,6 +32,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -221,6 +222,7 @@ class SequencerInfoLoader(
         sequencerLivenessMargin = sequencerConnections.sequencerLivenessMargin,
         submissionRequestAmplification = sequencerConnections.submissionRequestAmplification,
         sequencerConnectionPoolDelays = sequencerConnections.sequencerConnectionPoolDelays,
+        subscriptionLivenessLimits = sequencerConnections.subscriptionLivenessLimits,
         sequencerConnectionValidation = sequencerConnectionValidation,
         expectedSynchronizerId = expectedSynchronizerId,
       )
@@ -634,6 +636,7 @@ object SequencerInfoLoader {
       sequencerLivenessMargin: NonNegativeInt,
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
+      subscriptionLivenessLimits: SubscriptionLivenessLimits,
       sequencerConnectionValidation: SequencerConnectionValidation,
       expectedSynchronizerId: Option[PhysicalSynchronizerId],
   )(
@@ -676,6 +679,7 @@ object SequencerInfoLoader {
               sequencerLivenessMargin,
               submissionRequestAmplification,
               sequencerConnectionPoolDelays,
+              subscriptionLivenessLimits,
             )
             .leftMap(SequencerInfoLoaderError.FailedToConnectToSequencers.apply)
             .map(connections =>

@@ -106,7 +106,7 @@ class BatchDisseminationNodeQuotaTrackerTest extends AsyncWordSpec with BaseTest
       tracker.evictBatches(evictionEpoch = epoch1) shouldBe empty
 
       // evict batches from epoch 2
-      tracker.evictBatches(evictionEpoch = epoch2) shouldBe Seq(batchId3)
+      tracker.evictBatches(evictionEpoch = epoch2) shouldBe Map(epoch2 -> Set(batchId3))
 
       // nothing to evict from epoch 3 yet because it hasn't expired yet
       tracker.evictBatches(evictionEpoch = epoch3) shouldBe empty
@@ -114,7 +114,7 @@ class BatchDisseminationNodeQuotaTrackerTest extends AsyncWordSpec with BaseTest
       tracker.expireEpoch(initialEpoch = epoch1, expirationEpoch = epoch3)
 
       // now that epoch is expired, we can evict from it
-      tracker.evictBatches(evictionEpoch = epoch3) shouldBe Seq(batchId4, batchId5)
+      tracker.evictBatches(evictionEpoch = epoch3) shouldBe Map(epoch3 -> Set(batchId4, batchId5))
     }
 
     "still accept previously accepted batches even if quota is full" in {

@@ -441,7 +441,7 @@ class StoreBackedCommandInterpreterSpec
   ): ContractStore = {
     val store = mock[ContractStore]
     when(
-      store.lookupNonUniqueContractKey(
+      store.lookupContractKey(
         readers = any[Set[Ref.Party]],
         key = any[GlobalKey],
         pageToken = any[Option[Long]],
@@ -466,7 +466,7 @@ class StoreBackedCommandInterpreterSpec
   private val invalidContractStore: ContractStore = {
     val store = mock[ContractStore]
     when(
-      store.lookupNonUniqueContractKey(
+      store.lookupContractKey(
         readers = any[Set[Ref.Party]],
         key = any[GlobalKey],
         pageToken = any[Option[Long]],

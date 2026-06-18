@@ -21,7 +21,7 @@ object ContractKeyStateCache {
   ): StateCache[GlobalKey, ContractKeyStateValue] =
     StateCache(
       initialCacheEventSeqIdIndex = initialCacheEventSeqIdIndex,
-      emptyLedgerState = ContractKeyStateValue.Unassigned,
+      emptyLedgerState = ContractKeyStateValue.Empty,
       cache = SizedCache.from[GlobalKey, ContractKeyStateValue](
         SizedCache.Configuration(cacheSize),
         metrics.execution.cache.keyState.stateCache,
@@ -35,7 +35,18 @@ sealed trait ContractKeyStateValue extends Product with Serializable
 
 object ContractKeyStateValue {
 
-  final case class Assigned(contractId: ContractId) extends ContractKeyStateValue
+  /** @param contractId
+    *   The contract ID assigned to this key.
+    * @param eventSequentialId
+    *   The event sequential ID at which this assignment was observed.
+    * @param thereMightBeMore
+    *   Flag indicating whether there might be older active contracts for the same key in the DB.
+    */
+  final case class Last(
+      contractId: ContractId,
+      eventSequentialId: Long,
+      thereMightBeMore: Boolean,
+  ) extends ContractKeyStateValue
 
-  final case object Unassigned extends ContractKeyStateValue
+  case object Empty extends ContractKeyStateValue
 }

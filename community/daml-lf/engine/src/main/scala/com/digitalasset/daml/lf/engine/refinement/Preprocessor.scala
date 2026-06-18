@@ -181,7 +181,6 @@ private[engine] final class Preprocessor(
         case ReplayCommand.Fetch(templateId, interfaceId, _) =>
           templateId :: interfaceId.toList
         case ReplayCommand.FetchByKey(templateId, _) => List(templateId)
-        case ReplayCommand.LookupByKey(templateId, _) => List(templateId)
       }
     safelyRun(pullPackage(templateAndInterfaceIds)) {
       commandPreprocessor.unsafePreprocessReplayCommand(cmd)

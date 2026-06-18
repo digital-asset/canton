@@ -6,11 +6,13 @@ package com.digitalasset.canton.sequencing.client.transports.replay
 import cats.syntax.either.*
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.HasUnlessClosing
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
 import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnection,
   SequencerSubscription,
@@ -22,10 +24,10 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientSubscriptionError,
 }
 import com.digitalasset.canton.sequencing.{
-  ProcessingSerializedEvent,
-  SequencedEventHandler,
+  MaybeCompressedSequencedEventHandler,
   SequencerClientRecorder,
 }
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -52,7 +54,7 @@ import scala.concurrent.ExecutionContext
 private[sequencing] class ReplaySequencerSubscription[HandlerError] private[sequencing] (
     override val connection: SequencerConnection,
     replayPath: Path,
-    handler: SequencedEventHandler[HandlerError],
+    handler: MaybeCompressedSequencedEventHandler[HandlerError],
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -102,6 +104,14 @@ private[sequencing] class ReplaySequencerSubscription[HandlerError] private[sequ
 
   override private[sequencing] val health: HealthComponent =
     new AlwaysHealthyComponent(s"replay-subscription-${connection.name}", logger)
+
+  override def checkLiveness(
+      eventAndOrdinal: EventAndOrdinal,
+      maxTimestampDelta: NonNegativeFiniteDuration,
+      maxOrdinalDelta: NonNegativeInt,
+  )(implicit
+      traceContext: TraceContext
+  ): Unit = ()
 }
 
 object ReplaySequencerSubscription {
@@ -130,6 +140,14 @@ private[sequencing] class NullSequencerSubscription[HandlerError] private[sequen
 
   override private[sequencing] val health: HealthComponent =
     new AlwaysHealthyComponent(s"null-subscription-${connection.name}", logger)
+
+  override def checkLiveness(
+      eventAndOrdinal: EventAndOrdinal,
+      maxTimestampDelta: NonNegativeFiniteDuration,
+      maxOrdinalDelta: NonNegativeInt,
+  )(implicit
+      traceContext: TraceContext
+  ): Unit = ()
 }
 
 private[sequencing] class ReplaySequencerSubscriptionFactory(
@@ -141,7 +159,7 @@ private[sequencing] class ReplaySequencerSubscriptionFactory(
   override def create(
       connection: SequencerConnection,
       member: Member,
-      preSubscriptionEventO: Option[ProcessingSerializedEvent],
+      preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
       parent: HasUnlessClosing,
   )(implicit
@@ -180,7 +198,7 @@ private[sequencing] class NullSequencerSubscriptionFactory(
   override def create(
       connection: SequencerConnection,
       member: Member,
-      preSubscriptionEventO: Option[ProcessingSerializedEvent],
+      preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
       parent: HasUnlessClosing,
   )(implicit

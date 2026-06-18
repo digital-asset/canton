@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Signature, SignatureCheckError, SyncCryptoApi}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -26,7 +27,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress}
+import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress, MonadUtil}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -129,19 +130,19 @@ final case class ClosedUncompressedEnvelope private[protocol] (
   override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     this.asRight
 
-  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope =
+  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = {
+    val uncompressed = checkedToByteString(
+      v31.EnvelopeWithoutRecipients(
+        content = bytes,
+        signatures = signatures.map(_.toProtoV30),
+      )
+    )
     ClosedCompressedEnvelope.create(
-      bytes = ByteStringUtil.compressGzip(
-        checkedToByteString(
-          v31.EnvelopeWithoutRecipients(
-            content = bytes,
-            signatures = signatures.map(_.toProtoV30),
-          )
-        )
-      ),
+      bytes = ByteStringUtil.compressGzip(uncompressed),
       recipients = recipients,
       algorithm = CompressionAlgorithm.GZIP,
-    )(maxBytesToDecompress = MaxBytesToDecompress.HardcodedDefault)
+    )(maxBytesToDecompress = MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size)))
+  }
 
   def toProtoV30: v30.Envelope = v30.Envelope(
     content = bytes,
@@ -151,6 +152,10 @@ final case class ClosedUncompressedEnvelope private[protocol] (
 
   def updateSignatures(signatures: Seq[Signature]): ClosedUncompressedEnvelope =
     copy(signatures = signatures)
+
+  override def withMaxBytesToDecompress(
+      maxBytesToDecompress: MaxBytesToDecompress
+  ): ClosedUncompressedEnvelope = this
 
   @VisibleForTesting
   def copy(
@@ -170,6 +175,15 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     NonEmpty
       .from(signatures)
       .traverse_(ClosedEnvelope.verifySignatures(snapshot, sender, bytes, _))
+
+  def verifyKeyUsage(
+      snapshot: SyncCryptoApi,
+      sender: Member,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    MonadUtil.sequentialTraverse_(signatures)(ClosedEnvelope.verifyKeyUsage(snapshot, sender, _))
 
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedUncompressedEnvelope =

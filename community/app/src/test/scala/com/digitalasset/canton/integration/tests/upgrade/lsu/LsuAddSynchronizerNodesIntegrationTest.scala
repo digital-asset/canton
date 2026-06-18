@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{MediatorReference, SequencerReference}
@@ -135,6 +136,7 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
         sequencerLivenessMargin = NonNegativeInt.zero,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       )
       participant1.synchronizers.modify(
         daName,

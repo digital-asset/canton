@@ -504,7 +504,6 @@ class MaliciousParticipantNode(
           command.transactionUuid,
           cryptoSnapshot.ipsSnapshot,
           contractOfIdWithDisclosure,
-          metadata.globalKeyMapping,
           maxSequencingTime,
           validatePackageVettings = false,
         )

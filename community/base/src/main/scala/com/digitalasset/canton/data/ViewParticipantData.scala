@@ -6,13 +6,13 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
   ExerciseActionDescription,
   FetchActionDescription,
-  LookupByKeyActionDescription,
 }
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -24,6 +24,7 @@ import com.digitalasset.canton.serialization.{
   ProtocolVersionedMemoizedEvidence,
   SerializationCheckFailed,
 }
+import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.{ProtoVersion, *}
 import com.digitalasset.canton.{
   LfCommand,
@@ -32,12 +33,10 @@ import com.digitalasset.canton.{
   LfExerciseCommand,
   LfFetchByKeyCommand,
   LfFetchCommand,
-  LfLookupByKeyCommand,
   LfPackageId,
   LfPartyId,
   LfVersioned,
   ProtoDeserializationError,
-  checked,
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
@@ -136,17 +135,15 @@ final case class ViewParticipantData private (
         s"Contract created in a subview are also created in the core: $transientOverlap"
       )
 
-    if (
-      externalCallResults.nonEmpty &&
-      representativeProtocolVersion < ViewParticipantData.protocolVersionRepresentativeFor(
-        ProtocolVersion.dev
-      )
+    if (externalCallResults.isEmpty) ()
+    else if (
+      representativeProtocolVersion <
+        ViewParticipantData.protocolVersionRepresentativeFor(ProtocolVersion.dev)
     )
       throw InvalidViewParticipantData(
         s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards"
       )
-
-    if (externalCallResults.nonEmpty) {
+    else {
       actionDescription match {
         case _: ExerciseActionDescription => ()
         case _ =>
@@ -159,7 +156,6 @@ final case class ViewParticipantData private (
         s"externalCallResults contains duplicate occurrence (exercise index ${exerciseIndex.unwrap}, call index ${callIndex.unwrap})"
       }
     }
-
   }
 
   private def legacyIsAssignedKeyInconsistent(
@@ -185,9 +181,8 @@ final case class ViewParticipantData private (
   }
 
   if (
-    representativeProtocolVersion <= ViewParticipantData.protocolVersionRepresentativeFor(
-      ProtocolVersion.v34
-    )
+    representativeProtocolVersion <=
+      ViewParticipantData.protocolVersionRepresentativeFor(ProtocolVersion.v34)
   ) {
     checkLegacyResolutionsReferenceInputContracts()
   }
@@ -288,32 +283,6 @@ final case class ViewParticipantData private (
           LfFetchCommand(templateId = templateId, interfaceId = interfaceId, coid = inputContractId)
         }
         RootAction(cmd, actors, failed = false, packageIdPreference = fetch.packagePreference)
-
-      // This is created only maliciously
-      case LookupByKeyActionDescription(LfVersioned(_version, key)) =>
-        val LfVersioned(_, resolution) = keyResolution.getOrElse(
-          key,
-          throw InvalidViewParticipantData(
-            show"Key $key of LookupByKey root action is not resolved."
-          ),
-        )
-        // TODO(i32321): Remove the suppression again
-        @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
-        val maintainers = (resolution.contracts, resolution.maintainers) match {
-          case (Seq(), maintainers) => maintainers
-          case (Seq(contractId), maintainers) if maintainers.isEmpty =>
-            checked(coreInputs(contractId)).maintainers
-          case _ =>
-            throw new IllegalStateException(
-              s"Invalid key resolution for LookupByKey: $keyResolution"
-            )
-        }
-        RootAction(
-          LfLookupByKeyCommand(templateId = key.templateId, contractKey = key.key),
-          maintainers,
-          failed = false,
-          packageIdPreference = Set.empty,
-        )
     }
 
   @transient override protected lazy val companionObj: ViewParticipantData.type =
@@ -323,15 +292,7 @@ final case class ViewParticipantData private (
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
     createdCore = createdCore.map(_.toProtoV30),
     createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
-    resolvedKeys = keyResolution.map { case (k, LfVersioned(version, resolution)) =>
-      v30.ViewParticipantData.ResolvedKey(
-        key = Some(GlobalKeySerialization.assertToProtoV30(LfVersioned(version, k))),
-        resolution = LegacyKeyResolutionWithMaintainers
-          .tryFromNextGen(resolution)
-          .asSerializable
-          .toProtoOneOfV30,
-      )
-    }.toSeq,
+    resolvedKeys = Seq.empty, // Always empty, see tryCheckKeyResolution
     actionDescription = Some(actionDescription.toProtoV30),
     rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV30),
     salt = Some(salt.toProtoV30),
@@ -477,6 +438,8 @@ object ViewParticipantData
 
     tryCheckMaxSerializationVersion(protocolVersion, coreInputs, createdCore)
 
+    tryCheckKeyResolution(protocolVersion, keyResolution.size)
+
     ViewParticipantData(
       coreInputs,
       createdCore,
@@ -510,6 +473,12 @@ object ViewParticipantData
       )
     }
   }
+
+  private def tryCheckKeyResolution(protocolVersion: ProtocolVersion, numKeys: Int): Unit =
+    if (protocolVersion < ProtocolVersion.v35 && numKeys > 0)
+      throw InvalidViewParticipantData(
+        s"Keys not supported in $protocolVersion, but found $numKeys keys."
+      )
 
   /** Creates a view participant data.
     *
@@ -583,18 +552,13 @@ object ViewParticipantData
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV30)
-      resolvedKeys <- resolvedKeysP
-        .traverse { rkP =>
-          for {
-            keyP <- ProtoConverter.required("key", rkP.key)
-            key <- GlobalKeySerialization.fromProtoV30(keyP)
-            resolution <- LegacySerializableKeyResolution.fromProtoOneOfV30(rkP.resolution)
-          } yield (key.unversioned, key.map(_ => resolution.tryToNextGen()))
-        }
-        .map(_.toMap)
+      _ <- EitherUtil.condUnit( // Invariant violation, see tryCheckKeyResolution
+        resolvedKeysP.isEmpty,
+        InvariantViolation(Some("resolved-keys"), "Unexpected contract keys"),
+      )
       viewParticipantData <- fromProto(
         hashOps,
-        resolvedKeys,
+        Map.empty,
         actionDescription,
         protocolVersion,
         bytes,
@@ -816,15 +780,18 @@ object ViewParticipantData
   @VisibleForTesting
   object Optics {
     val coreInputsUnsafe: Lens[ViewParticipantData, Map[LfContractId, InputContract]] =
-      GenLens[ViewParticipantData](_.coreInputs)
+      GenLens.apply[ViewParticipantData](_.coreInputs)
     val createdCoreUnsafe: Lens[ViewParticipantData, Seq[CreatedContract]] =
-      GenLens[ViewParticipantData](_.createdCore)
+      GenLens.apply[ViewParticipantData](_.createdCore)
     val actionDescriptionUnsafe: Lens[ViewParticipantData, ActionDescription] =
-      GenLens[ViewParticipantData](_.actionDescription)
+      GenLens.apply[ViewParticipantData](_.actionDescription)
     val saltUnsafe: Lens[ViewParticipantData, Salt] =
-      GenLens[ViewParticipantData](_.salt)
+      GenLens.apply[ViewParticipantData](_.salt)
     val externalCallResultsUnsafe: Lens[ViewParticipantData, ImmArray[ViewExternalCallResult]] =
-      GenLens[ViewParticipantData](_.externalCallResults)
+      GenLens.apply[ViewParticipantData](_.externalCallResults)
+    val keyResolutionUnsafe
+        : Lens[ViewParticipantData, Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =
+      GenLens.apply[ViewParticipantData](_.keyResolution)
   }
 
 }

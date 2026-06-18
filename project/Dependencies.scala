@@ -61,7 +61,7 @@ object Dependencies {
   lazy val h2_version = "2.2.224"
   lazy val janino_version = "3.1.12"
   lazy val javax_annotations_version = "1.3.2"
-  lazy val jackson_databind_nullable_version = "0.2.6"
+  lazy val jackson_databind_nullable_version = "0.2.10"
   lazy val jakarta_annotation_api_version = "1.3.5"
   lazy val magnolia_version = "1.1.10"
   lazy val magnolifyScalacheck_version = "0.6.2"
@@ -80,7 +80,7 @@ object Dependencies {
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
   lazy val scala_collections_contrib_version = "0.2.2"
-  lazy val scala_csv_version = "1.3.10"
+  lazy val scala_csv_version = "2.0.0"
   lazy val scala_logging_version = "3.9.5"
   lazy val scalacheck_version = "1.15.4"
   lazy val scalafx_version = "17.0.1-R26"
@@ -94,8 +94,8 @@ object Dependencies {
 
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
-  lazy val sttp_version = "3.8.16"
-  lazy val swagger_parser_version = "2.1.22"
+  lazy val sttp_version = "3.11.0"
+  lazy val swagger_parser_version = "2.1.43"
   lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.11.7"
   lazy val testcontainers_version = "2.0.2"
@@ -389,7 +389,7 @@ object Dependencies {
   lazy val boopickle = "io.suzaku" %% "boopickle" % "1.5.0"
   lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
   lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.10.3"
-  lazy val semver = "org.semver4j" % "semver4j" % "5.3.0"
+  lazy val semver = "org.semver4j" % "semver4j" % "6.0.0"
   lazy val sourcecode = "com.lihaoyi" %% "sourcecode" % "0.4.2"
   lazy val ujson = "com.lihaoyi" %% "ujson" % upickle_version
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version

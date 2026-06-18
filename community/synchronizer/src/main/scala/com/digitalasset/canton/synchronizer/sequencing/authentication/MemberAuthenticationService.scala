@@ -163,7 +163,12 @@ class MemberAuthenticationService(
           maxTokenExpirationInterval
         }
       tokenExpiry = clock.now.add(maybeRandomTokenExpirationTime)
-      storedToken = StoredAuthenticationToken(member, tokenExpiry, token)
+      storedToken = StoredAuthenticationToken(
+        member,
+        tokenExpiry,
+        token,
+        signature.authorizingLongTermKey,
+      )
       _ = store.saveToken(storedToken)
     } yield {
       logger.info(
@@ -185,7 +190,8 @@ class MemberAuthenticationService(
     val tokenExpiry = clock.now.add(tokenDuration)
     logger.info(s"Generating authentication token for member $member expiring at $tokenExpiry")
     val token = AuthenticationToken.generate(cryptoApi.pureCrypto)
-    val storedToken = StoredAuthenticationToken(member, tokenExpiry, token)
+    val testFingerprint = member.fingerprint
+    val storedToken = StoredAuthenticationToken(member, tokenExpiry, token, testFingerprint)
     store.saveToken(storedToken)
     storedToken
   }
@@ -506,6 +512,9 @@ class MemberAuthenticationServiceImpl(
             ) =>
           val modifiedMediatorIndex = newState.group // group index
           val newMediatorSet: Set[MediatorId] = newState.allMediatorsInGroup.toSet
+
+          // we want to capture the timestamp at the previous state, but we do not use .immediatePredecessor here
+          // because the state changes at time T are captured only at T+1
           val measuredTimestampPreviousState = effectiveTimestamp.value
           for {
             snapshot <- cryptoApi
@@ -524,16 +533,64 @@ class MemberAuthenticationServiceImpl(
             _ <- safelyRevokeLeavers(leavers, isMediatorActive)
           } yield ()
 
+        // case 8: a OwnerToKeyMapping is removed: targeted key token revocation for OTK mappings
+        case TopologyTransaction(
+              TopologyChangeOp.Remove, // operation
+              _, // serial
+              otk: OwnerToKeyMapping, // mapping
+            ) =>
+          logger.info(
+            s"Received topology transaction for removing OwnerToKeyMapping $otk."
+          )
+          otk.keys.foreach { key =>
+            logger.info(
+              s"Revoking token for ${otk.member} due to removed signing key: $key.fingerprint"
+            )
+            store.invalidateTokensByFingerprint(key.fingerprint)
+          }
+          FutureUnlessShutdown.unit
+
+        // case 9: a OwnerToKeyMapping is replaced: revoke only tokens with that fingerprint
+        case TopologyTransaction(
+              TopologyChangeOp.Replace, // operation,
+              _, // serial
+              otk: OwnerToKeyMapping,
+            ) =>
+          // we want to capture the timestamp at the previous state, but we do not use .immediatePredecessor here
+          // because the state changes at time T are captured only at T+1
+          val measuredTimestampPreviousState = effectiveTimestamp.value
+          val newFingerprints = otk.keys.map(_.fingerprint).toSet
+          for {
+            snapshot <- cryptoApi.ipsSnapshot(measuredTimestampPreviousState)
+            oldKeys <- snapshot.signingKeys(
+              otk.member,
+              com.digitalasset.canton.crypto.SigningKeyUsage.SequencerAuthenticationOnly,
+            )
+            oldFingerprints = oldKeys.map(_.fingerprint).toSet
+            evictedFingerprints = oldFingerprints.diff(newFingerprints)
+            _ = logger.info(
+              s"Received topology transaction for replacing OwnerToKeyMapping $otk."
+            )
+          } yield {
+            // perform evictions
+            evictedFingerprints.foreach { fingerprint =>
+              logger.info(
+                s"Revoking token for ${otk.member} due to replaced signing key: $fingerprint"
+              )
+              store.invalidateTokensByFingerprint(fingerprint)
+            }
+          }
+
         // All other transactions: do nothing
         case TopologyTransaction(
               TopologyChangeOp.Replace | TopologyChangeOp.Remove, // operation
               _, // serial
               (
                 _: NamespaceDelegation | // mapping
-                _: DecentralizedNamespaceDefinition | _: OwnerToKeyMapping | _: PartyToKeyMapping |
-                _: PartyToParticipant | _: VettedPackages | _: PartyHostingLimits |
-                _: SynchronizerParametersState | _: SequencingParametersState | _: LsuAnnouncement |
-                _: LsuSequencerConnectionSuccessor
+                _: DecentralizedNamespaceDefinition | _: PartyToKeyMapping | _: PartyToParticipant |
+                _: VettedPackages | _: PartyHostingLimits | _: SynchronizerParametersState |
+                _: SequencingParametersState |
+                _: LsuAnnouncement | _: LsuSequencerConnectionSuccessor
               ),
             ) =>
           FutureUnlessShutdown.unit

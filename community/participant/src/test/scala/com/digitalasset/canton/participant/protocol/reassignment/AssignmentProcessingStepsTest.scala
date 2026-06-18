@@ -403,10 +403,10 @@ final class AssignmentProcessingStepsTest
       // We need to change the contract instance otherwise we get another error (AssignmentSubmitterMustBeStakeholder)
       val contract = ExampleTransactionFactory.asContractInstance(
         contractId = coidAbs1,
-        contractInstance = ExampleTransactionFactory.contractInstance(),
+        arg = ExampleTransactionFactory.defaultVersionedValue,
         ledgerTime = CreationTime.CreatedAt(CantonTimestamp.Epoch.toLf),
         metadata = ContractMetadata.tryCreate(Set(party3), Set(party3), None),
-      )()
+      )
 
       val unassignmentData2 = ReassignmentStoreTest.mkUnassignmentDataForSynchronizer(
         sourceMediator,
@@ -826,7 +826,7 @@ final class AssignmentProcessingStepsTest
       PublishUpdateViaRecordOrderPublisher.noop,
       trafficCost = NonNegativeLong.tryCreate(123L),
     )
-    val mockDeliver = mock[Deliver[DefaultOpenEnvelope]]
+    val mockDeliver = mock[Deliver[Batch[DefaultOpenEnvelope]]]
     when(mockDeliver.timestamp).thenReturn(CantonTimestamp.Epoch)
 
     "succeed without errors" in {

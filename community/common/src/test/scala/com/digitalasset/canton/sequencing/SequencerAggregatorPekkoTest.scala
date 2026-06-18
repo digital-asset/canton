@@ -8,7 +8,7 @@ import cats.implicits.catsSyntaxOptionId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{Fingerprint, Signature}
+import com.digitalasset.canton.crypto.{Fingerprint, Signature, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing, OnShutdownRunner}
@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.client.TestSequencerSubscriptionFactor
 }
 import com.digitalasset.canton.sequencing.client.TestSubscriptionError.UnretryableError
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OrderedBucketMergeHub.{
   ActiveSourceTerminated,
   DeadlockDetected,
@@ -331,9 +332,11 @@ class SequencerAggregatorPekkoTest
         timeouts,
       ) {
         override protected def verifySignature(
-            priorEventO: Option[ProcessingSerializedEvent],
-            event: SequencedSerializedEvent,
+            snapshot: SyncCryptoApi,
+            event: MaybeCompressedSerializedEvent,
             sequencerId: SequencerId,
+        )(implicit
+            traceContext: TraceContext
         ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] =
           EitherTUtil.unitUS
       }

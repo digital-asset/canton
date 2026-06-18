@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-FROM europe-docker.pkg.dev/da-images/public/docker/da-base-image:full-1.0.7@sha256:fb788e6f89eb6f28cee53dfc6c707d2d39aedcbc201d5c0c416e42b3da6f4fcd
+FROM europe-docker.pkg.dev/da-images/public/docker/da-base-image:full-1.0.9@sha256:127e022c310f9cf19399d34f85ab1f7ca5f248330de12c8a56e3cd12037dbcb7
 
 # Create repeatable-migrations directory
 WORKDIR /app/repeatable-migrations
@@ -12,12 +12,6 @@ COPY target/canton .
 COPY LICENSE.txt monitoring.conf parameters.conf storage.conf entrypoint.sh bootstrap-entrypoint.sc tools.sh logback.xml /app/
 
 ARG base_version=latest
-
-LABEL org.opencontainers.image.ref.name=canton-base:${base_version}
-
-# Add label for security scanners, compliance tools, and auditing purposes
-LABEL org.opencontainers.image.base.name="europe-docker.pkg.dev/da-images/public/docker/da-base-image:full-1.0.7"
-LABEL org.opencontainers.image.base.digest="sha256:fb788e6f89eb6f28cee53dfc6c707d2d39aedcbc201d5c0c416e42b3da6f4fcd"
 
 # point entrypoint to the amulet executable
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]

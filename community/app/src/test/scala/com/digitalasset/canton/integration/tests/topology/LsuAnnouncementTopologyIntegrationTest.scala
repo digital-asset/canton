@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.DbConfig
@@ -242,6 +243,7 @@ final class LsuAnnouncementTopologyIntegrationTest
           NonNegativeInt.zero,
           SubmissionRequestAmplification.NoAmplification,
           SequencerConnectionPoolDelays.default,
+          SubscriptionLivenessLimits.default,
         )
       ),
     )

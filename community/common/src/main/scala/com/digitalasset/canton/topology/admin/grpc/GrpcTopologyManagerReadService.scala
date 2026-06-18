@@ -724,13 +724,15 @@ class GrpcTopologyManagerReadService(
   override def exportTopologySnapshot(
       request: ExportTopologySnapshotRequest,
       responseObserver: StreamObserver[ExportTopologySnapshotResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient[ExportTopologySnapshotResponse](
       (out: OutputStream) => getTopologySnapshot(request, out),
       responseObserver,
       byteString => ExportTopologySnapshotResponse(byteString),
       processingTimeout.unbounded.duration,
     )
+  }
 
   private def getTopologySnapshot(
       request: ExportTopologySnapshotRequest,
@@ -759,13 +761,15 @@ class GrpcTopologyManagerReadService(
   override def exportTopologySnapshotV2(
       request: ExportTopologySnapshotV2Request,
       responseObserver: StreamObserver[ExportTopologySnapshotV2Response],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient[ExportTopologySnapshotV2Response](
       (out: OutputStream) => getTopologySnapshotV2(request, out),
       responseObserver,
       byteString => ExportTopologySnapshotV2Response(byteString),
       processingTimeout.unbounded.duration,
     )
+  }
 
   private def getTopologySnapshotV2(
       request: ExportTopologySnapshotV2Request,
@@ -844,13 +848,15 @@ class GrpcTopologyManagerReadService(
   override def genesisState(
       request: GenesisStateRequest,
       responseObserver: StreamObserver[GenesisStateResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => getGenesisState(request.synchronizerStore, request.timestamp, out),
       responseObserver,
       byteString => GenesisStateResponse(byteString),
       processingTimeout.unbounded.duration,
     )
+  }
 
   private def getGenesisState(
       filterSynchronizerStore: Option[StoreId],
@@ -867,12 +873,15 @@ class GrpcTopologyManagerReadService(
   override def genesisStateV2(
       request: GenesisStateV2Request,
       responseObserver: StreamObserver[GenesisStateV2Response],
-  ): Unit = GrpcStreamingUtils.streamToClient(
-    (out: OutputStream) => getGenesisStateV2(request.synchronizerStore, request.timestamp, out),
-    responseObserver,
-    byteString => GenesisStateV2Response(byteString),
-    processingTimeout.unbounded.duration,
-  )
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) => getGenesisStateV2(request.synchronizerStore, request.timestamp, out),
+      responseObserver,
+      byteString => GenesisStateV2Response(byteString),
+      processingTimeout.unbounded.duration,
+    )
+  }
 
   private def getGenesisStateV2(
       filterSynchronizerStore: Option[StoreId],
@@ -949,13 +958,16 @@ class GrpcTopologyManagerReadService(
   override def sequencerLsuState(
       request: SequencerLsuStateRequest,
       responseObserver: StreamObserver[SequencerLsuStateResponse],
-  ): Unit = GrpcStreamingUtils.streamToClient(
-    (out: OutputStream) =>
-      getLogicalUpgradeState(request.synchronizerStore, request.timestamp, out),
-    responseObserver,
-    byteString => SequencerLsuStateResponse(byteString),
-    processingTimeout.unbounded.duration,
-  )
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) =>
+        getLogicalUpgradeState(request.synchronizerStore, request.timestamp, out),
+      responseObserver,
+      byteString => SequencerLsuStateResponse(byteString),
+      processingTimeout.unbounded.duration,
+    )
+  }
 
   private def getLogicalUpgradeState(
       synchronizerStore: Option[StoreId],

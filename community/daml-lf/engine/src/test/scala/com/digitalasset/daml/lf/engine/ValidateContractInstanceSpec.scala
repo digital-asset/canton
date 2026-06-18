@@ -194,10 +194,10 @@ class ValidateContractInstanceSpec
   val cidMapping = Map(cid0 -> cid1).withDefault(identity)
 
   val expectedLegacyHash = Hash
-    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendly = false)
+    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendlyUnsafe = false)
     .value
   val expectedUpgradeFriendlyHash = Hash
-    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendly = true)
+    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendlyUnsafe = true)
     .value
   val expectedTypedNormalFormHash = SValueHash
     .hashContractInstance(
@@ -222,7 +222,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         ("hashingMethod", "expectedHash"),
         (Hash.HashingMethod.Legacy, expectedLegacyHash),
-        (Hash.HashingMethod.UpgradeFriendly, expectedUpgradeFriendlyHash),
+        (Hash.HashingMethod.UpgradeFriendlyUnsafe, expectedUpgradeFriendlyHash),
         (Hash.HashingMethod.TypedNormalForm, expectedTypedNormalFormHash),
       )
 
@@ -259,7 +259,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -293,7 +293,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -319,7 +319,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -345,7 +345,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -371,7 +371,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -397,7 +397,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 

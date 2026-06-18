@@ -49,9 +49,16 @@ trait SequencerParameters {
   *   strictly greater to this value will not be delivered. Important notes:
   *   - SHOULD be set only in disaster recovery scenarios.
   *   - MUST be the same value in all sequencers of a synchronizer
+  * @param disableSubmissionChecksForTesting
+  *   Whether to disable submission checks for testing purposes. This should only be used in tests.
+  * @param disableAggregationRuleSizeCheckForTesting
+  *   Whether to disable the aggregation rule size check for testing purposes. This should only be
+  *   used in tests.
   * @param disableReleaseVersionHandshakeCheck
   *   If set to true, then the sequencer will skip checking that the client binary aligns 100% with
   *   the server binary when the server is running an unstable protocol version.
+  * @param enablePrevalidation
+  *   if true then we will prevalidate signatures in a separate stage before processing
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -63,13 +70,16 @@ final case class SequencerNodeParameters(
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,
+    maxAuthNoncesPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
     delayRequestsBeforeLsuTrafficInit: Boolean,
     disableSubmissionChecksForTesting: Boolean = false,
+    disableAggregationRuleSizeCheckForTesting: Boolean = false,
     lsuConfig: SequencerLsuConfig,
     disableReleaseVersionHandshakeCheck: Boolean = false,
+    enablePrevalidation: Boolean = true,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

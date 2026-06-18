@@ -80,8 +80,8 @@ class ContractStorageBackendTemplate(
   override def supportsBatchKeyStateLookups: Boolean = false
 
   override def contractKey(
-      keyPageQuery: ContractStorageBackend.KeysPageQuery
-  )(connection: Connection): ContractStorageBackend.KeysPageResult = {
+      keyPageQuery: ContractStorageBackend.KeyLookupPageQuery
+  )(connection: Connection): ContractStorageBackend.KeyLookupPageResult = {
     import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
     val eventSeqIdUpperBoundInclusive =
       keyPageQuery.nextPageToken
@@ -108,10 +108,13 @@ class ContractStorageBackendTemplate(
         }
       )(connection)
       .unzip
-    ContractStorageBackend.KeysPageResult(
-      internalContractIds =
+    ContractStorageBackend.KeyLookupPageResult(
+      contractRefs =
         // we asked for limit plus 1
-        internalContractIds.take(keyPageQuery.limit),
+        internalContractIds.take(keyPageQuery.limit).zip(eventSeqIds).map {
+          case (contractId, seqId) =>
+            ContractStorageBackend.ContractRef(contractId, seqId)
+        },
       nextPageToken = Option
         // we asked for one more, so there is only make sense to continue if there is limit+1 results
         // and then the exclusive token should be one above the identified one
@@ -125,9 +128,9 @@ class ContractStorageBackendTemplate(
   }
 
   override def contractKeysPlain(
-      keyPageQueries: Seq[ContractStorageBackend.KeysPageQuery],
+      keyPageQueries: Seq[ContractStorageBackend.KeyLookupPageQuery],
       validAtEventSeqId: Long,
-  )(connection: Connection): Seq[ContractStorageBackend.KeysPageResult] =
+  )(connection: Connection): Seq[ContractStorageBackend.KeyLookupPageResult] =
     keyPageQueries.map(query =>
       contractKey(query.copy(validAtEventSeqId = validAtEventSeqId))(connection)
     )

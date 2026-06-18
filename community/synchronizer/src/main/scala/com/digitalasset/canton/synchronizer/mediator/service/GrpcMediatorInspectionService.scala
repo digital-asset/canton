@@ -20,7 +20,7 @@ import com.digitalasset.canton.synchronizer.mediator.store.FinalizedResponseStor
 import com.digitalasset.canton.synchronizer.mediator.{FinalizedResponse, Mediator}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureUtil
-import io.grpc.Status
+import com.digitalasset.canton.util.GrpcStreamingUtils.withServerCallStreamObserver
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
@@ -273,6 +273,7 @@ class GrpcMediatorInspectionService(
             request @ InformeeMessage(fullInformeeTree, _),
             finalizationTime,
             verdict,
+            _,
           ) =>
         val (flattened, rootNodes) = flattenForrest[TransactionView, mediatorV30.TransactionView](
           fullInformeeTree.tree.rootViews.unblindedElements,
@@ -314,26 +315,6 @@ class GrpcMediatorInspectionService(
       viewHash = view.viewHash.toRootHash.getCryptographicEvidence,
     )
   }
-
-  /** Ensure observer is a ServerCallStreamObserver
-    *
-    * @param observer
-    *   underlying observer
-    * @param handler
-    *   handler requiring a ServerCallStreamObserver
-    */
-  private def withServerCallStreamObserver[R](
-      observer: StreamObserver[R]
-  )(handler: ServerCallStreamObserver[R] => Unit)(implicit traceContext: TraceContext): Unit =
-    observer match {
-      case serverCallStreamObserver: ServerCallStreamObserver[R] =>
-        handler(serverCallStreamObserver)
-      case _ =>
-        val statusException =
-          Status.INTERNAL.withDescription("Unknown stream observer request").asException()
-        logger.warn(statusException.getMessage)
-        observer.onError(statusException)
-    }
 
 }
 

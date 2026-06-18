@@ -315,6 +315,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       delayRequestsBeforeLsuTrafficInit = false,
       disableSubmissionChecksForTesting = disableSubmissionChecksForTesting,
       lsuConfig = SequencerLsuConfig(),
+      enablePrevalidation = true,
     )
     // Important to create the histograms before the factory, because creating the factory will
     // register them once and for all and we can't add more afterwards
@@ -1320,6 +1321,7 @@ object ReferenceSequencerWithTrafficControlApiTestBase {
         trafficConfig,
         sequencerMemberRateLimiterFactory,
         eventCostCalculator,
+        lsuSequencingBounds = None,
       ) {
     private val isWriteSideEnforcementDisabled = new AtomicBoolean(false)
     private val readValidationResponse = new AtomicReference[

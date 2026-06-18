@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import com.digitalasset.canton.sequencing.SequencedEventHandler
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{Future, Promise}
@@ -22,9 +22,9 @@ class HasReceivedEvent {
   * processed)
   */
 object HasReceivedEvent {
-  def apply[E](
-      handler: SequencedEventHandler[E]
-  ): (HasReceivedEvent, SequencedEventHandler[E]) = {
+  def apply[E, Event](
+      handler: Event => FutureUnlessShutdown[Either[E, Unit]]
+  ): (HasReceivedEvent, Event => FutureUnlessShutdown[Either[E, Unit]]) = {
     val hasReceivedEvent = new HasReceivedEvent
 
     (
