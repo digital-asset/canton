@@ -520,6 +520,17 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         output = data.Bytes.fromByteString(resultProto.getOutput),
       )
 
+    private[this] def decodeExternalCallResult(
+        resultProto: proto.ExternalCallResult
+    ): ExternalCallResult =
+      ExternalCallResult(
+        extensionId = resultProto.getExtensionId,
+        functionId = resultProto.getFunctionId,
+        config = data.Bytes.fromByteString(resultProto.getConfig),
+        input = data.Bytes.fromByteString(resultProto.getInput),
+        output = data.Bytes.fromByteString(resultProto.getOutput),
+      )
+
     private[this] def decodeExercise(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
