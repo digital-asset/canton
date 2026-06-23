@@ -75,6 +75,8 @@ object KmsConfig {
     *   used if non-standard-config is enabled.
     * @param endpointOverride
     *   the [optional] endpoint for a proxy to be used by the KMS client.
+    * @param customTags
+    *   custom tags to attach to AWS KMS keys created by Canton.
     */
   final case class Aws(
       region: String,
@@ -83,6 +85,7 @@ object KmsConfig {
       override val retries: RetryConfig = RetryConfig(),
       disableSslVerification: Boolean = false,
       endpointOverride: Option[String] = None,
+      customTags: Map[String, String] = Map.empty,
   ) extends KmsConfig
 
   object Aws {
