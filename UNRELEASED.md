@@ -27,7 +27,6 @@ reassignments in the store, taking roughly 1 second per 10,000 reassignments.
 
 
 ### Minor Improvements
--
 - The concurrency limit interceptor `ActiveRequestInterceptor` now caches rejection responses instead of generating a new error (and thereby filling the stack trace) for each
 rejected response, once the concurrency limit is filled.
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
@@ -45,24 +44,27 @@ rejected response, once the concurrency limit is filled.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 - *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
-- *BREAKING*: The submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also be returned during
-  the synchronous submission of the sequencer, as the state of the aggregation is also checked before ordering. In
-  addition, the GRPC error code has been modified from `FAILED_PRECONDITION` to `ALREADY_EXISTS` to better reflect the
-  nature of the error. Clients should be updated to handle this error code accordingly.
+- Connection pool metrics:
+  - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
+  - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
+- Updated com.google.protobuf libs from 3.25.5 --> 3.25.9
+- A call to `AcknowledgeSigned` with a timestamp before the upgrade time returns immediately, without any acknowledgement being done.
+- (Potentially) *BREAKING*: Aggregatable submissions are now rejected eagerly to preserve bandwidth.
+  This means that the submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also
+  be returned during the synchronous submission of the sequencer, as the state of the aggregation is also
+  checked before ordering. In addition, the GRPC error code has been modified from `FAILED_PRECONDITION` to
+  `ALREADY_EXISTS` to better reflect the nature of the error. Clients should be updated to handle this error
+  code accordingly. Due to backwards compatibility, the old GRPC error code will be returned for PV35 and
+  before on the async path, and the new capability must only be turned on when all nodes have been
+  upgraded to a Canton version that supports this change. The new capability can be enabled using `canton.sequencers.seq.parameters.enable-reject-delivered-aggregations-on-pv-35 = MED`
+  for mediators. This can be combined with the new configuration option of the mediator `canton.mediators.mymediator.parameters.delayed-verdict-sender.enabled = true`.
+  Generally, the sequencer will send out the verdict after reaching the threshold. All subsequent sent verdicts are thrown away. The new option now allows threshold + extra verdicts to be sent immediately, while the rest of the mediators will wait a short amount of time. This allows to reduce the load on the sequencer by 30%, creating more capacity for other transactions.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
 
-- Fixed a bug in the sequencer node bootstrap workflow method `initSequencerNodeServer` to ensure that `maxRequestSize` is
-computed and applied correctly during node initialization, based on the configuration or a topology transaction,
-with a fallback default value of 10 MB.
-- When the AcsCommitmentProcessor is initializing, read stakeholder groups from the snapshot in batches of size
-  `canton.parameters.general.batching.max-stakeholder-groups-batch-size` (default 1000), rather than all at once.
-  This allows early termination of this initialization if the node is shutting down.
-
-### (YY-nnn, Severity): Title
 
 #### Issue Description
 
@@ -81,6 +83,7 @@ with a fallback default value of 10 MB.
 #### Recommendation
 
 ## Deprecations
+- `StaticSynchronizerParameters.defaultsWithoutKMS` has been deprecated in favor of `StaticSynchronizerParameters.defaults`. Supported cryptographic schemes now have parity between KMS and non-KMS configurations.
 
 ### Reminder: Support for scope-based access tokens will be removed in version 3.7.
 - "Scope-based" access tokens, i.e. JWTs without any audience specified, have been deprecated in version 3.5.

@@ -13,7 +13,7 @@ Canton Network Documentation Snippets: Troubleshooting Guide Transaction Failure
 .. are executed by SphinxDocumentationGenerator integration tests.
 
 .. snippet:: cn_global_synchronizer_troubleshooting_guide_transaction_failures
-    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "da")
     .. success:: participant1.parties.list()
 

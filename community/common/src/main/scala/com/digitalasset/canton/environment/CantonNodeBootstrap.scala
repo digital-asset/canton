@@ -1270,6 +1270,7 @@ abstract class CantonNodeBootstrapImpl[
           mapping,
           serial = None,
           keys,
+          namespacesToSignFor = Seq.empty,
           protocolVersion,
           expectFullAuthorization = true,
           waitToBecomeEffective = None,

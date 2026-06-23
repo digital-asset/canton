@@ -4,8 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.speedy.Speedy.{Control, Machine}
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.speedy.Speedy.{Control, Machine}
 
 import scala.collection.mutable
 
@@ -38,7 +38,7 @@ private[speedy] object Classify { // classify the machine state w.r.t what step 
     }
   }
 
-  def classifyMachine(machine: Machine[_], counts: Counts): Unit = {
+  def classifyMachine(machine: Machine[?], counts: Counts): Unit =
     machine.currentControl match {
       case Control.Value(_) =>
         // classify a value by the continuation it is about to return to
@@ -49,5 +49,4 @@ private[speedy] object Classify { // classify the machine state w.r.t what step 
         counts.addExpr(expr)
       case _ => ()
     }
-  }
 }

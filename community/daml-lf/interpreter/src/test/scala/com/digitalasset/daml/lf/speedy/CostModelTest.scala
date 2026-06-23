@@ -4,8 +4,8 @@
 package com.digitalasset.daml
 package lf
 
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.Party
-import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.speedy.CostModel.CostModelV0
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.value.test.ValueGenerators
@@ -23,7 +23,7 @@ import scala.reflect.ClassTag
 
 class CostModelV0Test extends AnyWordSpec with Matchers with ScalaCheckPropertyChecks {
 
-  import CostModelTest._
+  import CostModelTest.*
 
   def test[T](
       name: String,
@@ -43,7 +43,7 @@ class CostModelV0Test extends AnyWordSpec with Matchers with ScalaCheckPropertyC
         val s = compare(shallowFootprint, approximativeShallowSize)
         if (verbose) {
           println(
-            s"Sized: ${name}, actualShallowSize: $shallowFootprint, approximativeShallowSize: $approximativeShallowSize ($s), ${compare(shallowFootprint, approximativeShallowSize)}, x=`${x.toString
+            s"Sized: $name, actualShallowSize: $shallowFootprint, approximativeShallowSize: $approximativeShallowSize ($s), ${compare(shallowFootprint, approximativeShallowSize)}, x=`${x.toString
                 .take(60)}`"
           )
           println(classLayout(x))
@@ -119,7 +119,7 @@ class CostModelV0Test extends AnyWordSpec with Matchers with ScalaCheckPropertyC
 
 object CostModelTest {
 
-  import Sized._
+  import Sized.*
 
   def graphLayout(x: Any) =
     org.openjdk.jol.info.GraphLayout.parseInstance(x).toFootprint
@@ -216,7 +216,7 @@ abstract class Sized[T] {
 
 object Sized {
 
-  import CostModelTest._
+  import CostModelTest.*
 
   def footprint(x: Any): Long = {
     val f1 = Footprint.footprint(x)
@@ -389,12 +389,11 @@ object Sized {
         }.sum +
         corrections.map(Sized.footprint).sum
 
-    final override def shallowFootprint(x: T): Long = {
+    final override def shallowFootprint(x: T): Long =
       Sized.footprint(x) -
         (corrections ++ elements(x).flatMap { case (x, y) => List[Any](x, y) })
           .map(Sized.footprint)
           .sum
-    }
 
     final override def approximateShallowFootprint(x: T): Long =
       approximateShallowFootprint(size(x))
@@ -531,10 +530,9 @@ object Sized {
       override def approximateShallowFootprint(n: Int): Long =
         CostModelV0.FrontStackSize.calculate(n)
 
-      override def fromList(as: List[A]): FrontStack[A] = {
+      override def fromList(as: List[A]): FrontStack[A] =
         // Worth case for building a Fronstack
         as.foldRight(FrontStack.empty[A])((x, acc) => ImmArray(x) ++: acc)
-      }
     }
 
   implicit val SizedBytes: SizedVariableLengthAtom[Bytes] =
@@ -685,13 +683,11 @@ object Sized {
       values <- Gen.listOfN(m, SizedSValue.gen(n))
     } yield SValue.SRecord(id, fields.to(ImmArray), values.to(ArraySeq))
 
-    override def shallowFootprint(x: SValue.SRecord): Long = {
+    override def shallowFootprint(x: SValue.SRecord): Long =
       Sized.footprint(x) -
         Sized.footprint(x.id) - // we do not charge for the identifier
         Sized.footprint(x.fields) - // we do not charged for the field names
         x.values.view.map(Sized.footprint).sum
-
-    }
 
     override def approximateShallowFootprint(x: SValue.SRecord): Long =
       CostModelV0.SRecordWrapperSize.calculate(x.values.size)
@@ -786,7 +782,7 @@ object Footprint {
     val vm = org.openjdk.jol.vm.VM.current()
 
     @scala.annotation.tailrec
-    def loop(stack: List[(Any, IdentitySet)], acc0: Long): Long = {
+    def loop(stack: List[(Any, IdentitySet)], acc0: Long): Long =
       stack match {
         case (x, seen0) :: tail =>
           x match {
@@ -794,7 +790,7 @@ object Footprint {
               val acc = acc0 + vm.sizeOf(x)
 
               val nexts = x match {
-                case arr: Array[_] if !arr.getClass.getComponentType.isPrimitive =>
+                case arr: Array[?] if !arr.getClass.getComponentType.isPrimitive =>
                   arr.view.collect { case a: AnyRef => a }
                 case otherwise: AnyRef =>
                   val clazz = otherwise.getClass
@@ -815,7 +811,6 @@ object Footprint {
           }
         case Nil => acc0
       }
-    }
 
     loop(List(x -> IdentitySet.Empty), 0L)
   }

@@ -9,7 +9,7 @@ import scala.annotation.nowarn
 object Util {
 
   import value.Value
-  import value.Value._
+  import value.Value.*
 
   // Equivalent to serialization + unserialization.
   // Fails if :

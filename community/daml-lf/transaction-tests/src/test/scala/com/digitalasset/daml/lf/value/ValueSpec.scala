@@ -4,16 +4,17 @@
 package com.digitalasset.daml.lf
 package value
 
-import data.{Bytes, Time}
-import Value._
 import com.digitalasset.daml.lf.value.test.ValueGenerators
-import test.ValueGenerators.coidGen
 import org.scalacheck.Arbitrary
 import org.scalatest.Inside
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.{Checkers, ScalaCheckPropertyChecks}
-import scalaz.scalacheck.{ScalazProperties => SzP}
+import scalaz.scalacheck.ScalazProperties as SzP
+
+import data.{Bytes, Time}
+import Value.*
+import test.ValueGenerators.coidGen
 
 class ValueSpec
     extends AnyFreeSpec
@@ -101,7 +102,7 @@ class ValueSpec
 
   // XXX can factor like FlatSpecCheckLaws
   private def checkLaws(props: org.scalacheck.Properties) =
-    forEvery(Table(("law", "property"), props.properties.toSeq: _*)) { (_, p) =>
+    forEvery(Table(("law", "property"), props.properties.toSeq*)) { (_, p) =>
       check(p, minSuccessful(20))
     }
 }

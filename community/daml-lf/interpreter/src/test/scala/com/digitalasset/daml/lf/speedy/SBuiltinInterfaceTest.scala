@@ -4,8 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast.*

@@ -18,6 +18,7 @@ object PruningDto {
 
   final case class TxMeta(offset: Long)
   final case class Completion(offset: Long)
+  final case class AcsCommitment(offset: Long)
 
 }
 class PruningDtoQueries {
@@ -60,5 +61,9 @@ class PruningDtoQueries {
   def completions(implicit c: Connection): Seq[Completion] =
     SQL"SELECT completion_offset AS ledger_offset FROM lapi_command_completions ORDER BY completion_offset"
       .asVectorOf(offsetParser(Completion.apply))(c)
+
+  def acsCommitments(implicit c: Connection): Seq[AcsCommitment] =
+    SQL"SELECT event_offset AS ledger_offset FROM lapi_events_acs_commitments ORDER BY event_offset"
+      .asVectorOf(offsetParser(AcsCommitment.apply))(c)
 
 }

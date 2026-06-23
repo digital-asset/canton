@@ -36,7 +36,7 @@ val iouId = bootstrap.synchronizer(
   synchronizerOwners = synchronizerOwners,
   synchronizerThreshold = PositiveInt.two,
   staticSynchronizerParameters =
-    StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+    StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 val active_participant = findActive(participant_a, participant_b)

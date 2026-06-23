@@ -62,7 +62,6 @@ import org.scalatest.Assertion
 
 import java.util.UUID
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 
 import ActiveContractsIntegrationTestBase.*
@@ -93,7 +92,6 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
     EnvironmentDefinition.P2_S1M1_S1M1_S1M1
       .addConfigTransforms(
         // Ensure reassignments are not tripped up by some participants being a little behind.
-        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.enableAllLedgerApiReassignments)
             .replace(enableAllLedgerApiReassignments)

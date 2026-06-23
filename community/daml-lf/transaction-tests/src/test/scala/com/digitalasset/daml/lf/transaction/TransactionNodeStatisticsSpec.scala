@@ -4,9 +4,9 @@
 package com.digitalasset.daml.lf
 package transaction
 
+import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics.Actions
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey.NoKey
-import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics.Actions
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestIdFactory,
@@ -60,7 +60,7 @@ class TransactionNodeStatisticsSpec
 
   "TransactionNodeStatistics" should {
 
-    def create(b: TxBuilder, withKey: Boolean = false) = {
+    def create(b: TxBuilder, withKey: Boolean = false) =
       b.create(
         id = b.newCid,
         packageName = b.newPackageName,
@@ -76,7 +76,6 @@ class TransactionNodeStatisticsSpec
             )
           else NoKey,
       )
-    }
 
     def exe(consuming: Boolean, byKey: Boolean)(b: TxBuilder) = {
       val c = create(b, byKey)
@@ -201,7 +200,7 @@ class TransactionNodeStatisticsSpec
       forEvery(testCases) { (makeNode, _) =>
         val builder = new TxBuilder()
         val node = makeNode(builder)
-        val excludedPackageIds = Set(node).collect({ case a: Node.Action => a.packageIds }).flatten
+        val excludedPackageIds = Set(node).collect { case a: Node.Action => a.packageIds }.flatten
         builder.add(node)
         TransactionNodeStatistics(
           builder.build(),
@@ -216,7 +215,7 @@ class TransactionNodeStatisticsSpec
         val nonExcludedNode = makeNode(builder)
         val excludedNode = makeNode(builder)
         val excludedPackageIds =
-          Set(excludedNode).collect({ case a: Node.Action => a.packageIds }).flatten
+          Set(excludedNode).collect { case a: Node.Action => a.packageIds }.flatten
         builder.add(nonExcludedNode)
         builder.add(excludedNode)
         TransactionNodeStatistics(

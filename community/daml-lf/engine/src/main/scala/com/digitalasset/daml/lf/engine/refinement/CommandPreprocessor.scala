@@ -5,14 +5,14 @@ package com.digitalasset.daml.lf
 package engine
 package refinement
 
-import com.digitalasset.daml.lf.data.Ref.PackageRef
-import com.digitalasset.daml.lf.data.*
-import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.value.Value
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.command.ApiContractKey
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.PackageRef
+import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction.{GlobalKey, MaxContractKeyFetches}
+import com.digitalasset.daml.lf.value.Value
 
 private[lf] final class CommandPreprocessor(
     pkgInterface: language.PackageInterface,

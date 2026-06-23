@@ -50,6 +50,10 @@ final case class AsyncWriterConfig(
   *   Configures behavior of sendAsync requests until the traffic is initialized during LSU: If
   *   true, the sequencer will delay processing of the requests. If false, the sequencer will
   *   synchronously reject the requests with an error.
+  * @param enableRejectDeliveredAggregationsOnPv35
+  *   No effect on pv34. On pv36 enabled for all node types. On pv35, the sequencer will reject
+  *   aggregations that have already been completed eagerly for all configured member types, default
+  *   is MED.
   * @param disableSubmissionChecksForTesting
   *   If true, disable checks on the write path of the sequencer in order to allow testing the same
   *   checks on the post-processing path (malicious sequencer node tests). Only to be used for
@@ -82,6 +86,7 @@ final case class SequencerNodeParameterConfig(
     lsuRepair: LsuRepair = LsuRepair(),
     lsu: SequencerLsuConfig = SequencerLsuConfig(),
     delayRequestsBeforeLsuTrafficInit: Boolean = false,
+    enableRejectDeliveredAggregationsOnPv35: Seq[String] = Seq("MED"),
     disableSubmissionChecksForTesting: Boolean = false,
     disableAggregationRuleSizeCheckForTesting: Boolean = false,
     disableReleaseVersionHandshakeCheck: Boolean = false,

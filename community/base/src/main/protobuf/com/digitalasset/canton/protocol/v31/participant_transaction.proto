@@ -132,3 +132,10 @@ message EncryptedMultipleViewsMessage {
   string physical_synchronizer_id = 6;
   v30.ViewType view_type = 7;
 }
+
+// Compared to v30: rolled_back removed
+message CreatedContract {
+  bytes contract = 1; // Encoded ContractInstance
+  bool consumed_in_core = 2;
+  reserved 3; // was rolled_back
+}

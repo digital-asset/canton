@@ -4,11 +4,11 @@
 package com.digitalasset.daml.lf
 package transaction
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.transaction.TransactionError as TxErr
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.transaction.{TransactionError => TxErr}
 
 import scala.annotation.tailrec
 import scala.collection.immutable.HashMap
@@ -35,15 +35,17 @@ final case class VersionedTransaction private[digitalasset] (
 
 /** General transaction type
   *
-  * Abstracts over NodeId type and ContractId type
-  * ContractId restricts the occurrence of contractIds
+  * Abstracts over NodeId type and ContractId type ContractId restricts the occurrence of
+  * contractIds
   *
-  * @param nodes The nodes of this transaction.
-  * @param roots References to the root nodes of the transaction.
+  * @param nodes
+  *   The nodes of this transaction.
+  * @param roots
+  *   References to the root nodes of the transaction.
   *
   * Users of this class may assume that all instances are well-formed, i.e., `isWellFormed.isEmpty`.
-  * For performance reasons, users are not required to call `isWellFormed`.
-  * Therefore, it is '''forbidden''' to create ill-formed instances, i.e., instances with `!isWellFormed.isEmpty`.
+  * For performance reasons, users are not required to call `isWellFormed`. Therefore, it is
+  * '''forbidden''' to create ill-formed instances, i.e., instances with `!isWellFormed.isEmpty`.
   */
 final case class Transaction(
     nodes: Map[NodeId, Node],
@@ -51,17 +53,17 @@ final case class Transaction(
 ) extends HasTxNodes[Transaction]
     with value.CidContainer[Transaction] {
 
-  import Transaction._
+  import Transaction.*
 
   override protected def updated(nodes: Map[NodeId, Node], roots: ImmArray[NodeId]): Transaction =
     Transaction(nodes, roots)
 
   /** This function checks the following properties:
     *
-    * * No dangling references -- all node ids mentioned in the forest are in the nodes map;
-    * * No orphaned references -- all keys of the node map are mentioned in the forest;
-    * * No aliasing -- every node id in the node map is mentioned exactly once, in the roots list or as a child of
-    *   another node.
+    * * No dangling references -- all node ids mentioned in the forest are in the nodes map; * No
+    * orphaned references -- all keys of the node map are mentioned in the forest; * No aliasing --
+    * every node id in the node map is mentioned exactly once, in the roots list or as a child of
+    * another node.
     */
   def isWellFormed: Set[NotWellFormedError] = {
     // note that we cannot implement this with fold because fold itself crashes on bad
@@ -116,14 +118,14 @@ final case class Transaction(
     errors ++ orphaned
   }
 
-  /** Compares two Transactions up to renaming of Nids. You most likely want to use this rather than ==, since the
-    * Nid is irrelevant to the content of the transaction.
+  /** Compares two Transactions up to renaming of Nids. You most likely want to use this rather than
+    * \==, since the Nid is irrelevant to the content of the transaction.
     */
   def equalForest(other: Transaction): Boolean =
     compareForest(other)(_ == _)
 
-  /** Compares two Transactions up to renaming of Nids. with the specified comparision of nodes
-    * Nid is irrelevant to the content of the transaction.
+  /** Compares two Transactions up to renaming of Nids. with the specified comparision of nodes Nid
+    * is irrelevant to the content of the transaction.
     */
   def compareForest(other: Transaction)(
       compare: (Node, Node) => Boolean
@@ -188,7 +190,7 @@ final case class Transaction(
   }
 
   /** checks that all the values contained are serializable */
-  def serializable(f: Value => ImmArray[String]): ImmArray[String] = {
+  def serializable(f: Value => ImmArray[String]): ImmArray[String] =
     fold(BackStack.empty[String]) { case (errs, (_, node)) =>
       node match {
         case Node.Rollback(_) =>
@@ -203,7 +205,6 @@ final case class Transaction(
         case nlbk: Node.QueryByKey => errs :++ f(nlbk.gkey.key)
       }
     }.toImmArray
-  }
 
   /** Visit every `Val`. */
   def foldValues[Z](z: Z)(f: (Z, Value) => Z): Z =
@@ -278,7 +279,8 @@ sealed abstract class HasTxNodes[Tx] {
       }
     )
 
-  /** This function traverses the transaction tree in pre-order traversal (i.e. exercise node are traversed before their children).
+  /** This function traverses the transaction tree in pre-order traversal (i.e. exercise node are
+    * traversed before their children).
     *
     * Takes constant stack space. Crashes if the transaction is not well formed (see `isWellFormed`)
     */
@@ -300,7 +302,8 @@ sealed abstract class HasTxNodes[Tx] {
     go(roots.toFrontStack)
   }
 
-  /** Traverses the transaction tree in pre-order traversal (i.e. exercise nodes are traversed before their children)
+  /** Traverses the transaction tree in pre-order traversal (i.e. exercise nodes are traversed
+    * before their children)
     *
     * Takes constant stack space. Crashes if the transaction is not well formed (see `isWellFormed`)
     */
@@ -310,11 +313,10 @@ sealed abstract class HasTxNodes[Tx] {
     acc
   }
 
-  /** A fold over the transaction that maintains global and path-specific state.
-    * Takes constant stack space. Returns the global state.
+  /** A fold over the transaction that maintains global and path-specific state. Takes constant
+    * stack space. Returns the global state.
     *
-    * Used to for example compute the roots of per-party projections from the
-    * transaction.
+    * Used to for example compute the roots of per-party projections from the transaction.
     */
   final def foldWithPathState[A, B](globalState0: A, pathState0: B)(
       op: (A, B, NodeId, Node) => (A, B)
@@ -341,18 +343,15 @@ sealed abstract class HasTxNodes[Tx] {
     globalState
   }
 
-  lazy val localContractIds: Set[ContractId] = {
+  lazy val localContractIds: Set[ContractId] =
     fold(Set.empty[ContractId]) {
       case (acc, (_, create: Node.Create)) =>
         acc + create.coid
       case (acc, _) => acc
     }
-  }
 
-
-  /** Returns the IDs of all the consumed contracts.
-    * This includes transient contracts but it does not include contracts
-    * consumed in rollback nodes.
+  /** Returns the IDs of all the consumed contracts. This includes transient contracts but it does
+    * not include contracts consumed in rollback nodes.
     */
   final def consumedContracts[Cid2 >: ContractId]: Set[Cid2] =
     foldInExecutionOrder(Set.empty[Cid2])(
@@ -366,9 +365,8 @@ sealed abstract class HasTxNodes[Tx] {
       rollbackEnd = (acc, _, _) => acc,
     )
 
-  /** Local and global contracts that are inactive at the end of the transaction.
-    * This includes both contracts that have been arachived and local
-    * contracts whose create has been rolled back.
+  /** Local and global contracts that are inactive at the end of the transaction. This includes both
+    * contracts that have been arachived and local contracts whose create has been rolled back.
     */
   final def inactiveContracts[Cid2 >: ContractId]: Set[Cid2] = {
     final case class LedgerState(
@@ -436,36 +434,36 @@ sealed abstract class HasTxNodes[Tx] {
 
   /** Returns the IDs of all input contracts that are used by this transaction.
     */
-  final def inputContracts[Cid2 >: ContractId]: Set[Cid2] = {
-
+  final def inputContracts[Cid2 >: ContractId]: Set[Cid2] =
     fold(Set.empty[Cid2]) {
-      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) if !localContractIds.contains(coid)=>
+      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _)))
+          if !localContractIds.contains(coid) =>
         acc + coid
-      case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _)))  if !localContractIds.contains(coid)=>
+      case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _)))
+          if !localContractIds.contains(coid) =>
         acc + coid
-      case (acc, (_, Node.QueryByKey(_, _, _, _, result, _)))  =>
+      case (acc, (_, Node.QueryByKey(_, _, _, _, result, _))) =>
         acc ++ result.filterNot(localContractIds.contains)
       case (acc, _) => acc
     }
-  }
 
-  /** Return all the contract keys referenced by this transaction.
-    * This includes the keys created, exercised, fetched, or looked up, even those
-    * that refer transient contracts or that appear under a rollback node.
+  /** Return all the contract keys referenced by this transaction. This includes the keys created,
+    * exercised, fetched, or looked up, even those that refer transient contracts or that appear
+    * under a rollback node.
     */
-  final def contractKeys: Set[GlobalKey] = {
+  final def contractKeys: Set[GlobalKey] =
     fold(Set.empty[GlobalKey]) {
       case (acc, (_, node: Node.Action)) =>
         node.gkeyOpt.fold(acc)(acc + _)
       case (acc, (_, (_: Node.Rollback))) =>
         acc
     }
-  }
 
-  /** Keys are contracts (that have been consumed) and values are the nodes where the contract was consumed.
-    * Nodes under rollbacks (both exercises and creates) are ignored (as they have been rolled back).
-    * The result includes both local contracts created in the transaction (if they’ve been consumed) as well as global
-    * contracts created in previous transactions. It does not include local contracts created under a rollback.
+  /** Keys are contracts (that have been consumed) and values are the nodes where the contract was
+    * consumed. Nodes under rollbacks (both exercises and creates) are ignored (as they have been
+    * rolled back). The result includes both local contracts created in the transaction (if they’ve
+    * been consumed) as well as global contracts created in previous transactions. It does not
+    * include local contracts created under a rollback.
     */
   final def consumedBy: Map[ContractId, NodeId] =
     foldInExecutionOrder[Map[ContractId, NodeId]](HashMap.empty)(
@@ -484,24 +482,21 @@ sealed abstract class HasTxNodes[Tx] {
       rollbackEnd = (consumedByMap, _, _) => consumedByMap,
     )
 
-  /** Return the expected contract key inputs (i.e. the state before the transaction)
-    * for this transaction or an error if the transaction contains a
-    * duplicate key error or has an inconsistent mapping for a key. For
-    * KeyCreate and NegativeKeyLookup (both corresponding to the key not being active)
-    * the first required input in execution order wins. So if a create comes first
-    * the input will be set to KeyCreate, if a negative lookup by key comes first
-    * the input will be set to NegativeKeyLookup.
+  /** Return the expected contract key inputs (i.e. the state before the transaction) for this
+    * transaction or an error if the transaction contains a duplicate key error or has an
+    * inconsistent mapping for a key. For KeyCreate and NegativeKeyLookup (both corresponding to the
+    * key not being active) the first required input in execution order wins. So if a create comes
+    * first the input will be set to KeyCreate, if a negative lookup by key comes first the input
+    * will be set to NegativeKeyLookup.
     *
-    * Because we do not preserve byKey flags across transaction serialization
-    * this method will consider all operations with keys for conflicts
-    * rather than just by-key operations.
+    * Because we do not preserve byKey flags across transaction serialization this method will
+    * consider all operations with keys for conflicts rather than just by-key operations.
     */
   @throws[IllegalArgumentException](
     "If a contract key contains a contract id"
   )
   def contractKeyInputs: Either[TxErr, Map[GlobalKey, KeyMapping]] =
     contractStateMachine.map(_.keyInputs)
-
 
   @throws[IllegalArgumentException](
     "If a contract key contains a contract id"
@@ -515,32 +510,31 @@ sealed abstract class HasTxNodes[Tx] {
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),
-      exerciseEnd = (acc, _, _) =>
-        acc,
+      exerciseEnd = (acc, _, _) => acc,
       rollbackBegin =
         (acc, _, _) => (acc.map(_.beginRollback), Transaction.ChildrenRecursion.DoRecurse),
-      rollbackEnd = (acc, _, _) =>
-        acc.flatMap(_.endRollback.left.map(TxErr.EffectfulRollback(_))),
+      rollbackEnd = (acc, _, _) => acc.flatMap(_.endRollback.left.map(TxErr.EffectfulRollback(_))),
       leaf = (acc, nid, leaf) =>
         acc.flatMap(
           _.handleNode(nid, leaf)
         ), // ok to use None as keyInput, because mode is strict
     )
 
-
-
-  /** The contract keys created or consumed as part of the transaction.
-    *  For each key, a vector of Contract IDs created and removed is returned
-    *  For a transient key (created and consumed within this TX), the CID will not be present in either vector
+  /** The contract keys created or consumed as part of the transaction. For each key, a vector of
+    * Contract IDs created and removed is returned For a transient key (created and consumed within
+    * this TX), the CID will not be present in either vector
     */
-  final def updatedContractKeys: Map[GlobalKey, ContractKeyUpdate] = {
+  final def updatedContractKeys: Map[GlobalKey, ContractKeyUpdate] =
     foldInExecutionOrder(Map.empty[GlobalKey, ContractKeyUpdate])(
       exerciseBegin = {
         case (acc, _, exec) if exec.consuming =>
           (
             exec.gkeyOpt.fold(acc)(acc.updatedWith(_) {
-              case Some(ContractKeyUpdate(created, consumed)) if created.contains(exec.targetCoid) => Some(ContractKeyUpdate(created.filterNot(_==exec.targetCoid), consumed))
-              case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(created, consumed + exec.targetCoid))
+              case Some(ContractKeyUpdate(created, consumed))
+                  if created.contains(exec.targetCoid) =>
+                Some(ContractKeyUpdate(created.filterNot(_ == exec.targetCoid), consumed))
+              case Some(ContractKeyUpdate(created, consumed)) =>
+                Some(ContractKeyUpdate(created, consumed + exec.targetCoid))
               case None => Some(ContractKeyUpdate(Vector.empty, Set(exec.targetCoid)))
             }),
             ChildrenRecursion.DoRecurse,
@@ -552,14 +546,14 @@ sealed abstract class HasTxNodes[Tx] {
         case (acc, _, create: Node.Create) =>
           create.gkeyOpt.fold(acc)(acc.updatedWith(_) {
             case None => Some(ContractKeyUpdate(Vector(create.coid), Set.empty))
-            case Some(ContractKeyUpdate(created, consumed)) => Some(ContractKeyUpdate(create.coid +: created, consumed))
+            case Some(ContractKeyUpdate(created, consumed)) =>
+              Some(ContractKeyUpdate(create.coid +: created, consumed))
           })
         case (acc, _, _: Node.Fetch | _: Node.QueryByKey) => acc
       },
       exerciseEnd = (acc, _, _) => acc,
       rollbackEnd = (acc, _, _) => acc,
     ).filterNot(_._2.isEmpty)
-  }
 
   // This method visits to all nodes of the transaction in execution order.
   // Exercise/rollback nodes are visited twice: when execution reaches them and when execution leaves their body.
@@ -649,7 +643,7 @@ sealed abstract class HasTxNodes[Tx] {
   }
 
   // This method returns all node-ids reachable from the roots of a transaction.
-  final def reachableNodeIds: Set[NodeId] = {
+  final def reachableNodeIds: Set[NodeId] =
     foldInExecutionOrder[Set[NodeId]](Set.empty)(
       exerciseBegin = (acc, nid, _) => (acc + nid, ChildrenRecursion.DoRecurse),
       rollbackBegin = (acc, nid, _) => (acc + nid, ChildrenRecursion.DoRecurse),
@@ -657,7 +651,6 @@ sealed abstract class HasTxNodes[Tx] {
       exerciseEnd = (acc, _, _) => acc,
       rollbackEnd = (acc, _, _) => acc,
     )
-  }
 
   final def guessSubmitter: Either[String, Party] =
     rootNodes.map(_.requiredAuthorizers).toFrontStack.pop match {
@@ -693,18 +686,25 @@ object Transaction {
 
   /** Transaction meta data
     *
-    * @param submissionSeed   Populated with the submission seed when returned from [[com.digitalasset.daml.lf.engine.Engine.submit]].
-    * @param preparationTime  The preparation time
-    * @param usedPackages     The set of all packages that are needed for the interpretation of the command. This
-    *                         is done by first by establishing all the packages directly associated with action nodes
-    *                         in the transaction (by calling [[Node.Action.packageIds]]). The [[usedPackages]] will then
-    *                         be this set of packages combined with all packages on which there is a transitive
-    *                         dependency (for details see deps in [[com.digitalasset.daml.lf.engine.Engine]]).
-    * @param timeBoundery     Indicates that the transaction computation is valid for ledger times within these bounds.
-    * @param nodeSeeds        An association list that maps the node-id of create and exercise
-    *                         nodes to their seed.
-    * @param globalKeyMapping Input key mappings inferred during interpretation.
-    * @param contractOrder   The order of contract ids as they appear in the transaction.
+    * @param submissionSeed
+    *   Populated with the submission seed when returned from
+    *   [[com.digitalasset.daml.lf.engine.Engine.submit]].
+    * @param preparationTime
+    *   The preparation time
+    * @param usedPackages
+    *   The set of all packages that are needed for the interpretation of the command. This is done
+    *   by first by establishing all the packages directly associated with action nodes in the
+    *   transaction (by calling [[Node.Action.packageIds]]). The [[usedPackages]] will then be this
+    *   set of packages combined with all packages on which there is a transitive dependency (for
+    *   details see deps in [[com.digitalasset.daml.lf.engine.Engine]]).
+    * @param timeBoundery
+    *   Indicates that the transaction computation is valid for ledger times within these bounds.
+    * @param nodeSeeds
+    *   An association list that maps the node-id of create and exercise nodes to their seed.
+    * @param globalKeyMapping
+    *   Input key mappings inferred during interpretation.
+    * @param contractOrder
+    *   The order of contract ids as they appear in the transaction.
     */
   final case class Metadata(
       submissionSeed: Option[crypto.Hash],
@@ -765,10 +765,10 @@ object Transaction {
   }
 
   final case class ContractKeyUpdate(
-    // Created Ids are ordered to ensure most recently created keys are returned/exercised first
-    createdContractIds: Vector[Value.ContractId],
-    // Consumed Ids are unordered
-    consumedContractIds: Set[Value.ContractId],
+      // Created Ids are ordered to ensure most recently created keys are returned/exercised first
+      createdContractIds: Vector[Value.ContractId],
+      // Consumed Ids are unordered
+      consumedContractIds: Set[Value.ContractId],
   ) {
     def isEmpty: Boolean = createdContractIds.isEmpty && consumedContractIds.isEmpty
   }

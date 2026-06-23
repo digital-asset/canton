@@ -21,7 +21,17 @@ import com.digitalasset.daml.lf.engine.TransactionCoderSpec.{
   versionInIncreasingOrder,
   versionInStrictIncreasingOrder,
 }
-import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers, ExternalCallResult, Node, NodeId, SerializationVersion, TransactionOuterClass => proto, Util, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  ExternalCallResult,
+  GlobalKey,
+  GlobalKeyWithMaintainers,
+  Node,
+  NodeId,
+  SerializationVersion,
+  TransactionOuterClass as proto,
+  Util,
+  VersionedTransaction,
+}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
@@ -370,7 +380,8 @@ final class TransactionCoderSpec
           version = SerializationVersion.VDev,
           externalCallResults = ImmArray.Empty,
         )
-        val expectedNode = nodeWithoutExternalCallResults.copy(externalCallResults = ImmArray(result))
+        val expectedNode =
+          nodeWithoutExternalCallResults.copy(externalCallResults = ImmArray(result))
 
         val Right(encoded) = TransactionCoder.internal
           .encodeNode(
@@ -380,8 +391,7 @@ final class TransactionCoderSpec
           )
 
         val withExternalCallResultsBuilder = encoded.toBuilder
-        withExternalCallResultsBuilder
-          .getExerciseBuilder
+        withExternalCallResultsBuilder.getExerciseBuilder
           .addExternalCallResults(
             proto.ExternalCallResult
               .newBuilder()
@@ -417,8 +427,7 @@ final class TransactionCoderSpec
           )
 
         val withExternalCallResultsBuilder = encoded.toBuilder
-        withExternalCallResultsBuilder
-          .getExerciseBuilder
+        withExternalCallResultsBuilder.getExerciseBuilder
           .addExternalCallResults(
             proto.ExternalCallResult
               .newBuilder()

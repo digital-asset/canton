@@ -4,37 +4,35 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.data.{TreeMap => _, _}
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.speedy.SExpr.SExpr
-import com.digitalasset.daml.lf.value.Value.ValueArithmeticError
-import com.digitalasset.daml.lf.value.{GenValue, Value => V}
-import com.daml.scalautil.Statement.discard
 import com.daml.nameof.NameOf
+import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{TreeMap as _, *}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.speedy.SExpr.SExpr
 import com.digitalasset.daml.lf.speedy.iterable.SValueIterable
+import com.digitalasset.daml.lf.value.Value.ValueArithmeticError
+import com.digitalasset.daml.lf.value.{GenValue, Value as V}
 
 import scala.collection.immutable.{ArraySeq, TreeMap}
 import scala.util.hashing.MurmurHash3
 
-/** Speedy values. These are the value types recognized by the
-  * machine. In addition to the usual types present in the LF value,
-  * this also contains partially applied functions (SPAP).
+/** Speedy values. These are the value types recognized by the machine. In addition to the usual
+  * types present in the LF value, this also contains partially applied functions (SPAP).
   */
 sealed abstract class SValue extends AnyRef {
 
-  import SValue.{SValue => _, _}
+  import SValue.{SValue as _, *}
 
-  /** Convert a speedy-value to a value which may not be correctly normalized.
-    * And so the resulting value should not be serialized.
+  /** Convert a speedy-value to a value which may not be correctly normalized. And so the resulting
+    * value should not be serialized.
     */
-  def toUnnormalizedValue: V = {
+  def toUnnormalizedValue: V =
     toValue[Nothing](
       keepTypeInfo = true,
       keepFieldName = true,
       keepTrailingNoneFields = true,
     )
-  }
 
   def toUnnormalizedExtendedValue: GenValue[GenValue.Extension[SPAP]] =
     toValue[GenValue.Extension[SPAP]](
@@ -156,21 +154,19 @@ object SValue {
   sealed abstract class Prim
   final case class PBuiltin(b: SBuiltinFun) extends Prim
 
-  /** A closure consisting of an expression together with the values the
-    * expression is closing over.
-    * The [[label]] field is only used during profiling. During non-profiling
-    * runs it is always set to `null`.
-    * During profiling, whenever a closure whose [[label]] has been set is
-    * entered, we write an "open event" with the label and when the closure is
-    * left, we write a "close event" with the same label.
+  /** A closure consisting of an expression together with the values the expression is closing over.
+    * The [[label]] field is only used during profiling. During non-profiling runs it is always set
+    * to `null`. During profiling, whenever a closure whose [[label]] has been set is entered, we
+    * write an "open event" with the label and when the closure is left, we write a "close event"
+    * with the same label.
     */
   final case class PClosure(label: Profile.Label, expr: SExpr, frame: ArraySeq[SValue])
       extends Prim {
     override def toString: String = s"PClosure($expr, ${frame.mkString("[", ",", "]")})"
   }
 
-  /** A partially applied primitive.
-    * An SPAP is *never* fully applied. This is asserted on construction.
+  /** A partially applied primitive. An SPAP is *never* fully applied. This is asserted on
+    * construction.
     */
   final case class SPAP(prim: Prim, actuals: ArraySeq[SValue], arity: Int) extends SValue {
     if (actuals.size >= arity) {
@@ -186,26 +182,25 @@ object SValue {
 
   /** We split SRecord (interface) from SRecordRep (implementation/representation)
     *
-    * The interface supports creation from separate arrays of fields and values
-    * This is used throughout test code.
+    * The interface supports creation from separate arrays of fields and values This is used
+    * throughout test code.
     *
-    * The interface also supports (via unapply) the (legacy) reverse deconstruction.
-    * This is used by daml-script.
+    * The interface also supports (via unapply) the (legacy) reverse deconstruction. This is used by
+    * daml-script.
     *
-    * The implementation/representation is via a scala Map.
-    * This representation is simple to manipulate (lookupField/updateField).
+    * The implementation/representation is via a scala Map. This representation is simple to
+    * manipulate (lookupField/updateField).
     *
     * This representation makes illegal cases unrepresentable -- i.e.
-    * - mismatched counts of fields/values
-    * - repeated field names
-    * And prevent brittle access to element values via indexing.
+    *   - mismatched counts of fields/values
+    *   - repeated field names And prevent brittle access to element values via indexing.
     *
-    * Also note updateField has logarithmic complexity (where N is the number of fields)
-    * rather than the linear complexity that an array of element values would entail.
+    * Also note updateField has logarithmic complexity (where N is the number of fields) rather than
+    * the linear complexity that an array of element values would entail.
     *
-    * The representation also includes an ordered field list.
-    * This is needed to support the legacy interface used by daml-script.
-    * And is also used when we convert the svalue back to a normalised LF value.
+    * The representation also includes an ordered field list. This is needed to support the legacy
+    * interface used by daml-script. And is also used when we convert the svalue back to a
+    * normalised LF value.
     */
 
   final case class SRecord(id: Identifier, fields: ImmArray[Name], values: ArraySeq[SValue])
@@ -256,14 +251,13 @@ object SValue {
 
     @throws[SError.SError]
     // crashes if `k` contains type abstraction, function, Partially applied built-in or updates
-    def comparable(k: SValue): Unit = {
+    def comparable(k: SValue): Unit =
       discard[Int](`SMap Ordering`.compare(k, k))
-    }
 
     /** Build an SMap from an indexed sequence of SValue key/value pairs.
       *
-      * SValue keys are assumed to be in ascending order - hence the SMap's TreeMap will be built in time O(n) using a
-      * sorted map specialisation.
+      * SValue keys are assumed to be in ascending order - hence the SMap's TreeMap will be built in
+      * time O(n) using a sorted map specialisation.
       */
     def fromStrictlyOrderedEntries(
         isTextMap: Boolean,
@@ -275,8 +269,8 @@ object SValue {
 
     /** Build an SMap from an iterator over SValue key/value pairs.
       *
-      * SValue keys are not assumed to be ordered - hence the SMap will be built in time O(n log(n)).
-      * If keys are duplicate, the last overrides the firsts
+      * SValue keys are not assumed to be ordered - hence the SMap will be built in time O(n
+      * log(n)). If keys are duplicate, the last overrides the firsts
       */
     def apply(isTextMap: Boolean, entries: Iterable[(SValue, SValue)]): SMap = {
       entries.foreach { case (k, _) => comparable(k) }
@@ -288,7 +282,8 @@ object SValue {
 
     /** Build an SMap from a vararg sequence of SValue key/value pairs.
       *
-      * SValue keys are not assumed to be ordered - hence the SMap will be built in time O(n log(n)).
+      * SValue keys are not assumed to be ordered - hence the SMap will be built in time O(n
+      * log(n)).
       */
     def apply(isTextMap: Boolean, entries: (SValue, SValue)*): SMap =
       SMap(isTextMap: Boolean, entries)
@@ -310,7 +305,7 @@ object SValue {
   }
 
   object SAnyContract {
-    def apply(tyCon: Ref.TypeConId, value: SValue): SAny = {
+    def apply(tyCon: Ref.TypeConId, value: SValue): SAny =
       value match {
         case record: SRecord =>
           // TODO: https://github.com/digital-asset/daml/issues/17082
@@ -329,7 +324,6 @@ object SValue {
             s"SAnyContract.apply: expected a record value, got; $v",
           )
       }
-    }
   }
 
   class SArithmeticError(valueArithmeticError: ValueArithmeticError) {

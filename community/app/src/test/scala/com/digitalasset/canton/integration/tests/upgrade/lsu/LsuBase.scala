@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
@@ -398,7 +399,8 @@ object LsuBase {
       overridePsid: Option[PhysicalSynchronizerId] = None,
   ) {
     val newStaticSynchronizerParameters: StaticSynchronizerParameters =
-      StaticSynchronizerParameters.defaultsWithoutKMS(
+      StaticSynchronizerParameters.defaults(
+        CryptoConfig(),
         newPV,
         newSerial,
         topologyChangeDelay = config.NonNegativeFiniteDuration.Zero,

@@ -42,10 +42,13 @@ class ReplayBenchmark {
   // the contract ID version to use for locally created contracts
   var contractIdVersion: String = _
 
+  @Param(Array())
+  var commit: String = sys.env.getOrElse("CIRCLE_SHA1", "unknown")
+
   private var benchmark: TransactionSnapshot = _
 
   @Fork(value = 2, warmups = 3)
-  @Warmup(iterations = 3, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Warmup(iterations = 7, time = 500, timeUnit = TimeUnit.MILLISECONDS)
   @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))

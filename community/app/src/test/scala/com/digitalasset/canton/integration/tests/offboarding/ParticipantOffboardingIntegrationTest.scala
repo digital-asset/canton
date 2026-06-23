@@ -55,8 +55,10 @@ class ParticipantOffboardingIntegrationTest
         mediators.local.start()
       }
 
-      staticParameters =
-        StaticSynchronizerParameters.defaults(sequencer1.config.crypto, testedProtocolVersion)
+      staticParameters = StaticSynchronizerParameters.defaults(
+        cryptoConfig = sequencer1.config.crypto,
+        protocolVersion = testedProtocolVersion,
+      )
 
       synchronizerOwners = Seq[InstanceReference](sequencer1, mediator1)
       synchronizerId = clue("bootstrapping the synchronizer") {

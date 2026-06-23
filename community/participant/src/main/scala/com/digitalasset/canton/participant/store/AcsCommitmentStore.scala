@@ -12,9 +12,10 @@ import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.ReinitializationStatus
 import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.CommitmentPeriodStateInOutstanding
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
   CommitmentPeriodState,
+  Digest,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
@@ -57,7 +58,7 @@ trait AcsCommitmentStore
     * Caller needs to ensure the periods are valid.
     */
   def markOutstanding(
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
       traceContext: TraceContext,
@@ -70,7 +71,7 @@ trait AcsCommitmentStore
     *
     * The period must be after the time point returned by [[lastComputedAndSent]].
     */
-  def markComputedAndSent(period: CommitmentPeriod)(implicit
+  def markComputedAndSent(period: LegacyCommitmentPeriod)(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit]
@@ -86,7 +87,7 @@ trait AcsCommitmentStore
     * same time period. The caller can still store both commitments, for example, such that it can
     * later prove to a third party that the sender sent an incorrect commitment.
     */
-  def storeReceived(commitment: SignedProtocolMessage[AcsCommitment])(implicit
+  def storeReceived(commitment: SignedProtocolMessage[LegacyAcsCommitment])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -105,7 +106,7 @@ trait AcsCommitmentStore
     */
   def markSafe(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
   )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
@@ -128,7 +129,7 @@ trait AcsCommitmentStore
     */
   def markUnsafe(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
   )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
@@ -149,7 +150,7 @@ trait AcsCommitmentStore
     */
   protected def markPeriod(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
   )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit]
 
@@ -166,9 +167,11 @@ trait AcsCommitmentLookup {
     *
     * No guarantees on the order of the returned commitments.
     */
-  def getComputed(period: CommitmentPeriod, counterParticipant: ParticipantId)(implicit
+  def getComputed(period: LegacyCommitmentPeriod, counterParticipant: ParticipantId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Iterable[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)]]
+  ): FutureUnlessShutdown[
+    Iterable[(LegacyCommitmentPeriod, Digest.HashedDigestType)]
+  ]
 
   /** Last locally processed timestamp.
     *
@@ -210,7 +213,7 @@ trait AcsCommitmentLookup {
       includeMatchedPeriods: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)]]
+  ): FutureUnlessShutdown[Iterable[(LegacyCommitmentPeriod, ParticipantId, CommitmentPeriodState)]]
 
   /** Inspection: search computed commitments applicable to the specified period (start is
     * exclusive, end is inclusive)
@@ -222,7 +225,7 @@ trait AcsCommitmentLookup {
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.HashedCommitmentType)]
+    Iterable[(LegacyCommitmentPeriod, ParticipantId, Digest.HashedDigestType)]
   ]
 
   /** Inspection: search received commitments applicable to the specified period (start is
@@ -234,7 +237,7 @@ trait AcsCommitmentLookup {
       counterParticipantsFilter: Option[NonEmpty[Seq[ParticipantId]]] = None,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Iterable[SignedProtocolMessage[AcsCommitment]]]
+  ): FutureUnlessShutdown[Iterable[SignedProtocolMessage[LegacyAcsCommitment]]]
 
 }
 
@@ -265,7 +268,7 @@ trait IncrementalCommitmentStore {
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): FutureUnlessShutdown[
-    (RecordTime, Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType])
+    (RecordTime, Map[SortedSet[InternedPartyId], Digest.DigestType])
   ]
 
   /** Return the record time of the latest update.
@@ -289,7 +292,7 @@ trait IncrementalCommitmentStore {
     */
   def update(
       rt: RecordTime,
-      updates: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
+      updates: Map[SortedSet[InternedPartyId], Digest.DigestType],
       deletes: Set[SortedSet[InternedPartyId]],
       updateMode: UpdateMode,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
@@ -343,7 +346,7 @@ trait IncrementalCommitmentStore {
   */
 trait CommitmentQueue {
 
-  def enqueue(commitment: AcsCommitment)(implicit
+  def enqueue(commitment: LegacyAcsCommitment)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -388,7 +391,7 @@ trait CommitmentQueue {
     * and there is no malicious behavior.
     */
   def peekOverlapsForCounterParticipant(
-      period: CommitmentPeriod,
+      period: LegacyCommitmentPeriod,
       counterParticipant: ParticipantId,
   )(implicit
       traceContext: TraceContext
@@ -432,8 +435,8 @@ object AcsCommitmentStore {
 
   final case class ParticipantCommitmentData(
       counterParticipant: ParticipantId,
-      period: CommitmentPeriod,
-      commitment: AcsCommitment.HashedCommitmentType,
+      period: LegacyCommitmentPeriod,
+      commitment: Digest.HashedDigestType,
   )
 
   final case class ReinitializationStatus(

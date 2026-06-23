@@ -48,7 +48,6 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
 
 /*
@@ -103,7 +102,6 @@ final class ReassignmentsConfirmationThresholdIntegrationTest
     EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
-        ConfigTransforms.updateTargetTimestampForwardTolerance(10.minutes),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>

@@ -6,7 +6,7 @@ def bootstrapSynchronizer(): Unit = {
     synchronizerOwners = Seq(sequencer1, mediator1),
     synchronizerThreshold = PositiveInt.two,
     staticSynchronizerParameters =
-      StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+      StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
   )
 
   participant1.health.wait_for_initialized()

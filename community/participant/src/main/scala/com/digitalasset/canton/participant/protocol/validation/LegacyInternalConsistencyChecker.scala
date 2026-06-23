@@ -4,17 +4,18 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.data.FullTransactionViewTree
+import com.digitalasset.canton.checked
+import com.digitalasset.canton.data.{FullTransactionViewTree, PathRollbackContextFactory}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.*
 import com.digitalasset.canton.participant.protocol.validation.LegacyInternalConsistencyChecker.*
-import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.{
   LfContractId,
   LfGlobalKey,
   LfTransaction,
-  WithRollbackScope,
+  PathRollbackContext,
+  PathRollbackScope,
 }
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
@@ -37,7 +38,7 @@ class LegacyInternalConsistencyChecker(
     */
   override def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfTransaction],
+      unmergedTransactionsWithoutTopLevelRollbackNodes: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext
@@ -46,6 +47,18 @@ class LegacyInternalConsistencyChecker(
       _ <- checkRollbackScopes(rootViewTrees)
       _ <- checkContractState(rootViewTrees)
     } yield ()
+
+  private def checkRollbackScopes(
+      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
+  ): Result[Unit] =
+    PathRollbackContextFactory
+      .checkRollbackScopeOrder(
+        rootViewTrees.map(_.viewParticipantData.rollbackContext)
+      )
+      .left
+      .map { error =>
+        ErrorWithInternalConsistencyCheck(IncorrectRollbackScopeOrder(error))
+      }
 
   private def checkContractState(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
@@ -57,7 +70,11 @@ class LegacyInternalConsistencyChecker(
       ) { (previous, rootViewTree) =>
         val state = adjustRollbackScope[ContractState, Set[LfContractId]](
           previous,
-          rootViewTree.viewParticipantData.tryUnwrap.rollbackContext.rollbackScope,
+          checked(
+            PathRollbackContext.tryToPathRollbackContext(
+              rootViewTree.viewParticipantData.tryUnwrap.rollbackContext
+            )
+          ).rollbackScope,
         )
 
         val created = rootViewTree.view.createdContracts.keySet
@@ -78,6 +95,11 @@ class LegacyInternalConsistencyChecker(
 
 object LegacyInternalConsistencyChecker {
 
+  private final case class WithPathRollbackScope[T](
+      val rollbackScope: PathRollbackScope,
+      val activeState: T,
+  )
+
   /** This trait manages pushing the active state onto a stack when a new rollback context is
     * entered and restoring the rollback back active state when a rollback scope is exited.
     *
@@ -88,28 +110,31 @@ object LegacyInternalConsistencyChecker {
 
     def self: M
 
-    def rollbackScope: RollbackScope
+    def rollbackScope: PathRollbackScope
 
-    def stack: List[WithRollbackScope[T]]
+    def stack: List[WithPathRollbackScope[T]]
 
     /** State that will be recorded / restored at the beginning / end of a rollback scope. */
     def activeRollbackState: T
 
     def copyWith(
-        rollbackScope: RollbackScope,
+        rollbackScope: PathRollbackScope,
         activeState: T,
-        stack: List[WithRollbackScope[T]],
+        stack: List[WithPathRollbackScope[T]],
     ): M
 
-    private[validation] def pushRollbackScope(newScope: RollbackScope): M =
+    private[validation] def pushRollbackScope(newScope: PathRollbackScope): M =
       copyWith(
         newScope,
         activeRollbackState,
-        WithRollbackScope(rollbackScope, activeRollbackState) :: stack,
+        WithPathRollbackScope(
+          rollbackScope,
+          activeRollbackState,
+        ) :: stack,
       )
 
     private[validation] def popRollbackScope(): M = stack match {
-      case WithRollbackScope(stackScope, stackActive) :: other =>
+      case WithPathRollbackScope(stackScope, stackActive) :: other =>
         copyWith(rollbackScope = stackScope, activeState = stackActive, stack = other)
       case _ =>
         throw new IllegalStateException(
@@ -120,10 +145,13 @@ object LegacyInternalConsistencyChecker {
 
   private final def adjustRollbackScope[M <: PushPopRollbackScope[M, T], T](
       starting: M,
-      targetScope: RollbackScope,
+      targetScope: PathRollbackScope,
   ): M = {
     @tailrec def loop(current: M): M =
-      RollbackScope.popsAndPushes(current.rollbackScope, targetScope) match {
+      PathRollbackScope.popsAndPushes(
+        current.rollbackScope,
+        targetScope,
+      ) match {
         case (0, 0) => current
         case (0, _) => current.pushRollbackScope(targetScope)
         case _ => loop(current.popRollbackScope())
@@ -143,9 +171,9 @@ object LegacyInternalConsistencyChecker {
     */
   private final case class ContractState(
       referenced: Set[LfContractId],
-      rollbackScope: RollbackScope,
+      rollbackScope: PathRollbackScope,
       consumed: Set[LfContractId],
-      stack: List[WithRollbackScope[Set[LfContractId]]],
+      stack: List[WithPathRollbackScope[Set[LfContractId]]],
   ) extends PushPopRollbackScope[ContractState, Set[LfContractId]] {
 
     override def self: ContractState = this
@@ -153,9 +181,9 @@ object LegacyInternalConsistencyChecker {
     override def activeRollbackState: Set[LfContractId] = consumed
 
     override def copyWith(
-        rollbackScope: RollbackScope,
+        rollbackScope: PathRollbackScope,
         activeState: Set[LfContractId],
-        stack: List[WithRollbackScope[Set[LfContractId]]],
+        stack: List[WithPathRollbackScope[Set[LfContractId]]],
     ): ContractState = copy(rollbackScope = rollbackScope, consumed = activeState, stack = stack)
 
     def update(referenced: Set[LfContractId], consumed: Set[LfContractId]): ContractState =
@@ -164,7 +192,7 @@ object LegacyInternalConsistencyChecker {
   }
 
   private object ContractState {
-    val empty: ContractState = ContractState(Set.empty, RollbackScope.empty, Set.empty, Nil)
+    val empty: ContractState = ContractState(Set.empty, PathRollbackScope.empty, Set.empty, Nil)
   }
 
 }

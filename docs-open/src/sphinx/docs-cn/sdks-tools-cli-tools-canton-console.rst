@@ -13,7 +13,7 @@ Canton Network Documentation Snippets: SDKs & Tools — Canton Console
 .. are executed by SphinxDocumentationGenerator integration tests.
 
 .. snippet:: cn_sdks_tools_cli_tools_canton_console
-    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "da")
     .. success:: participant1.parties.list()
     .. success:: participant1.dars.upload("dars/CantonExamples.dar")

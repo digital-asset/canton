@@ -44,6 +44,7 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.daml.lf.command.ApiCommands
 import com.digitalasset.daml.lf.crypto
+import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{CommandId, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
@@ -399,7 +400,23 @@ class TestSubmissionService(
           hasStarted: NeedKeyProgression.HasStarted =
             if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
             else NeedKeyProgression.Finished
-          r <- resolve(disclosedContracts, disclosedKeyContracts, resume(result, hasStarted))
+          r <- resolve(
+            disclosedContracts,
+            disclosedKeyContracts,
+            resume(
+              ResultNeedKey.Response(
+                result
+                  .map(fci =>
+                    ResultNeedKey.Response.AuthenticableFatContractInstance(
+                      fci,
+                      Hash.HashingMethod.TypedNormalForm,
+                      _ => true,
+                    )
+                  ),
+                hasStarted,
+              )
+            ),
+          )
         } yield r
 
       case ResultInterruption(continue, _) =>

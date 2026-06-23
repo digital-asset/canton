@@ -32,8 +32,5 @@ final class ContractServiceAuthorization(
 
 object ContractServiceAuthorization {
   def requiredClaims(request: GetContractRequest): List[RequiredClaim[GetContractRequest]] =
-    request.queryingParties match {
-      case empty if empty.isEmpty => List(RequiredClaim.ReadAsAnyParty[GetContractRequest]())
-      case nonEmpty => RequiredClaims.readAsForAllParties[GetContractRequest](nonEmpty)
-    }
+    RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[GetContractRequest](request.queryingParties)
 }

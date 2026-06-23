@@ -61,7 +61,6 @@ import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.Assertion
 
 import scala.collection.mutable
-import scala.concurrent.duration.DurationInt
 
 sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
     extends CommunityIntegrationTest
@@ -76,7 +75,6 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
-        ConfigTransforms.updateTargetTimestampForwardTolerance(60.seconds),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>

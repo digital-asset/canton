@@ -111,8 +111,7 @@ object TransferTesting {
               mediators = Seq(mediator),
               synchronizerOwners = Seq(sequencer),
               synchronizerThreshold = PositiveInt.one,
-              staticSynchronizerParameters =
-                StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion),
+              staticSynchronizerParameters = StaticSynchronizerParameters.defaults(protocolVersion),
             )
             .discard
           (alias, sequencer.sequencerConnection)

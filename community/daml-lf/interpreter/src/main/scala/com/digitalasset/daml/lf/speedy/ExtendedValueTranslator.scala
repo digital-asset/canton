@@ -4,11 +4,11 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error.Upgrade.TranslationFailed
 import com.digitalasset.daml.lf.language.LookupError
 import com.digitalasset.daml.lf.value.GenValue
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 
 import scala.collection.immutable.ArraySeq
 

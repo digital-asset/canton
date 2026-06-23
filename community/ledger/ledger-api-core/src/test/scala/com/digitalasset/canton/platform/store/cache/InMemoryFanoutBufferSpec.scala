@@ -9,6 +9,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.ReassignmentInfo
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.BufferSlice.LastBufferChunkSuffix
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
@@ -640,11 +641,6 @@ class InMemoryFanoutBufferSpec
     }
   }
 
-  private def offset(idx: Long): Offset = {
-    val base = 1000000000L
-    Offset.tryFromLong(base + idx)
-  }
-
   private def succ(offset: Offset): Offset = offset.increment
 
   private def txAccepted(idx: Long, offset: Offset) =
@@ -733,6 +729,8 @@ class InMemoryFanoutBufferSpec
       case reassignment: TransactionLogUpdate.ReassignmentAccepted => reassignment.updateId
       case topologyTransaction: TransactionLogUpdate.TopologyTransactionEffective =>
         topologyTransaction.updateId
+      case _: TransactionLogUpdate.ReceivedAcsCommitment =>
+        throw new RuntimeException("did not expect a ReceivedAcsCommitment")
     }
     UpdateId.fromLedgerString(updateStr).valueOrFail("invalid update id")
   }

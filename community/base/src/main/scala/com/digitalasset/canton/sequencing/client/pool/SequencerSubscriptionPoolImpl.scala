@@ -87,7 +87,8 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   private def currentConfigWithThreshold: ConfigWithThreshold =
     ConfigWithThreshold(config, pool.config.trustThreshold)
 
-  private implicit def mc: MetricsContext = metricsContext
+  private implicit val mc: MetricsContext = metricsContext
+
   metrics.subscriptionThreshold.updateValue(
     currentConfigWithThreshold.activeThreshold.value
   )

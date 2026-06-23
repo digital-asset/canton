@@ -114,6 +114,8 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
     *   the topology transaction to sign
     * @param inStore
     *   the latest fully authorized topology transaction with the same unique key as `toSign`
+    * @param namespacesToSignFor
+    *   if non empty, only keys for the specified namespaces are returned
     * @param returnAllValidKeys
     *   if true, returns all keys that can be used to sign. if false, only returns the most specific
     *   keys per namespace/uid.
@@ -124,6 +126,7 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
       asOfExclusive: CantonTimestamp,
       toSign: GenericTopologyTransaction,
       inStore: Option[GenericTopologyTransaction],
+      namespacesToSignFor: Seq[Namespace],
       returnAllValidKeys: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -142,12 +145,17 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
             relaxChecksForBackwardsCompatibility = false,
           )
         )
+      requestedAuthScope = Option.when(namespacesToSignFor.nonEmpty)(
+        ReferencedAuthorizations(namespaces = namespacesToSignFor.toSet)
+      )
 
-      referencedAuth = requiredAuthFor(
-        toSign,
-        inStore,
-        relaxChecksForBackwardsCompatibility = false,
-      ).referenced
+      referencedAuth = requestedAuthScope.getOrElse(
+        requiredAuthFor(
+          toSign,
+          inStore,
+          relaxChecksForBackwardsCompatibility = false,
+        ).referenced
+      )
 
       knownNsKeys = referencedAuth.namespaces.toSeq
         .parFlatTraverse(namespace =>
@@ -169,7 +177,8 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
       selfSigned = EitherT.rightT[FutureUnlessShutdown, CryptoPrivateStoreError](
         toSign.mapping match {
           case nsd @ NamespaceDelegation(ns, target, _)
-              if ns.fingerprint == target.fingerprint && nsd.canSign(Code.NamespaceDelegation) =>
+              if ns.fingerprint == target.fingerprint && nsd
+                .canSign(Code.NamespaceDelegation) && referencedAuth.namespaces.contains(ns) =>
             Seq(target.fingerprint)
           case _ => Seq.empty
         }

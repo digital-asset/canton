@@ -297,7 +297,7 @@ class TransactionViewTest
       }
 
       // Will be enabled from ProtocolVersion.v36
-      if (testedProtocolVersion > ProtocolVersion.v35) {
+      if (testedProtocolVersion > ProtocolVersion.v36) {
 
         "allow the parent view to reference input contracts from this view or any subview - same key" in {
 
@@ -420,7 +420,7 @@ class TransactionViewTest
           archivedInSubviews,
           resolvedKeys,
           actionDescription,
-          RollbackContext.empty,
+          RollbackContextFactory(testedProtocolVersion).empty,
           salt,
           testedProtocolVersion,
           externalCallResults,
@@ -573,7 +573,7 @@ class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "reconstruct the original keyed view participant data" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "reconstruct the original keyed view participant data" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
 
         val key = ExampleTransactionFactory.globalKeyWithMaintainers()
 

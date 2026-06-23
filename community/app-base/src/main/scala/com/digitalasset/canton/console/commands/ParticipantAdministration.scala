@@ -63,9 +63,10 @@ import com.digitalasset.canton.participant.pruning.{
   OpenCommitmentHelper,
 }
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
   CommitmentPeriodState,
+  Digest,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, LfVersionedTransaction}
@@ -802,7 +803,7 @@ class LocalCommitmentsAdministrationGroup(
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
-  ): Iterable[SignedProtocolMessage[AcsCommitment]] =
+  ): Iterable[SignedProtocolMessage[LegacyAcsCommitment]] =
     access(node =>
       node.sync.stateInspection
         .findReceivedCommitments(
@@ -819,7 +820,7 @@ class LocalCommitmentsAdministrationGroup(
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
-  ): Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.HashedCommitmentType)] =
+  ): Iterable[(LegacyCommitmentPeriod, ParticipantId, Digest.HashedDigestType)] =
     access { node =>
       node.sync.stateInspection.findComputedCommitments(
         synchronizerAlias,
@@ -834,7 +835,7 @@ class LocalCommitmentsAdministrationGroup(
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
-  ): Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)] =
+  ): Iterable[(LegacyCommitmentPeriod, ParticipantId, CommitmentPeriodState)] =
     access { node =>
       node.sync.stateInspection.outstandingCommitments(
         synchronizerAlias,
@@ -892,7 +893,7 @@ class CommitmentsAdministrationGroup(
       """
   )
   def open_commitment(
-      commitment: AcsCommitment.HashedCommitmentType,
+      commitment: Digest.HashedDigestType,
       physicalSynchronizerId: PhysicalSynchronizerId,
       timestamp: CantonTimestamp,
       counterParticipant: ParticipantId,

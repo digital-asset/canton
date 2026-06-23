@@ -149,15 +149,8 @@ private[reassignment] class UnassignmentProcessingSteps(
         TargetSynchronizerIsSourceSynchronizer(psid.unwrap, contractIds),
       )
 
-      targetStaticSynchronizerParameters <- EitherT.fromEither[FutureUnlessShutdown](
-        reassignmentCoordination
-          .getStaticSynchronizerParameter(targetSynchronizer)
-      )
       targetTopology <- reassignmentCoordination
-        .getRecentTopologySnapshot(
-          targetSynchronizer,
-          targetStaticSynchronizerParameters,
-        )
+        .getTargetApproximateSnapshot(targetSynchronizer)
       targetTimestamp = targetTopology.map(_.timestamp)
       _ = logger.debug(withDetails(s"Picked target timestamp $targetTimestamp"))
 
@@ -495,28 +488,12 @@ private[reassignment] class UnassignmentProcessingSteps(
       )
     } yield {
       val confirmationResponseF =
-        if (
-          unassignmentValidationResult.reassigningParticipantValidationResult.isTargetTsValidatable
-        ) {
-          createConfirmationResponses(
-            parsedRequest.requestId,
-            parsedRequest.malformedPayloads,
-            protocolVersion.unwrap,
-            unassignmentValidationResult,
-          )
-        } else {
-          logger.info(
-            s"Sending an abstain verdict for ${unassignmentValidationResult.hostedConfirmingReassigningParties} because target timestamp is not validatable"
-          )
-          FutureUnlessShutdown.pure(
-            createAbstainResponse(
-              parsedRequest.requestId,
-              unassignmentValidationResult.rootHash,
-              s"Non-validatable target timestamp when processing unassignment ${parsedRequest.reassignmentId}",
-              unassignmentValidationResult.hostedConfirmingReassigningParties,
-            )
-          )
-        }
+        createConfirmationResponses(
+          parsedRequest.requestId,
+          parsedRequest.malformedPayloads,
+          protocolVersion.unwrap,
+          unassignmentValidationResult,
+        )
       val responseF =
         confirmationResponseF.map(_.map((_, Recipients.cc(parsedRequest.mediator))))
 
@@ -624,7 +601,7 @@ private[reassignment] class UnassignmentProcessingSteps(
 
     for {
       rejectionFromPhase3 <- EitherT.right(
-        checkPhase7Validations(unassignmentValidationResult)
+        checkPhase7Validations(unassignmentValidationResult.commonValidationResult)
       )
 
       // Additional validation requested during security audit as DIA-003-013.

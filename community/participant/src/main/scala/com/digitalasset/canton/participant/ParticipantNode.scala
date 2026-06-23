@@ -677,6 +677,7 @@ class ParticipantNodeBootstrap(
                 chunkSize = purgeCfg.chunkSize,
                 synchronizerConnectionConfigStore,
                 syncPersistentStateManager,
+                parameters.batchingConfig,
                 timeouts,
                 loggerFactory,
               )

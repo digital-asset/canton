@@ -5,7 +5,9 @@ package com.digitalasset.daml.lf.ledger
 
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Identifier, Location, Party}
 
-/** Authorize the transaction using the provided parties as initial authorizers for the dynamic authorization. */
+/** Authorize the transaction using the provided parties as initial authorizers for the dynamic
+  * authorization.
+  */
 final case class Authorize(authParties: Set[Party])
 
 sealed trait FailedAuthorization

@@ -25,15 +25,29 @@ final class UserManagementServiceAuthorization(
     with NamedLogging {
   import UserManagementServiceAuthorization.*
 
-  // Only ParticipantAdmin is allowed to grant ParticipantAdmin right
-  private def containsParticipantAdmin(rights: Seq[Right]): Boolean =
-    rights.contains(Right(Right.Kind.ParticipantAdmin(Right.ParticipantAdmin())))
+  // Only a ParticipantAdmin is allowed to toggle the rights:
+  //
+  // - ParticipantAdmin
+  // - CanReadAsAnyParty
+  // - CanExecuteAsAnyParty
+  private def needsParticipantAdmin(rights: Seq[Right]): Boolean =
+    // Exhaustive match so we get an error here when we add new items to Kind.
+    rights.map(_.kind).exists {
+      case Right.Kind.ParticipantAdmin(_) => true
+      case Right.Kind.CanReadAsAnyParty(_) => true
+      case Right.Kind.CanExecuteAsAnyParty(_) => true
+      case Right.Kind.CanActAs(_) => false
+      case Right.Kind.CanReadAs(_) => false
+      case Right.Kind.CanExecuteAs(_) => false
+      case Right.Kind.IdentityProviderAdmin(_) => false
+      case Right.Kind.Empty => false
+    }
 
   override def createUser(request: CreateUserRequest): Future[CreateUserResponse] =
     authorizer.rpc(service.createUser)(
       RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
         identityProviderIdL = Lens.unit[CreateUserRequest].user.identityProviderId,
-        mustBeParticipantAdmin = containsParticipantAdmin(request.rights),
+        mustBeParticipantAdmin = needsParticipantAdmin(request.rights),
       )*
     )(request)
 
@@ -63,7 +77,7 @@ final class UserManagementServiceAuthorization(
     authorizer.rpc(service.grantUserRights)(
       RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
         identityProviderIdL = Lens.unit[GrantUserRightsRequest].identityProviderId,
-        mustBeParticipantAdmin = containsParticipantAdmin(request.rights),
+        mustBeParticipantAdmin = needsParticipantAdmin(request.rights),
       )*
     )(request)
 
@@ -73,7 +87,7 @@ final class UserManagementServiceAuthorization(
     authorizer.rpc(service.revokeUserRights)(
       RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
         identityProviderIdL = Lens.unit[RevokeUserRightsRequest].identityProviderId,
-        mustBeParticipantAdmin = containsParticipantAdmin(request.rights),
+        mustBeParticipantAdmin = needsParticipantAdmin(request.rights),
       )*
     )(request)
 

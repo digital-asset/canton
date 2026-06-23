@@ -11,10 +11,8 @@ package compiler
   */
 
 import com.digitalasset.daml.lf.data.Ref
-
 import com.digitalasset.daml.lf.speedy.SExpr.SCasePat
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 => source}
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr1 => target}
+import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 as source, SExpr1 as target}
 
 import scala.annotation.tailrec
 
@@ -30,12 +28,11 @@ private[speedy] object ClosureConversion {
         targetDepth: Int,
     ) {
 
-      def lookup(v: SEVarLevel): target.SELoc = {
+      def lookup(v: SEVarLevel): target.SELoc =
         mapping.get(v) match {
           case Some(loc) => loc
           case None => sys.error(s"lookup($v),in:$mapping")
         }
-      }
 
       def extend(n: Int): Env = {
         // Create mappings for `n` new stack items, and combine with the (unshifted!) existing mapping.
@@ -63,55 +60,53 @@ private[speedy] object ClosureConversion {
     }
 
     object Env {
-      def apply(): Env = {
+      def apply(): Env =
         Env(0, Map.empty, 0)
-      }
     }
 
     /** Closure-conversion, Traversal:
       *
-      *   To ensure stack-safety, the input expression is traversed by a single tail-recursive 'loop'.
-      *   During the 'Traversal', we are either:
+      * To ensure stack-safety, the input expression is traversed by a single tail-recursive 'loop'.
+      * During the 'Traversal', we are either:
       *   - going 'Down' a source expression (subtree), with an 'Env' for context, or
       *   - coming 'Up' with a target expression (result for a subtree)
       *
-      *   In both cases we have a continuation ('List[Cont]') argument which says how to proceed.
+      * In both cases we have a continuation ('List[Cont]') argument which says how to proceed.
       */
     sealed abstract class Traversal extends Product with Serializable
     object Traversal {
       final case class Down(exp: source.SExpr, env: Env) extends Traversal
       final case class Up(exp: target.SExpr) extends Traversal
     }
-    import Traversal._
+    import Traversal.*
 
     /** Closure Conversion, Cont:
       *
-      *   The multiple forms for a continuation describe how the result of transforming a
-      *   sub-expression should be embedded in the continuing traversal. The continuation
-      *   forms correspond to the source expression forms: specifically, the location of
-      *   recursive expression instances (values of type SExpr).
+      * The multiple forms for a continuation describe how the result of transforming a
+      * sub-expression should be embedded in the continuing traversal. The continuation forms
+      * correspond to the source expression forms: specifically, the location of recursive
+      * expression instances (values of type SExpr).
       *
-      *   For expression forms with no recursive instance (i.e. SEVarLevel, SEVal), there are
-      *   no corresponding continuation forms.
+      * For expression forms with no recursive instance (i.e. SEVarLevel, SEVal), there are no
+      * corresponding continuation forms.
       *
-      *   For expression forms with a single recursive instance (i.e. SELocation), there
-      *   is a single continuation form: (Cont.Location).
+      * For expression forms with a single recursive instance (i.e. SELocation), there is a single
+      * continuation form: (Cont.Location).
       *
-      *   For expression forms with two recursive instances (i.e. SETryCatch), there are
-      *   two corresponding continuation forms: (Cont.TryCatch1, Cont.TryCatch2).
+      * For expression forms with two recursive instances (i.e. SETryCatch), there are two
+      * corresponding continuation forms: (Cont.TryCatch1, Cont.TryCatch2).
       *
-      *   For the more complex expression forms containing a list of recursive instances
-      *   (i.e. SEApp), the corresponding continuation forms are also more complex,
-      *   but will generally have two cases (i.e. Cont.App1, Cont.App2), corresponding to
-      *   the Nil/Cons cases of the list of recursive instances.
+      * For the more complex expression forms containing a list of recursive instances (i.e. SEApp),
+      * the corresponding continuation forms are also more complex, but will generally have two
+      * cases (i.e. Cont.App1, Cont.App2), corresponding to the Nil/Cons cases of the list of
+      * recursive instances.
       *
-      *   And so on. In effect, 'Cont' is a zipper type for expressions.
+      * And so on. In effect, 'Cont' is a zipper type for expressions.
       *
-      *   Another way to understand the continuation forms is by observing the presence of
-      *   an 'env: Env' component indicates more source-expression processing to be done
-      *   (generally with the components following the 'env'). Any components before the
-      *   'env' (or all components if there is no 'env') represent transform-(sub)-results
-      *   which need combining into the final result.
+      * Another way to understand the continuation forms is by observing the presence of an 'env:
+      * Env' component indicates more source-expression processing to be done (generally with the
+      * components following the 'env'). Any components before the 'env' (or all components if there
+      * is no 'env') represent transform-(sub)-results which need combining into the final result.
       */
     sealed abstract class Cont extends Product with Serializable
     object Cont {
@@ -198,7 +193,7 @@ private[speedy] object ClosureConversion {
             case source.SEAbs(arity, body) =>
               val freeVars =
                 computeFreeVars(body, env.sourceDepth).toList.sortBy(_.level)
-              val freeLocs = freeVars.map { v => env.lookup(v) }
+              val freeLocs = freeVars.map(v => env.lookup(v))
               loop(Down(body, env.absBody(arity, freeVars)), Cont.Abs(arity, freeLocs) :: conts)
 
             case source.SEApp(fun, args) =>
@@ -338,7 +333,7 @@ private[speedy] object ClosureConversion {
   /** Compute the free variables of a speedy expression */
   private[this] def computeFreeVars(expr0: source.SExpr, sourceDepth: Int): Set[SEVarLevel] = {
     @tailrec // woo hoo, stack safe!
-    def go(acc: Set[SEVarLevel], work: List[source.SExpr]): Set[SEVarLevel] = {
+    def go(acc: Set[SEVarLevel], work: List[source.SExpr]): Set[SEVarLevel] =
       // 'acc' is the (accumulated) set of free variables we have found so far.
       // 'work' is a list of source expressions which we still have to process.
       work match {
@@ -368,7 +363,6 @@ private[speedy] object ClosureConversion {
           }
         }
       }
-    }
     go(Set.empty, List(expr0))
   }
 

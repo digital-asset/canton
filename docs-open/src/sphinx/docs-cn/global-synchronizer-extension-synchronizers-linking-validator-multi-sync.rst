@@ -13,7 +13,7 @@ Canton Network Documentation Snippets: Extension Synchronizers Linking Validator
 .. are executed by SphinxDocumentationGenerator integration tests.
 
 .. snippet:: cn_global_synchronizer_extension_synchronizers_linking_validator_multi_sync
-    .. success:: bootstrap.synchronizer(synchronizerName = "private-sync", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+    .. success:: bootstrap.synchronizer(synchronizerName = "private-sync", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
     .. hidden:: val participant = participant1
     .. hidden:: val participantReference: com.digitalasset.canton.console.ParticipantReference = participant1
     .. hidden:: val sequencerReference = sequencer1

@@ -388,7 +388,7 @@ class AvailabilityModuleOutputFetchTest
           log => {
             log.level shouldBe Level.WARN
             log.message should include regex (
-              """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
+              """Batch BatchId\([^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
             )
           },
         )

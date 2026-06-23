@@ -5,26 +5,29 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.data.support.crypto.MessageSignatureUtil
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.data.{Bytes, Ref}
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.SValue.{SBool, SText}
-import com.digitalasset.daml.lf.speedy.Speedy.Control
 import com.digitalasset.daml.lf.speedy.DERTestLib.derPublicKeyHexStringGen
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.SBSECP256K1ValidateKey
+import com.digitalasset.daml.lf.speedy.SValue.{SBool, SText}
+import com.digitalasset.daml.lf.speedy.Speedy.Control
 import org.bouncycastle.jce.provider.BouncyCastleProvider
-
-import java.security.interfaces.ECPublicKey
-import java.security.spec.ECGenParameterSpec
-import java.security.{KeyPairGenerator, Security}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
+import java.security.interfaces.ECPublicKey
+import java.security.spec.ECGenParameterSpec
+import java.security.{KeyPairGenerator, Security}
 import scala.collection.immutable.ArraySeq
 
-class SBSECP256K1ValidateKeyTest extends AnyFreeSpec with Matchers with ScalaCheckPropertyChecks with SuppressingLogging {
+class SBSECP256K1ValidateKeyTest
+    extends AnyFreeSpec
+    with Matchers
+    with ScalaCheckPropertyChecks
+    with SuppressingLogging {
   Security.addProvider(new BouncyCastleProvider)
 
   private val compilerConfig = Compiler.Config.Default

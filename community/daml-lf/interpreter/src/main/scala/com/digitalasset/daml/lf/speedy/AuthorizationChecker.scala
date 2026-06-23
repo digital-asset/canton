@@ -5,8 +5,7 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, Party, TypeConId}
-import com.digitalasset.daml.lf.ledger.Authorize
-import com.digitalasset.daml.lf.ledger.FailedAuthorization
+import com.digitalasset.daml.lf.ledger.{Authorize, FailedAuthorization}
 
 private[lf] abstract class AuthorizationChecker {
 
@@ -53,12 +52,11 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
   private[this] def authorize(
       passIf: Boolean,
       failWith: => FailedAuthorization,
-  ): List[FailedAuthorization] = {
+  ): List[FailedAuthorization] =
     if (passIf)
       List()
     else
       List(failWith)
-  }
 
   override private[lf] def authorizeCreate(
       optLocation: Option[Location],
@@ -67,7 +65,7 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
       maintainers: Option[Set[Party]],
   )(
       auth: Authorize
-  ): List[FailedAuthorization] = {
+  ): List[FailedAuthorization] =
     authorize(
       passIf = signatories subsetOf auth.authParties,
       failWith = FailedAuthorization.CreateMissingAuthorization(
@@ -94,7 +92,6 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
             ),
           )
       })
-  }
 
   override private[lf] def authorizeFetch(
       optLocation: Option[Location],
@@ -102,7 +99,7 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
       stakeholders: Set[Party],
   )(
       auth: Authorize
-  ): List[FailedAuthorization] = {
+  ): List[FailedAuthorization] =
     authorize(
       passIf = stakeholders.intersect(auth.authParties).nonEmpty,
       failWith = FailedAuthorization.FetchMissingAuthorization(
@@ -112,7 +109,6 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
         authorizingParties = auth.authParties,
       ),
     )
-  }
 
   override private[lf] def authorizeLookupByKey(
       optLocation: Option[Location],
@@ -120,7 +116,7 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
       maintainers: Set[Party],
   )(
       auth: Authorize
-  ): List[FailedAuthorization] = {
+  ): List[FailedAuthorization] =
     authorize(
       passIf = maintainers subsetOf auth.authParties,
       failWith = FailedAuthorization.LookupByKeyMissingAuthorization(
@@ -130,7 +126,6 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
         auth.authParties,
       ),
     )
-  }
 
   override private[lf] def authorizeExercise(
       optLocation: Option[Location],
@@ -140,7 +135,7 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
       choiceAuthorizers: Option[Set[Party]],
   )(
       auth: Authorize
-  ): List[FailedAuthorization] = {
+  ): List[FailedAuthorization] =
     authorize(
       passIf = actingParties.nonEmpty,
       failWith = FailedAuthorization.NoControllers(templateId, choiceId, optLocation),
@@ -163,7 +158,6 @@ private[lf] object DefaultAuthorizationChecker extends AuthorizationChecker {
           requiredParties = actingParties union choiceAuthorizers.getOrElse(Set.empty),
         ),
       )
-  }
 
 }
 

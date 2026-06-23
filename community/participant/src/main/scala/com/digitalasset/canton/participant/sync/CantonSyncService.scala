@@ -24,6 +24,7 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApiPart
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Offset,
+  PathRollbackContextFactory,
   ReassignmentSubmitterMetadata,
   SynchronizerSuccessor,
 }
@@ -623,8 +624,10 @@ class CantonSyncService(
         // TODO(#25385):: Consider moving before SyncService, so that the result of command interpretation
         //                      is already sanity checked wrt Canton TX normalization rules
         wfTransaction <- EitherT.fromEither[FutureUnlessShutdown](
+          // Use PathRollbackContextFactory by as we do not currently know the protocol version and
+          // PathRollbackContextFactory has stricter checking than NoPathRollbackContextFactory.
           WellFormedTransaction
-            .check(transaction, metadata, WithoutSuffixes)
+            .check(transaction, metadata, WithoutSuffixes, PathRollbackContextFactory)
             .leftMap(RoutingInternalError.IllformedTransaction.apply)
         )
         submitted <- transactionRoutingProcessor.submitTransaction(

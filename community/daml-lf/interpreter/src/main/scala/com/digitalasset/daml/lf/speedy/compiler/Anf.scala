@@ -5,41 +5,39 @@ package com.digitalasset.daml.lf
 package speedy
 package compiler
 
-/**  Transformation to ANF based AST for the speedy interpreter.
+/** Transformation to ANF based AST for the speedy interpreter.
   *
-  *  "ANF" stands for A-normal form.
-  *  In essence it means that sub-expressions of most expression nodes are in atomic-form.
-  *  The one exception is the let-expression.
+  * "ANF" stands for A-normal form. In essence it means that sub-expressions of most expression
+  * nodes are in atomic-form. The one exception is the let-expression.
   *
-  *  Atomic mean: a variable reference (ELoc), a (literal) value, or a builtin.
-  *  This is captured by any speedy-expression which `extends SExprAtomic`.
+  * Atomic mean: a variable reference (ELoc), a (literal) value, or a builtin. This is captured by
+  * any speedy-expression which `extends SExprAtomic`.
   *
-  *  The reason we convert to ANF is to improve the efficiency of speedy execution: the
-  *  execution engine can take advantage of the atomic assumption, and often removes
-  *  additional execution steps - in particular the pushing of continuations to allow
-  *  execution to continue after a compound expression is reduced to a value.
+  * The reason we convert to ANF is to improve the efficiency of speedy execution: the execution
+  * engine can take advantage of the atomic assumption, and often removes additional execution steps
+  * \- in particular the pushing of continuations to allow execution to continue after a compound
+  * expression is reduced to a value.
   *
-  *  The speedy machine now expects that it will never have to execute a non-ANF expression,
-  *  crashing at runtime if one is encountered. In particular we must ensure that the
-  *  expression forms: SEApp(General) and SECase are removed, and replaced by the simpler
-  *  SEAppAtomic and SECaseAtomic (plus SELet as required).
+  * The speedy machine now expects that it will never have to execute a non-ANF expression, crashing
+  * at runtime if one is encountered. In particular we must ensure that the expression forms:
+  * SEApp(General) and SECase are removed, and replaced by the simpler SEAppAtomic and SECaseAtomic
+  * (plus SELet as required).
   *
-  *  This compilation phase transforms from SExpr1 to SExpr.
-  *    SExpr contains only the expression forms which execute on the speedy machine.
-  *    SExpr1 contains expression forms which exist during the speedy compilation pipeline.
+  * This compilation phase transforms from SExpr1 to SExpr. SExpr contains only the expression forms
+  * which execute on the speedy machine. SExpr1 contains expression forms which exist during the
+  * speedy compilation pipeline.
   *
-  *  We use "source." and "t." for lightweight discrimination.
+  * We use "source." and "t." for lightweight discrimination.
   */
 
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr1 => source}
-import com.digitalasset.daml.lf.speedy.{SExpr => target}
 import com.digitalasset.daml.lf.speedy.Compiler.CompilationError
-
-import scala.annotation.tailrec
-import scala.util.control.TailCalls._
+import com.digitalasset.daml.lf.speedy.SExpr as target
+import com.digitalasset.daml.lf.speedy.compiler.SExpr1 as source
 import scalaz.{@@, Tag}
 
+import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
+import scala.util.control.TailCalls.*
 
 private[compiler] object Anf {
 
@@ -75,8 +73,8 @@ private[compiler] object Anf {
     def incr(m: Int): DepthA = DepthA(m + n)
   }
 
-  /** `Env` contains the mapping from old to new depth, as well as the old-depth as these
-    * components always travel together
+  /** `Env` contains the mapping from old to new depth, as well as the old-depth as these components
+    * always travel together
     */
   private final case class Env(absMap: Map[DepthE, DepthA], oldDepth: DepthE)
 
@@ -89,35 +87,33 @@ private[compiler] object Anf {
 
   private type Res = TailRec[target.SExpr]
 
-  /** Tx is the type for the stacked transformation functions managed by the ANF
-    * transformation, mainly transformExp.
+  /** Tx is the type for the stacked transformation functions managed by the ANF transformation,
+    * mainly transformExp.
     *
-    * @tparam T The type of expression this will be applied to.
+    * @tparam T
+    *   The type of expression this will be applied to.
     */
   private type Tx[T] = (DepthA, T) => Res
 
-  /** During conversion we need to deal with bindings which are made/found at a given
-    * absolute stack depth. These are represented using `AbsBinding`. An absolute stack
-    * depth is the offset from the depth of the stack when the function is entered. We call
-    * it absolute because an offset doesn't change as new bindings are pushed onto the
-    * stack.
+  /** During conversion we need to deal with bindings which are made/found at a given absolute stack
+    * depth. These are represented using `AbsBinding`. An absolute stack depth is the offset from
+    * the depth of the stack when the function is entered. We call it absolute because an offset
+    * doesn't change as new bindings are pushed onto the stack.
     *
-    * Happily, the source expressions use absolute stack offsets in `SELocAbsoluteS`.
-    * In contrast to the target expressions which use relative offsets in `SELocS`. The
-    * relative-offset to a binding varies as new bindings are pushed on the stack.
+    * Happily, the source expressions use absolute stack offsets in `SELocAbsoluteS`. In contrast to
+    * the target expressions which use relative offsets in `SELocS`. The relative-offset to a
+    * binding varies as new bindings are pushed on the stack.
     */
   private case class AbsBinding(abs: DepthA)
 
-  private def makeAbsoluteB(env: Env, abs: Int): AbsBinding = {
+  private def makeAbsoluteB(env: Env, abs: Int): AbsBinding =
     env.absMap.get(DepthE(abs)) match {
       case None => throw CompilationError(s"makeAbsoluteB(env=$env,abs=$abs)")
       case Some(abs) => AbsBinding(abs)
     }
-  }
 
-  private def makeRelativeB(depth: DepthA, binding: AbsBinding): Int = {
+  private def makeRelativeB(depth: DepthA, binding: AbsBinding): Int =
     (depth.n - binding.abs.n)
-  }
 
   private type AbsAtom = Either[target.SExprAtomic, AbsBinding]
 
@@ -161,12 +157,11 @@ private[compiler] object Anf {
   private def expandMultiLet(rhss: List[source.SExpr], body: source.SExpr): source.SExpr = {
     // loop over rhss in reverse order
     @tailrec
-    def loop(acc: source.SExpr, xs: List[source.SExpr]): source.SExpr = {
+    def loop(acc: source.SExpr, xs: List[source.SExpr]): source.SExpr =
       xs match {
         case Nil => acc
         case rhs :: xs => loop(source.SELet1General(rhs, acc), xs)
       }
-    }
 
     loop(body, rhss.reverse)
   }
@@ -175,7 +170,7 @@ private[compiler] object Anf {
   private def traverse[A, B](
       xs: List[A],
       f: A => TailRec[B],
-  ): TailRec[List[B]] = {
+  ): TailRec[List[B]] =
     xs match {
       case Nil => done(Nil)
       case x :: xs =>
@@ -186,38 +181,33 @@ private[compiler] object Anf {
           }
         } yield (x :: xs)
     }
-  }
 
-  /**    The transformation code is implemented using a what looks like
-    *    continuation-passing style; the code routinely creates new functions to
-    *    pass down the stack as it explores the expression tree. This is quite
-    *    common for translation to ANF. In general, naming nested compound
-    *    expressions requires turning an expression kind of inside out, lifting the
-    *    introduced let-expression up to the the nearest enclosing abstraction or
-    *    case-branch.
+  /** The transformation code is implemented using a what looks like continuation-passing style; the
+    * code routinely creates new functions to pass down the stack as it explores the expression
+    * tree. This is quite common for translation to ANF. In general, naming nested compound
+    * expressions requires turning an expression kind of inside out, lifting the introduced
+    * let-expression up to the the nearest enclosing abstraction or case-branch.
     *
-    *    For speedy, the ANF pass occurs after translation to De Brujin and closure
-    *    conversions, which adds the additional complication of re-indexing the
-    *    variable indexes. This is achieved by tracking the old and new depth & the
-    *    mapping between them. See the types: DepthE, DepthA and Env.
+    * For speedy, the ANF pass occurs after translation to De Brujin and closure conversions, which
+    * adds the additional complication of re-indexing the variable indexes. This is achieved by
+    * tracking the old and new depth & the mapping between them. See the types: DepthE, DepthA and
+    * Env.
     *
-    *    Using a coding style that looks like CPS is a natural way to express the
-    *    ANF transformation. The transformation is however not tail recursive: it
-    *    is only mostly in CPS form, and is actually stack intensive. To address
-    *    this, all functions of the core loop return trampolines
-    *    (scala.util.control.TailCalls).
+    * Using a coding style that looks like CPS is a natural way to express the ANF transformation.
+    * The transformation is however not tail recursive: it is only mostly in CPS form, and is
+    * actually stack intensive. To address this, all functions of the core loop return trampolines
+    * (scala.util.control.TailCalls).
     */
 
-  private[this] def flattenExp(depth: DepthA, env: Env, exp: source.SExpr): Res = {
-    transformExp(depth, env, exp) { (_, sexpr) => done(sexpr) }
-  }
+  private[this] def flattenExp(depth: DepthA, env: Env, exp: source.SExpr): Res =
+    transformExp(depth, env, exp)((_, sexpr) => done(sexpr))
 
   private[this] def transformLet1(
       depth: DepthA,
       env: Env,
       rhs: source.SExpr,
       body: source.SExpr,
-  )(transform: Tx[target.SExpr]): Res = {
+  )(transform: Tx[target.SExpr]): Res =
     transformExp(depth, env, rhs) { (depth, rhs) =>
       val depth1 = depth.incr(1)
       val env1 = trackBindings(depth, env, 1)
@@ -225,22 +215,19 @@ private[compiler] object Anf {
         target.SELet1(rhs, body)
       }
     }
-  }
 
   private[this] def flattenAlts(
       depth: DepthA,
       env: Env,
       alts0: List[source.SCaseAlt],
-  ): TailRec[List[SExpr.SCaseAlt]] = {
+  ): TailRec[List[SExpr.SCaseAlt]] =
     traverse(alts0, (alt: source.SCaseAlt) => flattenAlt(depth, env, alt))
-  }
 
   private[this] def flattenAlt(
       depth: DepthA,
       env: Env,
       alt: source.SCaseAlt,
-  ): TailRec[SExpr.SCaseAlt] = {
-
+  ): TailRec[SExpr.SCaseAlt] =
     alt match {
       case source.SCaseAlt(pat, body) =>
         val n = patternNArgs(pat)
@@ -249,20 +236,17 @@ private[compiler] object Anf {
           target.SCaseAlt(pat, body)
         }
     }
-  }
 
-  /** `transformExp` is the function at the heart of the ANF transformation.
-    *  You can read its type as saying: "Caller, give me a general expression
-    *  `exp`, (& depth/env info), and a transformation function `transform`
-    *  which says what you want to do with the transformed expression. Then I
-    *  will do the transform, and call `transform` with it. I reserve the right
-    *  to wrap further expression-AST around the expression returned by
-    *  `transform`.
+  /** `transformExp` is the function at the heart of the ANF transformation. You can read its type
+    * as saying: "Caller, give me a general expression `exp`, (& depth/env info), and a
+    * transformation function `transform` which says what you want to do with the transformed
+    * expression. Then I will do the transform, and call `transform` with it. I reserve the right to
+    * wrap further expression-AST around the expression returned by `transform`.
     *
-    *  See: `atomizeExp` for an instance where this wrapping occurs.
+    * See: `atomizeExp` for an instance where this wrapping occurs.
     *
-    *  Note: this wrapping is the reason why we need a "second" CPS transform to
-    *  achieve constant stack through trampoline.
+    * Note: this wrapping is the reason why we need a "second" CPS transform to achieve constant
+    * stack through trampoline.
     */
   private[this] def transformExp(depth: DepthA, env: Env, exp: source.SExpr)(
       transform: Tx[target.SExpr]
@@ -355,8 +339,7 @@ private[compiler] object Anf {
 
   private[this] def atomizeExp(depth: DepthA, env: Env, exp: source.SExpr)(
       transform: Tx[AbsAtom]
-  ): Res = {
-
+  ): Res =
     exp match {
       case ea: source.SExprAtomic => transform(depth, makeAbsoluteA(env, ea))
       case _ =>
@@ -369,14 +352,13 @@ private[compiler] object Anf {
           }
         }
     }
-  }
 
   private[this] def transformMultiApp(
       depth: DepthA,
       env: Env,
       func: source.SExpr,
       args: List[source.SExpr],
-  )(transform: Tx[target.SExpr]): Res = {
+  )(transform: Tx[target.SExpr]): Res =
     atomizeExps(depth, env, args.reverse) { (depth, rargs) =>
       atomizeExp(depth, env, func) { (depth, func) =>
         val func1 = makeRelativeA(depth)(func)
@@ -384,5 +366,4 @@ private[compiler] object Anf {
         transform(depth, target.SEAppAtomic(func1, args1.to(ArraySeq)))
       }
     }
-  }
 }

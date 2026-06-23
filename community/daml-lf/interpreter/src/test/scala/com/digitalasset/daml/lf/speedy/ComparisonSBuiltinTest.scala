@@ -7,17 +7,21 @@ package speedy
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Struct}
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.SExpr._
 import com.digitalasset.daml.lf.speedy.SError.SError
+import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.value.Value.ContractId
-import org.scalatest.prop.{TableDrivenPropertyChecks, TableFor2}
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.{TableDrivenPropertyChecks, TableFor2}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
+class ComparisonSBuiltinTest
+    extends AnyWordSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 
@@ -398,8 +402,8 @@ class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenP
     }
 
     "fail when comparing non-comparable values" in {
-      import language.Ast._
-      import language.Util._
+      import language.Ast.*
+      import language.Util.*
 
       val funT = t"(Int64 -> Int64)"
       val fun1 = e"(ADD_INT64 1)"
@@ -601,15 +605,15 @@ class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenP
       forEvery(tests) { case Test(typ, negativeTestCases, positiveTestCases) =>
         negativeTestCases.foreach { case (x, y) =>
           forEvery(builtins) { case (bi, _) =>
-            eval(bi, typ, x, y) shouldBe a[Right[_, _]]
-            if (x != y) eval(bi, typ, y, x) shouldBe a[Right[_, _]]
+            eval(bi, typ, x, y) shouldBe a[Right[?, ?]]
+            if (x != y) eval(bi, typ, y, x) shouldBe a[Right[?, ?]]
           }
         }
 
         positiveTestCases.foreach { case (x, y) =>
           forEvery(builtins) { case (bi, _) =>
-            eval(bi, typ, x, y) shouldBe a[Left[_, _]]
-            if (x != y) eval(bi, typ, y, x) shouldBe a[Left[_, _]]
+            eval(bi, typ, x, y) shouldBe a[Left[?, ?]]
+            if (x != y) eval(bi, typ, y, x) shouldBe a[Left[?, ?]]
           }
         }
 
@@ -684,7 +688,7 @@ class ComparisonSBuiltinTest extends AnyWordSpec with Matchers with TableDrivenP
       Speedy.Machine.fromPureSExpr(
         compiledPackages,
         SEApp(sexpr, (parties ++ contractIds).to(ArraySeq)),
-        logger = MachineLogger()
+        logger = MachineLogger(),
       )
     machine.runPure()
   }

@@ -23,6 +23,8 @@ import com.digitalasset.canton.integration.{
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.time.{Seconds, Span}
 
+import scala.concurrent.duration.*
+
 // TODO(#21030): Unify with gRPC conformance tests
 sealed trait JsonApiConformanceBase
     extends CommunityIntegrationTest
@@ -183,7 +185,15 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
       .prependConfigTransform(ConfigTransforms.enableHttpLedgerApi)
-      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        updateAllParticipantConfigs_(
+          // TODO(#33535): Please provide custom timeout setting on Client Side for LWideTransaction test.
+          // Remove the custom JSON API requestTimeout setting from JsonApiConformanceIntegrationShardedTest
+          // once the client side timeout setting is available and used in the test.
+          _.focus(_.httpLedgerApi.requestTimeout).replace(30.seconds)
+        ),
+      )
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)

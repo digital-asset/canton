@@ -698,6 +698,7 @@ class ModelConformanceCheckerTest
       },
       suffixed.metadata,
       WellFormedTransaction.WithoutSuffixes,
+      PathRollbackContextFactory,
     )
 
   // Verify that an (un-mutated) example passes model conformance checking
@@ -722,6 +723,7 @@ class ModelConformanceCheckerTest
           example.tx,
           TransactionMetadata.fromLf(example.ledgerTime, example.metadata),
           WellFormedTransaction.WithoutSuffixes,
+          PathRollbackContextFactory,
         )
       )
 
@@ -755,6 +757,7 @@ class ModelConformanceCheckerTest
         lfTransaction = example.tx,
         metadata = TransactionMetadata.fromLf(example.ledgerTime, example.metadata),
         state = WellFormedTransaction.WithoutSuffixes,
+        PathRollbackContextFactory,
       )
 
     val submitterInfo = SubmitterInfo(

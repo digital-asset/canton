@@ -31,7 +31,6 @@ class NextGenInternalConsistencyChecker(
       traceContext: TraceContext
   ): Either[ErrorWithInternalConsistencyCheck, Unit] =
     for {
-      _ <- checkRollbackScopes(rootViewTrees)
       _ <- checkContractState(rootViewTrees)
       _ <- checkKeyState(hostedKeys, unmergedTransactionsWithoutToplevelRollbackNodes)
     } yield ()

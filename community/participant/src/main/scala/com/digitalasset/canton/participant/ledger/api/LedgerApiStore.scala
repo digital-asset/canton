@@ -9,22 +9,18 @@ import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.platform.config.ServerRole
-import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend.DataSourceConfig
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawParticipantAuthorization,
   SequentialIdBatch,
   SynchronizerOffset,
 }
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
-import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterningView
@@ -94,45 +90,6 @@ class LedgerApiStore(
     executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingMoveLedgerEndBackToScratch"))(
       integrityStorageBackend.moveLedgerEndBackToScratch()
     )
-
-  @VisibleForTesting
-  private def withConnectionForTest(testFunction: Connection => Unit) = {
-    val conn = ledgerApiDbSupport.storageBackendFactory.createDataSourceStorageBackend
-      .createDataSource(
-        dataSourceConfig = DataSourceConfig(ledgerApiStorage.jdbcUrl),
-        loggerFactory = loggerFactory,
-      )
-      .getConnection
-    conn.setAutoCommit(false)
-    testFunction(conn)
-    new Object {
-      def commitAndClose(): Unit = {
-        conn.commit()
-        conn.close()
-      }
-    }
-  }
-
-  @VisibleForTesting
-  def lockPruning = withConnectionForTest(
-    QueryStrategy.withoutNetworkTimeout(
-      eventStorageBackend.lockExclusivelyPruningProcessingTable
-    )(_, noTracingLogger)
-  )
-
-  @VisibleForTesting
-  def readLockContract(internalContractId: Long) = withConnectionForTest(
-    QueryStrategy.withoutNetworkTimeout(
-      eventStorageBackend.readLockInternalContractIds(Set(internalContractId))(_).discard
-    )(_, noTracingLogger)
-  )
-
-  @VisibleForTesting
-  def writeLockContract(internalContractId: Long) = withConnectionForTest(
-    QueryStrategy.withoutNetworkTimeout(
-      eventStorageBackend.writeLockInternalContractIds(cSQL"= $internalContractId")(_)
-    )(_, noTracingLogger)
-  )
 
   @VisibleForTesting
   def numberOfAcceptedTransactionsFor(synchronizerId: SynchronizerId)(implicit

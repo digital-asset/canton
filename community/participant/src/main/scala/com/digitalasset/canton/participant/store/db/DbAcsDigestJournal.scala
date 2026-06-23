@@ -6,10 +6,9 @@ package com.digitalasset.canton.participant.store.db
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.event.RecordTime
-import com.digitalasset.canton.participant.event.RecordTime.*
 import com.digitalasset.canton.participant.store.data.AcsDigestJournalData.JournalTable
 import com.digitalasset.canton.participant.store.data.DbAcsDigestJournalImplicits
 import com.digitalasset.canton.participant.store.{
@@ -21,15 +20,13 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import slick.jdbc.PositionedParameters
 import slick.jdbc.canton.SQLActionBuilder
-import slick.jdbc.{PositionedParameters, SetParameter}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
-import scala.math.Ordering.Implicits.*
 
 import DbStorage.Implicits.BuilderChain.*
-import SetParameter.*
 
 class DbAcsDigestJournal[K, V](
     override protected val storage: DbStorage,
@@ -53,16 +50,14 @@ class DbAcsDigestJournal[K, V](
 
   private val digestColNamesInSelect = digestColumnNames.mkString(", ")
 
-  override def deleteAfter(fromExclusive: RecordTime)(implicit
+  override def deleteAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    val RecordTime(fromTs, fromTieBreaker) = fromExclusive
-
     val deleteAction =
       sqlu"""
       delete from #$tableName
       where synchronizer_idx = $synchronizerIdx
-        and (ts > $fromTs or (ts = $fromTs and tie_breaker > $fromTieBreaker))
+        and change_offset > $fromExclusive
     """
 
     logger.trace(s"Deleting entries from $tableName after $fromExclusive...")
@@ -73,42 +68,38 @@ class DbAcsDigestJournal[K, V](
     )
   }
 
-  override def deleteUpTo(toExclusive: RecordTime)(implicit
+  override def deleteUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-
-    val RecordTime(toTs, toTieBreaker) = toExclusive
-
     val pruneActionForNonNull = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         // H2 doesn't support 'with' on 'delete from' so we use 'exists' instead
         sqlu"""
-        delete from #$tableName old
-        where old.synchronizer_idx = $synchronizerIdx
-          and (old.ts < $toTs or (old.ts = $toTs and old.tie_breaker < $toTieBreaker))
-          and exists (
-            select 1
-            from #$tableName newer
-            where newer.synchronizer_idx = $synchronizerIdx
-              and newer.#$keyColumnName = old.#$keyColumnName
-              and newer.replaces_ts = old.ts
-              and newer.replaces_tie_breaker = old.tie_breaker
-              and (newer.ts < $toTs or (newer.ts = $toTs and newer.tie_breaker <= $toTieBreaker))
+        delete from #$tableName
+        where synchronizer_idx = $synchronizerIdx
+          and change_offset < $toExclusive
+          and (#$keyColumnName, change_offset) in (
+            select #$keyColumnName, replaces_offset
+            from #$tableName
+            where synchronizer_idx = $synchronizerIdx
+              and change_offset <= $toExclusive
+              and replaces_offset is not null
           )
         """
 
       case _: DbStorage.Profile.Postgres =>
         sqlu"""
         with replaced_entries as (
-          select #$keyColumnName as key_id, replaces_ts, replaces_tie_breaker
+          select #$keyColumnName as key_id, replaces_offset
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
-            and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
+            and change_offset <= $toExclusive
+            and replaces_offset is not null
         )
         delete from #$tableName
         where synchronizer_idx = $synchronizerIdx
-          and (#$keyColumnName, ts, tie_breaker) in (
-            select key_id, replaces_ts, replaces_tie_breaker from replaced_entries
+          and (#$keyColumnName, change_offset) in (
+            select key_id, replaces_offset from replaced_entries
           )
         """
     }
@@ -118,7 +109,7 @@ class DbAcsDigestJournal[K, V](
     val pruneActionOnNull = sqlu"""
       delete from #$tableName
       where synchronizer_idx = $synchronizerIdx
-        and (ts < $toTs or (ts = $toTs and tie_breaker < $toTieBreaker))
+        and change_offset < $toExclusive
         and #$nullDigestCondition
     """
 
@@ -139,16 +130,15 @@ class DbAcsDigestJournal[K, V](
         pp: PositionedParameters
     )(update: AcsDigestStore.AcsDigestUpdate[K, V]): Unit = {
       val AcsDigestStore.AcsDigestUpdate(
-        AcsDigestStore.AcsDigest(key, digest, recordTime),
-        replacesRecordTime,
+        AcsDigestStore.AcsDigest(key, offset, timestamp, digest),
+        replacesOffset,
       ) = update
       pp >> indexedSynchronizer
       pp >> key
-      pp >> recordTime.timestamp
-      pp >> recordTime.tieBreaker
+      pp >> offset
+      pp >> timestamp
       pp >> digest
-      pp >> replacesRecordTime.map(_.timestamp)
-      pp >> replacesRecordTime.map(_.tieBreaker)
+      pp >> replacesOffset
     }
 
     val digestColPlaceHolders = Seq.fill(digestColumnNames.length)("?").mkString(", ")
@@ -157,23 +147,22 @@ class DbAcsDigestJournal[K, V](
       case _: DbStorage.Profile.H2 =>
         s"""merge into $tableName (
              synchronizer_idx, $keyColumnName,
-             ts, tie_breaker, $digestColNamesInSelect, replaces_ts, replaces_tie_breaker
+             change_offset, ts, $digestColNamesInSelect, replaces_offset
            )
-           key (synchronizer_idx, $keyColumnName, ts, tie_breaker)
-           values (?, ?, ?, ?, $digestColPlaceHolders, ?, ?)
+           key (synchronizer_idx, $keyColumnName, change_offset)
+           values (?, ?, ?, ?, $digestColPlaceHolders, ?)
          """
 
       case _: DbStorage.Profile.Postgres =>
         s"""insert into $tableName (
                synchronizer_idx, $keyColumnName,
-               ts, tie_breaker, $digestColNamesInSelect, replaces_ts, replaces_tie_breaker
+               change_offset, ts, $digestColNamesInSelect, replaces_offset
              )
-             values (?, ?, ?, ?, $digestColPlaceHolders, ?, ?)
-             on conflict (synchronizer_idx, $keyColumnName, ts, tie_breaker)
+             values (?, ?, ?, ?, $digestColPlaceHolders, ?)
+             on conflict (synchronizer_idx, $keyColumnName, change_offset)
              do update set
                ${digestColumnNames.map(col => s"$col = excluded.$col").mkString(", ")},
-               replaces_ts = excluded.replaces_ts,
-               replaces_tie_breaker = excluded.replaces_tie_breaker
+               replaces_offset = excluded.replaces_offset
          """
     }
 
@@ -194,19 +183,17 @@ class DbAcsDigestJournal[K, V](
       }
   }
 
-  override def lookup(key: K, toInclusive: RecordTime)(implicit
+  override def lookup(key: K, toInclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K, V]]] = {
-    val RecordTime(toTs, toTieBreaker) = toInclusive
-
     val lookupQuery =
       (sql"""
-        select #$keyColumnName, ts, tie_breaker, #$digestColNamesInSelect, replaces_ts, replaces_tie_breaker from #$tableName
+        select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, replaces_offset from #$tableName
         where
         synchronizer_idx = $synchronizerIdx
         and #$keyColumnName = $key
-        and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
-        order by synchronizer_idx, #$keyColumnName, ts desc, tie_breaker desc
+        and change_offset <= $toInclusive
+        order by synchronizer_idx, #$keyColumnName, change_offset desc
         """ ++ storage.limitSql(1))
         .as[AcsDigestStore.AcsDigestUpdate[K, V]]
         .headOption
@@ -221,7 +208,7 @@ class DbAcsDigestJournal[K, V](
     )
   }
 
-  override def bulkLookup(keys: immutable.Iterable[K], toInclusive: RecordTime)(implicit
+  override def bulkLookup(keys: immutable.Iterable[K], toInclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K, V]]] =
     NonEmpty.from(keys) match {
@@ -229,39 +216,38 @@ class DbAcsDigestJournal[K, V](
       case Some(nonEmptyIterable) =>
         // uses the ClassTag[K] - and SetParameters[Array[K]] implicits
         val keysArray = toKeysArray(keys)
-        val RecordTime(toTs, toTieBreaker) = toInclusive
 
         val bulkLookupQuery: SQLActionBuilder = storage.profile match {
           case _: DbStorage.Profile.H2 =>
             val inClause = DbStorage.toInClause(keyColumnName, nonEmptyIterable)
             sql"""
-            select r.#$keyColumnName, r.ts, r.tie_breaker, r.#$digestColNamesInSelect, r.replaces_ts, r.replaces_tie_breaker
+            select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect, r.replaces_offset
             from (
               select
-                #$keyColumnName, ts, tie_breaker, #$digestColNamesInSelect, replaces_ts, replaces_tie_breaker,
-                ROW_NUMBER() OVER (
-                  PARTITION BY #$keyColumnName
-                  ORDER BY ts DESC, tie_breaker DESC
+                #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, replaces_offset,
+                row_number() over (
+                  partition by #$keyColumnName
+                  order by change_offset desc
                 ) as rn
               from #$tableName
               where """ ++ inClause ++ sql"""
                 and synchronizer_idx = $synchronizerIdx
-                and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
+                and change_offset <= $toInclusive
             ) as r
             where r.rn = 1
             """
 
           case _: DbStorage.Profile.Postgres =>
             sql"""
-            select k.target_key_id, j.ts, j.tie_breaker, j.#$digestColNamesInSelect, j.replaces_ts, j.replaces_tie_breaker
+            select k.target_key_id, j.change_offset, j.ts, j.#$digestColNamesInSelect, j.replaces_offset
               from UNNEST($keysArray) as k(target_key_id)
               cross join lateral (
-                 select ts, tie_breaker, #$digestColNamesInSelect, replaces_ts, replaces_tie_breaker
+                 select change_offset, ts, #$digestColNamesInSelect, replaces_offset
                  from #$tableName j
                  where j.synchronizer_idx = $synchronizerIdx
                    and j.#$keyColumnName = (k.target_key_id)::int
-                   and (j.ts < $toTs or (j.ts = $toTs and j.tie_breaker <= $toTieBreaker))
-                 order by j.synchronizer_idx, j.#$keyColumnName, j.ts desc, j.tie_breaker desc
+                   and j.change_offset <= $toInclusive
+                 order by j.synchronizer_idx, j.#$keyColumnName, j.change_offset desc
                  limit 1
               ) as j
             """
@@ -294,12 +280,10 @@ class DbAcsDigestJournal[K, V](
         Either[PaginationTokenDone, SnapshotPaginationToken],
     )
   ] = {
-    val (targetTime, startKeyO) = tokenOrStart match {
+    val (atInclusive, startKeyO) = tokenOrStart match {
       case Right(atInclusive) => (atInclusive, Option.empty[K])
       case Left(token) => (token.atInclusive, Some(token.lastKey))
     }
-
-    val RecordTime(toTs, toTieBreaker) = targetTime
 
     val keyCondition = startKeyO match {
       case Some(startKeyVal) => sql"and #$keyColumnName > $startKeyVal"
@@ -312,13 +296,13 @@ class DbAcsDigestJournal[K, V](
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sql"""
-          select r.#$keyColumnName, r.ts, r.tie_breaker, r.#$digestColNamesInSelect
+          select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect
           from (
-            select #$keyColumnName, ts, tie_breaker, #$digestColNamesInSelect,
-                   ROW_NUMBER() OVER (PARTITION BY #$keyColumnName ORDER BY ts DESC, tie_breaker DESC) as rn
+            select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect,
+                   row_number() over (partition by #$keyColumnName order by change_offset desc) as rn
             from #$tableName
             where synchronizer_idx = $synchronizerIdx
-              and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
+              and change_offset <= $atInclusive
               """ ++ keyCondition ++
           sql"""
           ) as r
@@ -333,10 +317,10 @@ class DbAcsDigestJournal[K, V](
             select #$keyColumnName as key_id
             from #$tableName
             where synchronizer_idx = $synchronizerIdx
-              and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
+              and change_offset <= $atInclusive
               """ ++ keyCondition ++
           sql"""
-            order by #$keyColumnName asc, ts desc, tie_breaker desc
+            order by #$keyColumnName asc, change_offset desc
             limit 1
           )
           union all
@@ -345,23 +329,23 @@ class DbAcsDigestJournal[K, V](
             from #$tableName j
             where j.synchronizer_idx = $synchronizerIdx
               and j.#$keyColumnName > kb.key_id
-              and (j.ts < $toTs or (j.ts = $toTs and j.tie_breaker <= $toTieBreaker))
-            order by j.#$keyColumnName asc, j.ts desc, j.tie_breaker desc
+              and j.change_offset <= $atInclusive
+            order by j.#$keyColumnName asc, j.change_offset desc
             limit 1
           )
           from key_batch kb
           -- recursive query's termination case
           where kb.key_id is not null
         )
-        select j.#$keyColumnName, j.ts, j.tie_breaker, j.#$digestColNamesInSelect
+        select j.#$keyColumnName, j.change_offset, j.ts, j.#$digestColNamesInSelect
         from key_batch b
         cross join lateral (
-          select #$keyColumnName, ts, tie_breaker, #$digestColNamesInSelect
+          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
             and #$keyColumnName = b.key_id
-            and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
-          order by ts desc, tie_breaker desc
+            and change_offset <= $atInclusive
+          order by change_offset desc
           limit 1
         ) as j
       """ ++ storage.limitSql(fetchLimit)
@@ -380,17 +364,17 @@ class DbAcsDigestJournal[K, V](
             .map(_.key)
             .getOrElse(
               throw new IllegalStateException(
-                s"Unexpected error in snapshot query in $tableName, to $targetTime!"
+                s"Unexpected error in snapshot query in $tableName, to $atInclusive!"
               )
             )
-          (limitNumOfAcsDigests, Right(SnapshotToken(targetTime, lastQueriedKey)))
+          (limitNumOfAcsDigests, Right(SnapshotToken(atInclusive, lastQueriedKey)))
       }
   }
 
   override type ChangesBetweenPaginationToken = ChangesBetweenToken[K]
 
   override def changesBetween(
-      tokenOrStart: Either[ChangesBetweenPaginationToken, AcsDigestStore.ChangesBetweenTimeRange],
+      tokenOrStart: Either[ChangesBetweenPaginationToken, AcsDigestStore.ChangesBetweenOffsetRange],
       limit: Int,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
@@ -403,8 +387,8 @@ class DbAcsDigestJournal[K, V](
       case Left(token) => (token.timeRange, Some(token.lastKey))
     }
 
-    val RecordTime(fromTs, fromTieBreaker) = range.fromInclusive
-    val RecordTime(toTs, toTieBreaker) = range.toExclusive
+    val fromInclusive = range.fromInclusive
+    val toExclusive = range.toExclusive
 
     val keyCondition = startKeyO match {
       case Some(startKeyVal) => sql"and #$keyColumnName > $startKeyVal"
@@ -417,14 +401,14 @@ class DbAcsDigestJournal[K, V](
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sql"""
-        select r.#$keyColumnName, r.ts, r.tie_breaker, r.#$digestColNamesInSelect
+        select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect
         from (
-          select #$keyColumnName, ts, tie_breaker, #$digestColNamesInSelect,
-                 ROW_NUMBER() OVER (PARTITION BY #$keyColumnName ORDER BY ts DESC, tie_breaker DESC) as rn
+          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect,
+                 row_number() over (partition by #$keyColumnName order by change_offset desc) as rn
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
-            and (ts > $fromTs or (ts = $fromTs and tie_breaker >= $fromTieBreaker))
-            and (ts < $toTs or (ts = $toTs and tie_breaker < $toTieBreaker))
+            and change_offset >= $fromInclusive
+            and change_offset < $toExclusive
             """ ++ keyCondition ++ sql"""
         ) as r
         where r.rn = 1
@@ -438,10 +422,10 @@ class DbAcsDigestJournal[K, V](
             select #$keyColumnName as key_id
             from #$tableName
             where synchronizer_idx = $synchronizerIdx
-              and (ts > $fromTs or (ts = $fromTs and tie_breaker >= $fromTieBreaker))
-              and (ts < $toTs or (ts = $toTs and tie_breaker < $toTieBreaker))
+              and change_offset >= $fromInclusive
+              and change_offset < $toExclusive
               """ ++ keyCondition ++ sql"""
-            order by #$keyColumnName asc, ts desc, tie_breaker desc
+            order by #$keyColumnName asc, change_offset desc
             limit 1
           )
           union all
@@ -450,25 +434,25 @@ class DbAcsDigestJournal[K, V](
             from #$tableName j
             where j.synchronizer_idx = $synchronizerIdx
               and j.#$keyColumnName > kb.key_id
-              and (j.ts > $fromTs or (j.ts = $fromTs and j.tie_breaker >= $fromTieBreaker))
-              and (j.ts < $toTs or (j.ts = $toTs and j.tie_breaker < $toTieBreaker))
-            order by j.#$keyColumnName asc, j.ts desc, j.tie_breaker desc
+              and j.change_offset >= $fromInclusive
+              and j.change_offset < $toExclusive
+            order by j.#$keyColumnName asc, j.change_offset desc
             limit 1
           )
           from key_batch kb
           -- recursive query's termination case
           where kb.key_id is not null
         )
-        select j.#$keyColumnName, j.ts, j.tie_breaker, j.#$digestColNamesInSelect
+        select j.#$keyColumnName, j.change_offset, j.ts, j.#$digestColNamesInSelect
         from key_batch b
         cross join lateral (
-          select #$keyColumnName, ts, tie_breaker, #$digestColNamesInSelect
+          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
             and #$keyColumnName = b.key_id
-            and (ts > $fromTs or (ts = $fromTs and tie_breaker >= $fromTieBreaker))
-            and (ts < $toTs or (ts = $toTs and tie_breaker < $toTieBreaker))
-          order by ts desc, tie_breaker desc
+            and change_offset >= $fromInclusive
+            and change_offset < $toExclusive
+          order by change_offset desc
           limit 1
         ) as j
       """ ++ storage.limitSql(fetchLimit)
@@ -494,62 +478,56 @@ class DbAcsDigestJournal[K, V](
       }
   }
 
-  override def checkReplacesInvariant(upToInclusive: RecordTime)(implicit
+  override def checkReplacesInvariant(upToInclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
 
-    val RecordTime(toTs, toTieBreaker) = upToInclusive
-
     val checkQuery =
       (sql"""
-        select #$keyColumnName, ts, tie_breaker, replaces_ts, replaces_tie_breaker, prev_ts, prev_tie_breaker
+        select #$keyColumnName, change_offset, replaces_offset, prev_offset
         from (
           select
             #$keyColumnName,
-            ts,
-            tie_breaker,
-            replaces_ts,
-            replaces_tie_breaker,
-            LAG(ts, 1) OVER (PARTITION BY #$keyColumnName ORDER BY ts, tie_breaker) as prev_ts,
-            LAG(tie_breaker, 1) OVER (PARTITION BY #$keyColumnName ORDER BY ts, tie_breaker) as prev_tie_breaker
+            change_offset,
+            replaces_offset,
+            lag(change_offset, 1) over (partition by #$keyColumnName order by change_offset) as prev_offset
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
-            and (ts < $toTs or (ts = $toTs and tie_breaker <= $toTieBreaker))
+            and change_offset <= $upToInclusive
         ) as lagged
         where
-          (prev_ts is null and replaces_ts is not null and (replaces_ts > ts or (replaces_ts = ts and replaces_tie_breaker >= tie_breaker)))
+          (prev_offset is null and replaces_offset is not null and (replaces_offset >= change_offset))
           or
-          (prev_ts is not null and (replaces_ts is null or replaces_ts <> prev_ts or replaces_tie_breaker <> prev_tie_breaker))
-        order by ts, tie_breaker
+          (prev_offset is not null and (replaces_offset is null or replaces_offset <> prev_offset))
+        order by change_offset
       """ ++ storage.limitSql(1))
-        .as[(K, RecordTime, Option[RecordTime], Option[RecordTime])]
+        .as[(K, Offset, Option[Offset], Option[Offset])]
         .headOption
 
     storage.query(checkQuery, functionFullName).map {
-      case Some((key, recordTime, Some(replacesRecordTime), _))
-          if replacesRecordTime >= recordTime =>
+      case Some((key, offset, Some(replacesOffset), _)) if replacesOffset >= offset =>
         ErrorUtil.invalidState(
-          s"ReplacesRecordTime check error for Key ${prettyKey(key)} - " +
-            s"We cannot have replacesTime=$replacesRecordTime which is gte to recordTime $recordTime"
+          s"ReplacesOffset check error for Key ${prettyKey(key)} - " +
+            s"We cannot have replacesOffset=$replacesOffset which is gte to change offset $offset"
         )
-      case Some((key, recordTime, None, Some(precedentRecordTime))) =>
+      case Some((key, offset, None, Some(precedentOffset))) =>
         ErrorUtil.invalidState(
-          s"ReplacesRecordTime check error for key ${prettyKey(key)} at $recordTime - " +
-            s"Replaces time should point to $precedentRecordTime but it is empty!"
+          s"ReplacesOffset check error for key ${prettyKey(key)} at $offset - " +
+            s"Replaces offset should point to $precedentOffset but it is empty!"
         )
       case Some(
-            (key, currentRecordTime, Some(currentReplacesRecordTime), Some(precedingRecordTime))
-          ) if currentReplacesRecordTime != precedingRecordTime =>
+            (key, offset, Some(currentReplacesOffset), Some(precedingOffset))
+          ) if currentReplacesOffset != precedingOffset =>
         ErrorUtil.invalidState(
-          s"ReplacesRecordTime check error for key ${prettyKey(key)} - " +
-            s"We cannot have an entry with (recordTime=$currentRecordTime, replacesTime=$currentReplacesRecordTime) " +
-            s"which is not pointing to the preceding recordTime=$precedingRecordTime"
+          s"ReplacesOffset check error for key ${prettyKey(key)} - " +
+            s"We cannot have an entry with (offset=$offset, replacesOffset=$currentReplacesOffset) " +
+            s"which is not pointing to the preceding offset=$precedingOffset"
         )
-      case Some((key, recordTime, replacesRecordTime, precedentRecordTime)) =>
+      case Some((key, offset, replacesOffset, precedentOffset)) =>
         ErrorUtil.invalidState(
-          s"ReplacesRecordTime check error for key ${prettyKey(key)} - " +
-            s"found a case which shouldn't exist for recordTime $recordTime, replacesRecordTime: $replacesRecordTime " +
-            s"and precedentRecordTime $precedentRecordTime"
+          s"ReplacesOffset check error for key ${prettyKey(key)} - " +
+            s"found a case which shouldn't exist for offset $offset, replacesOffset: $replacesOffset " +
+            s"and precedentOffset $precedentOffset"
         )
       case None => () // All is good. No violation found!
     }
@@ -557,9 +535,9 @@ class DbAcsDigestJournal[K, V](
 }
 
 object DbAcsDigestJournal {
-  final case class SnapshotToken[K](atInclusive: RecordTime, lastKey: K)
+  final case class SnapshotToken[K](atInclusive: Offset, lastKey: K)
   final case class ChangesBetweenToken[K](
-      timeRange: AcsDigestStore.ChangesBetweenTimeRange,
+      timeRange: AcsDigestStore.ChangesBetweenOffsetRange,
       lastKey: K,
   )
 }

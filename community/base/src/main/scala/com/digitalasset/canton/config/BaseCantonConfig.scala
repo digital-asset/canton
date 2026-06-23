@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.config
 
+import pureconfig.generic.ProductHint
 import pureconfig.{ConfigReader, ConfigWriter}
 
 /** Base config readers and writers used in different places
@@ -16,6 +17,10 @@ object BaseCantonConfig {
   import pureconfig.generic.semiauto.*
 
   object Readers {
+
+    // the great ux of pureconfig expects you to provide this ProductHint such that the created derivedReader fails on
+    // unknown keys
+    implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
 
     lazy implicit val batchAggregatorConfigReader: ConfigReader[BatchAggregatorConfig] = {
       implicit val batching: ConfigReader[BatchAggregatorConfig.Batching] =

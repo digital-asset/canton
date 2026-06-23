@@ -3369,9 +3369,7 @@ object BuildCommon {
     lazy val `daml-lf-ide-ledger` = project
       .in(file("community/daml-lf/ide-ledger"))
       .disablePlugins(
-        WartRemover,
-        ScalafixPlugin,
-        ScalafmtPlugin,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3430,9 +3428,7 @@ object BuildCommon {
     lazy val `daml-lf-transaction` = project
       .in(file("community/daml-lf/transaction"))
       .disablePlugins(
-        WartRemover,
-        ScalafixPlugin,
-        ScalafmtPlugin,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3513,9 +3509,7 @@ object BuildCommon {
     lazy val `daml-lf-transaction-tests` = project
       .in(file("community/daml-lf/transaction-tests"))
       .disablePlugins(
-        WartRemover,
-        ScalafixPlugin,
-        ScalafmtPlugin,
+        WartRemover
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -3740,9 +3734,7 @@ object BuildCommon {
     lazy val `daml-lf-interpreter` = project
       .in(file("community/daml-lf/interpreter"))
       .disablePlugins(
-        WartRemover,
-        ScalafixPlugin,
-        ScalafmtPlugin,
+        WartRemover
       )
       .settings(
         sharedCommunitySettings,
@@ -3831,9 +3823,7 @@ object BuildCommon {
     lazy val `daml-lf-engine` = project
       .in(file("community/daml-lf/engine"))
       .disablePlugins(
-        WartRemover,
-        ScalafixPlugin,
-        ScalafmtPlugin,
+        WartRemover
       )
       .enablePlugins(DamlPlugin)
       .settings(

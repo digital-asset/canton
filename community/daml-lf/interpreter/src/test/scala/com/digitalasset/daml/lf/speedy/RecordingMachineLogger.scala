@@ -3,29 +3,32 @@
 
 package com.digitalasset.daml.lf.speedy
 
-import scala.collection.mutable.Buffer
 import com.digitalasset.canton.logging.LoggerNameFromClass
 import com.digitalasset.daml.lf.data.Ref.Location
+
+import scala.collection.mutable.Buffer
 
 class RecordingMachineLogger(underlying: MachineLogger) extends MachineLogger {
   private val messages: Buffer[String] = Buffer.empty
 
-  override def trace(message: String, location: Option[Location])(
-    implicit loggerName: LoggerNameFromClass
+  override def trace(message: String, location: Option[Location])(implicit
+      loggerName: LoggerNameFromClass
   ): Unit = {
     llTrace(message)
     underlying.trace(message, location)
   }
 
-  override def warn(message: String, location: Option[Location])(
-    implicit loggerName: LoggerNameFromClass
+  override def warn(message: String, location: Option[Location])(implicit
+      loggerName: LoggerNameFromClass
   ): Unit = underlying.warn(message, location)
 
-  def llTrace(message: String): Unit = {
+  def llTrace(message: String): Unit =
     messages += message
-  }
 
-  def tracePartialFunction[X, Y](message: String, pf: PartialFunction[X, Y]): PartialFunction[X, Y] = {
+  def tracePartialFunction[X, Y](
+      message: String,
+      pf: PartialFunction[X, Y],
+  ): PartialFunction[X, Y] = {
     case x if { llTrace(message); pf.isDefinedAt(x) } => pf(x)
   }
 

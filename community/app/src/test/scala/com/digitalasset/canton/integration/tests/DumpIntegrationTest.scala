@@ -19,7 +19,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.protocol.messages.AcsCommitment
+import com.digitalasset.canton.protocol.messages.LegacyAcsCommitment
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.store.SequencedEventStore.{
@@ -229,7 +229,7 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
 
 // architecture-handbook-entry-begin: DumpAcsCommitmentToFile
       // Obtain the last acs commitment.
-      val lastCommitment: AcsCommitment = participant1.commitments
+      val lastCommitment: LegacyAcsCommitment = participant1.commitments
         .received(
           daName,
           CantonTimestamp.MinValue.toInstant,
@@ -250,8 +250,8 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
 
       val dumpedLastCommitmentOrErr: Either[
         ProtoDeserializationError,
-        AcsCommitment,
-      ] = AcsCommitment.fromByteString(protocolVersion, dumpedLastCommitmentBytes)
+        LegacyAcsCommitment,
+      ] = LegacyAcsCommitment.fromByteString(protocolVersion, dumpedLastCommitmentBytes)
 // architecture-handbook-entry-end: DumpAcsCommitmentToFile
       dumpedLastCommitmentOrErr.value shouldBe lastCommitment
     }

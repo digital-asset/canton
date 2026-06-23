@@ -4,17 +4,17 @@
 package com.digitalasset.daml.lf
 package engine
 
-import java.util.concurrent.ConcurrentHashMap
+import com.daml.nameof.NameOf
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.engine.ConcurrentCompiledPackages.AddPackageState
 import com.digitalasset.daml.lf.language.Ast.{Package, PackageSignature}
-import com.digitalasset.daml.lf.language.{Util => AstUtil}
+import com.digitalasset.daml.lf.language.Util as AstUtil
 import com.digitalasset.daml.lf.speedy.Compiler
-import com.daml.nameof.NameOf
-import com.daml.scalautil.Statement.discard
 
-import scala.jdk.CollectionConverters._
-import scala.collection.concurrent.{Map => ConcurrentMap}
+import java.util.concurrent.ConcurrentHashMap
+import scala.collection.concurrent.Map as ConcurrentMap
+import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 /** Thread-safe class that can be used when you need to maintain a shared, mutable collection of

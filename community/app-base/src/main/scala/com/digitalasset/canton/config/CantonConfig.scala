@@ -84,6 +84,7 @@ import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDri
 import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, PublicServerConfig}
 import com.digitalasset.canton.synchronizer.mediator.{
   DeduplicationStoreConfig,
+  DelayedVerdictSenderConfig,
   MediatorConfig,
   MediatorNodeConfig,
   MediatorNodeParameterConfig,
@@ -553,6 +554,8 @@ final case class CantonConfig(
             .map(DisasterRecoverySequencingTimeUpperBound(_)),
         delayRequestsBeforeLsuTrafficInit =
           sequencerNodeConfig.parameters.delayRequestsBeforeLsuTrafficInit,
+        enableRejectDeliveredAggregationsOnPv35 =
+          sequencerNodeConfig.parameters.enableRejectDeliveredAggregationsOnPv35,
         disableSubmissionChecksForTesting =
           sequencerNodeConfig.parameters.disableSubmissionChecksForTesting,
         disableAggregationRuleSizeCheckForTesting =
@@ -576,6 +579,7 @@ final case class CantonConfig(
       MediatorNodeParameters(
         general = CantonNodeParameterConverter.general(this, mediatorNodeConfig),
         protocol = CantonNodeParameterConverter.protocol(this, mediatorNodeConfig.parameters),
+        delayedVerdictSender = mediatorNodeConfig.parameters.delayedVerdictSender,
       )
     }
 
@@ -730,9 +734,7 @@ private[canton] object CantonNodeParameterConverter {
 object CantonConfig {
   import DeprecatedConfigUtils.*
 
-  // the great ux of pureconfig expects you to provide this ProductHint such that the created derivedReader fails on
-  // unknown keys
-  implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
+  import BaseCantonConfig.Readers.preventAllUnknownKeys
 
   import com.daml.nonempty.NonEmptyUtil.instances.*
   import pureconfig.ConfigReader
@@ -1300,9 +1302,15 @@ object CantonConfig {
 
     lazy implicit final val remoteSequencerConfigReader: ConfigReader[RemoteSequencerConfig] =
       deriveReader[RemoteSequencerConfig]
+
     lazy implicit final val mediatorNodeParameterConfigReader
-        : ConfigReader[MediatorNodeParameterConfig] =
+        : ConfigReader[MediatorNodeParameterConfig] = {
+      implicit val verdictSenderReaderConfig: ConfigReader[DelayedVerdictSenderConfig] = {
+        import NonNegativeNumeric.*
+        deriveReader[DelayedVerdictSenderConfig]
+      }
       deriveReader[MediatorNodeParameterConfig]
+    }
 
     lazy implicit final val mediatorConfigReader: ConfigReader[MediatorConfig] = {
       implicit val mediatorPruningConfigReader: ConfigReader[MediatorPruningConfig] =
@@ -1548,8 +1556,18 @@ object CantonConfig {
       implicit val alphaOnlinePartyReplicationConfig
           : ConfigReader[AlphaOnlinePartyReplicationConfig] =
         deriveReader[AlphaOnlinePartyReplicationConfig]
+      implicit val deprecatedReassignmentsFields: DeprecatedFieldsFor[ReassignmentsConfig] =
+        new DeprecatedFieldsFor[ReassignmentsConfig] {
+          override def deprecatePath: List[DeprecatedConfigPath[?]] =
+            List(
+              DeprecatedConfigPath[NonNegativeFiniteDuration](
+                "target-timestamp-forward-tolerance",
+                since = "3.6.0",
+              )
+            )
+        }
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
-        deriveReader[ReassignmentsConfig]
+        deriveReader[ReassignmentsConfig].applyDeprecations
       implicit val purgeReader: ConfigReader[PurgeConfig] = deriveReader[PurgeConfig]
       implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
 
@@ -2145,8 +2163,11 @@ object CantonConfig {
       deriveWriter[MediatorConfig]
     }
     lazy implicit final val mediatorNodeParameterConfigWriter
-        : ConfigWriter[MediatorNodeParameterConfig] =
+        : ConfigWriter[MediatorNodeParameterConfig] = {
+      implicit val verdictSenderConfigWriter: ConfigWriter[DelayedVerdictSenderConfig] =
+        deriveWriter[DelayedVerdictSenderConfig]
       deriveWriter[MediatorNodeParameterConfig]
+    }
     lazy implicit final val remoteMediatorConfigWriter: ConfigWriter[RemoteMediatorConfig] =
       deriveWriter[RemoteMediatorConfig]
 

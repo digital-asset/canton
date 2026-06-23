@@ -76,10 +76,10 @@ object TreeTransactionBuilder extends TreeTransactionBuilder {
   implicit class NodeOps(node: Node) {
     def withChildren(children: NodeWrapper*): NodeWrapper = node match {
       case n: Node.Exercise if n.children.isEmpty =>
-        Parent(c => n.copy(children = ImmArray.from(c)), children)
+        Parent(childNodeIds => n.copy(children = ImmArray.from(childNodeIds)), children)
 
       case n: Node.Rollback if n.children.isEmpty =>
-        Parent(c => n.copy(children = ImmArray.from(c)), children)
+        Parent(childNodeIds => n.copy(children = ImmArray.from(childNodeIds)), children)
 
       case _ => throw new IllegalArgumentException(s"Node $node is not supported $node as parent")
     }

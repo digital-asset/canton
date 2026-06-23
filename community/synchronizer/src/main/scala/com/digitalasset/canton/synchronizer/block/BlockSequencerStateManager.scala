@@ -12,16 +12,18 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState, HealthComponent}
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
+  HasRunOnClosing,
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.InstrumentedGraph.BufferedFlow
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumed
 import com.digitalasset.canton.synchronizer.block
@@ -101,6 +103,11 @@ trait BlockSequencerStateManagerBase extends FlagCloseable {
   def waitForAcknowledgementToComplete(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit]
+
+  /** Health of the background writer. Reports a fatal state when a background write fails and the
+    * writer can no longer make progress.
+    */
+  def asyncWriterHealth: HealthComponent
 }
 
 /** Async block sequencer writer control parameters
@@ -340,6 +347,16 @@ private class BlockSequencerStateAsyncWriter(
 )(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends NamedLogging {
 
+  /** Health of the writer. It transitions to a fatal state whenever a write fails, which never
+    * recovers as further writes are blocked to avoid an inconsistent store.
+    */
+  val health: AtomicHealthComponent =
+    new BlockSequencerStateAsyncWriter.WriterHealth(
+      BlockSequencerStateAsyncWriter.healthName,
+      closeContext.context,
+      logger,
+    )
+
   private def mkWriter[Q <: Iterable[?]](
       addToQueue: (Q, Q) => Q,
       writeQueue: Q => FutureUnlessShutdown[Unit],
@@ -365,6 +382,7 @@ private class BlockSequencerStateAsyncWriter(
           ).initCause(exception)
         )
       )
+      health.fatalOccurred(s"Write $name failed - no further writes to avoid inconsistent store")
     }
   }
   private def mkPromise[A](description: String) =
@@ -489,6 +507,19 @@ private class BlockSequencerStateAsyncWriter(
 
 }
 
+private object BlockSequencerStateAsyncWriter {
+  val healthName: String = "block-sequencer-async-writer"
+
+  /** Atomic health component reporting the state of the writer. */
+  class WriterHealth(
+      override val name: String,
+      override protected val associatedHasRunOnClosing: HasRunOnClosing,
+      override protected val logger: TracedLogger,
+  ) extends AtomicHealthComponent {
+    override protected def initialHealthState: ComponentHealthState = ComponentHealthState.Ok()
+  }
+}
+
 class BlockSequencerStateManager(
     val store: SequencerBlockStore,
     val trafficConsumedStore: TrafficConsumedStore,
@@ -528,6 +559,8 @@ class BlockSequencerStateManager(
       asyncWriterParameters,
       loggerFactory,
     )
+
+  override def asyncWriterHealth: HealthComponent = asyncWriter.health
 
   private val memberAcknowledgementPromises =
     TrieMap[Member, NonEmpty[SortedMap[CantonTimestamp, Traced[Promise[Unit]]]]]()

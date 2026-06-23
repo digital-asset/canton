@@ -6,7 +6,7 @@ package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -24,7 +24,12 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
+class LimitsSpec
+    extends AnyFreeSpec
+    with Matchers
+    with Inside
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -115,7 +120,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           eval(limits, Map.empty, committers, e, asSParties(signatories), asSParties(observers))
 
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -157,7 +162,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
             SValue.SContractId(aCid),
           )
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -202,7 +207,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
         )
 
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -249,7 +254,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           )
 
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -286,7 +291,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           )
 
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -325,7 +330,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
         )
 
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -370,7 +375,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           )
 
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -423,7 +428,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           asSParties(observers),
         )
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -476,7 +481,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           asSParties(authorizers),
         )
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -522,7 +527,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
           asSCids(cids.take(i)),
         )
         if (succeed)
-          result shouldBe a[Right[_, _]]
+          result shouldBe a[Right[?, ?]]
         else
           inside(result) {
             case Left(
@@ -555,8 +560,7 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
       cid: Value.ContractId,
       signatories: Iterable[Ref.Party],
       observers: Iterable[Ref.Party],
-  ) = {
-
+  ) =
     TransactionBuilder.fatContractInstanceWithDummyDefaults(
       version = SerializationVersion.StableVersions.max,
       contractId = cid,
@@ -572,5 +576,4 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
       signatories = signatories,
       observers = observers,
     )
-  }
 }

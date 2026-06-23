@@ -23,8 +23,9 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
-import collection.immutable.TreeSet
 import scala.jdk.CollectionConverters.*
+
+import collection.immutable.TreeSet
 
 final class ContractInstanceCoderSpec
     extends AnyWordSpec

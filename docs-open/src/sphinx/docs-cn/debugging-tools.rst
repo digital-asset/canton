@@ -13,7 +13,7 @@ Canton Network Documentation Snippets: Debugging tools
 .. are executed by SphinxDocumentationGenerator integration tests.
 
 .. snippet:: cn_debugging_tools
-    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "da")
     .. hidden:: val myParty = participant1.parties.enable("MyParty")
     .. hidden:: participant1.dars.upload("dars/CantonExamples.dar")

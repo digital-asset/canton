@@ -6,15 +6,16 @@ package value
 
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, TypeConId}
-import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.{Ast, StablePackages}
-import data.ScalazEqual._
+import scalaz.syntax.order.*
+import scalaz.syntax.semigroup.*
 import scalaz.{Equal, Order}
-import scalaz.syntax.order._
-import scalaz.syntax.semigroup._
 
 import java.nio.{ByteBuffer, ByteOrder}
+
+import data.ScalazEqual.*
 
 sealed abstract class GenValue[+X]
     extends CidContainer[GenValue[X]]
@@ -82,8 +83,9 @@ object GenValue {
     override def nonVerboseWithoutTrailingNones: this.type = this
   }
 
-  /** Daml-LF lists are basically linked lists. However we use FrontQueue since we store list-literals in the Daml-LF
-    * packages and FrontQueue lets prepend chunks rather than only one element.
+  /** Daml-LF lists are basically linked lists. However we use FrontQueue since we store
+    * list-literals in the Daml-LF packages and FrontQueue lets prepend chunks rather than only one
+    * element.
     */
   final case class List[+X](values: FrontStack[GenValue[X]])
       extends GenValue[X]
@@ -208,13 +210,12 @@ object GenValue {
 
 object Value {
 
-  /** the maximum nesting level for Daml-LF serializable values. we put this
-    * limitation to be able to reliably implement stack safe programs with it.
-    * right now it's 100 to be conservative -- it's in the same order of magnitude
-    * as the default maximum nesting value of protobuf.
+  /** the maximum nesting level for Daml-LF serializable values. we put this limitation to be able
+    * to reliably implement stack safe programs with it. right now it's 100 to be conservative --
+    * it's in the same order of magnitude as the default maximum nesting value of protobuf.
     *
-    * encoders and decoders should check this to make sure values do not exceed
-    * this level of nesting.
+    * encoders and decoders should check this to make sure values do not exceed this level of
+    * nesting.
     */
   val MAXIMUM_NESTING: Int = 100
 
@@ -270,9 +271,9 @@ object Value {
   type ValueUnit = GenValue.Unit.type
   val ValueUnit: GenValue.Unit.type = GenValue.Unit
 
-  import scalaz.syntax.traverse._
-  import scalaz.std.either._
-  import scalaz.std.option._
+  import scalaz.syntax.traverse.*
+  import scalaz.std.either.*
+  import scalaz.std.option.*
 
   // Casts from GenValue[Extension[From]] to GenValue[Nothing] i.e. `Value`
   def castExtendedValue[From](
@@ -402,7 +403,9 @@ object Value {
       }
     }
 
-    final case class V2 private[digitalasset] (local: Bytes, suffix: Bytes) extends ContractId with data.NoCopy {
+    final case class V2 private[digitalasset] (local: Bytes, suffix: Bytes)
+        extends ContractId
+        with data.NoCopy {
       override lazy val toBytes: Bytes = V2.prefix ++ local ++ suffix
       lazy val coid: Ref.HexString = toBytes.toHexString
       override def toString: String = s"ContractId($coid)"
@@ -425,7 +428,7 @@ object Value {
 
       private val suffixStart: Int = prefix.length + localSize
 
-      def build(local: Bytes, suffix: Bytes): Either[String, V2] = {
+      def build(local: Bytes, suffix: Bytes): Either[String, V2] =
         for {
           _ <- Either.cond(
             local.length == localSize,
@@ -438,13 +441,13 @@ object Value {
             s"The suffix is too long, expected at most $MaxSuffixLength bytes, but got ${suffix.length}",
           )
         } yield new V2(local, suffix)
-      }
 
       def assertBuild(local: Bytes, suffix: Bytes): V2 =
         assertRight(build(local, suffix))
 
-      /** The largest integer `i` so that the number of microseconds between [[Time.Timestamp.MinValue]]
-        * and [[Time.Timestamp.MaxValue]] divided by `i` is smaller than `2^40-1` and therefore fits into 5 bytes.
+      /** The largest integer `i` so that the number of microseconds between
+        * [[Time.Timestamp.MinValue]] and [[Time.Timestamp.MaxValue]] divided by `i` is smaller than
+        * `2^40-1` and therefore fits into 5 bytes.
         */
       private[lf] val resolution: Long = 286981L
 

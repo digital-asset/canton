@@ -9,7 +9,9 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.console.commands.PartiesAdministration
+import com.digitalasset.canton.crypto.KeyPurpose.Signing
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningKeysWithThreshold}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -17,16 +19,21 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.ExternalPartyAlreadyExists
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
-import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
+import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
+  CanSignAllButNamespaceDelegations,
+  CanSignAllMappings,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
 }
 import com.digitalasset.canton.topology.transaction.{
+  DelegationRestriction,
   HostingParticipant,
   MultiTransactionSignature,
   NamespaceDelegation,
@@ -83,6 +90,179 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         .list(filterParty = patrick.filterString)
         .loneElement
         .party shouldBe patrick.partyId
+    }
+
+    "sign the external party transaction for the participant" when {
+      // This test case checks that a participant signs external party allocations only for itself, even if
+      // the participant owns a signing key with a delegation from another participant. This restriction
+      // is in place to avoid a loophole where a participant might not want to host an external party,
+      // but through a namespace delegation, the external party might try to acquire the participant's signature
+      // through other means (e.g. by submitting the allocation via a participant with a namespace delegation in place).
+      "the participant also has a delegated key for another participant" in { implicit env =>
+        import env.*
+
+        // set up the key delegation from participant2 to a key owned by participant1
+        val delegatedKey =
+          participant1.keys.secret.generate_signing_key(usage = Set(SigningKeyUsage.Namespace))
+        participant2.topology.namespace_delegations.propose_delegation(
+          participant2.namespace,
+          delegatedKey,
+          DelegationRestriction.CanSignSpecificMappings(PartyToParticipant.code),
+          store = daId,
+        )
+
+        eventually() {
+          participant1.topology.namespace_delegations
+            .list(
+              daId,
+              filterNamespace = participant2.namespace.filterString,
+              filterTargetKey = Some(delegatedKey.fingerprint),
+            )
+            .loneElement
+            .discard
+        }
+        // validate that the delegation from participant2 to participant1's key actually works for PTPs
+        participant1.parties.enable(
+          "party-on-p2",
+          namespace = participant2.namespace,
+          synchronizer = daName,
+        )
+
+        val partyId = allocateExternalParty().partyId
+
+        val ptp = eventually() {
+          participant2.topology.party_to_participant_mappings
+            .list(daId, proposals = true, filterParty = partyId)
+            .loneElement
+        }
+        // future-proofing the test: ensure that the PTP has both participants as hosting participants (and therefore eligigle for signing it)
+        ptp.item.participantIds should contain theSameElementsAs Seq(
+          participant1.id,
+          participant2.id,
+        )
+        // check that participant1 only signed with the key for participant1, even though it owns a delegated key for participant2
+        ptp.context.signedBy.forgetNE.loneElement shouldBe participant1.fingerprint
+
+        // clean up: revoke the delegation again
+        participant2.topology.namespace_delegations.propose_revocation(
+          participant2.namespace,
+          targetKey = delegatedKey,
+          store = daId,
+        )
+
+        eventually() {
+          participant1.topology.namespace_delegations.list(
+            daId,
+            filterNamespace = participant2.namespace.filterString,
+            filterTargetKey = Some(delegatedKey.fingerprint),
+          ) shouldBe empty
+        }
+
+      }
+      "the participant has an offline root key" in { implicit env =>
+        import env.*
+
+        // download the root key so that we can restore it at the end of the test
+        val rootNamespaceKey = participant1.keys.secret.download(participant1.fingerprint)
+
+        // delete the root namespace key to make it "offline"
+        participant1.keys.secret.delete(participant1.fingerprint, force = true)
+
+        // try to allocate the external party without any valid topology signing key
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          allocateExternalParty(),
+          _.errorMessage should include(
+            "Could not find an appropriate signing key to issue the topology transaction"
+          ),
+        )
+
+        // temporarily restore the root namespace key and issue a namespace delegation
+        // for an intermediate key
+        participant1.keys.secret.upload(rootNamespaceKey, name = None)
+
+        val intermediateKey =
+          participant1.keys.secret.generate_signing_key(usage = Set(SigningKeyUsage.Namespace))
+        participant1.topology.namespace_delegations.propose_delegation(
+          participant1.namespace,
+          intermediateKey,
+          CanSignAllButNamespaceDelegations,
+          store = daId,
+        )
+
+        eventually() {
+          participant1.topology.namespace_delegations
+            .list(daId, filterTargetKey = Some(intermediateKey.fingerprint))
+            .loneElement
+        }
+
+        // delete the root namespace key again
+        participant1.keys.secret.delete(participant1.fingerprint, force = true)
+
+        // allocating the external party should work now
+        val externalPartyId = allocateExternalParty().partyId
+
+        // validate that the mapping for the external party exists,
+        // and that it was only signed by intermediate key
+        eventually() {
+          participant1.topology.party_to_participant_mappings
+            .list(
+              daId,
+              proposals = true,
+              filterParty = externalPartyId,
+            )
+            .loneElement
+            .context
+            .signedBy
+            .forgetNE should contain theSameElementsAs Seq(intermediateKey.fingerprint)
+        }
+
+        participant1.keys.secret.upload(rootNamespaceKey, name = None)
+      }
+    }
+
+    /** Allocates an external party with a random name in sequencer1's namespace with participant1
+      * and participant2 as the hosting participants.
+      */
+    def allocateExternalParty()(implicit env: TestConsoleEnvironment) = {
+      import env.*
+      participant1.ledger_api.parties
+        .allocate_external(
+          daId,
+          Seq(
+            TopologyTransaction(
+              TopologyChangeOp.Replace,
+              PositiveInt.one,
+              PartyToParticipant.tryCreate(
+                PartyId.tryCreate(UUID.randomUUID().toString, sequencer1.namespace),
+                PositiveInt.one,
+                Seq(
+                  HostingParticipant(participant1.id, ParticipantPermission.Confirmation),
+                  HostingParticipant(participant2.id, ParticipantPermission.Confirmation),
+                ),
+                partySigningKeysWithThreshold = Some(
+                  SigningKeysWithThreshold(
+                    NonEmpty(
+                      Set,
+                      // pick some key as the party's signing key
+                      sequencer1.keys.public
+                        .list(
+                          filterPurpose = Set(Signing),
+                          filterUsage = Set(SigningKeyUsage.Protocol),
+                        )
+                        .head
+                        .publicKey
+                        .asSigningKey
+                        .value,
+                    ),
+                    PositiveInt.one,
+                  )
+                ),
+              ),
+              testedProtocolVersion,
+            ) -> Seq.empty
+          ),
+          Seq.empty,
+        )
     }
 
     "allocate a party with a PartyToKeyMapping" in { implicit env =>

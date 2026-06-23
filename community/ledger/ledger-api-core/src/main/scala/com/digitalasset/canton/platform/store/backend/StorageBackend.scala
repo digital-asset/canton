@@ -292,7 +292,7 @@ trait CompletionStorageBackend {
   def commandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse]
@@ -483,6 +483,12 @@ trait EventStorageBackend {
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
   )(connection: Connection): Option[Offset]
+
+  def fetchAcsCommitments(
+      eventSequentialIds: SequentialIdBatch,
+      synchronizerId: SynchronizerId,
+      descendingOrder: Boolean,
+  )(connection: Connection): Vector[RawAcsCommitment]
 
   def fetchEventPayloadsAcsDelta(target: EventPayloadSourceForUpdatesAcsDelta)(
       eventSequentialIds: SequentialIdBatch,
@@ -820,6 +826,15 @@ object EventStorageBackend {
       authorizationEvent: AuthorizationEvent,
       recordTime: Timestamp,
       synchronizerId: String,
+      traceContext: Array[Byte],
+  )
+
+  final case class RawAcsCommitment(
+      offset: Offset,
+      eventSequentialId: Long,
+      synchronizerId: String,
+      recordTime: Timestamp,
+      payload: Array[Byte],
       traceContext: Array[Byte],
   )
 

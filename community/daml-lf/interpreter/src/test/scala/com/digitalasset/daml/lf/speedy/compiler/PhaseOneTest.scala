@@ -6,13 +6,12 @@ package speedy
 package compiler
 
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.Ref.{PackageId, *}
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.PackageInterface
-import com.digitalasset.daml.lf.speedy.compiler.ClosureConversion.closureConvert
-import com.digitalasset.daml.lf.speedy.compiler.SExpr0._
 import com.digitalasset.daml.lf.speedy.compiler.Anf.flattenToAnf
+import com.digitalasset.daml.lf.speedy.compiler.ClosureConversion.closureConvert
+import com.digitalasset.daml.lf.speedy.compiler.SExpr0.*
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -65,7 +64,7 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       transform(source)
     }
 
-    val testCases = {
+    val testCases =
       Table[String, Expr => Expr](
         ("name", "recursion-point"),
         ("tyApp", tyApp),
@@ -119,7 +118,6 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         ("let1_esome", let1_esome),
         ("let2_esome", let2_esome),
       )
-    }
 
     {
       val depth = 10000 // 10k plenty to prove stack-safety (but we can do a million)

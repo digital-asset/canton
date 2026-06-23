@@ -4,7 +4,9 @@
 package com.digitalasset.canton.participant.scheduler
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.networking.Endpoint
@@ -18,6 +20,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryRegisteredSynchronizersStore,
   InMemorySynchronizerConnectionConfigStore,
+  InMemorySynchronizerConnectivityStatusStore,
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.participant.synchronizer.{
@@ -102,10 +105,16 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
 
       val schedule = new SteppingSchedule()
 
+      val purgeableStoresComputation = mock[PostLsuPurgeableStoresComputation]
+
+      when(purgeableStoresComputation.compute()(any[TraceContext]))
+        .thenReturn(FutureUnlessShutdown.pure(Seq(store1, store2)))
+
       val scheduler = new ParticipantPurgeStoresAfterLsuScheduler(
         schedule = Some(schedule),
-        getPurgeableStores = () => Seq(store1, store2),
+        purgeableStoresComputation = purgeableStoresComputation,
         chunkSize = PositiveInt.tryCreate(2),
+        BatchingConfig(),
         timeouts,
         loggerFactory,
       )
@@ -161,13 +170,17 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         sequencerId = None,
       )
 
-      def setStatus(psid: PhysicalSynchronizerId, status: Status): Assertion = {
+      def setStatus(
+          psid: PhysicalSynchronizerId,
+          status: Status,
+          predecessor: Option[SynchronizerPredecessor],
+      ): Assertion = {
         val cfg = new SynchronizerConnectionConfig(
           alias,
           SequencerConnections.single(sequencerConnection),
         )
         // Ensure it's there.
-        configStore.upsert(psid, (cfg, status, None)).futureValueUS.value.discard
+        configStore.upsert(psid, (cfg, status, predecessor)).futureValueUS.value.discard
         configStore
           .setStatus(alias, KnownPhysicalSynchronizerId(psid), status)
           .futureValueUS
@@ -184,19 +197,27 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         val stateManager = mock[SyncPersistentStateManager]
         val oldPersistentState = mock[SyncPersistentState]
         val newPersistentState = mock[SyncPersistentState]
+        val newConnectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
+        newConnectivityStatusStore.setTopologyInitialized().futureValueUS
+
         when(oldPersistentState.purgeableStores).thenReturn(Seq(oldStore))
         when(newPersistentState.purgeableStores).thenReturn(Seq(newStore))
+        when(newPersistentState.connectivityStatusStore).thenReturn(newConnectivityStatusStore)
 
+        when(stateManager.getAll).thenReturn(
+          Map(oldPsid -> oldPersistentState, newPsid -> newPersistentState)
+        )
         when(stateManager.get(oldPsid)).thenReturn(Some(oldPersistentState))
         when(stateManager.get(newPsid)).thenReturn(Some(newPersistentState))
 
-        ParticipantPurgeStoresAfterLsuScheduler.create(
-          Some(schedule),
-          PositiveInt.two,
-          configStore,
-          stateManager,
-          timeouts,
-          loggerFactory,
+        new ParticipantPurgeStoresAfterLsuScheduler(
+          schedule = Some(schedule),
+          purgeableStoresComputation =
+            new PostLsuPurgeableStoresComputation(configStore, stateManager),
+          chunkSize = PositiveInt.two,
+          batchingConfig = BatchingConfig(),
+          timeouts = timeouts,
+          loggerFactory = loggerFactory,
         )
       }
       val f = scheduler.start()
@@ -214,7 +235,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         newStore.size shouldBe 1
 
         // Now old store becomes active. No status for new store yet.
-        setStatus(oldPsid, Active)
+        setStatus(oldPsid, Active, predecessor = None)
       }
 
       schedule.step { result =>
@@ -222,7 +243,12 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         (result, oldStore.size, newStore.size) shouldBe (Done, 1, 1)
 
         // Now new synchronizer is registered, and gets status LsuTarget.
-        setStatus(newPsid, LsuTarget)
+        setStatus(
+          newPsid,
+          LsuTarget,
+          predecessor =
+            Some(SynchronizerPredecessor(oldPsid, CantonTimestamp.Epoch, isLateUpgrade = false)),
+        )
       }
 
       schedule.step { result =>
@@ -230,7 +256,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         (result, oldStore.size, newStore.size) shouldBe (Done, 1, 1)
 
         // Now it's upgrade time and the old synchronizer gets status LsuSource
-        setStatus(oldPsid, LsuSource)
+        setStatus(oldPsid, LsuSource, predecessor = None)
       }
 
       schedule.step { result =>
@@ -238,7 +264,12 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         (result, oldStore.size, newStore.size) shouldBe (Done, 1, 1)
 
         // Next at upgrade time the new synchronizer gets status Active
-        setStatus(newPsid, Active)
+        setStatus(
+          newPsid,
+          Active,
+          predecessor =
+            Some(SynchronizerPredecessor(oldPsid, CantonTimestamp.Epoch, isLateUpgrade = false)),
+        )
       }
 
       schedule.step { result =>

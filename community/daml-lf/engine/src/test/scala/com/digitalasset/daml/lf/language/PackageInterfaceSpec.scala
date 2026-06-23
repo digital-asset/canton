@@ -4,19 +4,19 @@
 package com.digitalasset.daml.lf
 package language
 
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.Identifier
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.PackageInterface.{
   DataEnumInfo,
   DataRecordInfo,
   DataVariantInfo,
 }
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import org.scalatest.{Assertion, Inside}
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.prop._
+import org.scalatest.prop.*
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Assertion, Inside}
 
 class PackageInterfaceSpec
     extends AnyWordSpec
@@ -26,8 +26,8 @@ class PackageInterfaceSpec
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
   import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
-    defaultPackageId => _,
-    _,
+    defaultPackageId as _,
+    *,
   }
 
   // TODO https://github.com/digital-asset/daml/issues/12051
@@ -74,7 +74,7 @@ class PackageInterfaceSpec
       }
 
       s"fail on unknown ${description.toLowerCase()}" in {
-        val table = Table("input" -> "reference", errorCases: _*)
+        val table = Table("input" -> "reference", errorCases*)
 
         forEvery(table) { (input, expectedNotFound) =>
           inside(lookup(input)) { case Left(LookupError.NotFound(notFound, context)) =>

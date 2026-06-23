@@ -14,13 +14,13 @@ import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError}
 import com.digitalasset.daml.lf.speedy.{Command, Compiler, SValue}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
-  defaultPackageId => _,
-  _,
+  defaultPackageId as _,
+  *,
 }
-import com.digitalasset.daml.lf.transaction._
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
@@ -37,7 +37,7 @@ class PreprocessorSpec
     with SuppressingLogging {
 
   val helpers = new PreprocessorSpecHelpers
-  import helpers._
+  import helpers.*
 
   val compilerConfig = Compiler.Config.Dev
 
@@ -49,9 +49,9 @@ class PreprocessorSpec
           Ast.TTyCon("Mod:WithoutKey"),
           ValueRecord("", ImmArray("owners" -> parties, "data" -> ValueInt64(42))),
         )
-      intermediaryResult shouldBe a[ResultNeedPackage[_]]
+      intermediaryResult shouldBe a[ResultNeedPackage[?]]
       val finalResult = intermediaryResult.consume(pkgs = pkgs)
-      finalResult shouldBe a[Right[_, _]]
+      finalResult shouldBe a[Right[?, ?]]
     }
 
     "returns correct error when resuming" in {
@@ -64,7 +64,7 @@ class PreprocessorSpec
             ImmArray("owners" -> parties, "wrong_field" -> ValueInt64(42)),
           ),
         )
-      intermediaryResult shouldBe a[ResultNeedPackage[_]]
+      intermediaryResult shouldBe a[ResultNeedPackage[?]]
       val finalResult = intermediaryResult.consume(pkgs = pkgs)
       inside(finalResult) { case Left(Error.Preprocessing(error)) =>
         error shouldBe a[Error.Preprocessing.TypeMismatch]
@@ -224,10 +224,10 @@ class PreprocessorSpec
                 errorMessage,
                 None,
               )
-            )
+            ),
           ),
           logEntry => logEntry.message should include(errorMessage),
-          logEntry => logEntry.message should include(errorMessage)
+          logEntry => logEntry.message should include(errorMessage),
         )
       }
     }

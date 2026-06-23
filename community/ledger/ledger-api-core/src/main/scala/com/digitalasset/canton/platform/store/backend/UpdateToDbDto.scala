@@ -93,8 +93,13 @@ object UpdateToDbDto {
       case _: CommitRepair =>
         Iterator.empty
 
-      case _: ReceivedAcsCommitment =>
-        Iterator.empty // TODO(#33232): fix
+      case u: ReceivedAcsCommitment =>
+        receivedAcsCommitmentToDbDto(
+          metrics = metrics,
+          offset = offset,
+          serializedTraceContext = serializedTraceContext,
+          receivedAcsCommitment = u,
+        )
     }
   }
 
@@ -205,6 +210,44 @@ object UpdateToDbDto {
     // will be assigned consecutive event sequential ids
     // and transaction meta is assigned sequential ids of its first and last event
     events ++ Seq(transactionMeta)
+  }
+
+  private def receivedAcsCommitmentToDbDto(
+      metrics: LedgerApiServerMetrics,
+      receivedAcsCommitment: ReceivedAcsCommitment,
+      offset: Offset,
+      serializedTraceContext: Array[Byte],
+  )(implicit mc: MetricsContext): Iterator[DbDto] = {
+    incrementCounterForEvent(
+      metrics.indexer,
+      IndexerMetrics.Labels.eventType.acsCommitment,
+      IndexerMetrics.Labels.status.accepted,
+    )
+
+    val updateId = receivedAcsCommitment.updateId.toProtoPrimitive.toByteArray
+
+    val transactionMeta = DbDto.TransactionMeta(
+      update_id = updateId,
+      event_offset = offset.unwrap,
+      publication_time = 0, // this is filled later
+      record_time = receivedAcsCommitment.recordTime.toMicros,
+      synchronizer_id = receivedAcsCommitment.synchronizerId,
+      event_sequential_id_first = 0, // this is filled later
+      event_sequential_id_last = 0, // this is filled later
+    )
+
+    val acsCommitment =
+      DbDto.AcsCommitment(
+        event_sequential_id = 0, // this is filled later
+        event_offset = offset.unwrap,
+        update_id = updateId,
+        synchronizer_id = receivedAcsCommitment.synchronizerId,
+        record_time = receivedAcsCommitment.recordTime.toMicros,
+        payload = receivedAcsCommitment.payload.toByteArray,
+        trace_context = serializedTraceContext,
+      )
+
+    Iterator(acsCommitment, transactionMeta)
   }
 
   private def transactionAcceptedToDbDto(

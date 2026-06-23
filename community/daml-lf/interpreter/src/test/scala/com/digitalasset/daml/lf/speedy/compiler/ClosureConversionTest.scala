@@ -8,10 +8,8 @@ package compiler
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.speedy.compiler.Anf.flattenToAnf
 import com.digitalasset.daml.lf.speedy.compiler.ClosureConversion.closureConvert
-import com.digitalasset.daml.lf.speedy.{SExpr => expr}
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 => source}
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr1 => target}
-import com.digitalasset.daml.lf.speedy.{SValue => v}
+import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 as source, SExpr1 as target}
+import com.digitalasset.daml.lf.speedy.{SExpr as expr, SValue as v}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -20,7 +18,7 @@ import scala.annotation.tailrec
 
 class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
 
-  import source._
+  import source.*
 
   // Construct one level of source-expression at various 'recursion-points'.
   // This list is intended to be exhaustive.
@@ -66,7 +64,7 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
       transform(source)
     }
 
-    val testCases = {
+    val testCases =
       Table[String, SExpr => SExpr](
         ("name", "recursion-point"),
         ("Abs", abs1),
@@ -86,7 +84,6 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
         ("preventCatch", preventCatch),
         ("Labelclosure", labelClosure),
       )
-    }
 
     {
       val depth = 10000
@@ -120,7 +117,7 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
       // ..to test stack-safety of the freeVars computation.
       {
         val depth = 10000
-        val testCases = {
+        val testCases =
           Table[String, SExpr => SExpr](
             ("name", "recursion-point"),
             ("Location", location),
@@ -139,7 +136,6 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
             ("scopeExercise", scopeExercise),
             ("Labelclosure", labelClosure),
           )
-        }
         s"depth = $depth" - {
           forEvery(testCases) { (name: String, recursionPoint: SExpr => SExpr) =>
             name in {
@@ -168,7 +164,7 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
       SELet(xs, leaf)
     }
 
-    val testCases = {
+    val testCases =
       Table[String, List[SExpr] => SExpr](
         ("name", "recursion-point"),
         ("appGeneral", appGeneral),
@@ -176,18 +172,16 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
         ("caseWide", caseWide),
         ("letWide", letWide),
       )
-    }
 
     def runTest(transform: SExpr => Boolean)(width: Int, cons: List[SExpr] => SExpr): Boolean = {
 
-      @tailrec def loop(x: SExpr, n: Int): SExpr = {
+      @tailrec def loop(x: SExpr, n: Int): SExpr =
         if (n == 0) x
         else {
           val half = List.fill(width / 2)(leaf)
           val wide = half ++ List(x) ++ half
           loop(cons(wide), n - 1)
         }
-      }
       val depth = 3
       val source: SExpr = loop(leaf, depth)
       transform(source)

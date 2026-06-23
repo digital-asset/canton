@@ -6,7 +6,7 @@ package lf
 package data
 
 import com.digitalasset.daml.lf.command.ApiContractKey
-import com.digitalasset.daml.lf.{transaction => tx}
+import com.digitalasset.daml.lf.transaction as tx
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   ExternalCallResult,
@@ -229,9 +229,8 @@ private[lf] object CostModel {
       case Value.ValueParty(p) =>
         1 + costOfString(p)
       case Value.ValueRecord(tyCon, fields) =>
-        implicit def costOfFieldEntry(value: (Option[Ref.Name], Value)): Cost = {
+        implicit def costOfFieldEntry(value: (Option[Ref.Name], Value)): Cost =
           costOfTuple2(value)(costOfOption, costOfValue)
-        }
 
         1 + costOfOption(tyCon) + costOfImmArray(fields)
       case Value.ValueTextMap(ls) =>
@@ -303,12 +302,11 @@ private[lf] object CostModel {
 
     implicit def costOfHash(value: crypto.Hash): Cost = 1 + value.bytes.length.toLong
 
-    implicit def costOfGlobalKey(value: GlobalKey): Cost = {
+    implicit def costOfGlobalKey(value: GlobalKey): Cost =
       1 + costOfIdentifier(value.templateId) +
         costOfString(value.packageName) +
         costOfValue(value.key) +
         costOfHash(value.hash)
-    }
 
     implicit def costOfGlobalKeyWithMaintainers(value: GlobalKeyWithMaintainers): Cost = {
       val GlobalKeyWithMaintainers(key, maintainers) = value

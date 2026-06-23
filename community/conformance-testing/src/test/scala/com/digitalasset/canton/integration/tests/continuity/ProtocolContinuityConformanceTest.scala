@@ -190,7 +190,7 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
           remoteMediator1.health.wait_for_ready_for_initialization()
         }
 
-        val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
+        val staticParams = StaticSynchronizerParameters.defaults(protocolVersion = pv)
         NetworkBootstrapper(
           Seq(
             NetworkTopologyDescription.createWithStaticSynchronizerParameters(
@@ -264,7 +264,7 @@ trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityCon
         mediator1.health.wait_for_ready_for_initialization()
         sequencer1.health.wait_for_ready_for_initialization()
 
-        val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
+        val staticParams = StaticSynchronizerParameters.defaults(protocolVersion = pv)
         NetworkBootstrapper(
           Seq(
             EnvironmentDefinition.S1M1.copy(staticSynchronizerParameters = staticParams)
@@ -346,7 +346,7 @@ trait ProtocolContinuityConformanceTestPing extends ProtocolContinuityConformanc
         mediator1.health.wait_for_ready_for_initialization()
         sequencer1.health.wait_for_ready_for_initialization()
 
-        val staticParams = StaticSynchronizerParameters.defaultsWithoutKMS(protocolVersion = pv)
+        val staticParams = StaticSynchronizerParameters.defaults(protocolVersion = pv)
         NetworkBootstrapper(
           Seq(
             EnvironmentDefinition.S1M1.copy(staticSynchronizerParameters = staticParams)

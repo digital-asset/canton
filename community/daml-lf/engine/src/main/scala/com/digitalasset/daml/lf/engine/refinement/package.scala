@@ -10,8 +10,8 @@ package object refinement {
 
   @inline
   private[refinement] def safelyRun[X](
-                                        handleMissingPackages: => Result[_]
-                                      )(unsafeRun: => X): Result[X] = {
+      handleMissingPackages: => Result[?]
+  )(unsafeRun: => X): Result[X] = {
 
     def start(first: Boolean): Result[X] =
       try {

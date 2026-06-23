@@ -41,9 +41,7 @@ import com.digitalasset.canton.util.{ReassignmentTag, SameReassignmentType, Sing
 import com.digitalasset.canton.{BaseTest, LfPackageId}
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.DurationConverters.*
 
 private[reassignment] object TestReassignmentCoordination {
 
@@ -57,7 +55,6 @@ private[reassignment] object TestReassignmentCoordination {
       awaitTimestampOverride: Option[Option[Future[Unit]]] = None,
       loggerFactory: NamedLoggerFactory,
       packages: Seq[LfPackageId] = Seq.empty,
-      targetTimestampForwardTolerance: FiniteDuration = 30.seconds,
   )(implicit ec: ExecutionContext): ReassignmentCoordination = {
 
     val reassignmentStores =
@@ -108,8 +105,6 @@ private[reassignment] object TestReassignmentCoordination {
         loggerFactory,
         timeProofTimestamp,
       ),
-      targetTimestampForwardTolerance =
-        NonNegativeFiniteDuration.tryCreate(targetTimestampForwardTolerance.toJava),
       loggerFactory,
     ) {
 

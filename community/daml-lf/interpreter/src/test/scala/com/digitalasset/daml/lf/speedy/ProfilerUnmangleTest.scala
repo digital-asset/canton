@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf.speedy
 
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import org.scalatestplus.scalacheck.{ScalaCheckDrivenPropertyChecks}
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
 class ProfilerUnmangleTest extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyChecks {
   "unmangleLenient" should {

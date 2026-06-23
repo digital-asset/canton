@@ -5,10 +5,9 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data.FrontStack
-import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.{FrontStack, Ref}
 import com.digitalasset.daml.lf.interpretation.Error.FailedAuthorization
-import com.digitalasset.daml.lf.ledger.FailedAuthorization._
+import com.digitalasset.daml.lf.ledger.FailedAuthorization.*
 import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.SEApp
 import com.digitalasset.daml.lf.speedy.SValue.{SList, SParty}
@@ -17,7 +16,7 @@ import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.{NodeId, SubmittedTransaction}
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
-import org.scalatest.matchers.should.Matchers._
+import org.scalatest.matchers.should.Matchers.*
 
 import scala.collection.immutable.ArraySeq
 
@@ -72,9 +71,8 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
   val theSig: Ref.Party = alice
   val theCon: Ref.Party = bob
 
-  def makeSetPartyValue(set: Set[Ref.Party]): SValue = {
-    SList(FrontStack(set.toList.map(SParty(_)): _*))
-  }
+  def makeSetPartyValue(set: Set[Ref.Party]): SValue =
+    SList(FrontStack(set.toList.map(SParty(_))*))
 
   def runExample(
       theAut: Set[Ref.Party], // The set of parties lists in the explicit choice authority decl.
@@ -90,26 +88,32 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
         SParty(theGoal),
       ),
     )
-    val machine = Speedy.Machine.fromUpdateSExpr(pkgs, transactionSeed, example, committers, logger = MachineLogger())
+    val machine = Speedy.Machine.fromUpdateSExpr(
+      pkgs,
+      transactionSeed,
+      example,
+      committers,
+      logger = MachineLogger(),
+    )
     SpeedyTestLib.buildTransaction(machine)
   }
 
   "Happy" - {
 
     "restrict authority: {A,B}-->A (need A)" in {
-      runExample(theAut = Set(alice), theGoal = alice) shouldBe a[Right[_, _]]
+      runExample(theAut = Set(alice), theGoal = alice) shouldBe a[Right[?, ?]]
     }
 
     "restrict authority: {A,B}-->B (need B)" in {
-      runExample(theAut = Set(bob), theGoal = bob) shouldBe a[Right[_, _]]
+      runExample(theAut = Set(bob), theGoal = bob) shouldBe a[Right[?, ?]]
     }
 
     "restrict authority: {A,B}-->{A,B} (need A)" in {
-      runExample(theAut = Set(alice, bob), theGoal = alice) shouldBe a[Right[_, _]]
+      runExample(theAut = Set(alice, bob), theGoal = alice) shouldBe a[Right[?, ?]]
     }
 
     "restrict authority: {A,B}-->{A,B} (need B)" in {
-      runExample(theAut = Set(alice, bob), theGoal = bob) shouldBe a[Right[_, _]]
+      runExample(theAut = Set(alice, bob), theGoal = bob) shouldBe a[Right[?, ?]]
     }
 
   }

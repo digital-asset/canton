@@ -90,9 +90,7 @@ abstract class ReassignmentServiceIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1_S1M1
       .addConfigTransforms(
-        // Ensure reassignments are not tripped up by some participants being a little behind.
-        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*

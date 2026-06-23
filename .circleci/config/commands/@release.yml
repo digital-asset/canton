@@ -86,3 +86,4 @@ publish_libs_to_maven_central:
         cmd: "publishToSonatype"
         # TODO(#29907) re-enable failure on error
         fail_on_error_in_output: false
+        timeout: 60m

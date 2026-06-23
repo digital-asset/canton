@@ -4,20 +4,16 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import org.scalatest._
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.{Node, NodeId, SerializationVersion, Transaction}
+import com.digitalasset.daml.lf.value.Value as V
+import org.scalatest.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.transaction.Node
-import com.digitalasset.daml.lf.transaction.SerializationVersion
-import com.digitalasset.daml.lf.transaction.{NodeId, Transaction}
-import com.digitalasset.daml.lf.value.{Value => V}
-
 class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
 
-  import NormalizeRollbackSpec._
+  import NormalizeRollbackSpec.*
 
   // TODO:
   // Below we test a set of hand-constructed testcases. Hopefully we got all edge cases!
@@ -26,7 +22,7 @@ class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
   // TODO:
   // We should test that the `meaning` of a transaction is preserved by normalization.
 
-  def test(name: String)(orig: Shape.Top, expected: Shape.Top): Unit = {
+  def test(name: String)(orig: Shape.Top, expected: Shape.Top): Unit =
     s"normalize: ($orig) -- $name" should {
       val tx = Shape.toTransaction(orig)
       val (txN, _) = NormalizeRollbacks.normalizeTx(tx) // code under test
@@ -41,7 +37,6 @@ class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
         assert(preOrderNidsOfTxIsIncreasingFromZero(txN))
       }
     }
-  }
 
   // multi arg construction for example convenience
   def Top(xs: Shape*) = Shape.Top(xs.toList)
@@ -174,12 +169,11 @@ object NormalizeRollbackSpec {
   type TX = Transaction
 
   def preOrderNidsOfTxIsIncreasingFromZero(tx: TX): Boolean = {
-    def check(x1: Int, xs: List[Int]): Boolean = {
+    def check(x1: Int, xs: List[Int]): Boolean =
       xs match {
         case Nil => true
         case x2 :: xs => x1 < x2 && check(x2, xs)
       }
-    }
     preOrderNidsOfTx(tx) match {
       case Nil => true
       case x :: xs => x == 0 && check(x, xs)
@@ -187,46 +181,41 @@ object NormalizeRollbackSpec {
   }
 
   def preOrderNidsOfTx(tx: TX): List[Int] = {
-    def fromNids(acc: List[Int], xs: List[NodeId]): List[Int] = {
+    def fromNids(acc: List[Int], xs: List[NodeId]): List[Int] =
       xs match {
         case Nil => acc
         case x :: xs =>
           val node = tx.nodes(x)
           fromNids(fromNode(x.index :: acc, node), xs)
       }
-    }
-    def fromNode(acc: List[Int], node: Node): List[Int] = {
+    def fromNode(acc: List[Int], node: Node): List[Int] =
       node match {
         case _: Node.LeafOnlyAction => acc
         case node: Node.Exercise => fromNids(acc, node.children.toList)
         case node: Node.Rollback => fromNids(acc, node.children.toList)
       }
-    }
     fromNids(Nil, tx.roots.toList).reverse
   }
 
-  def forallNode(tx: TX)(pred: Node => Boolean): Boolean = {
+  def forallNode(tx: TX)(pred: Node => Boolean): Boolean =
     tx.fold[Boolean](true) { case (acc, (_, node)) =>
       acc && pred(node)
     }
-  }
 
-  def forallRB(tx: TX)(pred: Node.Rollback => Boolean): Boolean = {
+  def forallRB(tx: TX)(pred: Node.Rollback => Boolean): Boolean =
     forallNode(tx) {
       case rb: Node.Rollback => pred(rb)
       case _ => true
     }
-  }
 
-  def isNormalized(tx: TX): Boolean = {
+  def isNormalized(tx: TX): Boolean =
     tx match {
       case Transaction(nodes, _) =>
-        def isRB(node: Node): Boolean = {
+        def isRB(node: Node): Boolean =
           node match {
             case _: Node.Rollback => true
             case _ => false
           }
-        }
         def check(rb: Node.Rollback): Boolean = {
           val n = rb.children.length
           (n > 0) && // Normalization rule #1
@@ -237,7 +226,6 @@ object NormalizeRollbackSpec {
           check(rb)
         }
     }
-  }
 
   // Shape: description of a transaction, with conversions to and from a real tx
   sealed trait Shape
@@ -256,7 +244,7 @@ object NormalizeRollbackSpec {
         nodes += (nodeId -> node)
         nodeId
       }
-      def toNid(shape: Shape): NodeId = {
+      def toNid(shape: Shape): NodeId =
         shape match {
           case Create(n) => add(dummyCreateNode(n))
           case Exercise(shapes) =>
@@ -266,13 +254,12 @@ object NormalizeRollbackSpec {
             val children = shapes.map(toNid)
             add(Node.Rollback(children = children.to(ImmArray)))
         }
-      }
       val roots: List[NodeId] = top.xs.map(toNid)
       Transaction(nodes, roots.to(ImmArray))
     }
 
     def ofTransaction(tx: TX): Top = {
-      def ofNid(nid: NodeId): Shape = {
+      def ofNid(nid: NodeId): Shape =
         tx.nodes(nid) match {
           case create: Node.Create =>
             create.arg match {
@@ -284,7 +271,6 @@ object NormalizeRollbackSpec {
           case node: Node.Exercise => Exercise(node.children.toList.map(ofNid))
           case node: Node.Rollback => Rollback(node.children.toList.map(ofNid))
         }
-      }
       Top(tx.roots.toList.map(nid => ofNid(nid)))
     }
   }

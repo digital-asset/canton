@@ -20,8 +20,8 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.BackgroundWorkloadRunner
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.scheduler.IgnoresTransientSchedulerErrors
@@ -145,7 +145,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
         dst: Seq[LocalParticipantReference],
     ) = {
 
-      val defaultPeriod = CommitmentPeriod
+      val defaultPeriod = LegacyCommitmentPeriod
         .create(
           CantonTimestamp.Epoch,
           CantonTimestamp.Epoch.plusSeconds(reconciliationInterval.toSeconds),
@@ -162,7 +162,13 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
           openEnvelope match {
             case SignedProtocolMessage(typedMessage, _signatures) =>
               typedMessage.content match {
-                case AcsCommitment(_psid, _sender, _counterParticipant, period, _commitment) =>
+                case LegacyAcsCommitment(
+                      _psid,
+                      _sender,
+                      _counterParticipant,
+                      period,
+                      _commitment,
+                    ) =>
                   period
                 case _ => defaultPeriod
               }
@@ -179,7 +185,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
         .currentSnapshotApproximation
 
       val signedFakeMsgs = dst.map { case recipient =>
-        val commitment1 = AcsCommitment
+        val commitment1 = LegacyAcsCommitment
           .create(
             daId,
             src,

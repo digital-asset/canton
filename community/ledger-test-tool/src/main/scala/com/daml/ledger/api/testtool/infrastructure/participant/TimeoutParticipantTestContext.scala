@@ -20,6 +20,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
   SubmitAndWaitForTransactionRequest,
@@ -819,6 +820,32 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       p: Completion => Boolean
   ): Future[Option[Completion]] =
     withTimeout(s"Find completion for parties $parties", delegate.findCompletion(parties*)(p))
+
+  // GetCompletions helpers (delegating). Kept separate from completionStream on purpose; the latter
+  // is deprecated and will be removed.
+  override def getCompletionsRequest(from: Long)(
+      parties: Party*
+  ): GetCompletionsRequest = delegate.getCompletionsRequest(from)(parties*)
+
+  override def completions(
+      within: NonNegativeFiniteDuration,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    delegate.completions(within, request)
+
+  override def completions(
+      take: Int,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    delegate.completions(take, request)
+
+  override def findCompletion(request: GetCompletionsRequest)(
+      p: Completion => Boolean
+  ): Future[Option[Completion]] = withTimeout(
+    s"Find completion for request $request",
+    delegate.findCompletion(request)(p),
+  )
+
   override def offsets(n: Int, request: CompletionStreamRequest): Future[Vector[Long]] =
     withTimeout(s"$n checkpoints for request $request", delegate.offsets(n, request))
   override def checkHealth(): Future[HealthCheckResponse] =

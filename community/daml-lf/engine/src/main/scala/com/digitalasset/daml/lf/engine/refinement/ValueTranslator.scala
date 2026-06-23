@@ -5,12 +5,12 @@ package com.digitalasset.daml.lf
 package engine
 package refinement
 
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.TypeDestructor
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
@@ -29,7 +29,7 @@ private[lf] final class ValueTranslator(
     def go(
         fields: FrontStack[(Option[Ref.Name], Value)],
         map: Map[Ref.Name, Value],
-    ): Either[String, Option[Map[Ref.Name, Value]]] = {
+    ): Either[String, Option[Map[Ref.Name, Value]]] =
       fields.pop match {
         case None => Right(Some(map))
         case Some(((None, _), _)) => Right(None)
@@ -39,7 +39,6 @@ private[lf] final class ValueTranslator(
         case Some(((Some(label), value), tail)) =>
           go(tail, map + (label -> value))
       }
-    }
 
     go(fields.toFrontStack, Map.empty)
   }
@@ -79,7 +78,7 @@ private[lf] final class ValueTranslator(
       value: Value,
       extendLocalIdForbiddanceToRelativeV2: Boolean,
   ): SValue = {
-    import TypeDestructor.SerializableTypeF._
+    import TypeDestructor.SerializableTypeF.*
     val Destructor = TypeDestructor(pkgInterface)
 
     // TODO: https://github.com/digital-asset/daml/issues/17082

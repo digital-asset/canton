@@ -5,9 +5,9 @@ package com.digitalasset.daml.lf
 package speedy
 package svalue
 
-import com.digitalasset.daml.lf.value.Value.ContractId
 import com.daml.nameof.NameOf
 import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.daml.lf.value.Value.ContractId
 
 private[lf] object Equality {
 
@@ -15,7 +15,7 @@ private[lf] object Equality {
   // This follows the equality defined in the daml-lf spec.
   @throws[SError.SError]
   def areEqual(x: SValue, y: SValue): Boolean = {
-    import SValue._
+    import SValue.*
 
     var success = true
     var stackX = List(Iterator.single(x))
@@ -43,7 +43,7 @@ private[lf] object Equality {
         prefix2: Bytes,
         suffix2: Bytes,
         allowDifferentNonemptySuffixes: Boolean,
-    ): Boolean = {
+    ): Boolean =
       if (prefix1 != prefix2) {
         false
       } else if (suffix1.isEmpty) {
@@ -59,7 +59,6 @@ private[lf] object Equality {
           interpretation.Error.ContractIdComparability(cid1)
         )
       } else false
-    }
 
     @inline
     def step(tuple: (SValue, SValue)) =

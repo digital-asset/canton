@@ -42,7 +42,6 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
-import scala.concurrent.duration.DurationInt
 
 /*
 This test checks that the admin party of the submitting participant is required for reassignments.
@@ -68,7 +67,6 @@ sealed trait ReassignmentConfirmationAdminPartyIntegrationTest
         ConfigTransforms.useStaticTime,
         // Because we play with the simClock, ensure we have enough forward tolerance
         // on the target timestamp to not impact up unassigments.
-        ConfigTransforms.updateTargetTimestampForwardTolerance(1.hours),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>

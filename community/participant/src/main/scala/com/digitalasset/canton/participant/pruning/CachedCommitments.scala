@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.pruning
 
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.protocol.messages.AcsCommitment
+import com.digitalasset.canton.protocol.messages.Digest
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.util.Mutex
 
@@ -23,18 +23,18 @@ import scala.collection.immutable.{Map, SortedSet}
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class CachedCommitments(
-    private var prevParticipantCmts: Map[ParticipantId, AcsCommitment.CommitmentType] =
-      Map.empty[ParticipantId, AcsCommitment.CommitmentType],
-    private var prevStkhdCmts: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType] = Map
-      .empty[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
+    private var prevParticipantCmts: Map[ParticipantId, Digest.DigestType] =
+      Map.empty[ParticipantId, Digest.DigestType],
+    private var prevStkhdCmts: Map[SortedSet[InternedPartyId], Digest.DigestType] = Map
+      .empty[SortedSet[InternedPartyId], Digest.DigestType],
     private var prevParticipantToStkhd: Map[ParticipantId, Set[SortedSet[InternedPartyId]]] =
       Map.empty[ParticipantId, Set[SortedSet[InternedPartyId]]],
 ) {
   private val lock = new Mutex()
 
   def setCachedCommitments(
-      cmts: Map[ParticipantId, AcsCommitment.CommitmentType],
-      stkhdCmts: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
+      cmts: Map[ParticipantId, Digest.DigestType],
+      stkhdCmts: Map[SortedSet[InternedPartyId], Digest.DigestType],
       participantToStkhd: Map[ParticipantId, Set[SortedSet[InternedPartyId]]],
   ): Unit =
     lock.exclusive {
@@ -47,8 +47,8 @@ class CachedCommitments(
 
   def computeCmtFromCached(
       participant: ParticipantId,
-      newStkhdCmts: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
-  ): Option[AcsCommitment.CommitmentType] =
+      newStkhdCmts: Map[SortedSet[InternedPartyId], Digest.DigestType],
+  ): Option[Digest.DigestType] =
     lock.exclusive {
       // a commitment is cached when we have the participant commitment, and
       // all commitments for all its stakeholder groups are cached, and exist
@@ -90,8 +90,8 @@ class CachedCommitments(
     }
 
   def clear(): Unit = setCachedCommitments(
-    Map.empty[ParticipantId, AcsCommitment.CommitmentType],
-    Map.empty[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
+    Map.empty[ParticipantId, Digest.DigestType],
+    Map.empty[SortedSet[InternedPartyId], Digest.DigestType],
     Map.empty[ParticipantId, Set[SortedSet[InternedPartyId]]],
   )
 }

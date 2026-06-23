@@ -15,7 +15,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 class FatContractInstanceSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks {
 
-  import FatContractInstanceSpec._
+  import FatContractInstanceSpec.*
 
   "createdAt" - {
     "now works with relative IDs" in {

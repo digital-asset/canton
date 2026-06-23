@@ -5,13 +5,13 @@ package com.digitalasset.daml
 package lf
 package value
 
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.transaction.{Versioned, SerializationVersion}
-import com.digitalasset.daml.lf.value.{ValueOuterClass => proto}
-import org.scalacheck.{Shrink, Arbitrary}
-import org.scalatest.{Assertion, Inside}
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.transaction.{SerializationVersion, Versioned}
+import com.digitalasset.daml.lf.value.ValueOuterClass as proto
+import org.scalacheck.{Arbitrary, Shrink}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Assertion, Inside}
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 class ValueCoderSpec
@@ -21,8 +21,8 @@ class ValueCoderSpec
     with EitherAssertions
     with ScalaCheckPropertyChecks {
 
-  import Value._
-  import test.ValueGenerators._
+  import Value.*
+  import test.ValueGenerators.*
 
   implicit val noStringShrink: Shrink[String] = Shrink.shrinkAny[String]
 
@@ -45,9 +45,9 @@ class ValueCoderSpec
       val value21 = values(21) // serialization would need a bit more than 2GB
       val value22 = values(22) // serialization would need a bit more than 4GB
 
-      ValueCoder.encodeValue(valueVersion = ver, v0 = value18) shouldBe a[Right[_, _]]
-      ValueCoder.encodeValue(valueVersion = ver, v0 = value21) shouldBe a[Left[_, _]]
-      ValueCoder.encodeValue(valueVersion = ver, v0 = value22) shouldBe a[Left[_, _]]
+      ValueCoder.encodeValue(valueVersion = ver, v0 = value18) shouldBe a[Right[?, ?]]
+      ValueCoder.encodeValue(valueVersion = ver, v0 = value21) shouldBe a[Left[?, ?]]
+      ValueCoder.encodeValue(valueVersion = ver, v0 = value22) shouldBe a[Left[?, ?]]
     }
 
     val valuesWithNullCharacters = Table(
@@ -74,7 +74,7 @@ class ValueCoderSpec
 
       forAll(valuesWithNullCharacters) { v =>
         ValueCoder.encodeValue(valueVersion = SerializationVersion.minVersion, v0 = v) shouldBe a[
-          Right[_, _]
+          Right[?, ?]
         ]
       }
     }
@@ -125,7 +125,7 @@ class ValueCoderSpec
 
       forEvery(protoWithNullCharacters)(v =>
         ValueCoder
-          .decodeValue(SerializationVersion.minVersion, v.toByteString) shouldBe a[Right[_, _]]
+          .decodeValue(SerializationVersion.minVersion, v.toByteString) shouldBe a[Right[?, ?]]
       )
     }
 
@@ -145,7 +145,7 @@ class ValueCoderSpec
     }
 
     "do Numeric" in {
-      import test.ValueGenerators.Implicits._
+      import test.ValueGenerators.Implicits.*
 
       forAll("Numeric scale", "Decimal (BigDecimal) invariant") {
         (s: Numeric.Scale, d: BigDecimal) =>
@@ -261,7 +261,7 @@ class ValueCoderSpec
         .encodeValue(
           valueVersion = SerializationVersion.maxVersion,
           v0 = toNat(1, n), // 101
-        ) shouldBe a[Left[_, _]]
+        ) shouldBe a[Left[?, ?]]
 
       val encoded = assertRight(
         ValueCoder

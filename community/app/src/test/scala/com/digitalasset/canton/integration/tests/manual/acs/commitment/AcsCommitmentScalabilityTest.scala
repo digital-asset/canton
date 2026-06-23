@@ -49,7 +49,7 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.SentCmtState
 import com.digitalasset.canton.participant.pruning.{ContractActive, ContractArchived}
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
-import com.digitalasset.canton.protocol.messages.CommitmentPeriod
+import com.digitalasset.canton.protocol.messages.LegacyCommitmentPeriod
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.MonadUtil
 import monocle.Monocle.toAppliedFocusOps
@@ -258,7 +258,6 @@ abstract class AcsCommitmentScalabilityTestBase(
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxCommandDeduplicationDuration),
-        ConfigTransforms.updateTargetTimestampForwardTolerance(24.hours),
         // Hard-coded ports ensure connectivity across node restarts. To save time,
         // participants are restored from database dumps which contain persisted
         // sequencer configurations. Static ports are required so these restored
@@ -510,8 +509,8 @@ abstract class AcsCommitmentScalabilityTestBase(
   protected def verifySentCommitmentState(
       p1LastSentCommitmentFrom: CantonTimestampSecond,
       p2LastSentCommitmentFrom: CantonTimestampSecond,
-      p1ReceivedPeriod: CommitmentPeriod,
-      p2ReceivedPeriod: CommitmentPeriod,
+      p1ReceivedPeriod: LegacyCommitmentPeriod,
+      p2ReceivedPeriod: LegacyCommitmentPeriod,
       verifyState: SentCmtState,
   )(implicit env: TestConsoleEnvironment) = {
     import env.*

@@ -4,25 +4,26 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import org.typelevel.paiges._
-import org.typelevel.paiges.Doc._
-import com.digitalasset.daml.lf.value.Value
-import Value._
-import com.digitalasset.daml.lf.ledger._
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.interpretation.Error.Upgrade.TranslationFailed
+import com.digitalasset.daml.lf.ledger.*
+import com.digitalasset.daml.lf.script.*
 import com.digitalasset.daml.lf.script.IdeLedger.{Disclosure, TransactionId}
-import com.digitalasset.daml.lf.script._
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
+import com.digitalasset.daml.lf.speedy.SError.*
+import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   Node,
   NodeId,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
-import com.digitalasset.daml.lf.speedy.SError._
-import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.speedy.SBuiltinFun._
+import com.digitalasset.daml.lf.value.Value
+import org.typelevel.paiges.*
+import org.typelevel.paiges.Doc.*
+
+import Value.*
 
 //
 // Pretty-printer for the interpreter errors and the script ledger
@@ -45,7 +46,7 @@ private[lf] object Pretty {
     char('{') & intercalate(char(','), p.map(prettyParty)) & char('}')
 
   def prettyDamlException(error: interpretation.Error): Doc = {
-    import interpretation.Error._
+    import interpretation.Error.*
     error match {
       case FailedAuthorization(nid, fa) =>
         text(prettyFailedAuthorization(nid, fa))
@@ -60,7 +61,10 @@ private[lf] object Pretty {
               text(s"Consuming $exerciseMsg of ${n.choiceId} on") &
                 prettyTypeConId(n.templateId) & text("(") & prettyContractId(n.coid) & text(")")
           }
-        text(s"Tried to rollback side-effectful node(s):") & intercalate(text(", ") + Doc.line, nodes.map(prettyEffectfulRollbackNode(_)))
+        text(s"Tried to rollback side-effectful node(s):") & intercalate(
+          text(", ") + Doc.line,
+          nodes.map(prettyEffectfulRollbackNode(_)),
+        )
       case UnhandledException(_, value) =>
         text(s"Unhandled Daml exception:") & prettyValue(true)(value)
       case UserError(message) =>
@@ -128,6 +132,8 @@ private[lf] object Pretty {
           text("The provided shared key is") & prettyValue(true)(key)
       case ContractNotFound(cid) =>
         text("Update failed due to a unknown contract") & prettyContractId(cid)
+      case UnsupportedContractId(cid) =>
+        text("Update failed due to a unsupported contract ID") & prettyContractId(cid)
       case UnresolvedPackageName(packageName) =>
         text("Update failed due to a failed package name resolution:") & text(packageName)
       case NonComparableValues =>
@@ -370,7 +376,7 @@ private[lf] object Pretty {
           })
     }
 
-  private def prettyFailedAuthorization(id: NodeId, failure: FailedAuthorization): String = {
+  private def prettyFailedAuthorization(id: NodeId, failure: FailedAuthorization): String =
     failure match {
       case nc: FailedAuthorization.NoControllers =>
         s"node $id (${nc.templateId}) has no controllers"
@@ -387,11 +393,11 @@ private[lf] object Pretty {
       case ns: FailedAuthorization.NoSignatories =>
         s"node $id (${ns.templateId}) has no signatories"
       case nlbk: FailedAuthorization.LookupByKeyMissingAuthorization =>
-        s"node $id (${nlbk.templateId}) requires authorizers ${nlbk.maintainers.mkString(",")} for lookup by key, but it only has ${nlbk.authorizingParties.mkString(",")}"
+        s"node $id (${nlbk.templateId}) requires authorizers ${nlbk.maintainers.mkString(",")} for lookup by key, but it only has ${nlbk.authorizingParties
+            .mkString(",")}"
       case mns: FailedAuthorization.MaintainersNotSubsetOfSignatories =>
         s"node $id (${mns.templateId}) has maintainers ${mns.maintainers.mkString(",")} which are not a subset of the signatories ${mns.signatories}"
     }
-  }
 
   def prettyValueRef(ref: ValueRef): Doc =
     text(ref.qualifiedName.toString + "@" + ref.packageId)
@@ -528,14 +534,13 @@ private[lf] object Pretty {
     )
   }
 
-  def prettyOptVersion(opt: Option[SerializationVersion]) = {
+  def prettyOptVersion(opt: Option[SerializationVersion]) =
     opt match {
       case Some(v) =>
         text("version:") & str(v)
       case None =>
         text("no-version")
     }
-  }
 
   def prettyEventId(n: EventId): Doc =
     text(n.toLedgerString)
@@ -624,8 +629,8 @@ private[lf] object Pretty {
     // An incomplete pretty-printer for debugging purposes. Exposed
     // via the ':speedy' repl command.
 
-    import com.digitalasset.daml.lf.language.Ast._
-    import com.digitalasset.daml.lf.speedy.SExpr._
+    import com.digitalasset.daml.lf.language.Ast.*
+    import com.digitalasset.daml.lf.speedy.SExpr.*
 
     def prettyAlt(index: Int)(alt: SCaseAlt): Doc = {
       val (pat, newIndex) = alt.pattern match {

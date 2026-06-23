@@ -37,6 +37,7 @@ import com.digitalasset.canton.ledger.api.{
 }
 import com.digitalasset.canton.ledger.localstore.*
 import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.ledger.participant.state.metrics.TimedSyncService
 import com.digitalasset.canton.ledger.participant.state.{InternalIndexService, PackageSyncService}
 import com.digitalasset.canton.lifecycle.*
@@ -192,6 +193,7 @@ class LedgerApiServer(
         readTimeout = serverConfig.jwksCacheConfig.readTimeout.underlying,
         jwtTimestampLeeway = serverConfig.jwtTimestampLeeway,
         maxTokenLife = serverConfig.maxTokenLifetime.toMillisOrNone(),
+        autoRefreshAfter = serverConfig.jwksCacheConfig.autoRefreshAfter.underlying,
         metrics = Some(grpcApiMetrics.identityProviderConfigStore.verifierCache),
         loggerFactory = loggerFactory,
       )
@@ -321,10 +323,14 @@ class LedgerApiServer(
                     )
                   )
                 ),
+                includeAcsCommitments = None,
               ),
               descendingOrder = false,
               skipPruningChecks = false,
             )
+            .collect { case UpdateResponse.ProtoUpdate(update) =>
+              update
+            }
             .mapConcat(_.update.topologyTransaction)
 
         override def acsUpdates(synchronizerId: SynchronizerId, fromExclusive: Offset)(implicit

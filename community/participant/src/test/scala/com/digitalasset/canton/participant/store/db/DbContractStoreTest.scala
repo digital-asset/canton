@@ -59,7 +59,7 @@ trait DbContractStoreTest extends AsyncWordSpec with BaseTest with ContractStore
 
     for {
       p0 <- store.lookupPersisted(contractId).failOnShutdown
-      _ <- store.lookupPersistedIfCached(contractId) shouldBe Some(None)
+      _ <- eventually()(store.lookupPersistedIfCached(contractId) shouldBe Some(None))
       _ <- store.storeContract(contract).failOnShutdown
       p <- store.lookupPersisted(contractId).failOnShutdown
       pByIid <- store.lookupBatchedNonReadThrough(Seq(p.value.internalContractId)).failOnShutdown

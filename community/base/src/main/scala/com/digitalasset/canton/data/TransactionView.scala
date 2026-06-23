@@ -29,7 +29,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, RoseTree}
 import com.digitalasset.canton.version.*
-import com.digitalasset.canton.{LfPartyId, LfVersioned, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPartyId, LfVersioned, ProtoDeserializationError, checked}
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -252,11 +252,11 @@ final case class TransactionView private (
       vpd <- viewParticipantData.unwrap.leftMap(_ =>
         s"Inputs and created contracts of view $viewHash can be computed only if the view participant data is unblinded"
       )
-      currentRollbackScope = vpd.rollbackContext.rollbackScope
       _ <- subviews.allUnblinded(hash =>
         s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
       )
 
+      currentRollbackScope = vpd.rollbackContext.rollbackScope
       subviewInputsAndCreated <- subviews.unblindedElements.traverse { subview =>
         for {
           subviewVpd <- subview.unblindViewParticipantData("Inputs and created contracts")
@@ -268,7 +268,9 @@ final case class TransactionView private (
           // If the subview sits under a Rollback node in the view's core,
           // then the created contracts of the subview are all rolled back,
           // and all consuming inputs become non-consuming inputs.
-          if (subviewRollbackScope != currentRollbackScope) {
+          if (
+            checked(RollbackScope.tryRollbackEffects(subviewRollbackScope, currentRollbackScope))
+          ) {
             (
               inputs.fmap(_.copy(consumed = false)),
               created.fmap(_.copy(rolledBack = true)),
@@ -608,6 +610,6 @@ object TransactionView
   private[data] val NoKeyValidation: Boolean = false
   private[data] object ValidateKeys {
     def apply(protocolVersion: ProtocolVersion): Boolean =
-      protocolVersion > ProtocolVersion.v35
+      protocolVersion >= ProtocolVersion.v36
   }
 }

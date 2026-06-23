@@ -509,6 +509,24 @@ private[store] object StorageBackendTestValues extends OptionValues {
     )
   }
 
+  def dtoAcsCommitment(
+      offset: Offset,
+      eventSequentialId: Long,
+      synchronizerId: SynchronizerId = someSynchronizerId,
+      recordTime: Timestamp = someTime,
+      payload: ByteString = ByteString.copyFromUtf8("some-acs-commitment-payload"),
+      traceContext: Array[Byte] = serializableTraceContext,
+  ): DbDto.AcsCommitment =
+    DbDto.AcsCommitment(
+      event_sequential_id = eventSequentialId,
+      event_offset = offset.unwrap,
+      update_id = updateIdArrayFromOffset(offset),
+      synchronizer_id = synchronizerId,
+      record_time = recordTime.micros,
+      payload = payload.toByteArray,
+      trace_context = traceContext,
+    )
+
   def dtoCompletion(
       offset: Offset,
       submitters: Set[Party] = Set(Party.assertFromString("signatory")),

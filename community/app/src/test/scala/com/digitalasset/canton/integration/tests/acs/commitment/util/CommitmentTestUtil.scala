@@ -28,7 +28,7 @@ import com.digitalasset.canton.participant.pruning.{
   SortedReconciliationIntervalsHelpers,
 }
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
-import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod}
+import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -43,8 +43,8 @@ import scala.jdk.DurationConverters.ScalaDurationOps
 
 sealed trait ContractsAndCommitment {
   def contracts: Seq[Contract]
-  def commitmentPeriod: CommitmentPeriod
-  def commitment: AcsCommitment.HashedCommitmentType
+  def commitmentPeriod: LegacyCommitmentPeriod
+  def commitment: Digest.HashedDigestType
   def temporaryContracts: Seq[Contract]
 }
 
@@ -52,8 +52,8 @@ object ContractsAndCommitment {
   // For saving memory on large sets, big sequence of contracts shouldn't be stored (these classes are used after computation to return the contracts and commitment with its period), so
   // the active - and temporary contracts are empty lists
   final case class IouCommitment(
-      commitmentPeriod: CommitmentPeriod,
-      commitment: AcsCommitment.HashedCommitmentType,
+      commitmentPeriod: LegacyCommitmentPeriod,
+      commitment: Digest.HashedDigestType,
   ) extends ContractsAndCommitment {
     override val contracts: Seq[Iou.Contract] = List.empty
     override val temporaryContracts: Seq[Iou.Contract] = List.empty
@@ -61,8 +61,8 @@ object ContractsAndCommitment {
 
   final case class IouCommitmentWithContracts(
       contracts: Seq[Iou.Contract],
-      commitmentPeriod: CommitmentPeriod,
-      commitment: AcsCommitment.HashedCommitmentType,
+      commitmentPeriod: LegacyCommitmentPeriod,
+      commitment: Digest.HashedDigestType,
       temporaryContracts: Seq[Iou.Contract] = List.empty,
   ) extends ContractsAndCommitment
 }
@@ -380,7 +380,10 @@ trait CommitmentTestUtil
   protected def awaitNextTick(
       participant: LocalParticipantReference,
       counterparticipant: ParticipantReference,
-  )(implicit env: TestConsoleEnvironment, intervalDuration: IntervalDuration): CommitmentPeriod = {
+  )(implicit
+      env: TestConsoleEnvironment,
+      intervalDuration: IntervalDuration,
+  ): LegacyCommitmentPeriod = {
     import env.*
     val simClock = environment.simClock.value
 
@@ -405,7 +408,7 @@ trait CommitmentTestUtil
   }
 
   protected def checkReceivedCommitment(
-      period: CommitmentPeriod,
+      period: LegacyCommitmentPeriod,
       participant: ParticipantReference,
       synchronizer: SynchronizerId,
       state: ReceivedCmtState,
@@ -533,7 +536,7 @@ trait CommitmentTestUtil
 object CommitmentTestUtil {
   def computeHashedCommitment(
       contracts: Seq[CommitmentContractMetadata]
-  ): AcsCommitment.HashedCommitmentType = {
+  ): Digest.HashedDigestType = {
     val h = LtHash16()
     contracts.map(item => item.cid -> item.reassignmentCounter).toMap.foreach {
       case (cid, reassignmentCounter) =>
@@ -544,6 +547,6 @@ object CommitmentTestUtil {
     val sumHash = LtHash16()
     sumHash.add(commitment.toByteArray)
 
-    AcsCommitment.hashCommitment(sumHash.getByteString())
+    Digest.hashDigest(sumHash.getByteString())
   }
 }

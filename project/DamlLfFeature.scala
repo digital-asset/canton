@@ -85,16 +85,10 @@ object DamlLfFeature {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
-  val featureNUCK = DamlLfFeature(
-    name = "Non-unique contract keys",
-    cppFlag = "DAML_NUCK",
-    versionRange = VersionRange.From(v2_3),
-  )
-
   val featureContractKeys = DamlLfFeature(
     name = "Contract Keys",
     cppFlag = "DAML_CONTRACT_KEYS",
-    versionRange = featureNUCK.versionRange,
+    versionRange = VersionRange.From(v2_3),
   )
 
   val featureFlatArchive = DamlLfFeature(
@@ -164,7 +158,6 @@ object DamlLfFeature {
     "featureExtendedInterfaces" -> featureExtendedInterfaces,
     "featureChoiceFuncs" -> featureChoiceFuncs,
     "featureTemplateTypeRepToText" -> featureTemplateTypeRepToText,
-    "featureNUCK" -> featureNUCK,
     "featureContractKeys" -> featureContractKeys,
     "featureFlatArchive" -> featureFlatArchive,
     "featurePackageImports" -> featurePackageImports,

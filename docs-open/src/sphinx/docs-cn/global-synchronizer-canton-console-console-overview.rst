@@ -13,7 +13,7 @@ Canton Network Documentation Snippets: Global Synchronizer Canton Console Overvi
 .. are executed by SphinxDocumentationGenerator integration tests.
 
 .. snippet:: cn_global_synchronizer_canton_console_console_overview
-    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "da")
     .. success:: participant1.help()
     .. success:: participant1.topology.help()

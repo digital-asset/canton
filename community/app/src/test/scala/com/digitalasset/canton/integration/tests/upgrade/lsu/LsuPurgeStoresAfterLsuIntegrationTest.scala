@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.participant.config.PurgeConfig
+import com.digitalasset.canton.topology.transaction.TopologyMapping
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration
@@ -62,6 +63,7 @@ final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
               PurgeConfig().copy(
                 chunkSize = PositiveInt.tryCreate(2),
                 cron = "/5 * * * * ?",
+                purgeableStoresListValidity = config.NonNegativeFiniteDuration.ofSeconds(1),
               )
             )
           )
@@ -85,8 +87,9 @@ final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
 
       performSynchronizerNodesLsu(fixture)
 
-      clue("old stores are not empty") {
-        oldTopologyStore.dumpStoreContent().futureValueUS.result should not be empty
+      val oldTopology = clue("old stores are not empty") {
+        val oldTopology = oldTopologyStore.dumpStoreContent().futureValueUS.result.toSet
+        oldTopology should not be empty
 
         participant1.underlying.value.sync.syncPersistentStateManager
           .get(fixture.currentPsid)
@@ -94,6 +97,8 @@ final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
           .submissionTrackerStore
           .size
           .futureValueUS shouldBe 1
+
+        oldTopology
       }
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
@@ -126,8 +131,16 @@ final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
         .value
         .topologyStore
 
-      clue("new stores are not empty") {
-        newTopologyStore.dumpStoreContent().futureValueUS.result should not be empty
+      clue("new stores are not purged") {
+        newTopologyStore
+          .dumpStoreContent()
+          .futureValueUS
+          .result
+          .toSet shouldBe oldTopology
+          // LsuSequencerConnectionSuccessor is filtered out when doing the local copy
+          .filterNot(
+            _.mapping.code == TopologyMapping.Code.LsuSequencerConnectionSuccessor
+          )
 
         participant1.underlying.value.sync.syncPersistentStateManager
           .get(fixture.newPsid)

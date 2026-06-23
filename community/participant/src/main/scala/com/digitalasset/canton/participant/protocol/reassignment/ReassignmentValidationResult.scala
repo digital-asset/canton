@@ -69,5 +69,9 @@ private[reassignment] object ReassignmentValidationResult {
 
   private[reassignment] trait ReassigningParticipantValidationResult {
     def errors: Seq[ReassignmentValidationError]
+
+    /** Subset of [[errors]] representing abstain instead of reject
+      */
+    def abstainErrors: Seq[ReassignmentValidationError] = Seq.empty
   }
 }

@@ -6,11 +6,12 @@ package transaction
 
 import com.digitalasset.daml.lf.value.Value.ValueRecord
 import com.google.common.annotations.VisibleForTesting
-import data.{Bytes, Ref, Time}
 import monocle.Lens
-import value.{CidContainer, Value}
 
 import scala.collection.immutable.TreeSet
+
+import data.{Bytes, Ref, Time}
+import value.{CidContainer, Value}
 
 sealed abstract class FatContractInstance extends CidContainer[FatContractInstance] {
   type CreatedAtTime <: CreationTime

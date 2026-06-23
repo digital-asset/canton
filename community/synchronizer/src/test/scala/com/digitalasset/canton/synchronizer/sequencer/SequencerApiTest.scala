@@ -34,6 +34,7 @@ import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.apache.pekko.actor.ActorSystem
@@ -329,6 +330,8 @@ abstract class SequencerApiTest
       }
 
       def testAggregation: Boolean = supportAggregation
+      def testAggregationPV35: Boolean =
+        supportAggregation && testedProtocolVersion > ProtocolVersion.v34
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*
@@ -401,7 +404,7 @@ abstract class SequencerApiTest
         }
       }
 
-      "bounce on write path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregation in {
+      "bounce on write path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregationPV35 in {
         env =>
           import env.*
 
@@ -454,7 +457,7 @@ abstract class SequencerApiTest
           }
       }
 
-      "bounce on write path aggregate submissions dedup" onlyRunWhen testAggregation in { env =>
+      "bounce on write path aggregate submissions dedup" onlyRunWhen testAggregationPV35 in { env =>
         import env.*
 
         val messageContent = "bounce-sender-dedup-message"
@@ -613,9 +616,12 @@ abstract class SequencerApiTest
             startTimestamp = firstEventTimestamp(p13)(reads12).map(_.immediateSuccessor),
           )
           // if participant13 sends after processing, he'll see the already sent error
-          _ <- sequencer
-            .sendAsyncSigned(sign(request3))
-            .leftOrFail("Send async should fail with already sent")
+          _ <-
+            if (testAggregationPV35)
+              sequencer
+                .sendAsyncSigned(sign(request3))
+                .leftOrFail("Send async should fail with already sent")
+            else FutureUnlessShutdown.unit
         } yield {
           checkMessages(
             Seq(
@@ -663,6 +669,11 @@ abstract class SequencerApiTest
 
           checkRejection(reads13, p13, messageId3, defaultExpectedTrafficReceipt) {
             case SequencerErrors.AggregateSubmissionAlreadySent(reason) =>
+              reason should (
+                include(s"The aggregatable request with aggregation ID") and
+                  include("was previously delivered at")
+              )
+            case SequencerErrors.AggregateSubmissionAlreadySentV2(reason) =>
               reason should (
                 include(s"The aggregatable request with aggregation ID") and
                   include("was previously delivered at")

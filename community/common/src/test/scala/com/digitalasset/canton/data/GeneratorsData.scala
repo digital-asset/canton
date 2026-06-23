@@ -350,7 +350,7 @@ final class GeneratorsData(
                   overrideContractId = Some(created.contractId),
                 )
                 .arbitrary,
-              Gen.oneOf(true, false),
+              createdContractRolledBackArb.arbitrary,
             )
             .map { case (c, rolledBack) =>
               List(
@@ -371,7 +371,7 @@ final class GeneratorsData(
                 )
                 .arbitrary,
               Gen.oneOf(true, false),
-              Gen.oneOf(true, false),
+              createdContractRolledBackArb.arbitrary,
             )
           )
             .map(_.map(CreatedContract.tryCreate tupled))
@@ -417,7 +417,7 @@ final class GeneratorsData(
 
       }
 
-      rollbackContext <- Arbitrary.arbitrary[RollbackContext]
+      rollbackContext <- rollbackContextArb.arbitrary
       salt <- Arbitrary.arbitrary[Salt]
       externalCallResults <- viewExternalCallResultsGenFor(actionDescription)
 

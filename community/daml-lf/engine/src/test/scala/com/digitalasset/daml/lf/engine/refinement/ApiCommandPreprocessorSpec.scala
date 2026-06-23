@@ -6,17 +6,17 @@ package engine
 package refinement
 
 import com.digitalasset.daml.lf.command.ApiCommand
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.speedy.Compiler
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.newCid
-import com.digitalasset.daml.lf.value.Value._
-import org.scalatest.matchers.dsl.ResultOfATypeInvocation
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
+import org.scalatest.matchers.dsl.ResultOfATypeInvocation
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.daml.lf.speedy.Compiler
 
 import scala.util.{Failure, Success, Try}
 
@@ -28,8 +28,8 @@ class ApiCommandPreprocessorSpec
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
   import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
-    defaultPackageId => _,
-    _,
+    defaultPackageId as _,
+    *,
   }
 
   private implicit val parserParameters: ParserParameters[this.type] =
@@ -171,7 +171,7 @@ class ApiCommandPreprocessorSpec
         validCreateAndExe,
       )
 
-      val errorTestCases = Table[ApiCommand, ResultOfATypeInvocation[_]](
+      val errorTestCases = Table[ApiCommand, ResultOfATypeInvocation[?]](
         ("command", "error"),
         // TEST_EVIDENCE: Integrity: ill-formed create API command is rejected
         validCreate.copy(templateRef = "Mod:Undefined") ->
@@ -215,7 +215,7 @@ class ApiCommandPreprocessorSpec
 
       forEvery(noErrorTestCases) { command =>
         Try(defaultPreprocessor.unsafePreprocessApiCommand(Map.empty, command)) shouldBe a[Success[
-          _
+          ?
         ]]
       }
 
@@ -290,7 +290,7 @@ class ApiCommandPreprocessorSpec
 
       cids.foreach(cid =>
         forEvery(contractIdTestCases(cids.head, cid))(cmd =>
-          Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe a[Success[_]]
+          Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe a[Success[?]]
         )
       )
 
@@ -325,10 +325,10 @@ class ApiCommandPreprocessorSpec
         Failure(Error.Preprocessing.IllegalContractId.RelativeContractId(relativeCidV2))
 
       forEvery(contractIdTestCases(aLegalCidV1, anotherLegalCidV1)) { cmd =>
-        Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe a[Success[_]]
+        Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe a[Success[?]]
       }
       forEvery(contractIdTestCases(aLegalCidV1, aLegalCidV2)) { cmd =>
-        Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe a[Success[_]]
+        Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe a[Success[?]]
       }
       forEvery(contractIdTestCases(illegalCidV1, aLegalCidV1)) { cmd =>
         Try(cmdPreprocessor.unsafePreprocessApiCommand(Map.empty, cmd)) shouldBe failureV1

@@ -273,6 +273,29 @@ class ParallelIndexerSubscriptionSpec
     traffic_cost = 0L,
   )
 
+  private val someAcsCommitment = DbDto.AcsCommitment(
+    event_sequential_id = 0,
+    event_offset = 1,
+    update_id = updateIdByteArray,
+    synchronizer_id = someSynchronizerId,
+    record_time = 1,
+    payload = emptyByteArray,
+    trace_context = serializableTraceContext,
+  )
+
+  private val someEventPartyToParticipant = DbDto.EventPartyToParticipant(
+    event_sequential_id = 0,
+    event_offset = 1,
+    update_id = updateIdByteArray,
+    party_id = Ref.Party.assertFromString("party"),
+    participant_id = Ref.ParticipantId.assertFromString("participant"),
+    participant_permission = 1,
+    participant_authorization_event = 1,
+    synchronizer_id = someSynchronizerId,
+    record_time = 1,
+    trace_context = serializableTraceContext,
+  )
+
   private val offsetsAndUpdates =
     Vector(1L, 2L, 3L)
       .map(offset)
@@ -501,6 +524,10 @@ class ParallelIndexerSubscriptionSpec
           someEventWitnessed,
           filter.variousWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
+          someEventPartyToParticipant,
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
+          someAcsCommitment,
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
         ),
         batchSize = 3,
@@ -514,11 +541,11 @@ class ParallelIndexerSubscriptionSpec
     )
     import scala.util.chaining.*
 
-    result.ledgerEnd.lastEventSeqId shouldBe 19
+    result.ledgerEnd.lastEventSeqId shouldBe 21
     result.ledgerEnd.lastStringInterningId shouldBe 1
     result.ledgerEnd.lastPublicationTime shouldBe currentPublicationTime
     result.ledgerEnd.lastOffset shouldBe offset(2)
-    result.eventCount shouldBe 4L
+    result.eventCount shouldBe 6L
     result.distinctRawStrings shouldBe Nil
     result.batch(1).asInstanceOf[DbDto.EventActivate].event_sequential_id shouldBe 16
     result
@@ -578,10 +605,22 @@ class ParallelIndexerSubscriptionSpec
       transactionMeta.event_sequential_id_last shouldBe 19L
       transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
     }
-    result.batch(19).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
-    result.batch(19).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
-    result.batch(20).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
-    result.batch(20).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
+    result.batch(18).asInstanceOf[DbDto.EventPartyToParticipant].event_sequential_id shouldBe 20
+    result.batch(19).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 20L
+      transactionMeta.event_sequential_id_last shouldBe 20L
+      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
+    }
+    result.batch(20).asInstanceOf[DbDto.AcsCommitment].event_sequential_id shouldBe 21
+    result.batch(21).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 21L
+      transactionMeta.event_sequential_id_last shouldBe 21L
+      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
+    }
+    result.batch(23).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
+    result.batch(23).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
+    result.batch(24).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
+    result.batch(24).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
   }
 
   it should "preserve sequence id if nothing to assign" in {

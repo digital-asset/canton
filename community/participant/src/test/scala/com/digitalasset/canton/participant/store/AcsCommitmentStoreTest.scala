@@ -26,9 +26,10 @@ import com.digitalasset.canton.participant.store.UpdateMode.Checkpoint
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.ContractMetadata
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
   CommitmentPeriodState,
+  Digest,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.pruning.ConfigForNoWaitCounterParticipants
@@ -106,21 +107,23 @@ trait CommitmentStoreBaseTest
       stakeholders.toSet,
       maybeKeyWithMaintainersVersioned = None,
     )
-  def period(fromExclusive: Int, toInclusive: Int): CommitmentPeriod =
-    CommitmentPeriod.create(ts(fromExclusive), ts(toInclusive), interval).value
-  def periods(fromExclusive: Int, toInclusive: Int): NonEmpty[Set[CommitmentPeriod]] =
+  def period(fromExclusive: Int, toInclusive: Int): LegacyCommitmentPeriod =
+    LegacyCommitmentPeriod.create(ts(fromExclusive), ts(toInclusive), interval).value
+  def periods(fromExclusive: Int, toInclusive: Int): NonEmpty[Set[LegacyCommitmentPeriod]] =
     NonEmptyUtil
       .fromUnsafe(
         (fromExclusive until toInclusive by intervalInt).map { i =>
-          CommitmentPeriod.create(ts(i), ts(i + intervalInt), interval).value
+          LegacyCommitmentPeriod.create(ts(i), ts(i + intervalInt), interval).value
         }
       )
       .toSet
 
-  def deriveFullPeriod(commitmentPeriods: NonEmpty[Set[CommitmentPeriod]]): CommitmentPeriod = {
+  def deriveFullPeriod(
+      commitmentPeriods: NonEmpty[Set[LegacyCommitmentPeriod]]
+  ): LegacyCommitmentPeriod = {
     val fromExclusive = commitmentPeriods.minBy1(_.fromExclusive).fromExclusive
     val toInclusive = commitmentPeriods.maxBy1(_.toInclusive).toInclusive
-    new CommitmentPeriod(
+    new LegacyCommitmentPeriod(
       fromExclusive,
       PositiveSeconds
         .create(toInclusive - fromExclusive)
@@ -128,34 +131,34 @@ trait CommitmentStoreBaseTest
     )
   }
 
-  lazy val dummyCommitment: AcsCommitment.CommitmentType = {
+  lazy val dummyCommitment: Digest.DigestType = {
     val h = LtHash16()
     h.add("blah".getBytes())
     h.getByteString()
   }
-  lazy val hashedDummyCommitment: AcsCommitment.HashedCommitmentType =
-    AcsCommitment.hashCommitment(dummyCommitment)
-  lazy val dummyCommitment2: AcsCommitment.CommitmentType = {
+  lazy val hashedDummyCommitment: Digest.HashedDigestType =
+    Digest.hashDigest(dummyCommitment)
+  lazy val dummyCommitment2: Digest.DigestType = {
     val h = LtHash16()
     h.add("yah mon".getBytes())
     h.getByteString()
   }
-  lazy val hashedDummyCommitment2: AcsCommitment.HashedCommitmentType =
-    AcsCommitment.hashCommitment(dummyCommitment2)
+  lazy val hashedDummyCommitment2: Digest.HashedDigestType =
+    Digest.hashDigest(dummyCommitment2)
 
-  lazy val dummyCommitment3: AcsCommitment.CommitmentType = {
+  lazy val dummyCommitment3: Digest.DigestType = {
     val h = LtHash16()
     h.add("it's 42".getBytes())
     h.getByteString()
   }
 
-  lazy val dummyCommitment4: AcsCommitment.CommitmentType = {
+  lazy val dummyCommitment4: Digest.DigestType = {
     val h = LtHash16()
     h.add("impossibility results".getBytes())
     h.getByteString()
   }
 
-  lazy val dummyCommitment5: AcsCommitment.CommitmentType = {
+  lazy val dummyCommitment5: Digest.DigestType = {
     val h = LtHash16()
     h.add("mayday".getBytes())
     h.getByteString()
@@ -169,8 +172,8 @@ trait CommitmentStoreBaseTest
       SigningKeyUsage.ProtocolOnly,
     )
 
-  lazy val dummyCommitmentMsg: AcsCommitment =
-    AcsCommitment.create(
+  lazy val dummyCommitmentMsg: LegacyAcsCommitment =
+    LegacyAcsCommitment.create(
       synchronizerId,
       remoteId,
       localId,
@@ -178,7 +181,7 @@ trait CommitmentStoreBaseTest
       dummyCommitment,
       testedProtocolVersion,
     )
-  lazy val dummySigned: SignedProtocolMessage[AcsCommitment] =
+  lazy val dummySigned: SignedProtocolMessage[LegacyAcsCommitment] =
     SignedProtocolMessage.from(dummyCommitmentMsg, dummySignature)
 
   lazy val alice: LfPartyId = LfPartyId.assertFromString("Alice")
@@ -635,7 +638,7 @@ trait AcsCommitmentStoreTest
     "correctly search stored remote commitment messages" in {
       val store = mk()
 
-      val dummyMsg2 = AcsCommitment.create(
+      val dummyMsg2 = LegacyAcsCommitment.create(
         synchronizerId,
         remoteId,
         localId,
@@ -645,7 +648,7 @@ trait AcsCommitmentStoreTest
       )
       val dummySigned2 =
         SignedProtocolMessage.from(dummyMsg2, dummySignature)
-      val dummyMsg3 = AcsCommitment.create(
+      val dummyMsg3 = LegacyAcsCommitment.create(
         synchronizerId,
         remoteId2,
         localId,
@@ -718,7 +721,7 @@ trait AcsCommitmentStoreTest
     "allow storing different remote commitment messages for the same period" in {
       val store = mk()
 
-      val dummyMsg2 = AcsCommitment.create(
+      val dummyMsg2 = LegacyAcsCommitment.create(
         synchronizerId,
         remoteId,
         localId,
@@ -1243,13 +1246,13 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         remoteId: ParticipantId,
         start: Int,
         end: Int,
-        cmt: AcsCommitment.CommitmentType,
+        cmt: Digest.DigestType,
     ) =
-      AcsCommitment.create(
+      LegacyAcsCommitment.create(
         synchronizerId,
         remoteId,
         localId,
-        CommitmentPeriod.create(ts(start), ts(end), PositiveSeconds.tryOfSeconds(5)).value,
+        LegacyCommitmentPeriod.create(ts(start), ts(end), PositiveSeconds.tryOfSeconds(5)).value,
         cmt,
         testedProtocolVersion,
       )
@@ -1367,7 +1370,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
     "peekOverlapsForCounterParticipant works as expected" in {
 
       val dummyCommitmentMsg =
-        AcsCommitment.create(
+        LegacyAcsCommitment.create(
           synchronizerId,
           remoteId,
           localId,
@@ -1377,7 +1380,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         )
 
       val dummyCommitmentMsg2 =
-        AcsCommitment.create(
+        LegacyAcsCommitment.create(
           synchronizerId,
           remoteId,
           localId,
@@ -1387,7 +1390,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         )
 
       val dummyCommitmentMsg3 =
-        AcsCommitment.create(
+        LegacyAcsCommitment.create(
           synchronizerId,
           remoteId,
           localId,

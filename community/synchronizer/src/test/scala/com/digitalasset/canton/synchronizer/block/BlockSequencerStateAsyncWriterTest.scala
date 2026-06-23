@@ -285,6 +285,7 @@ class BlockSequencerStateAsyncWriterTest
       val trafficWriteP = PromiseUnlessShutdown.unsupervised[Unit]()
       val boooh = new Exception("booh")
       trafficConsumed.updateAndGet(_.copy(writeReturn = Seq(trafficWriteP.futureUS))).discard
+      writer.health.getState.isOk shouldBe true
       unwrap(for {
         _ <- syncWrite(trafficConsumed)(writer.append(Seq(tc1), Map(), EitherT.pure(())))
         _ = loggerFactory.assertLogs(
@@ -299,6 +300,7 @@ class BlockSequencerStateAsyncWriterTest
               // then the future will complete immediately.
               ret.value.isCompleted shouldBe true
               ret.failOnShutdown.value.failed.futureValue.getCause shouldBe boooh
+              writer.health.getState.isFatal shouldBe true
             }
           },
           _.errorMessage should include("Background write failed"),

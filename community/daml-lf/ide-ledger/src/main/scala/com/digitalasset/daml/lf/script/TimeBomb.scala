@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package script
 
 import java.util.{Timer, TimerTask}
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 private[script] class TimeBomb(delayInMillis: Long) {
   @volatile

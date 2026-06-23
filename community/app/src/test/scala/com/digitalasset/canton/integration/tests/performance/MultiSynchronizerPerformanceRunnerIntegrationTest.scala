@@ -20,8 +20,6 @@ import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
 import org.scalatest.time.{Millis, Minutes, Span}
 
-import scala.concurrent.duration.DurationInt
-
 /** Ensures performance runner can introduce reassignments
   */
 class MultiSynchronizerPerformanceRunnerIntegrationTest
@@ -46,7 +44,6 @@ class MultiSynchronizerPerformanceRunnerIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
         ConfigTransforms.updateSequencerClientAcknowledgementInterval(
           config.NonNegativeDuration
             .ofMillis(sequencerClientAcknowledgementIntervalMs.toLong)

@@ -424,6 +424,12 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.GetActiveContractsRequest.fromJson
         ),
         Mapping[
+          v2.command_completion_service.GetCompletionsRequest,
+          openapi.GetCompletionsRequest,
+        ](
+          openapi.GetCompletionsRequest.fromJson
+        ),
+        Mapping[
           v2.state_service.GetConnectedSynchronizersResponse,
           openapi.GetConnectedSynchronizersResponse,
         ](

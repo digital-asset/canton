@@ -11,6 +11,8 @@ import com.daml.tracing.Spans
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.api.{TraceIdentifiers, TransactionShape}
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse.ProtoUpdate
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -32,8 +34,12 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdFilterPageQuery,
   IdPageQuery,
 }
+import com.digitalasset.canton.platform.store.dao.events.AcsCommitmentsStreamReader.AcsCommitmentsStreamQueryParams
 import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.TopologyTransactionsStreamQueryParams
-import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.VectorOps
+import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.{
+  VectorOps,
+  orderingBasedOnDescending,
+}
 import com.digitalasset.canton.platform.store.dao.{DbDispatcher, PaginatingAsyncStream}
 import com.digitalasset.canton.platform.store.utils.{
   ConcurrencyLimiter,
@@ -51,7 +57,7 @@ import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Attributes
-import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.scaladsl.{Flow, Source}
 
 import java.sql.Connection
 import scala.concurrent.{ExecutionContext, Future}
@@ -69,6 +75,7 @@ class UpdatesStreamReader(
     metrics: LedgerApiServerMetrics,
     tracer: Tracer,
     topologyTransactionsStreamReader: TopologyTransactionsStreamReader,
+    acsCommitmentsStreamReader: AcsCommitmentsStreamReader,
     pruningOffsetService: PruningOffsetService,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -87,7 +94,7 @@ class UpdatesStreamReader(
       skipPruningChecks: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
+  ): Source[(Offset, UpdateResponse), NotUsed] = {
     val span =
       Telemetry.Updates.createSpan(
         tracer,
@@ -106,7 +113,7 @@ class UpdatesStreamReader(
       skipPruningChecks = skipPruningChecks,
     )
       .wireTap(_ match {
-        case (_, getUpdatesResponse) =>
+        case (_, ProtoUpdate(getUpdatesResponse)) =>
           getUpdatesResponse.update match {
             case GetUpdatesResponse.Update.Transaction(value) =>
               val event = tracing.Event("update", TraceIdentifiers.fromTransaction(value))
@@ -121,6 +128,8 @@ class UpdatesStreamReader(
               Spans.addEventToSpan(event, span)
             case _ => ()
           }
+        // TODO(#33238) verify whether we need trace identifiers for acs commitment updates
+        case (_, UpdateResponse.AcsCommitment(_)) => ()
       })
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -132,7 +141,7 @@ class UpdatesStreamReader(
       skipPruningChecks: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
+  ): Source[(Offset, UpdateResponse), NotUsed] = {
     val longOrdering: Ordering[Long] =
       orderingBasedOnDescending(descendingOrder = descendingOrder)
 
@@ -240,7 +249,7 @@ class UpdatesStreamReader(
       case None => Source.empty
     }
 
-    val topologyTransactions =
+    val topologyTransactions: Source[(Offset, UpdateResponse), NotUsed] =
       internalUpdateFormat.includeTopologyEvents.flatMap(_.participantAuthorizationFormat) match {
         case Some(participantAuthorizationFormat) =>
           topologyTransactionsStreamReader
@@ -258,18 +267,38 @@ class UpdatesStreamReader(
               )
             )
             .map { case (offset, topologyTransaction) =>
-              offset -> GetUpdatesResponse(
-                GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction)
-              ).withPrecomputedSerializedSize()
+              offset -> UpdateResponse.ProtoUpdate(
+                GetUpdatesResponse(
+                  GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction)
+                ).withPrecomputedSerializedSize()
+              )
             }
         case None => Source.empty
+      }
+
+    val acsCommitmentsFlow: Flow[(Offset, UpdateResponse), (Offset, UpdateResponse), NotUsed] =
+      internalUpdateFormat.includeAcsCommitments match {
+        case Some(synchronizerId) =>
+          val acsCommitments: Source[(Offset, UpdateResponse), NotUsed] =
+            acsCommitmentsStreamReader.streamAcsCommitments(
+              AcsCommitmentsStreamQueryParams(
+                queryRange = queryRange,
+                synchronizerId = synchronizerId,
+                descendingOrder = descendingOrder,
+                maxParallelPayloadQueries = transactionsProcessingParallelism,
+              )
+            )
+          Flow[(Offset, UpdateResponse)].mergeSorted(acsCommitments)(
+            Ordering.by[(Offset, UpdateResponse), Long](_._1.unwrap)(longOrdering)
+          )
+        case None => Flow[(Offset, UpdateResponse)]
       }
 
     UpdateReader
       .groupContiguous(sourceOfTransactionsAndReassignments)(_.offset)
       .mapAsync(transactionsProcessingParallelism) { rawEvents =>
         deserializationQueriesLimiter.execute(
-          UpdateReader.toApiUpdate(
+          UpdateReader.toApiUpdate[(Offset, UpdateResponse)](
             reassignmentEventProjectionProperties = internalUpdateFormat.includeReassignments.map(
               _.eventProjectionProperties
             ),
@@ -279,20 +308,25 @@ class UpdatesStreamReader(
             lfValueTranslation = lfValueTranslation,
           )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
             convertReassignment = reassignment =>
-              Offset.tryFromLong(reassignment.offset) -> GetUpdatesResponse(
-                GetUpdatesResponse.Update.Reassignment(reassignment)
-              ).withPrecomputedSerializedSize(),
+              Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
+                GetUpdatesResponse(
+                  GetUpdatesResponse.Update.Reassignment(reassignment)
+                ).withPrecomputedSerializedSize()
+              ),
             convertTransaction = transaction =>
-              Offset.tryFromLong(transaction.offset) -> GetUpdatesResponse(
-                GetUpdatesResponse.Update.Transaction(transaction)
-              ).withPrecomputedSerializedSize(),
+              Offset.tryFromLong(transaction.offset) -> UpdateResponse.ProtoUpdate(
+                GetUpdatesResponse(
+                  GetUpdatesResponse.Update.Transaction(transaction)
+                ).withPrecomputedSerializedSize()
+              ),
           )
         )
       }
       .mapConcat(identity)
       .mergeSorted(topologyTransactions)(
-        Ordering.by[(Offset, GetUpdatesResponse), Long](_._1.unwrap)(longOrdering)
+        Ordering.by[(Offset, UpdateResponse), Long](_._1.unwrap)(longOrdering)
       )
+      .via(acsCommitmentsFlow)
   }
 
   private def reverseIfDescendingOrder(
@@ -958,15 +992,15 @@ class UpdatesStreamReader(
       )
       .mapConcat(identity)
   }
+}
 
-  private def orderingBasedOnDescending(descendingOrder: Boolean): Ordering[Long] =
+object UpdatesStreamReader {
+  def orderingBasedOnDescending(descendingOrder: Boolean): Ordering[Long] =
     if (descendingOrder)
       Ordering.Long.reverse
     else
       Ordering.Long
-}
 
-object UpdatesStreamReader {
   final implicit class VectorOps[T](vec: Vector[T]) {
     def reverseIfDescendingOrder(descendingOrder: Boolean): Vector[T] =
       if (descendingOrder) vec.reverse else vec

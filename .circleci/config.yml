@@ -547,6 +547,7 @@ commands:
             - execute_sbt_command:
                 cmd: publishToSonatype
                 fail_on_error_in_output: false
+                timeout: 60m
     publish_release_on_artifactory:
         parameters:
             nightly_release:
@@ -760,6 +761,15 @@ commands:
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
                 name: Run tests
                 no_output_timeout: << parameters.no_output_timeout >>
+    run_temp_acs_commitment_tests:
+        steps:
+            - run_tests:
+                command: dumpClassPath "set \`transcode-schema\` / Test / testOnly := {};set \`transcode-daml-lf\` / Test / testOnly := {};set \`transcode-codec-json\` / Test / testOnly := {};set \`transcode-codec-proto-java\` / Test / testOnly := {};set \`transcode-codec-proto-scala\` / Test / testOnly := {};set \`transcode-daml-examples\` / Test / testOnly := {};set \`transcode-test-conformance\` / Test / testOnly := {};set \`transcode-test-utils\` / Test / testOnly := {};testOnly * -- -n com.digitalasset.canton.annotations.AcsCommitmentTest"
+                fail_on_error_in_output: true
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                succeed_on_error: false
     run_test_coverage_test:
         parameters:
             command:
@@ -1197,6 +1207,7 @@ commands:
                 filter: |
                     grep -E -e $FLAKY_TEST_GREP_FILTER \
                 num_test_buckets: "1"
+                report_to_datadog: false
                 succeed_on_error: << parameters.succeed_on_error >>
                 test_sub_command: testManyTimes << parameters.test_repetitions_per_runner >>
     topology_chaos_test_command:
@@ -2566,6 +2577,17 @@ jobs:
                 command: release/tag-new-releases.sh
                 name: Tag new releases
             - slack_red_main_with_volunteer
+    temp_acs_commitment_tests_pv_dev:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 1
+        parameters:
+            override_java_version_for_tests:
+                default: ""
+                type: string
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: DEV
+            - run_temp_acs_commitment_tests
     test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 12
@@ -3122,6 +3144,24 @@ workflows:
                 protocol_version: DEV
                 requires:
                     - test_protocol_version_34
+            - temp_acs_commitment_tests_pv_dev:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                            - /^release-line.*/
+                            - /^gh-readonly-queue\/main\/.*/
+                name: temp_acs_commitment_tests_pv_dev
+                requires:
+                    - compile
             - unstable_test:
                 context:
                     - datadog

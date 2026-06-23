@@ -44,48 +44,46 @@ create table par_acs_party_running_digest (
   synchronizer_idx integer not null,
   -- encoded integer for the interned party id and order (local - or remote)
   party_and_order_id integer not null,
-  -- change timestamp
+  -- ledger offset
+  change_offset bigint not null,
+  -- record time of the change_offset
   ts bigint not null,
-  -- change version (if `ts` is in the same time)
-  tie_breaker bigint not null,
   -- VARBINARY has a performance and memory layout advantage over BLOB for small, fixed-size byte structures (like digests).
   -- see https://www.h2database.com/html/datatypes.html for details
   digest varbinary,
   -- link to the last version of the digest that has the same party_and_order_id
-  replaces_ts bigint,
-  replaces_tie_breaker bigint,
-  primary key (synchronizer_idx, party_and_order_id, ts, tie_breaker)
+  replaces_offset bigint,
+  primary key (synchronizer_idx, party_and_order_id, change_offset)
 );
 
 create index par_acs_party_running_digest_by_time
-    on par_acs_party_running_digest (synchronizer_idx, party_and_order_id, ts DESC, tie_breaker DESC, replaces_ts, replaces_tie_breaker);
+    on par_acs_party_running_digest (synchronizer_idx, party_and_order_id, change_offset desc, replaces_offset);
 
 create table par_acs_participant_running_digest (
   synchronizer_idx integer not null,
   -- interned participant id
   participant_id integer not null,
-  -- change timestamp
+  -- ledger offset
+  change_offset bigint not null,
+  -- record time of the change_offset
   ts bigint not null,
-  -- change version (if `ts` is in the same time)
-  tie_breaker bigint not null,
   -- VARBINARY has a performance and memory layout advantage over BLOB for small, fixed-size byte structures (like digests).
   -- see https://www.h2database.com/html/datatypes.html for details
   digest varbinary,
   hashed_digest varbinary,
   -- link to the last version of the digest that has the same (counter) participant_id
-  replaces_ts bigint,
-  replaces_tie_breaker bigint,
-  primary key (synchronizer_idx, participant_id, ts, tie_breaker)
+  replaces_offset bigint,
+  primary key (synchronizer_idx, participant_id, change_offset)
 );
 
 create index par_acs_participant_running_digest_by_time
-    on par_acs_participant_running_digest (synchronizer_idx, participant_id, ts DESC, tie_breaker DESC, replaces_ts, replaces_tie_breaker);
+    on par_acs_participant_running_digest (synchronizer_idx, participant_id, change_offset desc, replaces_offset);
 
 create table par_acs_running_digests_checkpoint (
   synchronizer_idx integer not null,
-  -- change timestamp
+  -- ledger offset
+  change_offset bigint not null,
+  -- record time of the change_offset
   ts bigint not null,
-  -- version (if the change is in the same microsecond)
-  tie_breaker bigint not null,
-  primary key (synchronizer_idx, ts, tie_breaker)
+  primary key (synchronizer_idx, change_offset)
 );

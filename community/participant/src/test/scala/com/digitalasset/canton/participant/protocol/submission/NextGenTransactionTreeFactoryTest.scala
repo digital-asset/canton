@@ -9,7 +9,12 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{TestHash, TestSalt}
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
-import com.digitalasset.canton.data.{GenTransactionTree, ViewPosition}
+import com.digitalasset.canton.data.{
+  GenTransactionTree,
+  RollbackContextFactory,
+  TransactionViewDecompositionFactory,
+  ViewPosition,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
@@ -44,6 +49,11 @@ final class NextGenTransactionTreeFactoryTest
     with BaseTest
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
+
+  private val rolledBackState =
+    TransactionViewDecompositionFactory.RollbackState.empty.enterRollback
+  private val rollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
+  private val rolledBackContext = rollbackContextFactory.fromRollbackState(rolledBackState)
 
   private def successfulLookup(example: ExampleTransaction): ContractInstanceOfId = id =>
     EitherT.fromEither[FutureUnlessShutdown](
@@ -99,6 +109,7 @@ final class NextGenTransactionTreeFactoryTest
       updatedTransaction,
       example.metadata,
       WithoutSuffixes,
+      rollbackContextFactory,
     )
   }
 
@@ -122,10 +133,14 @@ final class NextGenTransactionTreeFactoryTest
       updatedTransaction,
       metadata,
       WithoutSuffixes,
+      rollbackContextFactory,
     )
   }
 
-  forAll(Table("contract id version", CantonContractIdVersion.all*)) { contractIdVersion =>
+  private val testedContractIdVersions: Seq[CantonContractIdVersion] =
+    if (testedProtocolVersion >= ProtocolVersion.v35) CantonContractIdVersion.all else Seq.empty
+
+  forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
     )(cantonContractIdVersion = contractIdVersion)
@@ -383,7 +398,7 @@ final class NextGenTransactionTreeFactoryTest
                   transactionUuid = factory.transactionUuid,
                   topologySnapshot = factory.topologySnapshot,
                   contractOfId = successfulLookup(example),
-                  rbContext = RollbackContext.empty,
+                  rbContext = rollbackContextFactory.empty,
                   absolutizer = factory.absolutizer(tree.updateId),
                 )
                 .failOnShutdown
@@ -516,12 +531,12 @@ final class NextGenTransactionTreeFactoryTest
                 transactionUuid = factory.transactionUuid,
                 topologySnapshot = factory.topologySnapshot,
                 contractOfId = cid => EitherT.leftT(ContractLookupError(cid, "")),
-                rbContext = RollbackContext.empty.enterRollback,
+                rbContext = rolledBackContext,
                 absolutizer = factory.absolutizer(UpdateId(TestHash.digest(1))),
               )
               .value
               .map { result =>
-                inside(result) { case Left(RolledBackEffect(_, actual)) =>
+                inside(result) { case Left(RolledBackEffect(actual)) =>
                   actual shouldBe expected
                 }
               }

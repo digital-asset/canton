@@ -46,7 +46,6 @@ import monocle.macros.syntax.lens.*
 import monocle.macros.{GenLens, GenPrism}
 
 import scala.concurrent.duration.*
-import scala.jdk.DurationConverters.*
 import scala.util.Random
 
 /** Utilities for transforming instances of [[CantonConfig]]. A transform itself is merely a
@@ -746,18 +745,6 @@ object ConfigTransforms {
     updateAllParticipantConfigs_(
       _.focus(_.init.ledgerApi.maxDeduplicationDuration)
         .replace(config.NonNegativeFiniteDuration(maxDeduplicationDuration))
-    )
-
-  def updateTargetTimestampForwardTolerance(
-      targetTimestampForwardTolerance: scala.concurrent.duration.FiniteDuration
-  ): ConfigTransform = updateTargetTimestampForwardTolerance(targetTimestampForwardTolerance.toJava)
-
-  def updateTargetTimestampForwardTolerance(
-      targetTimestampForwardTolerance: java.time.Duration
-  ): ConfigTransform =
-    ConfigTransforms.updateAllParticipantConfigs_(
-      _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
-        .replace(config.NonNegativeFiniteDuration(targetTimestampForwardTolerance))
     )
 
   def setPassiveCheckPeriodMediators(

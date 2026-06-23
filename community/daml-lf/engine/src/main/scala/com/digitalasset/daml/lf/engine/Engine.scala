@@ -4,76 +4,68 @@
 package com.digitalasset.daml.lf
 package engine
 
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.NamedLogging
+import com.daml.nameof.NameOf
+import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.Dar
-import com.digitalasset.daml.lf.command._
+import com.digitalasset.daml.lf.command.*
+import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
+import com.digitalasset.daml.lf.data
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error => IError}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language._
-import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
+import com.digitalasset.daml.lf.interpretation.{Error as IError, InterpretationConfig}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, PackageInterface, *}
+import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.Question.Update
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.SBFetchTemplate
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SEMakeClo, SEValue, SExpr}
-import com.digitalasset.daml.lf.speedy.SResult._
+import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine, UpdateMachine}
-import com.digitalasset.daml.lf.speedy._
+import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
+import com.digitalasset.daml.lf.stablepackages.StablePackages
+import com.digitalasset.daml.lf.testing.snapshot.Snapshot
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
   NeedKeyProgression,
   Node,
   SubmittedTransaction,
+  Transaction as Tx,
   Versioned,
   VersionedTransaction,
-  Transaction => Tx,
 }
+import com.digitalasset.daml.lf.validation.Validation
+import com.digitalasset.daml.lf.value.Value.ContractId
+import com.digitalasset.daml.lf.value.{ContractIdVersion, Value, ValueCoder}
 
 import java.nio.file.{Files, StandardOpenOption}
-import com.digitalasset.daml.lf.value.{ContractIdVersion, Value, ValueCoder}
-import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, PackageInterface}
-import com.digitalasset.daml.lf.stablepackages.StablePackages
-import com.digitalasset.daml.lf.testing.snapshot.Snapshot
-import com.digitalasset.daml.lf.validation.Validation
-import com.daml.nameof.NameOf
-import com.daml.scalautil.Statement.discard
-import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
-import com.digitalasset.daml.lf.data
-
 import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
-/** Allows for evaluating [[com.digitalasset.daml.lf.command.ApiCommands]] and validating [[com.digitalasset.daml.lf.transaction.Transaction]]s.
-  * <p>
+/** Allows for evaluating [[com.digitalasset.daml.lf.command.ApiCommands]] and validating
+  * [[com.digitalasset.daml.lf.transaction.Transaction]]s. <p>
   *
-  * This class does not dereference contract ids or package ids on its own.
-  * Instead, when an instance of this class needs to dereference a contract id or package id,
-  * it returns a [[ResultNeedContract]] or [[ResultNeedPackage]] to the caller.
-  * The caller can then resume the computation by calling `result.resume`.
-  * The engine may or may not cache and reuse the provided contract instance or package.
-  * <p>
+  * This class does not dereference contract ids or package ids on its own. Instead, when an
+  * instance of this class needs to dereference a contract id or package id, it returns a
+  * [[ResultNeedContract]] or [[ResultNeedPackage]] to the caller. The caller can then resume the
+  * computation by calling `result.resume`. The engine may or may not cache and reuse the provided
+  * contract instance or package. <p>
   *
-  * The caller must dereference contract and package ids consistently, i.e.,
-  * if the '''same engine''' returns `result1` and `result2`,
-  * `result1` and `result2` request to dereference the same contract or package id, and
-  * the caller invokes `result1.resume(x1)` and `result2.resume(x2)`,
-  * then `x1` must equal `x2`.
-  * <p>
+  * The caller must dereference contract and package ids consistently, i.e., if the '''same
+  * engine''' returns `result1` and `result2`, `result1` and `result2` request to dereference the
+  * same contract or package id, and the caller invokes `result1.resume(x1)` and
+  * `result2.resume(x2)`, then `x1` must equal `x2`. <p>
   *
-  * The caller may deference ids inconsistently across different engines.
-  * Namely, if '''two different engines''' return `result1` and `result2`,
-  * then the caller may call `result1.resume(x1)` and `result2.resume(x2)` with `x1 != x2`,
-  * even if `result1` and `result2` request to dereference the same id.
-  * <p>
+  * The caller may deference ids inconsistently across different engines. Namely, if '''two
+  * different engines''' return `result1` and `result2`, then the caller may call
+  * `result1.resume(x1)` and `result2.resume(x2)` with `x1 != x2`, even if `result1` and `result2`
+  * request to dereference the same id. <p>
   *
-  * The class requires a pseudo random generator (`nextRandomInt`) to randomize the
-  * preparation time. This generator does not have to be cryptographically secure.
-  * <p>
+  * The class requires a pseudo random generator (`nextRandomInt`) to randomize the preparation
+  * time. This generator does not have to be cryptographically secure. <p>
   *
   * This class is thread safe as long `nextRandomInt` is.
   */
@@ -100,28 +92,37 @@ class Engine(
 
   def info = new EngineInfo(config)
 
-  /** Interprets a sequence of commands `cmds` to the corresponding `SubmittedTransaction` and `Tx.Metadata`.
-    * Requests data required during the interpretation (such as the contract or package corresponding to a given id)
-    * through the `Result` subclasses.
+  /** Interprets a sequence of commands `cmds` to the corresponding `SubmittedTransaction` and
+    * `Tx.Metadata`. Requests data required during the interpretation (such as the contract or
+    * package corresponding to a given id) through the `Result` subclasses.
     *
-    * The resulting transaction (if any) meets the following properties:
-    * <ul>
-    *   <li>The transaction is well-typed and conforms to the DAML model described by the packages supplied via `ResultNeedPackage`.
-    *       In particular, each contract created by the transaction meets the ensures clauses of the underlying template.</li>
-    *   <li>The transaction paired with `submitters` is well-authorized according to the ledger model.</li>
-    *   <li>The transaction is annotated with the packages used during interpretation.</li>
-    * </ul>
+    * The resulting transaction (if any) meets the following properties: <ul> <li>The transaction is
+    * well-typed and conforms to the DAML model described by the packages supplied via
+    * `ResultNeedPackage`. In particular, each contract created by the transaction meets the ensures
+    * clauses of the underlying template.</li> <li>The transaction paired with `submitters` is
+    * well-authorized according to the ledger model.</li> <li>The transaction is annotated with the
+    * packages used during interpretation.</li> </ul>
     *
-    * @param packageMap all the package known by the ledger with their name and version
-    * @param packagePreference the set of package that should be use to resolve package name in command and interface exercise
-    *                          packageReference should not contain two package with the same name
-    * @param submitters the parties authorizing the root actions (both read and write) of the resulting transaction
-    *                   ("committers" according to the ledger model)
-    * @param readAs the parties authorizing the root actions (only read, but no write) of the resulting transaction
-    * @param cmds the commands to be interpreted
-    * @param participantId a unique identifier (of the underlying participant) used to derive node and contractId discriminators
-    * @param submissionSeed the master hash used to derive node and contractId discriminators
-    * @param contractIdVersion The contract ID version to use for local contracts
+    * @param packageMap
+    *   all the package known by the ledger with their name and version
+    * @param packagePreference
+    *   the set of package that should be use to resolve package name in command and interface
+    *   exercise packageReference should not contain two package with the same name
+    * @param submitters
+    *   the parties authorizing the root actions (both read and write) of the resulting transaction
+    *   ("committers" according to the ledger model)
+    * @param readAs
+    *   the parties authorizing the root actions (only read, but no write) of the resulting
+    *   transaction
+    * @param cmds
+    *   the commands to be interpreted
+    * @param participantId
+    *   a unique identifier (of the underlying participant) used to derive node and contractId
+    *   discriminators
+    * @param submissionSeed
+    *   the master hash used to derive node and contractId discriminators
+    * @param contractIdVersion
+    *   The contract ID version to use for local contracts
     */
   def submit(
       packageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] = Map.empty,
@@ -161,26 +162,33 @@ class Engine(
           packageResolution = pkgResolution,
           submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
           metricPlugins = config.snapshotDir.fold(Seq.empty[MetricPlugin]) { _ =>
-            Seq(new metrics.FetchNodeCount, new metrics.StepCount(config.iterationsBetweenInterruptions), new metrics.TxNodeCount)
+            Seq(
+              new metrics.FetchNodeCount,
+              new metrics.StepCount(config.iterationsBetweenInterruptions),
+              new metrics.TxNodeCount,
+            )
           },
         )
       (tx, meta, _) = result
     } yield (tx, meta)
   }
 
-  /** Behaves like `submit`, but it takes a single `ReplayCommand` (instead of `ApiCommands`) as input.
-    * It can be used to reinterpret partially an already interpreted transaction.
+  /** Behaves like `submit`, but it takes a single `ReplayCommand` (instead of `ApiCommands`) as
+    * input. It can be used to reinterpret partially an already interpreted transaction.
     *
     * If the command would fail with an unhandled exception, we return a transaction containing a
     * single rollback node. (This is achieving by compiling with `unsafeCompileForReinterpretation`
     * which wraps the command with a catch-everything exception handler.)
     *
-    * @param nodeSeed the seed of the root node as generated during submission.
-    *                 If undefined the contract IDs are derive using V0 scheme.
-    *                 The value does not matter for other kind of nodes.
-    * @param preparationTime the preparation time used to compute contract IDs
-    * @param ledgerEffectiveTime the ledger effective time used as a result of `getTime` during reinterpretation
-    * @param contractIdVersion The contract ID version to use for local contracts
+    * @param nodeSeed
+    *   the seed of the root node as generated during submission. If undefined the contract IDs are
+    *   derive using V0 scheme. The value does not matter for other kind of nodes.
+    * @param preparationTime
+    *   the preparation time used to compute contract IDs
+    * @param ledgerEffectiveTime
+    *   the ledger effective time used as a result of `getTime` during reinterpretation
+    * @param contractIdVersion
+    *   The contract ID version to use for local contracts
     */
   def reinterpret(
       submitters: Set[Party],
@@ -272,17 +280,20 @@ class Engine(
 
   /** Check if the given transaction is a valid result of some single-submitter command.
     *
-    * Formally, for all tx, pcs, pkgs, keys:
-    *   evaluate(validate(tx, ledgerEffectiveTime)) == Result.Unit <==> exists cmds. evaluate(submit(cmds)) = tx
-    * where:
-    *   evaluate(result) = result.consume(pcs, pkgs, keys)
+    * Formally, for all tx, pcs, pkgs, keys: evaluate(validate(tx, ledgerEffectiveTime)) ==
+    * Result.Unit <==> exists cmds. evaluate(submit(cmds)) = tx where: evaluate(result) =
+    * result.consume(pcs, pkgs, keys)
     *
-    * A transaction may contain relative contract IDs and still pass validation, but not in the root nodes.
+    * A transaction may contain relative contract IDs and still pass validation, but not in the root
+    * nodes.
     *
-    * This is enforced since commands cannot contain relative contract ids, and we check that root nodes come from commands.
+    * This is enforced since commands cannot contain relative contract ids, and we check that root
+    * nodes come from commands.
     *
-    *  @param tx a complete unblinded Transaction to be validated
-    *  @param ledgerEffectiveTime time when the transaction is claimed to be submitted
+    * @param tx
+    *   a complete unblinded Transaction to be validated
+    * @param ledgerEffectiveTime
+    *   time when the transaction is claimed to be submitted
     */
   def validate(
       submitters: Set[Party],
@@ -294,7 +305,7 @@ class Engine(
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit traceContext: TraceContext): Result[Unit] = {
+  )(implicit traceContext: TraceContext): Result[Unit] =
     validateAndCollectMetrics(
       submitters,
       tx,
@@ -306,7 +317,6 @@ class Engine(
       interpretationConfig,
       metricPlugins,
     ).map(_ => ())
-  }
 
   private[lf] def validateAndCollectMetrics(
       submitters: Set[Party],
@@ -318,7 +328,7 @@ class Engine(
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
-  )(implicit traceContext: TraceContext): Result[Speedy.Metrics] = {
+  )(implicit traceContext: TraceContext): Result[Speedy.Metrics] =
     // reinterpret
     for {
       result <- replayAndCollectMetrics(
@@ -341,19 +351,19 @@ class Engine(
             _ => ResultDone(metrics),
           )
     } yield validationResult
-  }
 
   /** Builds a GlobalKey based on a normalised representation of the provided key
-    * @param templateId - the templateId associated with the contract key
-    * @param key - a representation of the key that may be un-normalized
+    * @param templateId
+    *   \- the templateId associated with the contract key
+    * @param key
+    *   \- a representation of the key that may be un-normalized
     */
-  def buildGlobalKey(templateId: Identifier, key: Value): Result[GlobalKey] = {
+  def buildGlobalKey(templateId: Identifier, key: Value): Result[GlobalKey] =
     preprocessor.buildGlobalKey(
       templateId: Identifier,
       key: Value,
       extendLocalIdForbiddanceToRelativeV2 = false,
     )
-  }
 
   private[engine] def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] =
     ResultNeedPackage(
@@ -425,10 +435,11 @@ class Engine(
       )
     } yield result
 
-  /** Interprets the given commands under the authority of @submitters, with additional readers @readAs
+  /** Interprets the given commands under the authority of @submitters, with additional readers
+    * \@readAs
     *
-    * Submitters are a set, in order to support interpreting subtransactions
-    * (a subtransaction can be authorized by multiple parties).
+    * Submitters are a set, in order to support interpreting subtransactions (a subtransaction can
+    * be authorized by multiple parties).
     *
     * [[seeding]] is seeding used to derive node seed and contractId discriminator.
     */
@@ -492,14 +503,13 @@ class Engine(
     ResultDone(deps)
   }
 
-  private def handleError(err: SError.SError, detailMsg: Option[String]): ResultError = {
+  private def handleError(err: SError.SError, detailMsg: Option[String]): ResultError =
     err match {
       case SError.SErrorDamlException(error) =>
         ResultError(Error.Interpretation.DamlException(error), detailMsg)
       case err @ SError.SErrorCrash(where, reason) =>
         ResultError(Error.Interpretation.Internal(where, reason, Some(err)))
     }
-  }
 
   private lazy val enricher = refinement.Enricher(
     compiledPackages,
@@ -655,6 +665,7 @@ class Engine(
                         Files.newOutputStream(
                           snapshotFile,
                           StandardOpenOption.CREATE,
+                          StandardOpenOption.WRITE,
                           StandardOpenOption.APPEND,
                         )
                       )
@@ -693,12 +704,11 @@ class Engine(
               Result.needPackage(
                 pkgId,
                 context,
-                { (pkg: Package) =>
+                (pkg: Package) =>
                   compiledPackages.addPackage(pkgId, pkg).flatMap { _ =>
                     callback(compiledPackages)
                     interpretLoop(machine, time, submissionInfo)
-                  }
-                },
+                  },
               )
 
             case Question.Update.NeedContract(coid, _, callback) =>
@@ -726,7 +736,7 @@ class Engine(
               // token's buffer before going back to the caller.
 
               def wrapHasStarted(
-                  overflow: Vector[FatContractInstance],
+                  overflow: Vector[ResultNeedKey.Response.ContractEntry],
                   callerProgression: NeedKeyProgression.HasStarted,
               ): NeedKeyProgression.HasStarted =
                 if (overflow.nonEmpty)
@@ -743,19 +753,38 @@ class Engine(
                       NeedKeyProgression.Finished
                   }
 
+              def resumeWithNeededEntries(
+                  entries: Vector[ResultNeedKey.Response.ContractEntry],
+                  callerHasStarted: NeedKeyProgression.HasStarted,
+              ) = {
+                import cats.instances.either.*
+                import cats.instances.vector.*
+                import cats.syntax.traverse.*
+                val (enginePage, engineRest) = entries.splitAt(n)
+                enginePage.traverse {
+                  case ResultNeedKey.Response.AuthenticableFatContractInstance(
+                        contractInstance,
+                        expectedHashingMethod,
+                        idValidator,
+                      ) =>
+                    Right((contractInstance, expectedHashingMethod, idValidator))
+                  case ResultNeedKey.Response.UnsupportedContractIdVersion(coid) =>
+                    Left(interpretation.Error.UnsupportedContractId(coid))
+                } match {
+                  case Left(err) => ResultError(Error.Interpretation.DamlException(err))
+                  case Right(sanitizedPage) =>
+                    callback(sanitizedPage, wrapHasStarted(engineRest, callerHasStarted))
+                    interpretLoop(machine, time, submissionInfo)
+                }
+              }
+
               def askCaller(callerToken: NeedKeyProgression.CanContinue) =
                 ResultNeedKey(
                   gk,
                   n,
                   callerToken,
-                  {
-                    (
-                        callerContracts: Vector[FatContractInstance],
-                        callerHasStarted: NeedKeyProgression.HasStarted,
-                    ) =>
-                      val (enginePage, engineRest) = callerContracts.splitAt(n)
-                      callback(enginePage, wrapHasStarted(engineRest, callerHasStarted))
-                      interpretLoop(machine, time, submissionInfo)
+                  { case ResultNeedKey.Response(callerContracts, callerHasStarted) =>
+                    resumeWithNeededEntries(callerContracts, callerHasStarted)
                   },
                 )
 
@@ -766,9 +795,7 @@ class Engine(
                   if (overflow.nonEmpty) {
                     // We have buffered contracts from a previous caller response.
                     // Serve from the buffer without asking the caller.
-                    val (page, rest) = overflow.splitAt(n)
-                    callback(page, wrapHasStarted(rest, callerProgression))
-                    interpretLoop(machine, time, submissionInfo)
+                    resumeWithNeededEntries(overflow, callerProgression)
                   } else {
                     // Empty buffer — unwrap the caller progression.
                     callerProgression match {
@@ -792,7 +819,13 @@ class Engine(
                   )
               }
 
-            case Question.Update.NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+            case Question.Update.NeedExternalCall(
+                  extensionId,
+                  functionId,
+                  configHash,
+                  input,
+                  callback,
+                ) =>
               ResultNeedExternalCall(
                 extensionId,
                 functionId,
@@ -823,24 +856,19 @@ class Engine(
 
   def clearPackages(): Unit = compiledPackages.clear()
 
-  /** This function can be used to give a package to the engine pre-emptively,
-    * rather than having the engine to ask about it through
-    * [[ResultNeedPackage]].
+  /** This function can be used to give a package to the engine pre-emptively, rather than having
+    * the engine to ask about it through [[ResultNeedPackage]].
     *
-    * Returns a [[Result]] because the package might need another package to
-    * be loaded.
+    * Returns a [[Result]] because the package might need another package to be loaded.
     */
   def preloadPackage(pkgId: PackageId, pkg: Package): Result[Unit] =
     compiledPackages.addPackage(pkgId, pkg)
 
-  /** This method checks a Dar file is self-consistent (it
-    * contains all its dependencies and only those dependencies), contains only well-formed
-    * packages (See Daml-LF spec for more details) and uses only the
-    * allowed language versions (as described by the engine
-    * config).
-    * This is not affected by [[com.digitalasset.daml.lf.engine.EngineConfig.packageValidation]] flag in [config].
-    * Package in [pkgIds] but not in [pkgs] are assumed to be
-    * preloaded.
+  /** This method checks a Dar file is self-consistent (it contains all its dependencies and only
+    * those dependencies), contains only well-formed packages (See Daml-LF spec for more details)
+    * and uses only the allowed language versions (as described by the engine config). This is not
+    * affected by [[com.digitalasset.daml.lf.engine.EngineConfig.packageValidation]] flag in
+    * [config]. Package in [pkgIds] but not in [pkgs] are assumed to be preloaded.
     */
   def validateDar(dar: Dar[(PackageId, Package)]): Either[Error.Package.Error, Unit] = {
     val pkgIdDepGraph: Map[PackageId, Set[PackageId]] =
@@ -892,8 +920,7 @@ class Engine(
     } yield ()
   }
 
-  /** Given a contract argument of the given template id, calculate the interface
-    * view of that API.
+  /** Given a contract argument of the given template id, calculate the interface view of that API.
     */
   def computeInterfaceView(
       templateId: Identifier,
@@ -932,24 +959,27 @@ class Engine(
     MachineLogger(loggingConfig.enabled, loggingConfig.logLevel, loggingConfig.matching)
   }
 
-  /** Computes the hash of a Create node. Used for producing fat contract
-    * instances after absolutizing the contract IDs of a transaction produced by
-    * the engine.
+  /** Computes the hash of a Create node. Used for producing fat contract instances after
+    * absolutizing the contract IDs of a transaction produced by the engine.
     *
-    * @param create the Create node for which the hash is computed
-    * @param contractIdSubstitution a substitution for contract IDs to be applied by the engine to the create argument
-    *                               before hashing
-    * @param hashingMethod the hashing method to use
-    * @return a Result containing the computed hash. When [hashingMethod] is
-    *         [[com.digitalasset.daml.lf.crypto.Hash.HashingMethod.TypedNormalForm]], returns a [[ResultError]]
-    *         if [create] is ill-typed or if its package is unavailable.
+    * @param create
+    *   the Create node for which the hash is computed
+    * @param contractIdSubstitution
+    *   a substitution for contract IDs to be applied by the engine to the create argument before
+    *   hashing
+    * @param hashingMethod
+    *   the hashing method to use
+    * @return
+    *   a Result containing the computed hash. When [hashingMethod] is
+    *   [[com.digitalasset.daml.lf.crypto.Hash.HashingMethod.TypedNormalForm]], returns a
+    *   [[ResultError]] if [create] is ill-typed or if its package is unavailable.
     */
   def hashCreateNode(
       create: Node.Create,
       contractIdSubstitution: ContractId => ContractId,
       hashingMethod: Hash.HashingMethod,
   ): Result[Hash] = {
-    import Engine.Syntax._
+    import Engine.Syntax.*
     import Engine.mkInterpretationError
 
     val templateId = create.templateId
@@ -1012,20 +1042,27 @@ class Engine(
   }
 
   /** Validates [instance] against [targetPackageId] by performing the following checks:
-    * - Verifies that the argument type checks against the target package
-    * - Verifies that the ensures clause does not evaluate to false or throw
-    * - Checks that the metadata in the contract is consistent with that produced by the target package
-    * - Hashes the contract instance using the specified hashing method
-    * - Validates this hash using the provided [idValidator]
+    *   - Verifies that the argument type checks against the target package
+    *   - Verifies that the ensures clause does not evaluate to false or throw
+    *   - Checks that the metadata in the contract is consistent with that produced by the target
+    *     package
+    *   - Hashes the contract instance using the specified hashing method
+    *   - Validates this hash using the provided [idValidator]
     *
-    * @param instance the contract instance to validate
-    * @param targetPackageId the target package id against which the instance is validated
-    * @param contractIdSubstitution a substitution for contract IDs to be applied by the engine to the contract
-    *                                instance before validation
-    * @param hashingMethod the hash type to use for validation
-    * @param idValidator a function that checks whether a given hash is valid
-    * @return a Result containing a [Right(())] on success and a [Left(_)] when validation fails. On other errors
-    *         like missing packages or internal errors, a ResultError is returned.
+    * @param instance
+    *   the contract instance to validate
+    * @param targetPackageId
+    *   the target package id against which the instance is validated
+    * @param contractIdSubstitution
+    *   a substitution for contract IDs to be applied by the engine to the contract instance before
+    *   validation
+    * @param hashingMethod
+    *   the hash type to use for validation
+    * @param idValidator
+    *   a function that checks whether a given hash is valid
+    * @return
+    *   a Result containing a [Right(())] on success and a [Left(_)] when validation fails. On other
+    *   errors like missing packages or internal errors, a ResultError is returned.
     */
   def validateContractInstance(
       instance: FatContractInstance,
@@ -1059,12 +1096,11 @@ class Engine(
               Result.needPackage(
                 pkgId,
                 context,
-                { (pkg: Package) =>
+                (pkg: Package) =>
                   compiledPackages.addPackage(pkgId, pkg).flatMap { _ =>
                     callback(compiledPackages)
                     interpret(machine, abort)
-                  }
-                },
+                  },
               )
             case _ => internalError(s"unexpected question from speedy: $question")
           }
@@ -1119,7 +1155,7 @@ object Engine {
       crypto.Hash.deriveTransactionSeed(submissionSeed, participant, preparationTime)
     )
 
-  private def profileDesc(tx: VersionedTransaction): String = {
+  private def profileDesc(tx: VersionedTransaction): String =
     if (tx.roots.length == 1) {
       val makeDesc = (kind: String, tmpl: Ref.Identifier, extra: Option[String]) =>
         s"$kind:${tmpl.qualifiedName.name}${extra.map(extra => s":$extra").getOrElse("")}"
@@ -1134,7 +1170,6 @@ object Engine {
     } else {
       s"compound:${tx.roots.length}"
     }
-  }
 
   def DevConfig: EngineConfig =
     EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersions)
@@ -1144,7 +1179,7 @@ object Engine {
     Error.Interpretation(Error.Interpretation.DamlException(error), None)
 
   private final case class BufferedKeyContracts(
-      overflow: Vector[FatContractInstance],
+      overflow: Vector[ResultNeedKey.Response.ContractEntry],
       callerProgression: NeedKeyProgression.HasStarted,
   ) extends NeedKeyProgression.Token
 

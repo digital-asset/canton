@@ -4,22 +4,25 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.speedy.SValue.{SValue => _, _}
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.speedy.SBuiltinBigNumericTestHelpers.*
+import com.digitalasset.daml.lf.speedy.SValue.{SValue as _, *}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import org.scalatest.Inside.inside
-import org.scalatest.prop.TableDrivenPropertyChecks
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.freespec.AnyFreeSpec
-import com.digitalasset.daml.lf.speedy.SBuiltinBigNumericTestHelpers._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.language.implicitConversions
 
-class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
+class SBuiltinBigNumericTest
+    extends AnyFreeSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -57,7 +60,7 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
     import SValue.SBigNumeric.{MaxScale, MinScale}
 
     "BigNumeric binary operations compute proper results" in {
-      import scala.math.{BigDecimal => BigDec}
+      import scala.math.BigDecimal as BigDec
       import SBigNumeric.assertFromBigDecimal
 
       val testCases = Table[String, (BigDecimal, BigDecimal) => Option[SValue]](
@@ -119,12 +122,12 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
       val builtin = "ADD_BIGNUMERIC"
 
       "throws an exception in case of overflow" in {
-        eval(e"$builtin BigNumeric:maxPositive BigNumeric:maxNegative") shouldBe a[Right[_, _]]
-        eval(e"$builtin BigNumeric:maxPositive BigNumeric:minPositive") shouldBe a[Left[_, _]]
-        eval(e"$builtin BigNumeric:minNegative BigNumeric:minPositive") shouldBe a[Right[_, _]]
-        eval(e"$builtin BigNumeric:minNegative BigNumeric:maxNegative") shouldBe a[Left[_, _]]
-        eval(e"$builtin BigNumeric:x BigNumeric:almostX") shouldBe a[Right[_, _]]
-        eval(e"$builtin BigNumeric:x BigNumeric:x") shouldBe a[Left[_, _]]
+        eval(e"$builtin BigNumeric:maxPositive BigNumeric:maxNegative") shouldBe a[Right[?, ?]]
+        eval(e"$builtin BigNumeric:maxPositive BigNumeric:minPositive") shouldBe a[Left[?, ?]]
+        eval(e"$builtin BigNumeric:minNegative BigNumeric:minPositive") shouldBe a[Right[?, ?]]
+        eval(e"$builtin BigNumeric:minNegative BigNumeric:maxNegative") shouldBe a[Left[?, ?]]
+        eval(e"$builtin BigNumeric:x BigNumeric:almostX") shouldBe a[Right[?, ?]]
+        eval(e"$builtin BigNumeric:x BigNumeric:x") shouldBe a[Left[?, ?]]
       }
     }
 
@@ -132,12 +135,12 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
       val builtin = "SUB_BIGNUMERIC"
 
       "throws an exception in case of overflow" in {
-        eval(e"$builtin BigNumeric:minNegative BigNumeric:maxNegative") shouldBe a[Right[_, _]]
-        eval(e"$builtin BigNumeric:minNegative BigNumeric:minPositive") shouldBe a[Left[_, _]]
-        eval(e"$builtin BigNumeric:maxPositive BigNumeric:minPositive") shouldBe a[Right[_, _]]
-        eval(e"$builtin BigNumeric:maxPositive BigNumeric:maxNegative") shouldBe a[Left[_, _]]
-        eval(e"$builtin BigNumeric:minusX BigNumeric:almostX") shouldBe a[Right[_, _]]
-        eval(e"$builtin BigNumeric:minusX BigNumeric:x") shouldBe a[Left[_, _]]
+        eval(e"$builtin BigNumeric:minNegative BigNumeric:maxNegative") shouldBe a[Right[?, ?]]
+        eval(e"$builtin BigNumeric:minNegative BigNumeric:minPositive") shouldBe a[Left[?, ?]]
+        eval(e"$builtin BigNumeric:maxPositive BigNumeric:minPositive") shouldBe a[Right[?, ?]]
+        eval(e"$builtin BigNumeric:maxPositive BigNumeric:maxNegative") shouldBe a[Left[?, ?]]
+        eval(e"$builtin BigNumeric:minusX BigNumeric:almostX") shouldBe a[Right[?, ?]]
+        eval(e"$builtin BigNumeric:minusX BigNumeric:x") shouldBe a[Left[?, ?]]
       }
     }
 
@@ -146,12 +149,12 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
 
         val testCases = Table(
           "arguments" -> "success",
-          s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale} BigNumeric:one) BigNumeric:one" -> true,
-          s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale} BigNumeric:one) BigNumeric:ten" -> false,
+          s"(SHIFT_RIGHT_BIGNUMERIC $MinScale BigNumeric:one) BigNumeric:one" -> true,
+          s"(SHIFT_RIGHT_BIGNUMERIC $MinScale BigNumeric:one) BigNumeric:ten" -> false,
           s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2} BigNumeric:one)" -> true,
           s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one)" -> false,
-          s"(SHIFT_RIGHT_BIGNUMERIC ${MaxScale} BigNumeric:one) BigNumeric:one" -> true,
-          s"(SHIFT_RIGHT_BIGNUMERIC ${MaxScale} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC 1 BigNumeric:one)" -> false,
+          s"(SHIFT_RIGHT_BIGNUMERIC $MaxScale BigNumeric:one) BigNumeric:one" -> true,
+          s"(SHIFT_RIGHT_BIGNUMERIC $MaxScale BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC 1 BigNumeric:one)" -> false,
           s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2} BigNumeric:one)" -> true,
           s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one)" -> false,
           s"(SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2} BigNumeric:underSqrtOfTen) (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:underSqrtOfTen)" -> true,
@@ -159,7 +162,7 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
         )
 
         forEvery(testCases)((args, success) =>
-          eval(e"MUL_BIGNUMERIC $args") shouldBe (if (success) a[Right[_, _]] else a[Left[_, _]])
+          eval(e"MUL_BIGNUMERIC $args") shouldBe (if (success) a[Right[?, ?]] else a[Left[?, ?]])
         )
       }
     }
@@ -170,56 +173,56 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
           "arguments" -> "success",
           s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC ${-(MinScale / 2 - 1)} BigNumeric:one)" -> true,
           s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC ${-(MinScale / 2 - 1)} BigNumeric:one)" -> false,
-          s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC ${MinScale} BigNumeric:one) BigNumeric:one" -> true,
-          s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC ${MinScale} BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC 1 BigNumeric:one)" -> false,
+          s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC $MinScale BigNumeric:one) BigNumeric:one" -> true,
+          s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC $MinScale BigNumeric:one) (SHIFT_RIGHT_BIGNUMERIC 1 BigNumeric:one)" -> false,
           s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:underSqrtOfTen) (SHIFT_RIGHT_BIGNUMERIC ${-(MinScale / 2 - 1)} BigNumeric:overSqrtOfTen)" -> true,
           s"-1000 ROUNDING_DOWN (SHIFT_RIGHT_BIGNUMERIC ${MinScale / 2 - 1} BigNumeric:overSqrtOfTen) (SHIFT_RIGHT_BIGNUMERIC ${-(MinScale / 2 - 1)} BigNumeric:overSqrtOfTen)" -> false,
-          s"${MinScale} ROUNDING_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
-          s"${MinScale} ROUNDING_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> true,
-          s"${MinScale} ROUNDING_CEILING BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
-          s"${MinScale} ROUNDING_FLOOR BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> true,
-          s"${MinScale} ROUNDING_HALF_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
-          s"${MinScale} ROUNDING_HALF_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> true,
-          s"${MinScale} ROUNDING_HALF_EVEN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
-          s"${MinScale} ROUNDING_UP BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_DOWN BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_CEILING BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_FLOOR BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_HALF_UP BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_HALF_DOWN BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_HALF_EVEN BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_UP BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_DOWN BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_CEILING BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_FLOOR BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
-          s"${MinScale} ROUNDING_HALF_UP BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_HALF_DOWN BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_HALF_EVEN BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
-          s"${MinScale} ROUNDING_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
-          s"${MinScale} ROUNDING_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> true,
-          s"${MinScale} ROUNDING_CEILING BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> true,
-          s"${MinScale} ROUNDING_FLOOR BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
-          s"${MinScale} ROUNDING_HALF_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
-          s"${MinScale} ROUNDING_HALF_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> true,
-          s"${MinScale} ROUNDING_HALF_EVEN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
+          s"$MinScale ROUNDING_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
+          s"$MinScale ROUNDING_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> true,
+          s"$MinScale ROUNDING_CEILING BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
+          s"$MinScale ROUNDING_FLOOR BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> true,
+          s"$MinScale ROUNDING_HALF_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
+          s"$MinScale ROUNDING_HALF_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> true,
+          s"$MinScale ROUNDING_HALF_EVEN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:two)" -> false,
+          s"$MinScale ROUNDING_UP BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_DOWN BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_CEILING BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_FLOOR BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_HALF_UP BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_HALF_DOWN BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_HALF_EVEN BigNumeric:twentyEight (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_UP BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_DOWN BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_CEILING BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_FLOOR BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> true,
+          s"$MinScale ROUNDING_HALF_UP BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_HALF_DOWN BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_HALF_EVEN BigNumeric:twentyNine (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:three)" -> false,
+          s"$MinScale ROUNDING_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
+          s"$MinScale ROUNDING_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> true,
+          s"$MinScale ROUNDING_CEILING BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> true,
+          s"$MinScale ROUNDING_FLOOR BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
+          s"$MinScale ROUNDING_HALF_UP BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
+          s"$MinScale ROUNDING_HALF_DOWN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> true,
+          s"$MinScale ROUNDING_HALF_EVEN BigNumeric:nineteen (SHIFT_RIGHT_BIGNUMERIC ${-MinScale} BigNumeric:minusTwo)" -> false,
         )
         forEvery(testCases)((args, success) =>
-          eval(e"DIV_BIGNUMERIC $args") shouldBe (if (success) a[Right[_, _]] else a[Left[_, _]])
+          eval(e"DIV_BIGNUMERIC $args") shouldBe (if (success) a[Right[?, ?]] else a[Left[?, ?]])
         )
       }
 
       "crash if cannot compute the result without rounding" in {
         val testCases = Table(
           "arguments" -> "success",
-          s"${MaxScale} ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:two" -> true,
-          s"${MaxScale} ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:three" -> false,
+          s"$MaxScale ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:two" -> true,
+          s"$MaxScale ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:three" -> false,
           s"${MaxScale / 2} ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:three" -> false,
           "1 ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:two" -> true,
           "0 ROUNDING_UNNECESSARY BigNumeric:one BigNumeric:two" -> false,
         )
 
         forEvery(testCases)((args, success) =>
-          eval(e"DIV_BIGNUMERIC $args") shouldBe (if (success) a[Right[_, _]] else a[Left[_, _]])
+          eval(e"DIV_BIGNUMERIC $args") shouldBe (if (success) a[Right[?, ?]] else a[Left[?, ?]])
         )
       }
 
@@ -293,15 +296,15 @@ class SBuiltinBigNumericTest extends AnyFreeSpec with Matchers with TableDrivenP
           "arguments" -> "success",
           "1 BigNumeric:maxPositive" -> false,
           "-1 BigNumeric:maxPositive" -> false,
-          s"${MaxScale} BigNumeric:one" -> true,
+          s"$MaxScale BigNumeric:one" -> true,
           s"${MaxScale + 1} BigNumeric:one" -> false,
-          s"${MinScale} BigNumeric:one" -> true,
+          s"$MinScale BigNumeric:one" -> true,
           s"${MinScale - 1} BigNumeric:one" -> false,
         )
 
         forEvery(testCases)((args, success) =>
-          eval(e"SHIFT_RIGHT_BIGNUMERIC  $args") shouldBe (if (success) a[Right[_, _]]
-                                                           else a[Left[_, _]])
+          eval(e"SHIFT_RIGHT_BIGNUMERIC  $args") shouldBe (if (success) a[Right[?, ?]]
+                                                           else a[Left[?, ?]])
         )
       }
 

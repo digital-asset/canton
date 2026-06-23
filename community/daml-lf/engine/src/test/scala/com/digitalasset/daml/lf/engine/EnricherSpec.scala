@@ -9,11 +9,11 @@ import cats.Order
 import cats.data.NonEmptySet
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast.{TNat, TTyCon, Type}
-import com.digitalasset.daml.lf.language.Util._
 import com.digitalasset.daml.lf.language.Ast
+import com.digitalasset.daml.lf.language.Ast.{TNat, TTyCon, Type}
+import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -28,7 +28,7 @@ import com.digitalasset.daml.lf.transaction.test.{
 }
 import com.digitalasset.daml.lf.transaction.{CommittedTransaction, NodeId, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -43,7 +43,7 @@ class EnricherSpec
     with TableDrivenPropertyChecks
     with SuppressingLogging {
 
-  import TransactionBuilder.Implicits.{defaultPackageId => _, _}
+  import TransactionBuilder.Implicits.{defaultPackageId as _, *}
 
   implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default[this.type]
@@ -56,7 +56,7 @@ class EnricherSpec
   private def cid(key: String): ContractId =
     ContractId.V1.assertBuild(Hash.hashPrivateKey(key), nonEmptySuffix)
 
-  val pkg = {
+  val pkg =
     p"""metadata ( 'pkg' : '1.0.0' )
 
         module Mod {
@@ -112,7 +112,6 @@ class EnricherSpec
         }
 
     """
-  }
 
   val pkgId1 = Ref.PackageId.assertFromString("-pkg-id-1-")
   val pkg1 =
@@ -309,7 +308,7 @@ class EnricherSpec
       enricher.enrichValue(
         TList(TNat),
         ValueList(List.range(0, 99).map(toNat).to(FrontStack)),
-      ) shouldBe a[ResultDone[_]]
+      ) shouldBe a[ResultDone[?]]
       enricher.enrichValue(TNat, toNat(100)) shouldBe a[ResultError]
       enricher.enrichValue(
         TList(TNat),
@@ -320,7 +319,7 @@ class EnricherSpec
 
   "Enricher.enrichTransaction" should {
 
-    import TreeTransactionBuilder._
+    import TreeTransactionBuilder.*
 
     def buildTransaction(
         contract: Value,
@@ -488,7 +487,7 @@ class EnricherSpec
         // pkgId1 and pkgId3 disagree on the enrichment
         inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId3))) {
           case ResultDone(result) =>
-            result shouldBe a[Left[_, _]]
+            result shouldBe a[Left[?, ?]]
         }
       }
 

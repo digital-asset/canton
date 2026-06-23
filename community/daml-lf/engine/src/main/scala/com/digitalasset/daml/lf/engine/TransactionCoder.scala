@@ -18,10 +18,10 @@ import com.digitalasset.daml.lf.transaction.{
   Node,
   NodeId,
   SerializationVersion,
+  TransactionOuterClass as proto,
   VersionedTransaction,
   ensuresNoUnknownFieldsThenDecode,
   sequence,
-  TransactionOuterClass as proto,
 }
 import com.digitalasset.daml.lf.value.{DecodeError, EncodeError, Value}
 import com.digitalasset.daml.lf.{crypto, data, value}

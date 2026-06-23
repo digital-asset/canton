@@ -507,8 +507,14 @@ private[reassignment] trait ReassignmentProcessingSteps[
               LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
             )
 
+          val reassigningParticipantResult =
+            validationResult.reassigningParticipantValidationResult
+          val abstainErrors = reassigningParticipantResult.abstainErrors
+          val rejectingReassignmentErrors =
+            reassigningParticipantResult.errors.filterNot(abstainErrors.contains)
+
           val failedValidationRejection =
-            validationResult.reassigningParticipantValidationResult.errors
+            rejectingReassignmentErrors
               .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))
 
           val activenessRejection =
@@ -522,12 +528,30 @@ private[reassignment] trait ReassignmentProcessingSteps[
                 err.toLocalReject(protocolVersion)
               }
 
+          val reassigningParticipantAbstain =
+            NonEmpty
+              .from(abstainErrors)
+              .map { errors =>
+                val msg = errors.map(_.message).mkString(", ")
+                logger.info(
+                  s"Sending an abstain verdict for reassignment ${validationResult.reassignmentId} (parties: $hostedConfirmingParties): $msg"
+                )
+                LocalAbstainError.CannotPerformAllValidations
+                  .Abstain(msg)
+                  .toLocalAbstain(protocolVersion)
+              }
+
           val (localVerdict, parties) = localRejections
             .collectFirst[(LocalVerdict, Set[LfPartyId])] {
               case malformed: LocalReject if malformed.isMalformed => malformed -> Set.empty
               case localReject: LocalReject =>
                 localReject -> hostedConfirmingParties.forgetNE
             }
+            .orElse(
+              reassigningParticipantAbstain.map[(LocalVerdict, Set[LfPartyId])](
+                _ -> hostedConfirmingParties.forgetNE
+              )
+            )
             .getOrElse(
               LocalApprove(protocolVersion) -> hostedConfirmingParties.forgetNE
             )
@@ -566,44 +590,43 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *     stakeholder.
     */
   def checkPhase7Validations(
-      reassignmentValidationResult: ReassignmentValidationResult
+      commonValidationResult: ReassignmentValidationResult.CommonValidationResult
   ): FutureUnlessShutdown[Option[LocalRejectError]] =
-    reassignmentValidationResult.commonValidationResult.contractAuthenticationResultF.value.map {
-      contractAuthenticationResult =>
-        val modelConformanceRejection =
-          contractAuthenticationResult
-            .leftMap(error =>
-              LocalRejectError.MalformedRejects.ModelConformance.Reject(error.toString)
-            )
-            .swap
-            .toOption
+    commonValidationResult.contractAuthenticationResultF.value.map { contractAuthenticationResult =>
+      val modelConformanceRejection =
+        contractAuthenticationResult
+          .leftMap(error =>
+            LocalRejectError.MalformedRejects.ModelConformance.Reject(error.toString)
+          )
+          .swap
+          .toOption
 
-        val authenticationRejection =
-          reassignmentValidationResult.commonValidationResult.participantSignatureVerificationResult
-            .map(err =>
-              LocalRejectError.MalformedRejects.MalformedRequest
-                .Reject(err.message)
-            )
-
-        val submitterCheckRejection =
-          reassignmentValidationResult.commonValidationResult.submitterCheckResult.map(err =>
-            LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
+      val authenticationRejection =
+        commonValidationResult.participantSignatureVerificationResult
+          .map(err =>
+            LocalRejectError.MalformedRejects.MalformedRequest
+              .Reject(err.message)
           )
 
-        val reassignmentIdResult =
-          reassignmentValidationResult.commonValidationResult.reassignmentIdResult.map(err =>
-            LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
-          )
+      val submitterCheckRejection =
+        commonValidationResult.submitterCheckResult.map(err =>
+          LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
+        )
 
-        val multiSynchronizerIsNotEnabled =
-          reassignmentValidationResult.commonValidationResult.multiSynchronizerFeatureFlagCheckResult
-            .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))
+      val reassignmentIdResult =
+        commonValidationResult.reassignmentIdResult.map(err =>
+          LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
+        )
 
-        modelConformanceRejection
-          .orElse(authenticationRejection)
-          .orElse(submitterCheckRejection)
-          .orElse(reassignmentIdResult)
-          .orElse(multiSynchronizerIsNotEnabled)
+      val multiSynchronizerIsNotEnabled =
+        commonValidationResult.multiSynchronizerFeatureFlagCheckResult
+          .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))
+
+      modelConformanceRejection
+        .orElse(authenticationRejection)
+        .orElse(submitterCheckRejection)
+        .orElse(reassignmentIdResult)
+        .orElse(multiSynchronizerIsNotEnabled)
     }
 }
 

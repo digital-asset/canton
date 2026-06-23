@@ -13,6 +13,6 @@ Canton Network Documentation Snippets: Extension Synchronizers Private Synchroni
 .. are executed by SphinxDocumentationGenerator integration tests.
 
 .. snippet:: cn_global_synchronizer_extension_synchronizers_private_synchronizers
-    .. success:: bootstrap.synchronizer(synchronizerName = "my-private-sync", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+    .. success:: bootstrap.synchronizer(synchronizerName = "my-private-sync", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
     .. success:: participant1.synchronizers.connect_local(sequencer1, "my-private-sync")
     .. success:: participant1.synchronizers.list_connected()

@@ -4,26 +4,25 @@
 package com.digitalasset.daml.lf.speedy
 package svalue
 
-import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, Ref, Time}
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.interpretation.Error.ContractIdComparability
+import com.digitalasset.daml.lf.language.{Ast, Util as AstUtil}
+import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.test.ValueGenerators.comparableCoidsGen
-import com.digitalasset.daml.lf.typesig
-import com.digitalasset.daml.lf.interpretation.Error.ContractIdComparability
-import com.digitalasset.daml.lf.language.{Ast, Util => AstUtil}
+import com.digitalasset.daml.lf.{crypto, typesig}
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.Inside
+import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableFor2
+import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.{
   Checkers,
   ScalaCheckDrivenPropertyChecks,
   ScalaCheckPropertyChecks,
 }
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AnyWordSpec
 import scalaz.Order
-import scalaz.scalacheck.{ScalazProperties => SzP}
+import scalaz.scalacheck.ScalazProperties as SzP
 
 import scala.language.implicitConversions
 import scala.util.{Failure, Try}
@@ -44,7 +43,7 @@ class OrderingSpec
     case typesig.TypeNumeric(scale) =>
       AstUtil.TNumeric(Ast.TNat(scale))
     case typesig.TypePrim(prim, typArgs) =>
-      import typesig.{PrimType => P}
+      import typesig.PrimType as P
       val init = prim match {
         case P.Bool => AstUtil.TBool
         case P.Int64 => AstUtil.TInt64
@@ -73,7 +72,7 @@ class OrderingSpec
     Ref.Name.assertFromString(s)
 
   private val randomComparableValues: TableFor2[String, Gen[SValue]] = {
-    import com.digitalasset.daml.lf.value.test.TypedValueGenerators.{ValueAddend => VA}
+    import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
     def r(name: String, va: VA)(sv: va.Inj => SValue) =
       (name, va.injarb.arbitrary map sv)
     Table(
@@ -95,7 +94,7 @@ class OrderingSpec
     "be lawful on each subset" in forEvery(randomComparableValues) { (_, svGen) =>
       implicit val svalueOrd: Order[SValue] = Order fromScalaOrdering Ordering
       implicit val svalueArb: Arbitrary[SValue] = Arbitrary(svGen)
-      forEvery(Table(("law", "prop"), SzP.order.laws[SValue].properties.toSeq: _*)) { (_, p) =>
+      forEvery(Table(("law", "prop"), SzP.order.laws[SValue].properties.toSeq*)) { (_, p) =>
         check(p, minSuccessful(50))
       }
     }
@@ -105,15 +104,14 @@ class OrderingSpec
   // in Value.orderInstance or TypedValueGenerators, rather than to svalue.Ordering.
   // The tests are here as this is difficult to test outside daml-lf/interpreter.
   "txn Value Ordering" should {
-    import Value.{ContractId => Cid}
+    import Value.ContractId as Cid
     implicit val svalueOrd: Order[SValue] = Order fromScalaOrdering Ordering
     implicit val cidOrd: Order[Cid] = svalueOrd contramap SContractId.apply
 
-    "match global ContractId ordering" in forEvery(Table("gen", comparableCoidsGen: _*)) {
-      coidGen =>
-        forAll(coidGen, coidGen, minSuccessful(50)) { (a, b) =>
-          Cid.`Cid Order`.order(a, b) should ===(cidOrd.order(a, b))
-        }
+    "match global ContractId ordering" in forEvery(Table("gen", comparableCoidsGen*)) { coidGen =>
+      forAll(coidGen, coidGen, minSuccessful(50)) { (a, b) =>
+        Cid.`Cid Order`.order(a, b) should ===(cidOrd.order(a, b))
+      }
     }
 
     "fail when trying to compare local/relative contract ID with global/relative/absolute contract ID with same prefix" in {

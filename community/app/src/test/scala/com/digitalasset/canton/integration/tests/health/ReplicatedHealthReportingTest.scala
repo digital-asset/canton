@@ -127,8 +127,10 @@ trait HealthReportingTestHelper
         mediators = Seq(mediator),
         synchronizerOwners = Seq[InstanceReference](sequencer1, mediator),
         synchronizerThreshold = PositiveInt.two,
-        staticSynchronizerParameters =
-          StaticSynchronizerParameters.defaults(sequencer1.config.crypto, testedProtocolVersion),
+        staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
+          cryptoConfig = sequencer1.config.crypto,
+          protocolVersion = testedProtocolVersion,
+        ),
       )
     sequencer1.health.wait_for_initialized()
     sequencer1.topology.synchronisation.await_idle()

@@ -20,7 +20,6 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.protocol.submission.NextGenTransactionTreeFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithAbsoluteSuffixes,
   WithoutSuffixes,
@@ -59,6 +58,7 @@ class NextGenTransactionTreeFactory(
   private val contractIdSuffixer: ContractIdSuffixer =
     new ContractIdSuffixer(cryptoOps, cantonContractIdVersion)
   private val transactionViewDecompositionFactory = TransactionViewDecompositionFactory
+  private val rollbackContextFactory = RollbackContextFactory(protocolVersion)
 
   override def createTransactionTree(
       transaction: WellFormedTransaction[WithoutSuffixes],
@@ -100,8 +100,9 @@ class NextGenTransactionTreeFactory(
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
         transaction,
-        RollbackContext.empty,
+        rollbackContextFactory.empty,
         Some(participantId.adminParty.toLf),
+        rollbackContextFactory,
       )
 
     val commonMetadata = CommonMetadata
@@ -757,6 +758,7 @@ class NextGenTransactionTreeFactory(
         transaction,
         rbContext,
         submittingParticipantO.map(_.adminParty.toLf),
+        rollbackContextFactory,
       )
 
     val rolledBackEffect = rbContext.inRollback && transactionEffectful(transaction.unwrap)
@@ -765,7 +767,7 @@ class NextGenTransactionTreeFactory(
       _ <- EitherT.cond[FutureUnlessShutdown](
         !rolledBackEffect,
         (),
-        RolledBackEffect(rbContext, rootPosition),
+        RolledBackEffect(rootPosition),
       )
       decompositions <- EitherT.right(decompositionsF)
       decomposition = checked(decompositions.head)
@@ -805,7 +807,12 @@ class NextGenTransactionTreeFactory(
         .leftMap(ContractIdAbsolutizationError(_): TransactionTreeConversionError)
     } yield {
       view -> checked(
-        WellFormedTransaction.checkOrThrow(absolutizedTx, metadata, WithAbsoluteSuffixes)
+        WellFormedTransaction.checkOrThrow(
+          absolutizedTx,
+          metadata,
+          WithAbsoluteSuffixes,
+          rollbackContextFactory,
+        )
       )
     }
   }

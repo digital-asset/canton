@@ -67,10 +67,7 @@ private[participant] object AutomaticAssignment {
     def performAutoAssignmentOnce: EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
       for {
         targetTopology <- reassignmentCoordination
-          .getRecentTopologySnapshot(
-            targetSynchronizer,
-            targetStaticSynchronizerParameters,
-          )
+          .getTargetApproximateSnapshot(targetSynchronizer)
         possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetTopology))
         assignmentSubmitter <- EitherT.fromOption[FutureUnlessShutdown](
           possibleSubmittingParties.headOption,

@@ -34,7 +34,19 @@ import org.slf4j.event.Level
 import java.time.Instant
 import java.util.UUID
 
-class ReassignmentTargetTimestampIntegrationTest
+/** Verifies that an unassignment is validated against each participant's local target timestamp
+  * rather than the target timestamp carried by the submitter.
+  *
+  * Topology:
+  *   - P1, P2 are connected to S1 and S2
+  *   - Alice is hosted on P1 and P2
+  *   - the package is vetted on S1 for P1 and P2
+  *
+  * A malicious participant bypasses the phase-1 submission checks and submits the unassignment with
+  * a far-future target timestamp. Every reassigning participant still produces an abstain verdict
+  * showing that each participant validates against its own local target timestamp instead.
+  */
+final class ReassignmentLocalTargetTimestampIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with AcsInspection
@@ -52,8 +64,12 @@ class ReassignmentTargetTimestampIntegrationTest
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
+
+        // Vet the package on the source synchronizer (da) only, so the contract can be created and the
+        // unassignment source validation passes. The package is deliberately left unvetted on the target
+        // synchronizer (acme): a malicious submitter bypasses the phase-1 submission check, so the bad
+        // target vetting is only discovered phase 3.
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
-        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
         val allParticipants = participants.all.toSet
         PartiesAllocator(allParticipants)(
@@ -79,35 +95,37 @@ class ReassignmentTargetTimestampIntegrationTest
   private var alice: PartyId = _
   private var maliciousP1: MaliciousParticipantNode = _
 
-  "unassignment request with target timestamp too far in the future" should {
-    "lead to LocalAbstain" in { implicit env =>
-      import env.*
+  "an unassignment whose target package is not vetted" should {
+    "lead each reassigning participant to abstain (validating at its local target timestamp)" in {
+      implicit env =>
+        import env.*
 
-      val contract = createContract()
-      val doomsday = CantonTimestamp.fromInstant(Instant.parse("2060-12-31T23:59:59Z")).value
-      val unvalidatableUnassignReq = createFullUnassignmentTree(contract, Target(doomsday))
+        val contract = createContract()
 
-      val recorder = new RecordSequencerMessages()
-      getProgrammableSequencer(sequencer1.name)
-        .setPolicy_("record sequencer messages")(recorder.onSequencerMessage(_))
+        val doomsday = CantonTimestamp.fromInstant(Instant.parse("2060-12-31T23:59:59Z")).value
+        val unassignReq = createFullUnassignmentTree(contract, Target(doomsday))
 
-      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.INFO))(
-        within = maliciousP1
-          .submitUnassignmentRequest(unvalidatableUnassignReq)
-          .futureValueUS
-          .value,
-        logs =>
-          forAtLeast(2, logs)(
-            _.message should include regex "Sending an abstain verdict for .* because target timestamp is not validatable"
-          ),
-      )
+        val recorder = new RecordSequencerMessages()
+        getProgrammableSequencer(sequencer1.name)
+          .setPolicy_("record sequencer messages")(recorder.onSequencerMessage(_))
 
-      eventually() {
-        ProgrammableSequencer.confirmationResponsesKind(recorder.seen) shouldBe Map(
-          participant1.id -> Seq("LocalAbstain"),
-          participant2.id -> Seq("LocalAbstain"),
+        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.INFO))(
+          within = maliciousP1
+            .submitUnassignmentRequest(unassignReq)
+            .futureValueUS
+            .value,
+          logs =>
+            forAtLeast(2, logs)(
+              _.message should include("Sending an abstain verdict for")
+            ),
         )
-      }
+
+        eventually() {
+          ProgrammableSequencer.confirmationResponsesKind(recorder.seen) shouldBe Map(
+            participant1.id -> Seq("LocalAbstain"),
+            participant2.id -> Seq("LocalAbstain"),
+          )
+        }
     }
   }
 

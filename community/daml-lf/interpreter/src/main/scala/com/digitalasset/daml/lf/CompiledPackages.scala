@@ -10,8 +10,8 @@ import com.digitalasset.daml.lf.speedy.SExpr.SDefinitionRef
 import com.digitalasset.daml.lf.speedy.{Compiler, SDefinition}
 import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
 
-/** Trait to abstract over a collection holding onto Daml-LF package definitions + the
-  * compiled speedy expressions.
+/** Trait to abstract over a collection holding onto Daml-LF package definitions + the compiled
+  * speedy expressions.
   */
 private[lf] abstract class CompiledPackages(
     val compilerConfig: Compiler.Config
@@ -47,8 +47,8 @@ private[lf] object CompiledPackages {
   }
 }
 
-/** Important: use the constructor only if you _know_ you have all the definitions! Otherwise
-  * use the apply in the companion object, which will compile them for you.
+/** Important: use the constructor only if you _know_ you have all the definitions! Otherwise use
+  * the apply in the companion object, which will compile them for you.
   */
 private[lf] final class PureCompiledPackages(
     override val signatures: Map[PackageId, PackageSignature],
@@ -60,10 +60,10 @@ private[lf] final class PureCompiledPackages(
 
 private[lf] object PureCompiledPackages {
 
-  import CompiledPackages._
+  import CompiledPackages.*
 
-  /** Important: use this method only if you _know_ you have all the definitions! Otherwise
-    * use the other apply, which will compile them for you.
+  /** Important: use this method only if you _know_ you have all the definitions! Otherwise use the
+    * other apply, which will compile them for you.
     */
   def apply(
       packages: Map[PackageId, PackageSignature],

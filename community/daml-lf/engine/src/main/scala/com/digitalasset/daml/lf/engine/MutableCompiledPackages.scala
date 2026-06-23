@@ -17,8 +17,8 @@ abstract class MutableCompiledPackages(compilerConfig: Compiler.Config)
 
   def addPackage(pkgId: PackageId, pkg: Package): Result[Unit]
 
-  /** Get the transitive dependencies of the given package.
-    * Returns 'None' if the package does not exist.
+  /** Get the transitive dependencies of the given package. Returns 'None' if the package does not
+    * exist.
     */
   def getPackageDependencies(pkgId: PackageId): Option[Set[PackageId]]
 

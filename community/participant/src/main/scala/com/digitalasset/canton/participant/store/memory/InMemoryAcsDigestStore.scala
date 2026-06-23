@@ -4,17 +4,17 @@
 package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.InternedPartyId
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 
-import java.util.concurrent.ConcurrentSkipListSet
+import java.util.concurrent.ConcurrentSkipListMap
 import scala.concurrent.ExecutionContext
 
 class InMemoryAcsDigestStore(
@@ -26,8 +26,7 @@ class InMemoryAcsDigestStore(
     with NamedLogging {
   // Note: shardId=indexedSynchronizer.index is fixed so we don't have to store it in the journals
 
-  private val checkpointJournal =
-    new ConcurrentSkipListSet[RecordTime](RecordTime.recordTimeOrdering)
+  private val checkpointJournal = new ConcurrentSkipListMap[Offset, CantonTimestamp]()
   override protected val participant_ =
     new InMemoryAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
       indexedSynchronizer,
@@ -41,37 +40,39 @@ class InMemoryAcsDigestStore(
       prettyKey = _.map(stringInterning.party.externalize).party,
     )
 
-  override def insertCheckpointTime(recordTime: RecordTime)(implicit
+  override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown.pure(checkpointJournal.add(recordTime).discard)
+    FutureUnlessShutdown.pure(checkpointJournal.put(offset, timestamp).discard)
 
   override protected def deleteCheckpointsAfter(
-      fromExclusive: RecordTime
+      fromExclusive: Offset
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.pure {
       val isInclusive = false
-      checkpointJournal.tailSet(fromExclusive, isInclusive).clear()
+      checkpointJournal.tailMap(fromExclusive, isInclusive).clear()
     }
 
-  override protected def deleteCheckpointsUpTo(toExclusive: RecordTime)(implicit
+  override protected def deleteCheckpointsUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
     val isInclusive = false
-    checkpointJournal.headSet(toExclusive, isInclusive).clear()
+    checkpointJournal.headMap(toExclusive, isInclusive).clear()
   }
 
-  override def latestCheckpointUpTo(toInclusive: RecordTime)(implicit
+  override def latestCheckpointUpTo(toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[RecordTime]] =
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
     FutureUnlessShutdown.pure {
-      Option(checkpointJournal.floor(toInclusive))
+      Option(checkpointJournal.floorEntry(toInclusive))
+        .map(entry => (entry.getKey, entry.getValue))
     }
 
-  override def firstCheckpointAfter(fromExclusive: RecordTime)(implicit
+  override def firstCheckpointAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[RecordTime]] =
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
     FutureUnlessShutdown.pure {
-      Option(checkpointJournal.higher(fromExclusive))
+      Option(checkpointJournal.higherEntry(fromExclusive))
+        .map(entry => (entry.getKey, entry.getValue))
     }
 }

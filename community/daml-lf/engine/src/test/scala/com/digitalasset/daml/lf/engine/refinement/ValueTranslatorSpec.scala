@@ -5,18 +5,18 @@ package com.digitalasset.daml.lf
 package engine
 package refinement
 
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, Reference}
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.speedy.Compiler
+import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.daml.lf.speedy.Compiler
 
 import scala.collection.immutable.ArraySeq
 import scala.util.{Failure, Success, Try}
@@ -32,8 +32,8 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
   import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
-    defaultPackageId => _,
-    _,
+    defaultPackageId as _,
+    *,
   }
 
   val aInt = ValueInt64(42)
@@ -231,7 +231,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
 
       val TEnumUpgradable = t"Mod:Enum"
 
-      val testCases = Table[Ast.Type, Value, PartialFunction[Error.Preprocessing.Error, _]](
+      val testCases = Table[Ast.Type, Value, PartialFunction[Error.Preprocessing.Error, ?]](
         ("type", "value", "error"),
         (
           TRecordUpgradable,
@@ -762,7 +762,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
       val tooBig = mkMyList(50)
       val failure = Failure(Error.Preprocessing.ValueNesting(tooBig))
 
-      Try(unsafeTranslateValue(t"Mod:MyList", notTooBig)) shouldBe a[Success[_]]
+      Try(unsafeTranslateValue(t"Mod:MyList", notTooBig)) shouldBe a[Success[?]]
       Try(unsafeTranslateValue(t"Mod:MyList", tooBig)) shouldBe failure
     }
 
@@ -813,7 +813,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
       forEvery(testCases) { case (typ, negativeTestCase, positiveTestCase) =>
         val success = Try(unsafeTranslateValue(typ, negativeTestCase))
         val failure = Try(unsafeTranslateValue(typ, positiveTestCase))
-        success shouldBe a[Success[_]]
+        success shouldBe a[Success[?]]
         inside(failure) { case Failure(Error.Preprocessing.MalformedText(err)) =>
           err should include("null character")
         }
@@ -872,7 +872,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
               value,
               extendLocalIdForbiddanceToRelativeV2 = false,
             )
-          ) shouldBe a[Success[_]]
+          ) shouldBe a[Success[?]]
         )
       )
     }
@@ -909,7 +909,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
       forEvery(testCasesForCid(legalCidV1))((typ, value) =>
         Try(
           valueTranslator.unsafeTranslateValue(typ, value, extendLocalIdForbiddanceToRelativeV2)
-        ) shouldBe a[Success[_]]
+        ) shouldBe a[Success[?]]
       )
       forEvery(testCasesForCid(legalCidV2))((typ, value) =>
         Try(
@@ -918,7 +918,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
             value,
             extendLocalIdForbiddanceToRelativeV2,
           )
-        ) shouldBe a[Success[_]]
+        ) shouldBe a[Success[?]]
       )
       forEvery(testCasesForCid(illegalCidV1))((typ, value) =>
         Try(
@@ -982,7 +982,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
               value,
               extendLocalIdForbiddanceToRelativeV2 = true,
             )
-          ) shouldBe a[Success[_]]
+          ) shouldBe a[Success[?]]
         )
       }
       forEvery(Table[ContractId]("contract ID", legalCidV1, relativeCidV2, absoluteCidV2)) { cid =>
@@ -993,7 +993,7 @@ class ValueTranslatorSpec(languageVersion: LanguageVersion)
               value,
               extendLocalIdForbiddanceToRelativeV2 = false,
             )
-          ) shouldBe a[Success[_]]
+          ) shouldBe a[Success[?]]
         )
       }
     }

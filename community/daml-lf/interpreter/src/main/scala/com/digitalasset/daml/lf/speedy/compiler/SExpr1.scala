@@ -10,9 +10,9 @@ package compiler
   * These are *not* the expression forms which run on the speedy machine. See SExpr.
   */
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.speedy.SExpr.{SDefinitionRef, SCasePat}
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.speedy.SExpr.{SCasePat, SDefinitionRef}
+import com.digitalasset.daml.lf.speedy.SValue.*
 
 private[compiler] object SExpr1 {
 
@@ -20,8 +20,7 @@ private[compiler] object SExpr1 {
 
   sealed abstract class SExprAtomic extends SExpr
 
-  /** Reference to a value. On first lookup the evaluated expression is
-    * stored in 'cached'.
+  /** Reference to a value. On first lookup the evaluated expression is stored in 'cached'.
     */
   final case class SEVal(ref: SDefinitionRef) extends SExpr
 
@@ -33,21 +32,19 @@ private[compiler] object SExpr1 {
 
   object SEValue extends SValueContainer[SEValue]
 
-  /** Function application:
-    *    General case: 'fun' and 'args' are any kind of expression
+  /** Function application: General case: 'fun' and 'args' are any kind of expression
     */
 
   final case class SEApp(fun: SExpr, args: List[SExpr]) extends SExpr
 
-  /** Closure creation. Create a new closure object storing the free variables
-    * in 'body'.
+  /** Closure creation. Create a new closure object storing the free variables in 'body'.
     */
   final case class SEMakeClo(fvs: List[SELoc], arity: Int, body: SExpr) extends SExpr
 
   /** SELoc -- Reference to the runtime location of a variable.
     *
-    *    This is the closure-converted form of SEVar. There are three sub-forms, with sufffix:
-    *    S/A/F, indicating [S]tack, [A]argument, or [F]ree variable captured by a closure.
+    * This is the closure-converted form of SEVar. There are three sub-forms, with sufffix: S/A/F,
+    * indicating [S]tack, [A]argument, or [F]ree variable captured by a closure.
     */
   sealed abstract class SELoc extends SExprAtomic
 
@@ -63,34 +60,30 @@ private[compiler] object SExpr1 {
   /** Pattern match. */
   final case class SECase(scrut: SExpr, alts: List[SCaseAlt]) extends SExpr
 
-  /** A let-expression with a single RHS
-    * This form only exists *during* the ANF transformation, but not when the ANF
-    * transformation is finished.
+  /** A let-expression with a single RHS This form only exists *during* the ANF transformation, but
+    * not when the ANF transformation is finished.
     */
   final case class SELet1General(rhs: SExpr, body: SExpr) extends SExpr
 
-  /** A non-recursive, non-parallel let block.
-    * It is used as an intermediary data structure by the compiler to
-    * mitigate stack overflow issues, but are later exploded into
-    * [[SELet1General]] and [[SELet1Builtin]] by the ANF transformation.
+  /** A non-recursive, non-parallel let block. It is used as an intermediary data structure by the
+    * compiler to mitigate stack overflow issues, but are later exploded into [[SELet1General]] and
+    * [[SELet1Builtin]] by the ANF transformation.
     */
   final case class SELet(bounds: List[SExpr], body: SExpr) extends SExpr
 
-  /** Location annotation. When encountered the location is stored in the 'lastLocation'
-    * variable of the machine. When commit is begun the location is stored in 'commitLocation'.
+  /** Location annotation. When encountered the location is stored in the 'lastLocation' variable of
+    * the machine. When commit is begun the location is stored in 'commitLocation'.
     */
   final case class SELocation(loc: Location, expr: SExpr) extends SExpr
 
   final case class SEPreventCatch(body: SExpr) extends SExpr
 
-  /** This is used only during profiling. When a package is compiled with
-    * profiling enabled, the right hand sides of top-level and let bindings,
-    * lambdas and some builtins are wrapped into [[SELabelClosure]]. During
-    * runtime, if the value resulting from evaluating [[expr]] is a
-    * (partially applied) closure, the label of the closure is set to the
-    * [[label]] given here.
-    * See [[com.digitalasset.daml.lf.speedy.Profile]] for an explanation why we use
-    * [[AnyRef]] for the label.
+  /** This is used only during profiling. When a package is compiled with profiling enabled, the
+    * right hand sides of top-level and let bindings, lambdas and some builtins are wrapped into
+    * [[SELabelClosure]]. During runtime, if the value resulting from evaluating [[expr]] is a
+    * (partially applied) closure, the label of the closure is set to the [[label]] given here. See
+    * [[com.digitalasset.daml.lf.speedy.Profile]] for an explanation why we use [[AnyRef]] for the
+    * label.
     */
   final case class SELabelClosure(label: Profile.Label, expr: SExpr) extends SExpr
 
@@ -100,8 +93,8 @@ private[compiler] object SExpr1 {
   /** Exercise scope (begin..end) */
   final case class SEScopeExercise(body: SExpr) extends SExpr
 
-  /** Case alternative. If the 'pattern' matches, then the environment is accordingly
-    * extended and 'body' is evaluated.
+  /** Case alternative. If the 'pattern' matches, then the environment is accordingly extended and
+    * 'body' is evaluated.
     */
   final case class SCaseAlt(pattern: SCasePat, body: SExpr)
 }

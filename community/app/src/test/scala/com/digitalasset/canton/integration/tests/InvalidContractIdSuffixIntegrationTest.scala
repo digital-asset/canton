@@ -25,11 +25,11 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.UnsupportedContractId
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.protocol.LocalRejectError.ConsistencyRejections.InactiveContracts
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
-import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.UnsupportedContractId
 import com.digitalasset.canton.protocol.{
   AuthenticatedContractIdVersionV12,
   ContractInstance,
@@ -196,8 +196,7 @@ class InvalidContractIdSuffixIntegrationTest
     ContractId.V1.build(inCID.discriminator, Bytes.fromByteArray(bytes)).value
   }
 
-  // TODO(#33364): Enable once we have better handling of unsupported contract ID versions.
-  "invalid canton-contract-id-version submission" ignore { _ =>
+  "invalid canton-contract-id-version submission" in { _ =>
     assertThrowsAndLogsCommandFailures(
       submitCreateAndCall(mutateSuffix),
       _.commandFailureMessage should include(UnsupportedContractId.id),

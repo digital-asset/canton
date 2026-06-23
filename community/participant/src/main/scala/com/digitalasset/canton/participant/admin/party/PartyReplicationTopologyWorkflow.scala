@@ -293,6 +293,7 @@ class PartyReplicationTopologyWorkflow(
             // Don't specify signing keys to let the topology manager figure out the TP keys as it is complicated
             // for code outside the topology manager to determine the signing keys in general topologies.
             signingKeys = Seq.empty,
+            namespacesToSignFor = Seq(targetParticipantId.namespace),
             forceFlags = ForceFlags.none,
           )
           .map { proposalSignedByTP =>
@@ -332,6 +333,7 @@ class PartyReplicationTopologyWorkflow(
               mapping = existingProposalO.map(_.mapping).getOrElse(ptpProposal),
               serial = Some(serial),
               signingKeys = Seq.empty, // Rely on topology manager to use the right TP signing keys
+              namespacesToSignFor = Seq(targetParticipantId.namespace),
               protocolVersion = topologyManager.managerVersion.serialization,
               expectFullAuthorization = false,
               forceChanges = ForceFlags.none,
@@ -544,6 +546,7 @@ class PartyReplicationTopologyWorkflow(
                     serial = Some(serial),
                     signingKeys =
                       Seq.empty, // Rely on topology manager to use the right TP signing keys
+                    namespacesToSignFor = Seq(targetParticipantId.namespace),
                     protocolVersion = topologyManager.managerVersion.serialization,
                     expectFullAuthorization =
                       true, // expect full authorization when onboarding is done

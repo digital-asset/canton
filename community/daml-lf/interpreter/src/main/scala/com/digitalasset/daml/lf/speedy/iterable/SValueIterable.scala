@@ -17,7 +17,7 @@ private[speedy] object SValueIterable {
     case SValue.SEnum(_, _, _) => Iterator.empty
     case SValue.SOptional(value) => value.iterator
     case SValue.SList(list) => list.iterator
-    case SValue.SMap(_, entries) => entries.iterator.flatMap({ case (k, v) => Iterator(k, v) })
+    case SValue.SMap(_, entries) => entries.iterator.flatMap { case (k, v) => Iterator(k, v) }
     case SValue.SAny(_, value) => Iterator(value)
     case SValue.STypeRep(_) => Iterator.empty
     case SValue.SToken => Iterator.empty

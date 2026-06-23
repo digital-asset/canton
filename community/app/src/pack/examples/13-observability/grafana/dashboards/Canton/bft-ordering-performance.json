@@ -120,7 +120,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_global_requests_ordering_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{namespace}}.{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -213,7 +213,7 @@
           },
           "editorMode": "code",
           "expr": "histogram_quantile($percentile, sum by (namespace, job, node, ordering_stage) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"batch-availability-total\"}[$__rate_interval])))",
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{namespace}}.{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -311,7 +311,7 @@
           },
           "editorMode": "code",
           "expr": "sum by (namespace, job, node, is_block_empty) (irate(daml_sequencer_bftordering_global_ordered_blocks_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{node}} (empty: {{is_block_empty}})",
+          "legendFormat": "{{namespace}}.{{node}} (empty: {{is_block_empty}})",
           "range": true,
           "refId": "A"
         }
@@ -410,7 +410,7 @@
           "editorMode": "code",
           "expr": "irate(daml_sequencer_bftordering_global_ordered_batches_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
           "interval": "",
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{namespace}}.{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -508,7 +508,7 @@
           "editorMode": "code",
           "exemplar": false,
           "expr": "sum by (namespace, job, node) (irate(daml_sequencer_bftordering_global_ordered_requests_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{namespace}}.{{node}}",
           "range": true,
           "refId": "A"
         }
@@ -611,7 +611,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by(namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"module-queue-PekkoP2PGrpcConnectionManagingActor\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -699,7 +699,7 @@
               },
               "editorMode": "code",
               "expr": "sum by (namespace, job, node) (daml_sequencer_bftordering_performance_moduleQueueSize_PekkoP2PGrpcConnectionManagingActor{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -793,7 +793,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_p2p_send_grpc_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -886,7 +886,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_p2p_send_network_write_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -979,7 +979,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by(namespace, job, node) (rate(daml_sequencer_bftordering_p2p_receive_processing_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1086,7 +1086,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"module-queue-mempool\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1178,7 +1178,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_performance_moduleQueueSize_mempool{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1271,7 +1271,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"module-queue-availability\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1363,7 +1363,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_performance_moduleQueueSize_availability{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1457,7 +1457,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"batch-wait\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1551,7 +1551,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"batch-dissemination-total\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1645,7 +1645,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"batch-queued-for-block-inclusion\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1739,7 +1739,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_availability_batch_regressions{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}, {{stage}}",
+              "legendFormat": "{{namespace}}.{{node}}, {{stage}}",
               "range": true,
               "refId": "A"
             }
@@ -1832,7 +1832,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"availability-hash-batchId\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -1925,7 +1925,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"availability-sign-local-batchId\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2019,7 +2019,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"request-queued-for-batch-inclusion\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2112,7 +2112,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"availability-sign-remote-batchId\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2205,7 +2205,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"availability-sign-local-batches\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2298,7 +2298,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"availability-signature-verify-ack\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2391,7 +2391,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.db.DbAvailabilityStore.addBatch\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2484,7 +2484,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.db.DbAvailabilityStore.fetchBatches\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2577,7 +2577,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"batch-validation\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2709,7 +2709,7 @@
               "instant": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "{{node}} Cache Hits",
+              "legendFormat": "{{namespace}}.{{node}} Cache Hits",
               "refId": "A"
             },
             {
@@ -2723,7 +2723,7 @@
               "instant": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "{{node}} Cache Misses",
+              "legendFormat": "{{namespace}}.{{node}} Cache Misses",
               "refId": "B"
             },
             {
@@ -2737,7 +2737,7 @@
               "instant": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "{{node}} Cache Evictions",
+              "legendFormat": "{{namespace}}.{{node}} Cache Evictions",
               "refId": "C"
             }
           ],
@@ -2843,7 +2843,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"module-queue-consensus\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -2935,7 +2935,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_performance_moduleQueueSize_consensus{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3028,7 +3028,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"module-queue-segment-module\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3120,7 +3120,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_performance_moduleQueueSize_segment_module{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3231,7 +3231,7 @@
               "instant": false,
               "interval": "30s",
               "intervalFactor": 1,
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3325,7 +3325,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-segment-proposal-to-commit-latency\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3418,7 +3418,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-segment-block-commit-latency\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3511,7 +3511,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-block-proposal-wait\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3604,7 +3604,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-epoch-start-wait\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3697,7 +3697,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-epoch-completion-wait\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3789,7 +3789,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.startEpoch\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3881,7 +3881,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.completeEpoch\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -3973,7 +3973,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.addPrePrepare\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4065,7 +4065,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.addPreparesAtomically\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4157,7 +4157,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.addOrderedBlockAtomically\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4249,7 +4249,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-signature-verify-poa-ack\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4341,7 +4341,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-validate-signed-message\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4433,7 +4433,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"sign-BftSignedConsensusMessage\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4540,7 +4540,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_epoch_view_changes{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4633,7 +4633,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.addViewChangeMessage\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4726,7 +4726,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-postponed-view-messages-queue-latency\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4817,7 +4817,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_postponed_view_messages_queue_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4908,7 +4908,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_consensus_postponed_view_messages_queue_max_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -4999,7 +4999,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_postponed_view_messages_dropped_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5090,7 +5090,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_postponed_view_messages_duplicates_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5188,7 +5188,7 @@
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, daml_sequencer_bftordering_consensus_view_change_progress_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
               "interval": "",
-              "legendFormat": "(reporter: {{node}}) {{Leader}}",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{Leader}}",
               "range": true,
               "refId": "A"
             }
@@ -5295,7 +5295,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-validate-consensus-certificate\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5511,7 +5511,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"state-transfer-postponed-consensus-messages-queue-latency\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5603,7 +5603,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_consensus_state_transfer_postponed_consensus_messages_queue_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5694,7 +5694,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_consensus_state_transfer_postponed_consensus_messages_queue_max_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5785,7 +5785,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_state_transfer_postponed_consensus_messages_dropped{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5891,7 +5891,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_incoming_retransmission_requests_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -5983,7 +5983,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_outgoing_retransmission_requests_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6075,7 +6075,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_retransmitted_messages_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6167,7 +6167,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_retransmitted_commit_certificates_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6259,7 +6259,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"sign-BftSignedRetransmissionMessage\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6351,7 +6351,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"verify-signature-BftSignedRetransmissionMessage\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6442,7 +6442,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_discarded_wrong_epoch_retransmission_responses_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6533,7 +6533,7 @@
               },
               "editorMode": "code",
               "expr": "irate(daml_sequencer_bftordering_consensus_discarded_rate_limited_retransmission_requests_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6640,7 +6640,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.latestEpoch\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6733,7 +6733,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.loadEpochProgress\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6826,7 +6826,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.loadCompleteBlocks\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -6933,7 +6933,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"module-queue-output\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7025,7 +7025,7 @@
               },
               "editorMode": "code",
               "expr": "daml_sequencer_bftordering_performance_moduleQueueSize_output{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7119,7 +7119,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-block-inspection\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7212,7 +7212,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-block-fetch-batches\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7304,7 +7304,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.db.DbOutputMetadataStore.insertBlockIfMissing\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7396,7 +7396,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_topology_query_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7488,7 +7488,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.db.DbOutputMetadataStore.insertLeaderSelectionPolicyState\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7580,7 +7580,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.db.DbOutputMetadataStore.insertEpochIfMissing\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7673,7 +7673,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-backpressure\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7780,7 +7780,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.loadEpochInfo\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7873,7 +7873,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore.loadOrderedBlocks\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -7981,7 +7981,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"pruning-compute-pruning-point\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -8075,7 +8075,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.db.DbAvailabilityStore.gc\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -8169,7 +8169,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PartitionManager.PartitionCreatorImpl.createPartitionsIfNeeded\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -8263,7 +8263,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PartitionManager.PartitionPrunerImpl.prune\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }
@@ -8357,7 +8357,7 @@
               },
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PartitionManager.create\"}[$__rate_interval])))",
-              "legendFormat": "{{node}}",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "A"
             }

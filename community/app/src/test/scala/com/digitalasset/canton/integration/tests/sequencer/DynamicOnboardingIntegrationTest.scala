@@ -354,6 +354,17 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
                 )
               ) =>
             message should include(s"was previously delivered at $aggregationSequenced2")
+          case SendResult.Error(
+                DeliverError(
+                  _,
+                  _,
+                  _,
+                  _,
+                  SequencerErrors.AggregateSubmissionAlreadySentV2(message),
+                  _,
+                )
+              ) =>
+            message should include(s"was previously delivered at $aggregationSequenced2")
         }
       }
     }

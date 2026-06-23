@@ -32,6 +32,7 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.interpretation.Error.UnsupportedContractId
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
@@ -321,9 +322,18 @@ class StoreBackedCommandInterpreterSpec
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
-        .failed
-        .map { _ =>
-          succeed
+        .map {
+          case Left(
+                ErrorCause.DamlLf(
+                  engine.Error.Interpretation(
+                    engine.Error.Interpretation.DamlException(UnsupportedContractId(`invalidCid`)),
+                    _,
+                  )
+                )
+              ) =>
+            succeed
+          case result =>
+            fail(s"Expected failure due to unsupported contract id, but got $result")
         }
 
     }

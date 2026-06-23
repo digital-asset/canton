@@ -6,16 +6,16 @@ package engine
 package refinement
 
 import com.digitalasset.daml.lf.command.ReplayCommand
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.speedy.Compiler
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.newCid
-import com.digitalasset.daml.lf.value.Value._
-import org.scalatest.matchers.dsl.ResultOfATypeInvocation
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
+import org.scalatest.matchers.dsl.ResultOfATypeInvocation
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.daml.lf.speedy.Compiler
 
 import scala.util.{Failure, Success, Try}
 
@@ -27,8 +27,8 @@ class ReplayCommandPreprocessorSpec
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
   import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
-    defaultPackageId => _,
-    _,
+    defaultPackageId as _,
+    *,
   }
 
   private implicit val parserParameters: ParserParameters[this.type] =
@@ -116,7 +116,7 @@ class ReplayCommandPreprocessorSpec
         validExeByKey,
       )
 
-      val errorTestCases = Table[ReplayCommand, ResultOfATypeInvocation[_]](
+      val errorTestCases = Table[ReplayCommand, ResultOfATypeInvocation[?]](
         ("command", "error"),
         // TEST_EVIDENCE: Integrity: ill-formed create replay command is rejected
         validCreate.copy(templateId = "Mod:Undefined") ->
@@ -142,7 +142,7 @@ class ReplayCommandPreprocessorSpec
       )
 
       forEvery(noErrorTestCases) { command =>
-        Try(defaultPreprocessor.unsafePreprocessReplayCommand(command)) shouldBe a[Success[_]]
+        Try(defaultPreprocessor.unsafePreprocessReplayCommand(command)) shouldBe a[Success[?]]
       }
 
       forEvery(errorTestCases) { (command, typ) =>
@@ -170,7 +170,7 @@ class ReplayCommandPreprocessorSpec
         validFetch,
         validFetchByKey,
       )
-      val errorTestCases = Table[ReplayCommand, ResultOfATypeInvocation[_]](
+      val errorTestCases = Table[ReplayCommand, ResultOfATypeInvocation[?]](
         ("command", "error"),
         // TEST_EVIDENCE: Integrity: ill-formed fetch command is rejected
         validFetch.copy(templateId = "Mod:Undefined") ->
@@ -183,7 +183,7 @@ class ReplayCommandPreprocessorSpec
       )
 
       forEvery(noErrorTestCases) { command =>
-        Try(defaultPreprocessor.unsafePreprocessReplayCommand(command)) shouldBe a[Success[_]]
+        Try(defaultPreprocessor.unsafePreprocessReplayCommand(command)) shouldBe a[Success[?]]
       }
 
       forEvery(errorTestCases) { (command, typ) =>
@@ -241,7 +241,7 @@ class ReplayCommandPreprocessorSpec
 
       cids.foreach(cid =>
         forEvery(contractIdTestCases(cids.head, cid))(cmd =>
-          Try(cmdPreprocessor.unsafePreprocessReplayCommand(cmd)) shouldBe a[Success[_]]
+          Try(cmdPreprocessor.unsafePreprocessReplayCommand(cmd)) shouldBe a[Success[?]]
         )
       )
 
@@ -262,7 +262,7 @@ class ReplayCommandPreprocessorSpec
       val failure = Failure(Error.Preprocessing.IllegalContractId.NonSuffixV1ContractId(illegalCid))
 
       forEvery(contractIdTestCases(aLegalCid, anotherLegalCid)) { cmd =>
-        Try(cmdPreprocessor.unsafePreprocessReplayCommand(cmd)) shouldBe a[Success[_]]
+        Try(cmdPreprocessor.unsafePreprocessReplayCommand(cmd)) shouldBe a[Success[?]]
       }
       forEvery(contractIdTestCases(illegalCid, aLegalCid)) { cmd =>
         Try(cmdPreprocessor.unsafePreprocessReplayCommand(cmd)) shouldBe failure

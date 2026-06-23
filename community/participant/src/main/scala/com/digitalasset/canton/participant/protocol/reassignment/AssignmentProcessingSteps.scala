@@ -568,7 +568,9 @@ private[reassignment] class AssignmentProcessingSteps(
         .getOrElse(errorDetails)
 
     for {
-      rejectionFromPhase3 <- EitherT.right(checkPhase7Validations(assignmentValidationResult))
+      rejectionFromPhase3 <- EitherT.right(
+        checkPhase7Validations(assignmentValidationResult.commonValidationResult)
+      )
 
       // Additional validation requested during security audit as DIA-003-013.
       // Activeness of the mediator already gets checked in Phase 3,

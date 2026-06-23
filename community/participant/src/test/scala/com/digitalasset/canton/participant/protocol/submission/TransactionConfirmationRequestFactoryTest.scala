@@ -15,6 +15,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory.{
   ParticipantAuthorizationError,

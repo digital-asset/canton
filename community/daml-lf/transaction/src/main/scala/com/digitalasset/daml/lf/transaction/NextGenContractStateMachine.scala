@@ -10,6 +10,7 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.{View, immutable}
+
 case class NeedContract[+X](resume: Option[GlobalKey] => ErrOr[X])
 
 sealed abstract class NeedKeyProgression
@@ -166,7 +167,11 @@ object NextGenContractStateMachine {
     ): Either[NeedKey[LLState], ErrOr[(KeyMapping, LLState)]]
 
     // return None if cid is unknown
-    private[lf] def archive(tmplId: Ref.TypeConId, cid: ContractId, nid: NodeId): Option[ErrOr[State]]
+    private[lf] def archive(
+        tmplId: Ref.TypeConId,
+        cid: ContractId,
+        nid: NodeId,
+    ): Option[ErrOr[State]]
 
     private[lf] def beginTry: LLState
 
@@ -202,10 +207,9 @@ object NextGenContractStateMachine {
     //  TODO(#31848): remove this method
     def localContracts: immutable.VectorMap[ContractId, ?]
 
-    /** A deterministic total order over all contracts known to the state machine.
-      * The only guarantee is that if two contracts appearing in the same
-      * queryByKey result, their relative order in `contractOrder` matches their
-      * order in that query result.
+    /** A deterministic total order over all contracts known to the state machine. The only
+      * guarantee is that if two contracts appearing in the same queryByKey result, their relative
+      * order in `contractOrder` matches their order in that query result.
       */
     def contractOrder: List[ContractId]
   }
@@ -290,7 +294,7 @@ object NextGenContractStateMachine {
         visitFetchById(tmplId, contractId, mbKey)
 
     def visitExercise(
-                       nodeId: NodeId,
+        nodeId: NodeId,
         tmplId: Ref.TypeConId,
         targetId: ContractId,
         mbKey: Option[GlobalKey],
@@ -358,7 +362,7 @@ object NextGenContractStateMachine {
       authorizeRollback: Boolean,
       localContracts: immutable.VectorMap[ContractId, Option[GlobalKey]],
       override val inputContracts: Set[ContractId],
-      val internalKeyInputs: Map[GlobalKey, KeyInput],
+      internalKeyInputs: Map[GlobalKey, KeyInput],
       activeLedgerState: ActiveLedgerState,
       rollbackStack: List[ActiveLedgerState],
   ) extends LLState {

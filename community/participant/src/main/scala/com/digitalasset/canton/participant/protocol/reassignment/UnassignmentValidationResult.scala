@@ -149,16 +149,8 @@ object UnassignmentValidationResult {
   final case class ReassigningParticipantValidationResult(
       errors: Seq[ReassignmentValidationError]
   ) extends ReassignmentValidationResult.ReassigningParticipantValidationResult {
-    def isTargetTsValidatable: Boolean = !errors.exists {
-      case UnassignmentValidationError.TargetTimestampTooFarInFuture => true
-      case _ => false
-    }
-  }
-
-  object ReassigningParticipantValidationResult {
-    val TargetTimestampTooFarInFuture: ReassigningParticipantValidationResult =
-      ReassigningParticipantValidationResult(
-        Seq(UnassignmentValidationError.TargetTimestampTooFarInFuture)
-      )
+    // These validations read the target topology at this participant's localTargetTs, which may not
+    // yet reflect recent topology changes, so we abstain on any failure rather than reject.
+    override def abstainErrors: Seq[ReassignmentValidationError] = errors
   }
 }

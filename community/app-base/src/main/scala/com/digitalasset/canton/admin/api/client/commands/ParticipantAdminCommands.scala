@@ -56,7 +56,7 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.{
 }
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig as InternalSynchronizerConnectionConfig
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod}
+import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.sequencing.protocol.TrafficState
@@ -1759,7 +1759,7 @@ object ParticipantAdminCommands {
 
     final case class OpenCommitment(
         observer: StreamObserver[v30.OpenCommitmentResponse],
-        commitment: AcsCommitment.HashedCommitmentType,
+        commitment: Digest.HashedDigestType,
         physicalSynchronizerId: PhysicalSynchronizerId,
         computedForCounterParticipant: ParticipantId,
         toInclusive: CantonTimestamp,
@@ -1770,7 +1770,7 @@ object ParticipantAdminCommands {
         ] {
       override protected def createRequest() = Right(
         v30.OpenCommitmentRequest(
-          AcsCommitment.hashedCommitmentTypeToProto(commitment),
+          Digest.hashedDigestTypeToProto(commitment),
           physicalSynchronizerId.toProtoPrimitive,
           computedForCounterParticipant.toProtoPrimitive,
           Some(toInclusive.toProtoTimestamp),
@@ -1902,16 +1902,16 @@ object ParticipantAdminCommands {
     )
 
     final case class ReceivedAcsCmt(
-        receivedCmtPeriod: CommitmentPeriod,
+        receivedCmtPeriod: LegacyCommitmentPeriod,
         originCounterParticipant: ParticipantId,
-        receivedCommitment: Option[AcsCommitment.HashedCommitmentType],
-        localCommitment: Option[AcsCommitment.HashedCommitmentType],
+        receivedCommitment: Option[Digest.HashedDigestType],
+        localCommitment: Option[Digest.HashedDigestType],
         state: ReceivedCmtState,
     )
 
     private def fromIntervalToCommitmentPeriod(
         interval: Option[v30.Interval]
-    ): Either[String, CommitmentPeriod] =
+    ): Either[String, LegacyCommitmentPeriod] =
       interval match {
         case None => Left("Interval is missing")
         case Some(v) =>
@@ -1933,7 +1933,7 @@ object ParticipantAdminCommands {
                 toSecond.minusSeconds(fromSecond.getEpochSecond).getEpochSecond
               )
             )
-          } yield CommitmentPeriod(fromSecond, len)
+          } yield LegacyCommitmentPeriod(fromSecond, len)
       }
 
     private def fromProtoToReceivedAcsCmt(
@@ -1946,10 +1946,10 @@ object ParticipantAdminCommands {
           .fromProtoPrimitive(cmt.originCounterParticipantUid, "")
           .leftMap(_.toString)
         receivedCommitmentO <- cmt.receivedCommitment.traverse(
-          AcsCommitment.hashedCommitmentTypeFromByteString(_).leftMap(_.toString)
+          Digest.hashedDigestTypeFromByteString(_).leftMap(_.toString)
         )
         ownCommitmentO <- cmt.ownCommitment.traverse(
-          AcsCommitment.hashedCommitmentTypeFromByteString(_).leftMap(_.toString)
+          Digest.hashedDigestTypeFromByteString(_).leftMap(_.toString)
         )
       } yield ReceivedAcsCmt(
         period,
@@ -2019,10 +2019,10 @@ object ParticipantAdminCommands {
     }
 
     final case class SentAcsCmt(
-        receivedCmtPeriod: CommitmentPeriod,
+        receivedCmtPeriod: LegacyCommitmentPeriod,
         destCounterParticipant: ParticipantId,
-        sentCommitment: Option[AcsCommitment.HashedCommitmentType],
-        receivedCommitment: Option[AcsCommitment.HashedCommitmentType],
+        sentCommitment: Option[Digest.HashedDigestType],
+        receivedCommitment: Option[Digest.HashedDigestType],
         state: SentCmtState,
     )
 
@@ -2036,10 +2036,10 @@ object ParticipantAdminCommands {
           .fromProtoPrimitive(cmt.destCounterParticipantUid, "")
           .leftMap(_.toString)
         ownCommitmentO <- cmt.ownCommitment.traverse(
-          AcsCommitment.hashedCommitmentTypeFromByteString(_).leftMap(_.toString)
+          Digest.hashedDigestTypeFromByteString(_).leftMap(_.toString)
         )
         receivedCommitmentO <- cmt.receivedCommitment.traverse(
-          AcsCommitment.hashedCommitmentTypeFromByteString(_).leftMap(_.toString)
+          Digest.hashedDigestTypeFromByteString(_).leftMap(_.toString)
         )
       } yield SentAcsCmt(
         period,

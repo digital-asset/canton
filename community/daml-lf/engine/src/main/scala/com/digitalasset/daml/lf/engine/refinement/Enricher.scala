@@ -84,7 +84,7 @@ object Enricher {
     )
 
   private def impoverish(create: Node.Create): Node.Create = {
-    import create._
+    import create.*
     Node.Create(
       coid = coid,
       packageName = packageName,
@@ -102,7 +102,7 @@ object Enricher {
       case create: Node.Create =>
         impoverish(create)
       case fetch: Node.Fetch =>
-        import fetch._
+        import fetch.*
         Node.Fetch(
           coid = coid,
           packageName = packageName,
@@ -116,7 +116,7 @@ object Enricher {
           version = version,
         )
       case lookup: Node.QueryByKey =>
-        import lookup._
+        import lookup.*
         Node.QueryByKey(
           packageName = packageName,
           templateId = templateId,
@@ -126,7 +126,7 @@ object Enricher {
           version = version,
         )
       case exe: Node.Exercise =>
-        import exe._
+        import exe.*
         Node.Exercise(
           targetCoid = targetCoid,
           packageName = packageName,
@@ -218,14 +218,16 @@ trait Enricher {
       contract: FatContractInstance
   )(implicit traceContext: TraceContext): Result[FatContractInstance]
 
-  /** Verifies that [contract] hashes to the same value according to all packages in [packageIds] (i.e. renders to
-    * the same value modulo package IDs) and returns the contract enriched by the smallest package ID.
+  /** Verifies that [contract] hashes to the same value according to all packages in [packageIds]
+    * (i.e. renders to the same value modulo package IDs) and returns the contract enriched by the
+    * smallest package ID.
     *
     * Returns a Left if:
     *   - the contract hashes to different values according to different packages
     *   - the contract contains a key.
     *
-    * Returns a ResultError if the enrichment fails for unexpected reasons (e.g. typechecking fails).
+    * Returns a ResultError if the enrichment fails for unexpected reasons (e.g. typechecking
+    * fails).
     */
   def enrichContractWithPackages(
       contract: FatContractInstance,

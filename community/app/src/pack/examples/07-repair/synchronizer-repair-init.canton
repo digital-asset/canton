@@ -8,7 +8,7 @@ bootstrap.synchronizer(
   mediators = Seq(mediator1),
   synchronizerOwners = Seq(sequencer1, mediator1),
   synchronizerThreshold = PositiveInt.two,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 // connect participants to synchronizer

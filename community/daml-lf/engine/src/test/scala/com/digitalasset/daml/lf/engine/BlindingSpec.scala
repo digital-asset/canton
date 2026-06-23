@@ -8,16 +8,16 @@ import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.engine.BlindingSpec.TxBuilder
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.transaction.{BlindingInfo, Node, NodeId}
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
   TransactionBuilder,
 }
+import com.digitalasset.daml.lf.transaction.{BlindingInfo, Node, NodeId}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueRecord
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.ArraySeq
 
@@ -27,7 +27,7 @@ object BlindingSpec {
 
 class BlindingSpec extends AnyFreeSpec with Matchers {
 
-  import TransactionBuilder.Implicits._
+  import TransactionBuilder.Implicits.*
   import TestNodeBuilder.CreateKey
 
   def create(builder: TxBuilder): (Value.ContractId, Node.Create) = {
