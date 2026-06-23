@@ -7,11 +7,19 @@ import com.digitalasset.canton.config.KmsConfig
 import com.digitalasset.canton.crypto.kms.KmsError.{KmsDeleteKeyError, KmsKeyDisabledError}
 import com.digitalasset.canton.crypto.kms.aws.AwsKms
 import com.digitalasset.canton.crypto.provider.kms.HasPredefinedAwsKmsKeys
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
 import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.slf4j.event.Level.INFO
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.kms.KmsAsyncClient
+import software.amazon.awssdk.services.kms.model.ListResourceTagsRequest
+
+import scala.jdk.CollectionConverters.*
+import scala.jdk.FutureConverters.*
 
 class AwsKmsTest extends FixtureAsyncWordSpec with ExternalKmsTest with HasPredefinedAwsKmsKeys {
   override type KmsType = AwsKms
@@ -46,6 +54,38 @@ class AwsKmsTest extends FixtureAsyncWordSpec with ExternalKmsTest with HasPrede
             .failOnShutdown
           keyExists <- keyActivenessCheckAndDelete(kms, keyIdMulti).failOnShutdown
         } yield keyExists.left.value shouldBe a[KmsKeyDisabledError]
+      }
+    }
+
+    "create symmetric keys with custom tags" in { _ =>
+      val customTags = Map("environment" -> "test", "owner" -> "canton-nightly")
+      val config = KmsConfig.Aws.defaultTestConfig.copy(customTags = customTags)
+
+      ResourceUtil.withResourceM(KmsAsyncClient.builder.region(Region.of(config.region)).build()) {
+        kmsClient =>
+          ResourceUtil
+            .withResourceM(newKms(config)) { kms =>
+              for {
+                keyId <- kms
+                  .generateSymmetricEncryptionKey()
+                  .valueOrFail("create KMS key")
+                assertion <- eventually()(
+                  FutureUnlessShutdown
+                    .outcomeF(
+                      kmsClient
+                        .listResourceTags(
+                          ListResourceTagsRequest.builder
+                            .keyId(keyId.unwrap)
+                            .build()
+                        )
+                        .asScala
+                        .map(_.tags().asScala.map(tag => tag.tagKey() -> tag.tagValue()).toMap)
+                    )
+                    .map(_ should contain allElementsOf customTags)
+                ).thereafterF(_ => kms.deleteKey(keyId).valueOrFailShutdown("delete key"))
+              } yield assertion
+            }
+            .failOnShutdown
       }
     }
 
