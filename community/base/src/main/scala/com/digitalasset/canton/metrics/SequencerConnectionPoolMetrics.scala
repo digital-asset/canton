@@ -105,25 +105,19 @@ class SequencerConnectionPoolMetrics(
     connectionHealthMetrics.getOrElseUpdate(mc, Eval.later(createConnectionHealthGauge)).value
   }
 
-  def removeMetricsForAllConnections(): Unit = {
-    connectionHealthMetrics.values.foreach(_.value.close)
-    connectionHealthMetrics.clear()
+  def removeMetricsForAllConnections(psidO: Option[String]): Unit =
+    removeInternal(_.labels.get("psid") == psidO)
 
-    subscriptionHealthMetrics.values.foreach(_.value.close)
-    subscriptionHealthMetrics.clear()
-  }
+  def removeMetricsForConnection(toRemove: Set[String], psidO: Option[String]): Unit =
+    removeInternal(mc =>
+      mc.labels.get("psid") == psidO && mc.labels.get("connection").exists(toRemove(_))
+    )
 
-  def removeMetricsForConnection(toRemove: Set[String]): Unit = {
-    // remove from map
-    val connsToRemove = connectionHealthMetrics.keys
-      .filter(_.labels.get("connection").exists(toRemove(_)))
-    connsToRemove.foreach(mc => connectionHealthMetrics.remove(mc).foreach(_.value.close()))
-
-    val subsToRemove = subscriptionHealthMetrics.keys
-      .filter(_.labels.get("connection").exists(toRemove(_)))
-    subsToRemove
-      .foreach(mc => subscriptionHealthMetrics.remove(mc).foreach(_.value.close))
-  }
+  private def removeInternal[T](filter: MetricsContext => Boolean): Unit =
+    Seq(connectionHealthMetrics, subscriptionHealthMetrics).foreach { metricsMap =>
+      val toRemove = metricsMap.keys.filter(filter)
+      toRemove.foreach(metricsMap.remove(_).foreach(_.value.close))
+    }
 
   // Gauges don't support metrics context per update. So instead create a map with a gauge per context.
   private val subscriptionHealthMetrics: TrieMap[MetricsContext, Eval[Gauge[Int]]] = TrieMap.empty

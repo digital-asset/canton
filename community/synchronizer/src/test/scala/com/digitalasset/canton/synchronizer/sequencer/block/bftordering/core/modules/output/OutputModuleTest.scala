@@ -75,6 +75,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
@@ -1076,19 +1077,19 @@ class OutputModuleTest
             ("Pending Canton topology changes", "block mode"),
             (
               false,
-              OrderedBlockForOutput.Mode.FromConsensus,
+              OrderingMode.Consensus,
             ),
             (
               true,
-              OrderedBlockForOutput.Mode.FromConsensus,
+              OrderingMode.Consensus,
             ),
             (
               false,
-              OrderedBlockForOutput.Mode.FromStateTransfer,
+              OrderingMode.StateTransfer,
             ),
             (
               true,
-              OrderedBlockForOutput.Mode.FromStateTransfer,
+              OrderingMode.StateTransfer,
             ),
           ).forEvery { case (pendingChanges, blockMode) =>
             val store = spy(createOutputMetadataStore[ProgrammableUnitTestEnv])
@@ -1124,14 +1125,14 @@ class OutputModuleTest
               completeBlockData(
                 BlockNumber.First,
                 commitTimestamp = aTimestamp,
-                mode = blockMode,
+                orderingMode = blockMode,
               )
             val blockData2 = // lastInEpoch = true, isRequestToAllMembersOfSynchronizer = false
               completeBlockData(
                 BlockNumber(BlockNumber.First + 1L),
                 commitTimestamp = anotherTimestamp,
                 lastInEpoch = true,
-                mode = blockMode,
+                orderingMode = blockMode,
               )
 
             output.receive(Output.Start)
@@ -1251,7 +1252,7 @@ class OutputModuleTest
             aTimestamp,
             lastInEpoch = false, // Do not complete the epoch!
             EpochNumber.First,
-            mode = OrderedBlockForOutput.Mode.FromStateTransfer,
+            orderingMode = OrderingMode.StateTransfer,
           )
         val blockNumber2 = BlockNumber(BlockNumber.First + 1L)
         val blockData2 =
@@ -1259,7 +1260,7 @@ class OutputModuleTest
             blockNumber2,
             anotherTimestamp,
             epochNumber = EpochNumber(EpochNumber.First + 1L),
-            mode = OrderedBlockForOutput.Mode.FromStateTransfer,
+            orderingMode = OrderingMode.StateTransfer,
           )
 
         output.receive(Output.Start)
@@ -1757,7 +1758,7 @@ class OutputModuleTest
       commitTimestamp: CantonTimestamp,
       lastInEpoch: Boolean = false,
       epochNumber: EpochNumber = EpochNumber.First,
-      mode: OrderedBlockForOutput.Mode = OrderedBlockForOutput.Mode.FromConsensus,
+      orderingMode: OrderingMode = OrderingMode.Consensus,
   ): CompleteBlockData =
     CompleteBlockData(
       anOrderedBlockForOutput(
@@ -1765,7 +1766,7 @@ class OutputModuleTest
         blockNumber,
         commitTimestamp,
         lastInEpoch,
-        mode,
+        orderingMode,
       ),
       batches = Seq(
         OrderingRequestBatch.create(
@@ -1964,7 +1965,7 @@ object OutputModuleTest {
       blockNumber: Long = BlockNumber.First,
       commitTimestamp: CantonTimestamp = aTimestamp,
       lastInEpoch: Boolean = false,
-      mode: OrderedBlockForOutput.Mode = OrderedBlockForOutput.Mode.FromConsensus,
+      orderingMode: OrderingMode = OrderingMode.Consensus,
       batchIds: Seq[BatchId] = Seq.empty,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): OrderedBlockForOutput =
     OrderedBlockForOutput(
@@ -1990,6 +1991,6 @@ object OutputModuleTest {
       ViewNumber.First,
       BftNodeId.Empty,
       lastInEpoch,
-      mode,
+      orderingMode,
     )
 }

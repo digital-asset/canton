@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
@@ -125,6 +126,8 @@ class DirectSequencerConnectionPool(
   )(implicit
       traceContext: TraceContext
   ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = Either.unit
+
+  override val metricsContext: MetricsContext = MetricsContext.Empty
 }
 
 object DirectSequencerConnectionPool {

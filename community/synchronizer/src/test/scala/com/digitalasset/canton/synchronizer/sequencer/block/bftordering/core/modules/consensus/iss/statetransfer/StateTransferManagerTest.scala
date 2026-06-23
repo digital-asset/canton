@@ -39,6 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
@@ -392,7 +393,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
             prePrepare.viewNumber,
             originalLeader = commitCert.prePrepare.from,
             isLastInEpoch = true,
-            mode = OrderedBlockForOutput.Mode.FromStateTransfer,
+            orderingMode = OrderingMode.StateTransfer,
           )
         )
       )

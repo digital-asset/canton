@@ -12,6 +12,7 @@ import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
@@ -62,13 +63,25 @@ class TopologyManagerSigningKeyDetectionTest
         .futureValueUS
 
       detector
-        .getValidSigningKeysForTransaction(ts(1), dtc_uid1a, None, returnAllValidKeys = false)
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          dtc_uid1a,
+          None,
+          returnAllValidKeys = false,
+          namespacesToSignFor = Seq.empty,
+        )
         .map(_._2)
         .futureValueUS shouldBe Right(Seq(SigningKeys.key3.fingerprint))
 
       // test getting all valid keys
       detector
-        .getValidSigningKeysForTransaction(ts(1), dtc_uid1a, None, returnAllValidKeys = true)
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          dtc_uid1a,
+          None,
+          returnAllValidKeys = true,
+          namespacesToSignFor = Seq.empty,
+        )
         .futureValueUS
         .value
         ._2 should contain theSameElementsAs Seq(
@@ -94,7 +107,13 @@ class TopologyManagerSigningKeyDetectionTest
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         detector
-          .getValidSigningKeysForTransaction(ts(2), dtc_uid1a, None, returnAllValidKeys = false)
+          .getValidSigningKeysForTransaction(
+            ts(2),
+            dtc_uid1a,
+            None,
+            returnAllValidKeys = false,
+            namespacesToSignFor = Seq.empty,
+          )
           .map(_._2)
           .futureValueUS shouldBe Right(
           Seq(SigningKeys.key1.fingerprint)
@@ -110,6 +129,66 @@ class TopologyManagerSigningKeyDetectionTest
           )
         ),
       )
+    }
+
+    "respsect the requested authorization scope" in {
+      val detector = mk()
+
+      detector.store
+        .update(
+          SequencedTime(ts(0)),
+          EffectiveTime(ts(0)),
+          removals = Map.empty,
+          additions = Seq(ns1k1_k1, ns2k2_k2, ns3k3_k3).map(ValidatedTopologyTransaction(_)),
+        )
+        .futureValueUS
+
+      val ptp = PartyToParticipant.tryCreate(
+        PartyId.tryCreate("alice", ns1),
+        PositiveInt.one,
+        Seq(
+          HostingParticipant(ParticipantId(UniqueIdentifier.tryCreate("p2", ns2)), Submission),
+          HostingParticipant(ParticipantId(UniqueIdentifier.tryCreate("p3", ns3)), Submission),
+        ),
+      )
+
+      detector
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          TopologyTransaction(
+            TopologyChangeOp.Replace,
+            PositiveInt.one,
+            ptp,
+            testedProtocolVersion,
+          ),
+          None,
+          namespacesToSignFor = Seq(ns2),
+          returnAllValidKeys = false,
+        )
+        .map(_._2)
+        .futureValueUS shouldBe Right(Seq(SigningKeys.key2.fingerprint))
+
+      // test getting all valid keys
+      detector
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          TopologyTransaction(
+            TopologyChangeOp.Replace,
+            PositiveInt.one,
+            ptp,
+            testedProtocolVersion,
+          ),
+          None,
+          namespacesToSignFor = Seq.empty,
+          returnAllValidKeys = true,
+        )
+        .futureValueUS
+        .value
+        ._2 should contain theSameElementsAs Seq(
+        SigningKeys.key1,
+        SigningKeys.key2,
+        SigningKeys.key3,
+      ).map(_.fingerprint)
     }
 
     "resolves decentralized namespace definitions for finding appropriate signing keys" in {
@@ -140,7 +219,13 @@ class TopologyManagerSigningKeyDetectionTest
         .futureValueUS
 
       detector
-        .getValidSigningKeysForTransaction(ts(1), otk, None, returnAllValidKeys = false)
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          otk,
+          None,
+          returnAllValidKeys = false,
+          namespacesToSignFor = Seq.empty,
+        )
         .futureValueUS
         .value
         ._2 should contain theSameElementsAs Seq(
@@ -151,7 +236,13 @@ class TopologyManagerSigningKeyDetectionTest
       ).map(_.fingerprint)
 
       detector
-        .getValidSigningKeysForTransaction(ts(1), otk, None, returnAllValidKeys = true)
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          otk,
+          None,
+          returnAllValidKeys = true,
+          namespacesToSignFor = Seq.empty,
+        )
         .futureValueUS
         .value
         ._2 should contain theSameElementsAs Seq(

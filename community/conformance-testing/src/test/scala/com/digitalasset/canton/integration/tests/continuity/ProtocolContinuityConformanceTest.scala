@@ -450,6 +450,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer-client.channel-max-inbound-message-size",
         s"$base.sequencer-client.keep-alive-client.idle-timeout",
         s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
+        s"$base.parameters.connect-to-synchronizers-on-startup",
       )
     }
     val perMediator = {
@@ -462,6 +463,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.crypto.session-signing-keys",
         s"$base.parameters.caching.bft-ordering-batch-cache",
         s"$base.parameters.caching.sequencer-catchup-payload-cache",
+        s"$base.parameters.delayed-verdict-sender",
         s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",
         s"$base.sequencer-client.channel-max-inbound-message-size",
@@ -486,6 +488,8 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.parameters.unsafe-sequencer-channel-support",
         // Once we remove PV34, we can remove this exception
         s"$base.parameters.disable-release-version-handshake-check",
+        s"$base.parameters.enable-prevalidation",
+        s"$base.parameters.enable-reject-delivered-aggregations-on-pv-35",
         s"$base.public-api.max-concurrent-calls-per-connection",
         s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",

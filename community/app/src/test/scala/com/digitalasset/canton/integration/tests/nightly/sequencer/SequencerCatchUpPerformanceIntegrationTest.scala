@@ -24,6 +24,7 @@ import com.digitalasset.canton.console.{
   LocalSequencerReference,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -305,7 +306,11 @@ class SequencerCatchUpPerformanceIntegrationTest
               allMediators_.map { mediator =>
                 // Make sure both mediators are connected the first sequencer to avoid the SEQUENCER_SUBSCRIPTION_LOST warning
                 // And flaky results (load produced super slowly from time to time)
-                mediator -> (Seq(sequencer1), PositiveInt.one, NonNegativeInt.zero)
+                mediator -> MediatorSequencersConfiguration(
+                  Seq(sequencer1),
+                  trustThreshold = PositiveInt.one,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               }.toMap
             ),
             mediatorThreshold = allMediators_.length - 1,

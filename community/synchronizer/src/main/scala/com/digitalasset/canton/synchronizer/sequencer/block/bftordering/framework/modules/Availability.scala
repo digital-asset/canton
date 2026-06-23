@@ -20,7 +20,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BatchId,
   ProofOfAvailability,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
+  OrderedBlockForOutput,
+  OrderingMode,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   MessageFrom,
@@ -283,7 +286,7 @@ object Availability {
 
     final case class FetchBatchDataFromNodes(
         proofOfAvailability: ProofOfAvailability,
-        mode: OrderedBlockForOutput.Mode,
+        orderingMode: OrderingMode,
     ) extends LocalOutputFetch
 
     final case class FetchRemoteBatchDataTimeout(batchId: BatchId, epochNumber: EpochNumber)

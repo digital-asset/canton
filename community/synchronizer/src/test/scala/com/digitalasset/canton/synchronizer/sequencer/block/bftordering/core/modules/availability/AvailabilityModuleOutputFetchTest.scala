@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.LocalDissemination.LocalBatchStoredSigned
@@ -67,7 +68,7 @@ class AvailabilityModuleOutputFetchTest
           availability.receive(
             LocalOutputFetch.FetchBatchDataFromNodes(
               ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
-              OrderedBlockForOutput.Mode.FromConsensus,
+              OrderingMode.Consensus,
             )
           )
 
@@ -97,7 +98,7 @@ class AvailabilityModuleOutputFetchTest
             availability.receive(
               LocalOutputFetch.FetchBatchDataFromNodes(
                 ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
-                OrderedBlockForOutput.Mode.FromConsensus,
+                OrderingMode.Consensus,
               )
             )
 
@@ -387,7 +388,7 @@ class AvailabilityModuleOutputFetchTest
           log => {
             log.level shouldBe Level.WARN
             log.message should include regex (
-              """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
+              """Batch BatchId\([^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
             )
           },
         )
@@ -623,7 +624,7 @@ class AvailabilityModuleOutputFetchTest
                 Seq(Node1),
                 numberOfAttempts = 1,
                 jitterStream = jitterStream,
-                mode = OrderedBlockForOutput.Mode.FromConsensus,
+                orderingMode = OrderingMode.Consensus,
               )
             )
             val storage = TrieMap[BatchId, OrderingRequestBatch]()
@@ -715,7 +716,7 @@ class AvailabilityModuleOutputFetchTest
                   Seq(Node1),
                   numberOfAttempts = 1,
                   jitterStream = jitterStream,
-                  mode = OrderedBlockForOutput.Mode.FromConsensus,
+                  orderingMode = OrderingMode.Consensus,
                 )
               )
               implicit val context
@@ -769,7 +770,7 @@ class AvailabilityModuleOutputFetchTest
                   Seq(Node1),
                   numberOfAttempts = 1,
                   jitterStream = jitterStream,
-                  mode = OrderedBlockForOutput.Mode.FromConsensus,
+                  orderingMode = OrderingMode.Consensus,
                 )
               )
               implicit val context
@@ -836,11 +837,11 @@ class AvailabilityModuleOutputFetchTest
 
       "record the missing batches and ask other node for missing data" in {
         forAll(
-          Table[OrderedBlockForOutput.Mode, BftNodeId](
+          Table[OrderingMode, BftNodeId](
             ("block mode", "expected send to"),
-            (OrderedBlockForOutput.Mode.FromConsensus, Node1),
+            (OrderingMode.Consensus, Node1),
             // Ignore nodes from the PoA, use the current topology
-            (OrderedBlockForOutput.Mode.FromStateTransfer, Node3),
+            (OrderingMode.StateTransfer, Node3),
           )
         ) { (blockMode, expectedSendTo) =>
           val outputFetchProtocolState = new MainOutputFetchProtocolState()
@@ -868,7 +869,7 @@ class AvailabilityModuleOutputFetchTest
               ViewNumber.First,
               isLastInEpoch = false, // Irrelevant for availability
               originalLeader = Node0,
-              mode = blockMode,
+              orderingMode = blockMode,
             ),
             mutable.SortedSet(ABatchId),
             traceContext,

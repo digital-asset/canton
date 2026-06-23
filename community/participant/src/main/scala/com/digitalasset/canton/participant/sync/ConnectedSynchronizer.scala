@@ -709,6 +709,7 @@ class ConnectedSynchronizer(
                 .modify(_ ++ requiredFlagsForPV),
               serial = Some(existingSynchronizerTrustCertificate.serial.increment),
               signingKeys = Seq.empty,
+              namespacesToSignFor = Seq.empty,
               protocolVersion = protocolVersion,
               expectFullAuthorization = false,
               forceChanges = ForceFlags.none,

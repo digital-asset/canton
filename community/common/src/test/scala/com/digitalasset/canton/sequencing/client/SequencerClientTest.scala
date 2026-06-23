@@ -1822,7 +1822,7 @@ final class SequencerClientTest
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
 
-    override def physicalSynchronizerIdO: Option[PhysicalSynchronizerId] = ???
+    override def physicalSynchronizerIdO: Option[PhysicalSynchronizerId] = None
 
     override def staticSynchronizerParametersO: Option[StaticSynchronizerParameters] = ???
 
@@ -1884,6 +1884,8 @@ final class SequencerClientTest
     )(implicit
         traceContext: TraceContext
     ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = Either.unit
+
+    override val metricsContext: MetricsContext = MetricsContext.Empty
   }
 
   private object MockPool {

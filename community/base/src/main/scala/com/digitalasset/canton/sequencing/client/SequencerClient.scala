@@ -1522,7 +1522,7 @@ class RichSequencerClientImpl(
           sequencerSubscriptionFactory,
           subscriptionHandlerFactory,
           metrics.connectionPool,
-          metricsContext = MetricsContext.Empty,
+          connectionPool.metricsContext,
           timeouts,
           loggerFactory,
         )

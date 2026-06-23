@@ -706,7 +706,7 @@ class Engine(
               // token's buffer before going back to the caller.
 
               def wrapHasStarted(
-                  overflow: Vector[FatContractInstance],
+                  overflow: Vector[ResultNeedKey.Response.ContractEntry],
                   callerProgression: NeedKeyProgression.HasStarted,
               ): NeedKeyProgression.HasStarted =
                 if (overflow.nonEmpty)
@@ -723,21 +723,34 @@ class Engine(
                       NeedKeyProgression.Finished
                   }
 
+              def resumeWithNeededEntries(
+                  entries: Vector[ResultNeedKey.Response.ContractEntry],
+                  callerHasStarted: NeedKeyProgression.HasStarted,
+              ) = {
+                val (enginePage, engineRest) = entries.splitAt(n)
+                val callerFcis = enginePage.map {
+                  case ResultNeedKey.Response.AuthenticableFatContractInstance(
+                  contractInstance,
+                  _,
+                  _,
+                  ) =>
+                    contractInstance
+                  case ResultNeedKey.Response.UnsupportedContractIdVersion(_) =>
+                    throw new NotImplementedError(
+                      "UnsupportedContractIdVersion is not yet supported."
+                    )
+                }
+                callback(callerFcis, wrapHasStarted(engineRest, callerHasStarted))
+                interpretLoop(machine, time, submissionInfo)
+              }
+
               def askCaller(callerToken: NeedKeyProgression.CanContinue) =
                 ResultNeedKey(
                   gk,
                   n,
                   callerToken,
-                  {
-                    case ResultNeedKey.Response(callerContracts, callerHasStarted) =>
-                      // TODO(#32184): handle UnsupportedContractIdVersion entries and retain and use the authentication
-                      //  callback to authenticate these contracts
-                      val callerFcis = callerContracts.collect {
-                        case a: ResultNeedKey.Response.AuthenticableFatContractInstance => a.contractInstance
-                      }
-                      val (enginePage, engineRest) = callerFcis.splitAt(n)
-                      callback(enginePage, wrapHasStarted(engineRest, callerHasStarted))
-                      interpretLoop(machine, time, submissionInfo)
+                  { case ResultNeedKey.Response(callerContracts, callerHasStarted) =>
+                    resumeWithNeededEntries(callerContracts, callerHasStarted)
                   },
                 )
 
@@ -748,9 +761,7 @@ class Engine(
                   if (overflow.nonEmpty) {
                     // We have buffered contracts from a previous caller response.
                     // Serve from the buffer without asking the caller.
-                    val (page, rest) = overflow.splitAt(n)
-                    callback(page, wrapHasStarted(rest, callerProgression))
-                    interpretLoop(machine, time, submissionInfo)
+                    resumeWithNeededEntries(overflow, callerProgression)
                   } else {
                     // Empty buffer — unwrap the caller progression.
                     callerProgression match {
@@ -1112,7 +1123,7 @@ object Engine {
     Error.Interpretation(Error.Interpretation.DamlException(error), None)
 
   private final case class BufferedKeyContracts(
-      overflow: Vector[FatContractInstance],
+      overflow: Vector[ResultNeedKey.Response.ContractEntry],
       callerProgression: NeedKeyProgression.HasStarted,
   ) extends NeedKeyProgression.Token
 

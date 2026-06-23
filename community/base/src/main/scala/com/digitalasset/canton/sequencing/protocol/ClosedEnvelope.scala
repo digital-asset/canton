@@ -60,6 +60,20 @@ object ClosedEnvelope {
     snapshot.verifySignatures(hash, sender, signatures, SigningKeyUsage.ProtocolOnly)
   }
 
+  def verifyKeyUsage(
+      snapshot: SyncCryptoApi,
+      sender: Member,
+      signature: Signature,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    snapshot.verifyKeyUsage(
+      sender,
+      signature.authorizingLongTermKey,
+      signature.signatureDelegation,
+      SigningKeyUsage.ProtocolOnly,
+    )
+
   def verifyMediatorSignatures(
       snapshot: SyncCryptoApi,
       mediatorGroupIndex: MediatorGroupIndex,

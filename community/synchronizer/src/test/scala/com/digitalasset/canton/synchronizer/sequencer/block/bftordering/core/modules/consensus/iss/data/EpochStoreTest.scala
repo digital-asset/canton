@@ -31,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
   Commit,
@@ -551,6 +552,6 @@ object EpochStoreTest {
       ViewNumber.First,
       BftNodeId("address"),
       isLastInEpoch,
-      mode = OrderedBlockForOutput.Mode.FromConsensus,
+      OrderingMode.Consensus,
     )
 }

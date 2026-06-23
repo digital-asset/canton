@@ -307,6 +307,7 @@ class QueueBasedSynchronizerOutboxTest
           tx.mapping,
           tx.serial.some,
           signingKeys = Seq(publicKey.fingerprint),
+          namespacesToSignFor = Seq.empty,
           testedProtocolVersion,
           expectFullAuthorization = true,
           waitToBecomeEffective = waitToBecomeEffective,

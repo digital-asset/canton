@@ -12,6 +12,7 @@ import com.digitalasset.base.error.{
   Resolution,
   RetryStrategy,
 }
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors.AggregateSubmissionAlreadySent
 import org.reflections.Reflections
 
 import scala.jdk.CollectionConverters.*
@@ -44,13 +45,18 @@ object ErrorCodeDocumentationGenerator {
 
   private val DefaultPackagePrefixes: Array[String] = Array("com.daml")
 
+  /** duplicate error codes for backwards compatibility */
+  private val duplicateErrorCodes = Seq(
+    AggregateSubmissionAlreadySent.id
+  )
+
   def getErrorCodeItems(
       searchPackagePrefixes: Array[String] = DefaultPackagePrefixes,
       excludePackagePrefixes: Array[String] = Array.empty,
   ): Seq[ErrorCodeDocItem] = {
     val errorCodes = findInstancesOf[ErrorCode](searchPackagePrefixes, excludePackagePrefixes)
     errorCodes.view.map(_.id).groupBy(identity).foreach {
-      case (code, occurrences) if occurrences.sizeIs > 1 =>
+      case (code, occurrences) if occurrences.sizeIs > 1 && !duplicateErrorCodes.contains(code) =>
         sys.error(
           s"Error code $code is used ${occurrences.size} times but we require each error code to be unique!"
         )

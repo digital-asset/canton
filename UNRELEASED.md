@@ -8,46 +8,83 @@ _Write summary of release_
 
 ## What’s New
 
-### Dependencies of vetted packages can be unvetted (PV35+)
-On synchronizers running protocol versions 35 and above, vetting state change operations on the API (e.g. via ``/package-vetting/update``)
-allow dependencies of vetted packages to be unvetted safely, without requiring the use of a force flag.
-This is consistent with the transaction protocol, which does not require the dependencies of a Daml transaction node package to be vetted in PV35+.
-**Note**: For protocol versions 34 and below, the package dependency vetting restrictions remain unchanged.
+### Topic A
+Template for a bigger topic
+#### Background
+#### Specific Changes
+#### Impact and Migration
 
 ### Minor Improvements
+- Connection pool metrics:
+  - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
+  - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
+- Updated com.google.protobuf libs from 3.25.5 --> 3.25.9
+- A call to `AcknowledgeSigned` with a timestamp before the upgrade time returns immediately, without any acknowledgement being done.
+- Fix JDBC query for computing last activations: Under adverse conditions (data corruption) this query might called with empty inputs where it would have failed execution with PostgreSQL server version 14.
+- (Potentially) *BREAKING*: Aggregatable submissions are now rejected eagerly to preserve bandwidth.
+  This means that the submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also
+  be returned during the synchronous submission of the sequencer, as the state of the aggregation is also
+  checked before ordering. In addition, the GRPC error code has been modified from `FAILED_PRECONDITION` to
+  `ALREADY_EXISTS` to better reflect the nature of the error. Clients should be updated to handle this error
+  code accordingly. Due to backwards compatibility, the old GRPC error code will be returned for PV35 and
+  before on the async path, and the new capability must only be turned on when all nodes have been
+  upgraded to a Canton version that supports this change. The new capability can be enabled using `canton.sequencers.seq.parameters.enable-reject-delivered-aggregations-on-pv-35 = MED`
+  for mediators. This can be combined with the new configuration option of the mediator `canton.mediators.mymediator.parameters.delayed-verdict-sender.enabled = true`.
+  Generally, the sequencer will send out the verdict after reaching the threshold. All subsequent sent verdicts are thrown away. The new option now allows threshold + extra verdicts to be sent immediately, while the rest of the mediators will wait a short amount of time. This allows to reduce the load on the sequencer by 30%, creating more capacity for other transactions.
+- Fixed an issue that prevent external parties from being allocated on a participant with an offline root key via the Ledger API's `PartyManagementService.AllocateExternalParty` endpoint.
 
-- Updated docker base image from 1.0.8 to 1.0.9, which bumps grpc-health-probe to v0.4.52.
-- Reduce memory footprint with streaming of large gRPC responses by avoiding buffering the whole response.
-- Improve log message in the sequencer in case queuing the event signal is not possible due to a closed subscription and not describe that case as an error.
+### Preview Features
+- preview feature
 
 ## Bugfixes
 
-### (26-003, High): Restarting stuck sequencer yields to sequencer fork
+### (YY-nnn, Risk): Title
 
 #### Issue Description
-Around LSU: if a sequencer not processing blocks is restarted after upgrade time and before it had the chance to process any block,
-it will delete traffic data entries as part of crash recovery.
 
 #### Affected Deployments
-Sequencer nodes
 
 #### Affected Versions
-All versions before 3.5.5
 
 #### Impact
-Sequencer fork
 
 #### Symptom
-Inability for participants to connect (cannot get consensus on traffic) or participant disconnecting with SEQUENCER_FORK_DETECTED
 
 #### Workaround
-Restore from backup
+
+#### Likeliness
+
+#### Recommendation
+
+### (26-004, High): LSU: Missing synchronization between topology local copy and purging
+
+#### Issue Description
+Because of the lack of synchronization, it can happen that topology purging kicks in before the local copy of the topology state is finished, which result in incorrect topology state for the successor.
+
+The issue can occur only when topology purging is enabled, which is not the case by default.
+
+#### Affected Deployments
+Participant nodes
+
+#### Affected Versions
+All versions before 3.5.6
+
+#### Impact
+Topology fork
+
+#### Symptom
+
+- Participant nodes issues warning/errors about missing topology transactions that were valid before the LSU.
+- Submission of a transaction is rejected because of missing topology transactions that were valid before the LSU.
+
+#### Workaround
+Restore from backup and ensure topology purging is disabled
 
 #### Likeliness
 Exceptional
 
 #### Recommendation
-Upgrade to 3.5.5
+Upgrade to 3.5.6
 
 ## Compatibility
 
@@ -63,4 +100,9 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
+
+
+## What's Coming
+
+We are currently working on
 

@@ -236,7 +236,7 @@ object TopologyMapping {
 
   }
 
-  // Small wrapper to not have to work with a tuple3 (Set[Namespace], Set[Uid], Set[Fingerprint])
+  // Small wrapper to not have to work with a 2-tuple (Set[Namespace], Set[Fingerprint])
   final case class ReferencedAuthorizations(
       namespaces: Set[Namespace] = Set.empty,
       extraKeys: Set[Fingerprint] = Set.empty,

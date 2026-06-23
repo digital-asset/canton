@@ -34,7 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingBlock,
   ProofOfAvailability,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderingMode
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   MessageAuthorizer,
@@ -350,14 +350,17 @@ final class AvailabilityModule[E <: Env[E]](
 
       case LocalDissemination.RemoteBatchAcknowledgeVerified(batchId, from, signature) =>
         logger.debug(
-          s"$actingOnMessageType: $from sent valid ACK for batch $batchId, " +
+          s"$actingOnMessageType: $from sent valid ACK for batch $batchId " +
+            s"(long-term key ${signature.authorizingLongTermKey.unwrap}), " +
             "updating batches ready for ordering"
         )
         disseminationProtocolState.disseminationProgress.get(batchId).foreach { progress =>
           setProgress(
             actingOnMessageType,
             batchId,
-            progress.addAck(AvailabilityAck(from, signature)),
+            // The active topology could have changed while the signature was being verified, so we need to
+            //  review the progress to make sure we don't add stale ACKs
+            progress.addAck(AvailabilityAck(from, signature)).changeMembership(activeMembership),
           )
         }
         attemptSatisfyingProposalRequestIfNotWaitingForDelayedResponse(actingOnMessageType)
@@ -1137,7 +1140,7 @@ final class AvailabilityModule[E <: Env[E]](
                       fetchBatchDataFromNodes(
                         messageType,
                         proofOfAvailability,
-                        request.blockForOutput.mode,
+                        request.blockForOutput.orderingMode,
                       )
                     }
                 } else {
@@ -1234,7 +1237,7 @@ final class AvailabilityModule[E <: Env[E]](
               //  If these batches cannot be retrieved, e.g. because the topology has changed too much and/or
               //  the nodes in the PoA are unreachable indefinitely, we'll need to resort (possibly manually)
               //  to state transfer incl. the batch payloads (when it is implemented).
-              if (status.mode.isStateTransfer)
+              if (status.orderingMode.isStateTransfer)
                 extractNodes(None, useActiveTopology = true)
               else
                 extractNodes(Some(status.originalProof.acks))
@@ -1351,7 +1354,7 @@ final class AvailabilityModule[E <: Env[E]](
   private def fetchBatchDataFromNodes(
       actingOnMessageType: => String,
       proofOfAvailability: ProofOfAvailability,
-      mode: OrderedBlockForOutput.Mode,
+      orderingMode: OrderingMode,
   )(implicit
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
@@ -1367,7 +1370,7 @@ final class AvailabilityModule[E <: Env[E]](
       return
     }
     val (node, remainingNodes) =
-      if (mode.isStateTransfer)
+      if (orderingMode.isStateTransfer)
         extractNodes(acks = None, useActiveTopology = true)
       else
         extractNodes(Some(proofOfAvailability.acks))
@@ -1381,7 +1384,7 @@ final class AvailabilityModule[E <: Env[E]](
       remainingNodes,
       numberOfAttempts = 1,
       jitterStream = jitterConstructor(config, random),
-      mode,
+      orderingMode,
     )
     outputFetchProtocolState.localOutputMissingBatches.update(
       proofOfAvailability.batchId,

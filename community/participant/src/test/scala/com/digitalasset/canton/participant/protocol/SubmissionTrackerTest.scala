@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, SubmissionTrackerData}
 import com.digitalasset.canton.participant.store.memory.InMemorySubmissionTrackerStore
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -43,7 +43,11 @@ final class SubmissionTrackerTest
     (1 to 1000).map(i => RequestId(CantonTimestamp.Epoch.plusSeconds(i.toLong)))
 
   private lazy val submissionTrackerStore =
-    new InMemorySubmissionTrackerStore(loggerFactory, timeouts)
+    new InMemorySubmissionTrackerStore(
+      DefaultTestIdentities.physicalSynchronizerId,
+      loggerFactory,
+      timeouts,
+    )
   private lazy val submissionTracker: SubmissionTracker = SubmissionTracker(
     participantId,
     submissionTrackerStore,

@@ -91,7 +91,9 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      enableRejectDeliveredAggregationsOnPv35 = Seq("MED", "PAR"),
       lsuConfig = SequencerLsuConfig(),
+      enablePrevalidation = true,
     )
 
   "Reference sequencer" when runSequencerApiTests()

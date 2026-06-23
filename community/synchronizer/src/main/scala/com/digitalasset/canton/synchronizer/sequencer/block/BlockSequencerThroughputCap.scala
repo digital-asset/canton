@@ -13,13 +13,12 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
-import com.digitalasset.canton.synchronizer.block.update.{ChunkUpdate, OrderedBlockUpdate}
+import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent}
 import com.digitalasset.canton.synchronizer.metrics.{SequencerMetrics, ThroughputCapMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.{
   IndividualThroughputCapConfig,
   ThroughputCapConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.SubmissionOutcome
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerThroughputCap.{
   IndividualBlockSequencerThroughputCap,
   SubmissionRequestEntry,
@@ -138,25 +137,27 @@ class BlockSequencerThroughputCap(
         .getOrElse(Right(()))
 
   def addBlockUpdate(
-      update: OrderedBlockUpdate
+      update: BlockEvents
   ): Unit = if (enabled.get()) {
-    val submissions = update match {
-      case chunkUpdate: ChunkUpdate =>
-        chunkUpdate.submissionsOutcomes
-          .collect { case deliver: SubmissionOutcome.Deliver =>
-            deliver
-          }
-          .map { deliver =>
-            SubmissionRequestEntry(
-              deliver.submission.sender,
-              deliver.submission.requestType,
-              deliver.sequencingTime,
-              deliver.submission.toByteString.size().toLong,
-            )
-          }
-      case _ => Seq.empty
+    val submissions = update.events.map(_.value).collect {
+      // Collect all ordered events and count it towards the cap. We need to run this
+      // before filtering out events (e.g. max sequencing time exceeded or aggregation
+      // already completed) to ensure that the cap is enforced based on the load on the orderer
+      // and not based on the successfully procesed events.
+      // TODO (#19052): A malicious sequencer could send unauthenticated events with the given
+      //    unauthenticated sender to trigger the caps. Therefore, a submission should only
+      //    be attributed to a sender once the sender is authenticated and we ensured that
+      //    this is not a replay by a malicious sequencer. This requires substantial changes
+      //    to the processing pipeline.
+      case LedgerBlockEvent
+            .Send(timestamp, signedSubmissionRequest, _, originalPayloadSize) =>
+        SubmissionRequestEntry(
+          signedSubmissionRequest.content.sender,
+          signedSubmissionRequest.content.requestType,
+          timestamp,
+          originalPayloadSize.toLong,
+        )
     }
-
     addBlockUpdateInternal(submissions)
   }
 

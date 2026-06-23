@@ -26,7 +26,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress}
+import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress, MonadUtil}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -170,6 +170,15 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     NonEmpty
       .from(signatures)
       .traverse_(ClosedEnvelope.verifySignatures(snapshot, sender, bytes, _))
+
+  def verifyKeyUsage(
+      snapshot: SyncCryptoApi,
+      sender: Member,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    MonadUtil.sequentialTraverse_(signatures)(ClosedEnvelope.verifyKeyUsage(snapshot, sender, _))
 
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedUncompressedEnvelope =

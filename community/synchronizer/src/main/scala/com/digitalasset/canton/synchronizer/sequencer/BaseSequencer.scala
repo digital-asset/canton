@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.{
   SequencerAdministrationError,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.PayloadId
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
@@ -47,6 +48,7 @@ abstract class BaseSequencer(
     clock: Clock,
     signatureVerifier: SignatureVerifier,
     protocolVersion: ProtocolVersion,
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     protected val disableSubmissionChecksForTesting: Boolean,
 )(implicit executionContext: ExecutionContext, trace: Tracer)
     extends Sequencer
@@ -105,18 +107,33 @@ abstract class BaseSequencer(
 
   override def acknowledgeSigned(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(
       implicit traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] = for {
-    estimatedSequencingTime <-
-      if (protocolVersion >= ProtocolVersion.v35) EitherT.rightT[FutureUnlessShutdown, String](None)
-      else EitherT.right(sequencingTime).map(ts => Some(ts.getOrElse(clock.now)))
-    _ <- signatureVerifier.verifyAcknowledgeRequestSignature(
-      signedAcknowledgeRequest,
-      HashPurpose.AcknowledgementSignature,
-      estimatedSequencingTime,
-      protocolVersion,
-    )
-    _ <- EitherT.right(acknowledgeSignedInternal(signedAcknowledgeRequest))
-  } yield ()
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val ts = signedAcknowledgeRequest.content.timestamp
+    val shouldDropAckBeforeUpgradeTime =
+      lsuSequencingBounds.fold(false)(_.upgradeTime >= ts)
+
+    if (shouldDropAckBeforeUpgradeTime) {
+      logger.debug(
+        s"Dropping acknowledgement from ${signedAcknowledgeRequest.content.member} because it is before upgrade time"
+      )
+
+      EitherTUtil.unitUS
+    } else {
+      for {
+        estimatedSequencingTime <-
+          if (protocolVersion >= ProtocolVersion.v35)
+            EitherT.rightT[FutureUnlessShutdown, String](None)
+          else EitherT.right(sequencingTime).map(ts => Some(ts.getOrElse(clock.now)))
+        _ <- signatureVerifier.verifyAcknowledgeRequestSignature(
+          signedAcknowledgeRequest,
+          HashPurpose.AcknowledgementSignature,
+          estimatedSequencingTime,
+          protocolVersion,
+        )
+        _ <- EitherT.right(acknowledgeSignedInternal(signedAcknowledgeRequest))
+      } yield ()
+    }
+  }
 
   protected def acknowledgeSignedInternal(
       signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]

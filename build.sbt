@@ -464,6 +464,10 @@ lazy val `model-based-testing-drivers` =
   CommunityProjects.`model-based-testing-drivers`
 lazy val `model-based-testing-integration-tests` =
   CommunityProjects.`model-based-testing-integration-tests`
+lazy val `traffic-enforcement-api` =
+  CommunityProjects.`traffic-enforcement-api`
+lazy val `traffic-enforcement-component` =
+  CommunityProjects.`traffic-enforcement-component`
 
 lazy val `scalatest-utils` = DamlProjects.`scalatest-utils`
 lazy val `scala-utils` = DamlProjects.`scala-utils`

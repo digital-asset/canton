@@ -10,6 +10,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   MissingToken,
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors.AggregateSubmissionAlreadySent
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import io.grpc.Status.Code.*
@@ -122,6 +123,28 @@ object GrpcError {
       }
   }
 
+  /** The server rejected this request because it duplicates an existing resource. */
+  final case class GrpcRequestRefusedAlreadyExists(
+      request: String,
+      serverName: String,
+      status: Status,
+      optTrailers: Option[Metadata],
+      decodedCantonError: Option[DecodedCantonError],
+  ) extends GrpcError {
+
+    override protected def logFullCause: Boolean = true
+
+    def isAuthenticationTokenMissing: Boolean = false
+
+    override def log(logger: TracedLogger)(implicit traceContext: TraceContext): Unit =
+      // no need to log this dramatically as it is expected to happen
+      if (decodedCantonError.exists(_.code.id == AggregateSubmissionAlreadySent.id)) {
+        logger.info(s"""Request failed for $serverName.$hint
+         | ${getClass.getSimpleName}: ${status.getCode} / ${status.getDescription}""".mkString)
+      } else logger.info(toString)
+
+  }
+
   /** The client gave up waiting for a response. The server may or may not process the request. It
     * may or may not make sense to retry, depending on the specific situation.
     */
@@ -199,8 +222,11 @@ object GrpcError {
         else GrpcClientError(request, serverName, status, optTrailers, decodedError)
 
       case FAILED_PRECONDITION | NOT_FOUND | OUT_OF_RANGE | RESOURCE_EXHAUSTED | ABORTED |
-          PERMISSION_DENIED | ALREADY_EXISTS =>
+          PERMISSION_DENIED =>
         GrpcRequestRefusedByServer(request, serverName, status, optTrailers, decodedError)
+
+      case ALREADY_EXISTS =>
+        GrpcRequestRefusedAlreadyExists(request, serverName, status, optTrailers, decodedError)
 
       case DEADLINE_EXCEEDED | CANCELLED =>
         GrpcClientGaveUp(request, serverName, status, optTrailers, decodedError)

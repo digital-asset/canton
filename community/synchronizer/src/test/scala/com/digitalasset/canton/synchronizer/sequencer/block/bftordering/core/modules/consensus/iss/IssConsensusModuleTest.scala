@@ -18,12 +18,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   BootstrapEpochNumber,
   bootstrapEpoch,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.{
   Block,
   EpochInProgress,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.GenericInMemoryEpochStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
+  Bootstrap,
+  EpochStore,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.{
   CatchupDetector,
@@ -55,6 +58,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.{
   NodeActiveAt,
@@ -71,6 +75,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PbftUnverifiedNetworkMessage,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.{
+  NewEpochStored,
   NewEpochTopology,
   ProtocolMessage,
   RetransmissionsMessage,
@@ -794,7 +799,7 @@ class IssConsensusModuleTest
                   prePrepare.viewNumber,
                   leaderOfBlock,
                   isLastBlockInEpoch,
-                  OrderedBlockForOutput.Mode.FromConsensus,
+                  OrderingMode.Consensus,
                 )
               )
             )
@@ -961,7 +966,7 @@ class IssConsensusModuleTest
         succeed
       }
 
-      "start catch-up if the detector says so" in {
+      "start catch-up if the detector says so and no epoch is being stored" in {
         Table[ProtocolMessage](
           "message",
           PbftUnverifiedNetworkMessage(
@@ -1030,81 +1035,225 @@ class IssConsensusModuleTest
         }
       }
 
-      "not start catch-up if the detector says so but we are advancing epoch" in {
-        val epochOfFutureMessage = EpochNumber(7L)
-        val futureMessageToTriggerDetector = PbftUnverifiedNetworkMessage(
-          SignedMessage(
-            PrePrepare.create( // Just to trigger the catch-up check
-              BlockMetadata.mk(epochOfFutureMessage, BlockNumber(100L)),
-              ViewNumber.First,
-              OrderingBlock(oneRequestOrderingBlock.proofs),
-              CanonicalCommitSet(Set.empty),
-              from = allIds(1),
-              actualSender = Some(allIds(1)),
+      "not start catch-up" when {
+        "we get future messages that are retransmitted" in {
+          val futureMessageToTriggerDetector = PbftUnverifiedNetworkMessage(
+            SignedMessage(
+              PrePrepare.create( // Just to trigger the catch-up check
+                BlockMetadata.mk(EpochNumber(7L), BlockNumber(100L)),
+                ViewNumber.First,
+                OrderingBlock(oneRequestOrderingBlock.proofs),
+                CanonicalCommitSet(Set.empty),
+                from = allIds(1),
+                actualSender = Some(allIds(2)), // actual sender is different
+              ),
+              Signature.noSignature,
+            )
+          )
+
+          val catchupDetectorMock = mock[CatchupDetector]
+          when(catchupDetectorMock.shouldCatchUpTo(EpochNumber(-1))).thenReturn(None)
+
+          val (context, consensus) =
+            createIssConsensusModule(
+              p2pNetworkOutModuleRef = fakeIgnoringModule,
+              maybeCatchupDetector = Some(catchupDetectorMock),
+            )
+          implicit val ctx: ContextType = context
+
+          consensus.receive(Consensus.Start)
+          consensus.receive(futureMessageToTriggerDetector)
+
+          // we want to make sure we don't update the catchupDetector, but the code will always call [[shouldCatchUpTo]]
+          // that will not update state so it is okay. We verify that this is the only call we make
+          verify(catchupDetectorMock).shouldCatchUpTo(EpochNumber(-1))
+          verifyZeroInteractions(catchupDetectorMock)
+          succeed
+        }
+
+        "the detector says so but we are advancing epoch" in {
+          val epochOfFutureMessage = EpochNumber(7L)
+          val futureMessageToTriggerDetector = PbftUnverifiedNetworkMessage(
+            SignedMessage(
+              PrePrepare.create( // Just to trigger the catch-up check
+                BlockMetadata.mk(epochOfFutureMessage, BlockNumber(100L)),
+                ViewNumber.First,
+                OrderingBlock(oneRequestOrderingBlock.proofs),
+                CanonicalCommitSet(Set.empty),
+                from = allIds(1),
+                actualSender = Some(allIds(1)),
+              ),
+              Signature.noSignature,
+            )
+          )
+          val currentEpochState = EpochStore.Epoch(
+            EpochInfo(
+              EpochNumber.First,
+              BlockNumber.First,
+              epochLength,
+              TopologyActivationTime(aTimestamp),
             ),
-            Signature.noSignature,
+            Seq.empty,
           )
-        )
-        val currentEpochState = EpochStore.Epoch(
-          EpochInfo(
-            EpochNumber.First,
-            BlockNumber.First,
-            epochLength,
-            TopologyActivationTime(aTimestamp),
-          ),
-          Seq.empty,
-        )
-        val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
-        val retransmissionsManagerMock = mock[RetransmissionsManager[ProgrammableUnitTestEnv]]
-        val segmentModuleMock = mock[ModuleRef[ConsensusSegment.Message]]
-        val catchupDetectorMock = mock[CatchupDetector]
-        when(catchupDetectorMock.updateLatestKnownNodeEpoch(any[BftNodeId], any[EpochNumber]))
-          .thenReturn(true)
-        val catchUpToEpochNumber = Some(EpochNumber(7))
-        when(catchupDetectorMock.shouldCatchUpTo(any[EpochNumber])(any[TraceContext]))
-          .thenReturn(catchUpToEpochNumber)
+          val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
+          val retransmissionsManagerMock = mock[RetransmissionsManager[ProgrammableUnitTestEnv]]
+          val segmentModuleMock = mock[ModuleRef[ConsensusSegment.Message]]
+          val catchupDetectorMock = mock[CatchupDetector]
+          when(catchupDetectorMock.updateLatestKnownNodeEpoch(any[BftNodeId], any[EpochNumber]))
+            .thenReturn(true)
+          val catchUpToEpochNumber = Some(EpochNumber(7))
+          when(catchupDetectorMock.shouldCatchUpTo(any[EpochNumber])(any[TraceContext]))
+            .thenReturn(catchUpToEpochNumber)
 
-        val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
-        when(epochStore.latestEpoch(anyBoolean)(anyTraceContext))
-          .thenReturn(() => Some(currentEpochState))
-        val (context, consensus) =
-          createIssConsensusModule(
-            p2pNetworkOutModuleRef = fakeIgnoringModule,
-            preConfiguredInitialEpochState = Some { context =>
-              newEpochState(currentEpochState, context)
-            },
-            epochStore = epochStore,
-            segmentModuleFactoryFunction = _ => segmentModuleMock,
-            maybeOnboardingStateTransferManager = Some(stateTransferManagerMock),
-            maybeCatchupDetector = Some(catchupDetectorMock),
-            maybeRetransmissionsManager = Some(retransmissionsManagerMock),
+          val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
+          when(epochStore.latestEpoch(anyBoolean)(anyTraceContext))
+            .thenReturn(() => Some(currentEpochState))
+          val (context, consensus) =
+            createIssConsensusModule(
+              p2pNetworkOutModuleRef = fakeIgnoringModule,
+              preConfiguredInitialEpochState = Some { context =>
+                newEpochState(currentEpochState, context)
+              },
+              epochStore = epochStore,
+              segmentModuleFactoryFunction = _ => segmentModuleMock,
+              maybeOnboardingStateTransferManager = Some(stateTransferManagerMock),
+              maybeCatchupDetector = Some(catchupDetectorMock),
+              maybeRetransmissionsManager = Some(retransmissionsManagerMock),
+            )
+          implicit val ctx: ContextType = context
+
+          consensus.receive(Consensus.Start)
+
+          // simulate epoch completed
+          consensus.getEpochState.isClosing shouldBe false
+          consensus.receive(CompleteEpochStored(currentEpochState, Seq.empty))
+          consensus.getEpochState.isClosing shouldBe true
+          // we don't start new epoch because we are missing the next topology
+          verify(epochStore, never).startEpoch(any[EpochInfo])(any[TraceContext])
+
+          // now we get message that triggers catchupDetector (that would normally start state transfer)
+          consensus.receive(futureMessageToTriggerDetector)
+
+          verify(catchupDetectorMock, times(1))
+            .updateLatestKnownNodeEpoch(allIds(1), EpochNumber(epochOfFutureMessage))
+          verify(catchupDetectorMock, times(1))
+            .shouldCatchUpTo(eqTo(EpochNumber.First))(any[TraceContext])
+          verify(retransmissionsManagerMock, never)
+            .handleMessage(
+              any[OrderingTopologyInfo[ProgrammableUnitTestEnv]],
+              any[RetransmissionsMessage],
+            )(any[ContextType], any[TraceContext])
+
+          // but we are not doing state transfer because we are currently advancing epoch
+          context.extractBecomes() shouldBe empty
+        }
+
+        "the detector says so but we are storing a new epoch" in {
+          val epochOfFutureMessage = EpochNumber(7L)
+          val futureMessageToTriggerDetector = PbftUnverifiedNetworkMessage(
+            SignedMessage(
+              PrePrepare.create( // Just to trigger the catch-up check
+                BlockMetadata.mk(epochOfFutureMessage, BlockNumber(100L)),
+                ViewNumber.First,
+                OrderingBlock(oneRequestOrderingBlock.proofs),
+                CanonicalCommitSet(Set.empty),
+                from = allIds(1),
+                actualSender = Some(allIds(1)),
+              ),
+              Signature.noSignature,
+            )
           )
-        implicit val ctx: ContextType = context
+          val currentEpochState = EpochStore.Epoch(
+            Bootstrap.bootstrapEpochInfo(TopologyActivationTime(aTimestamp)),
+            Seq.empty,
+          )
+          val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
+          val retransmissionsManagerMock = mock[RetransmissionsManager[ProgrammableUnitTestEnv]]
+          val segmentModuleMock = mock[ModuleRef[ConsensusSegment.Message]]
+          val catchupDetectorMock = mock[CatchupDetector]
+          when(catchupDetectorMock.updateLatestKnownNodeEpoch(any[BftNodeId], any[EpochNumber]))
+            .thenReturn(true)
+          val catchUpToEpochNumber = Some(EpochNumber(7))
+          when(catchupDetectorMock.shouldCatchUpTo(any[EpochNumber])(any[TraceContext]))
+            .thenReturn(catchUpToEpochNumber)
 
-        consensus.receive(Consensus.Start)
+          val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
+          when(epochStore.latestEpoch(anyBoolean)(anyTraceContext)).thenReturn(() =>
+            Some(currentEpochState)
+          )
+          val (context, consensus) =
+            createIssConsensusModule(
+              p2pNetworkOutModuleRef = fakeIgnoringModule,
+              preConfiguredInitialEpochState = Some { context =>
+                newEpochState(currentEpochState, context)
+              },
+              epochStore = epochStore,
+              segmentModuleFactoryFunction = _ => segmentModuleMock,
+              maybeOnboardingStateTransferManager = Some(stateTransferManagerMock),
+              maybeCatchupDetector = Some(catchupDetectorMock),
+              maybeRetransmissionsManager = Some(retransmissionsManagerMock),
+            )
+          implicit val ctx: ContextType = context
 
-        // simulate epoch completed
-        consensus.getEpochState.isClosing shouldBe false
-        consensus.receive(CompleteEpochStored(currentEpochState, Seq.empty))
-        consensus.getEpochState.isClosing shouldBe true
-        // we don't start new epoch because we are missing the next topology
-        verify(epochStore, never).startEpoch(any[EpochInfo])(any[TraceContext])
+          consensus.receive(Consensus.Start)
 
-        // now we get message that triggers catchupDetector (that would normally start state transfer)
-        consensus.receive(futureMessageToTriggerDetector)
+          consensus.getEpochState.isClosing shouldBe false
+          consensus.storingNewEpoch shouldBe false
+          // simulate starting the first epoch (whose topology is self-sent by consensus)
+          consensus.receive(
+            NewEpochTopology(
+              EpochNumber.First,
+              aMembership,
+              failingCryptoProvider,
+            )
+          )
+          consensus.getEpochState.isClosing shouldBe false
+          consensus.storingNewEpoch shouldBe true
 
-        verify(catchupDetectorMock, times(1))
-          .updateLatestKnownNodeEpoch(allIds(1), EpochNumber(epochOfFutureMessage))
-        verify(catchupDetectorMock, times(1))
-          .shouldCatchUpTo(eqTo(EpochNumber.First))(any[TraceContext])
-        verify(retransmissionsManagerMock, never)
-          .handleMessage(
-            any[OrderingTopologyInfo[ProgrammableUnitTestEnv]],
-            any[RetransmissionsMessage],
-          )(any[ContextType], any[TraceContext])
+          // now we get message that triggers catchupDetector (that would normally start state transfer)
+          consensus.receive(futureMessageToTriggerDetector)
 
-        // but we are not doing state transfer because we are currently advancing epoch
-        context.extractBecomes() shouldBe empty
+          verify(catchupDetectorMock, times(1))
+            .updateLatestKnownNodeEpoch(allIds(1), EpochNumber(epochOfFutureMessage))
+          verify(catchupDetectorMock, times(1))
+            .shouldCatchUpTo(eqTo(Bootstrap.BootstrapEpochNumber))(any[TraceContext])
+          verify(retransmissionsManagerMock, never)
+            .handleMessage(
+              any[OrderingTopologyInfo[ProgrammableUnitTestEnv]],
+              any[RetransmissionsMessage],
+            )(any[ContextType], any[TraceContext])
+
+          // but we are not doing state transfer because we are currently storing an epoch
+          context.extractBecomes() shouldBe empty
+
+          // simulate completing storing the new epoch
+          consensus.receive(
+            NewEpochStored(
+              EpochInfo(
+                EpochNumber.First,
+                BlockNumber.First,
+                epochLength,
+                TopologyActivationTime(aTimestamp),
+              ),
+              aMembership,
+              failingCryptoProvider,
+            )
+          )
+          consensus.storingNewEpoch shouldBe false
+
+          // triggers catchupDetector again after completing storing the new epoch
+          consensus.receive(futureMessageToTriggerDetector)
+
+          verify(catchupDetectorMock, times(2))
+            .updateLatestKnownNodeEpoch(allIds(1), EpochNumber(epochOfFutureMessage))
+          verify(catchupDetectorMock, times(1))
+            .shouldCatchUpTo(eqTo(EpochNumber.First))(any[TraceContext])
+
+          // Switch to catchup state transfer because we are no longer storing an epoch
+          context.extractBecomes() should not be empty
+
+          succeed
+        }
       }
 
       "drop remote PBFT messages" when {

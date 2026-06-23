@@ -1052,6 +1052,14 @@ private[backend] trait StorageBackendTestsContracts
     )
   }
 
+  it should "be able to query with empty input" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    val activeContracts = executeSql(
+      backend.contract.lastActivations(Nil)
+    )
+    activeContracts shouldBe empty
+  }
+
   it should "be able to query with 1000 contract ids" in {
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(

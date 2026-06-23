@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
@@ -537,7 +538,7 @@ class DbEpochStore(
               prePrepare.viewNumber,
               prePrepare.from,
               epochInfo.lastBlockNumber == prePrepare.blockMetadata.blockNumber,
-              OrderedBlockForOutput.Mode.FromConsensus,
+              OrderingMode.Consensus,
             )
           }
         }

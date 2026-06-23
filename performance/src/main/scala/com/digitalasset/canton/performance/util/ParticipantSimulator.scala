@@ -580,7 +580,7 @@ class ParticipantSimulator(
       sequencerSubscriptionFactory,
       subscriptionHandlerFactory,
       synchronizerMetrics.sequencerClient.connectionPool,
-      metricsContext = MetricsContext.Empty,
+      metricsContext = pool.metricsContext,
       env.environment.config.parameters.timeouts.processing,
       loggerFactoryForParticipant,
     )

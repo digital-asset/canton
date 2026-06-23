@@ -50,6 +50,9 @@ object GrpcSubscriptionErrorRetryPolicy {
           loggingContext.debug("Not trying to reconnect.")
         retry
 
+      case error: GrpcError.GrpcRequestRefusedAlreadyExists =>
+        false // not retrying
+
       case _: GrpcError.GrpcServerError =>
         // We believe these errors (INTERNAL, UNKNOWN, DATA_LOSS) can in some circumstances by transient, and
         // therefore we err on the side of caution and retry.

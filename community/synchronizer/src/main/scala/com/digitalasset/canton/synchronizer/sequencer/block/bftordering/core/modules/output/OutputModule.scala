@@ -962,7 +962,7 @@ class OutputModule[E <: Env[E]](
 
     val epochEndBftTime = BftTime.epochEndBftTime(epochLastBlockBftTime, lastBlockInEpoch)
 
-    val lastBlockMode = lastBlockForOutput.mode
+    val lastBlockMode = lastBlockForOutput.orderingMode
     val newEpochNumber = EpochNumber(completedEpochNumber + 1)
 
     maybeNewEpochTopologyMessagePeanoQueue

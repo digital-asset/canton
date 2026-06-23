@@ -18,6 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
@@ -110,7 +111,7 @@ final class StateTransferMessageSender[E <: Env[E]](
           prePrepare.viewNumber,
           prePrepare.from,
           lastInEpoch,
-          mode = OrderedBlockForOutput.Mode.FromStateTransfer,
+          OrderingMode.StateTransfer,
         )
       )
     )

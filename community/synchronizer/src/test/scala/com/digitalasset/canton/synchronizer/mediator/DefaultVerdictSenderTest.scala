@@ -4,11 +4,11 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{Signature, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.error.MediatorError.MalformedMessage
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   InformeeMessage,
@@ -30,6 +30,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   OpenEnvelope,
   Recipients,
 }
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{
@@ -42,11 +43,18 @@ import com.digitalasset.canton.topology.{
   TestingTopology,
   UniqueIdentifier,
 }
+import com.digitalasset.canton.version.HasTestCloseContext.makeTestCloseContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  ProtocolVersionChecksAsyncWordSpec,
+  config,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.concurrent.Future
+import java.time.Duration
+import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
 class DefaultVerdictSenderTest
@@ -55,12 +63,13 @@ class DefaultVerdictSenderTest
     with HasExecutionContext
     with BaseTest {
 
-  private val activeMediator1 = MediatorId(UniqueIdentifier.tryCreate("mediator", "one"))
-  private val activeMediator2 = MediatorId(UniqueIdentifier.tryCreate("mediator", "two"))
-  private val passiveMediator3 = MediatorId(UniqueIdentifier.tryCreate("mediator", "three"))
+  private lazy implicit val testCloseContext: CloseContext = makeTestCloseContext(logger)
+  private lazy val activeMediator1 = MediatorId(UniqueIdentifier.tryCreate("mediator", "one"))
+  private lazy val activeMediator2 = MediatorId(UniqueIdentifier.tryCreate("mediator", "two"))
+  private lazy val passiveMediator3 = MediatorId(UniqueIdentifier.tryCreate("mediator", "three"))
 
-  private val mediatorGroupRecipient = MediatorGroupRecipient(MediatorGroupIndex.zero)
-  private val mediatorGroup: MediatorGroup = MediatorGroup(
+  private lazy val mediatorGroupRecipient = MediatorGroupRecipient(MediatorGroupIndex.zero)
+  private lazy val defaultMediatorGroup: MediatorGroup = MediatorGroup(
     index = mediatorGroupRecipient.group,
     active = Seq(activeMediator1, activeMediator2),
     passive = Seq(
@@ -68,9 +77,9 @@ class DefaultVerdictSenderTest
     ),
     threshold = PositiveInt.tryCreate(2),
   )
-  private val expectedMediatorGroupAggregationRule = Some(
+  private lazy val expectedMediatorGroupAggregationRule = Some(
     AggregationRule.activeMediators(
-      NonEmpty.mk(Seq, mediatorGroup.active(0), mediatorGroup.active.tail*),
+      NonEmpty.mk(Seq, defaultMediatorGroup.active(0), defaultMediatorGroup.active.tail*),
       NonNegativeInt.zero,
       PositiveInt.tryCreate(2),
       testedProtocolVersion,
@@ -164,12 +173,61 @@ class DefaultVerdictSenderTest
           aggregationRule shouldBe expectedMediatorGroupAggregationRule
         }
       }
+      "delay responses" in {
+        // In this test, we set the threshold to 1. As the requestId is deterministic, we know
+        // that mediator2 will be the "spare mediator" and as such should submit the response with
+        // a delay of 250ms (as per configuration).
+        val tester = TestHelper(
+          mediatorId = activeMediator2,
+          transactionMediatorGroup = mediatorGroupRecipient,
+          mediatorGroup = defaultMediatorGroup.copy(threshold = PositiveInt.one),
+        )
+        when(
+          tester.clock.scheduleAfterCancelledOnShutdown(
+            any[CantonTimestamp => Unit],
+            any[String],
+            any[Duration],
+          )(any[ExecutionContext], any[CloseContext])
+        )
+          .thenAnswer[CantonTimestamp => Unit, String, Duration] { case (_, _, duration) =>
+            duration.toMillis shouldBe 250
+            FutureUnlessShutdown.unit
+          }
+        tester.sendApproval() map { _ =>
+          tester.interceptedMessages should have size 1
+          verify(tester.clock, times(1)).scheduleAfterCancelledOnShutdown(
+            any[CantonTimestamp => Unit],
+            any[String],
+            any[Duration],
+          )(any[ExecutionContext], any[CloseContext])
+          val (_, aggregationRule) = tester.interceptedMessages.loneElement
+          if (testedProtocolVersion > ProtocolVersion.v34)
+            aggregationRule shouldBe expectedMediatorGroupAggregationRule
+          succeed
+        }
+      }
+      "not delay responses if response deadline is approaching" in {
+        // Very similar to above but here we assume that the response deadline is approaching,
+        // so we fire using all cannons.
+        val tester = TestHelper(
+          mediatorId = activeMediator2,
+          transactionMediatorGroup = mediatorGroupRecipient,
+          mediatorGroup = defaultMediatorGroup.copy(threshold = PositiveInt.one),
+          immediateBeforeDeadline =
+            NonNegativeLong.tryCreate(120L), // request / now is epoch, deadline is epoch + 120s
+        )
+        tester.sendApproval() map { _ =>
+          tester.interceptedMessages should have size 1
+        }
+      }
     }
   }
 
   private case class TestHelper(
       mediatorId: MediatorId,
       transactionMediatorGroup: MediatorGroupRecipient,
+      mediatorGroup: MediatorGroup = defaultMediatorGroup,
+      immediateBeforeDeadline: NonNegativeLong = NonNegativeLong.zero,
   ) {
 
     val psid: PhysicalSynchronizerId = SynchronizerId(
@@ -206,6 +264,8 @@ class DefaultVerdictSenderTest
     val requestIdTs = CantonTimestamp.Epoch
     val requestId = RequestId(requestIdTs)
     val decisionTime = requestIdTs.plusSeconds(120)
+    val clock = mock[Clock]
+    when(clock.now).thenReturn(requestIdTs.plusSeconds(1))
 
     val initialSynchronizerParameters = TestSynchronizerParameters.defaultDynamic
 
@@ -260,7 +320,7 @@ class DefaultVerdictSenderTest
       }
 
     private val sequencerClientSend: TestSequencerClientSend = new TestSequencerClientSend(
-      wallClock
+      clock
     )
 
     def interceptedMessages: Seq[(Batch[DefaultOpenEnvelope], Option[AggregationRule])] =
@@ -272,7 +332,15 @@ class DefaultVerdictSenderTest
       sequencerClientSend,
       synchronizerSyncCryptoApi,
       mediatorId,
-      BatchingConfig(),
+      VerdictSenderParameters(
+        enableDelay = true,
+        livenessMargin = NonNegativeInt.zero,
+        immediateBeforeDeadline =
+          config.NonNegativeFiniteDuration.ofSeconds(immediateBeforeDeadline.value),
+        initialDelay = config.NonNegativeFiniteDuration.ofMillis(250),
+        delay = config.NonNegativeFiniteDuration.ofMillis(100),
+        parallelism = PositiveInt.two,
+      ),
       loggerFactory,
     )
 
