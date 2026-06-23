@@ -245,6 +245,8 @@ object JsPackageService extends DocumentationEndpoints {
       .out(jsonBody[package_service.GetPackageStatusResponse])
       .protoRef(package_service.PackageServiceGrpc.METHOD_GET_PACKAGE_STATUS)
 
+  // GET with body: kept for backwards compatibility; do not add new endpoints with this pattern
+  @SuppressWarnings(Array("com.digitalasset.canton.GetEndpointWithBody"))
   private val listVettedPackagesEndpoint_deprecated =
     packageVetting.get
       .in(jsonBody[package_service.ListVettedPackagesRequest])

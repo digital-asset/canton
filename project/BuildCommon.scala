@@ -2057,6 +2057,10 @@ object BuildCommon {
         .settings(
           scalacOptions += "-Ytasty-reader",
           sharedCantonCommunitySettings,
+          // Prevent new GET endpoints with request bodies (bad HTTP practice)
+          Compile / compile / wartremoverErrors += Wart.custom(
+            "com.digitalasset.canton.GetEndpointWithBody"
+          ),
           Test / PB.targets := Seq(
             // build java codegen too
             PB.gens.java -> (Test / sourceManaged).value / "protobuf",

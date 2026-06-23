@@ -240,6 +240,8 @@ object JsStateService extends DocumentationEndpoints {
     )
     .inStreamListParamsAndDescription()
 
+  // GET with body: kept for backwards compatibility; do not add new endpoints with this pattern
+  @SuppressWarnings(Array("com.digitalasset.canton.GetEndpointWithBody"))
   val activeContractsPageEndpoint = state.get
     .in(sttp.tapir.stringToPath("active-contracts-page"))
     .in(jsonBody[state_service.GetActiveContractsPageRequest])
