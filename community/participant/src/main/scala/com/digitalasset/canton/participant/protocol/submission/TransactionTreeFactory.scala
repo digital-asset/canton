@@ -155,11 +155,10 @@ object TransactionTreeFactory {
     )
   }
 
-  final case class RolledBackEffect(context: RollbackContext, viewPosition: ViewPosition)
+  final case class RolledBackEffect(viewPosition: ViewPosition)
       extends TransactionTreeConversionError {
     override protected def pretty: Pretty[RolledBackEffect] = prettyOfClass(
-      param("context", _.context),
-      param("view position", _.viewPosition),
+      param("view position", _.viewPosition)
     )
   }
 

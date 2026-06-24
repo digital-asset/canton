@@ -14,7 +14,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -103,7 +102,7 @@ private[mediator] class Mediator(
     val state: MediatorState,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
-    parameters: CantonNodeParameters,
+    parameters: MediatorNodeParameters,
     clock: Clock,
     val metrics: MediatorMetrics,
     protected val loggerFactory: NamedLoggerFactory,
@@ -169,7 +168,13 @@ private[mediator] class Mediator(
     )
 
   private val verdictSender =
-    VerdictSender(sequencerClient, syncCrypto, mediatorId, parameters.batchingConfig, loggerFactory)
+    VerdictSender(
+      sequencerClient,
+      syncCrypto,
+      mediatorId,
+      parameters.verdictSenderParameters,
+      loggerFactory,
+    )
 
   private val processor = new ConfirmationRequestAndResponseProcessor(
     mediatorId,
@@ -349,7 +354,6 @@ private[mediator] class Mediator(
           verdict: MediatorVerdict.MediatorReject,
       )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
         val requestId = RequestId(timestamp)
-
         for {
           snapshot <- syncCrypto.awaitSnapshot(timestamp)
           synchronizerParameters <- snapshot.ipsSnapshot

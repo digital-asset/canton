@@ -8,11 +8,13 @@ lint:
     RPC_REQUEST_RESPONSE_UNIQUE:
       - com/daml/ledger/api/v2/command_service.proto
       - com/daml/ledger/api/v2/update_service.proto
+      - com/daml/ledger/api/v2/command_completion_service.proto
     RPC_REQUEST_STANDARD_NAME:
       - com/daml/ledger/api/v2/command_service.proto
       - com/daml/ledger/api/v2/update_service.proto
     RPC_RESPONSE_STANDARD_NAME:
       - com/daml/ledger/api/v2/update_service.proto
+      - com/daml/ledger/api/v2/command_completion_service.proto
     ENUM_ZERO_VALUE_SUFFIX:
       - com/daml/ledger/api/v2/package_service.proto
       - com/daml/ledger/api/v2/participant_offset.proto

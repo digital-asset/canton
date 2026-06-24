@@ -14,7 +14,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimit
 import com.digitalasset.canton.topology.{GeneratorsTopology, ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.canton.{GeneratorsLf, LfPartyId}
+import com.digitalasset.canton.{GeneratorsLf, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
@@ -232,10 +232,7 @@ final class GeneratorsProtocol(
       for {
         maintainers <- nonEmptySetGen[LfPartyId]
         key <- Arbitrary.arbitrary[LfGlobalKey]
-      } yield ExampleTransactionFactory.globalKeyWithMaintainers(
-        key,
-        maintainers,
-      )
+      } yield LfVersioned(LfSerializationVersion.V2, LfGlobalKeyWithMaintainers(key, maintainers))
     )
 
   val byKeyArb: Arbitrary[Boolean] =
@@ -280,7 +277,21 @@ final class GeneratorsProtocol(
   implicit val requestIdArb: Arbitrary[RequestId] = genArbitrary
 
   implicit val rollbackContextArb: Arbitrary[RollbackContext] =
-    Arbitrary(boundedListGen[PositiveInt].map(RollbackContext.apply))
+    Arbitrary[RollbackContext](
+      if (protocolVersion >= ProtocolVersion.v36) {
+        Gen.oneOf(true, false).map(inRollback => NoPathRollbackContext(inRollback))
+      } else {
+        boundedListGen[PositiveInt].map(l =>
+          PathRollbackContext(l.toVector, PathRollbackContext.firstChild)
+        )
+      }
+    )
+
+  val createdContractRolledBackArb: Arbitrary[Boolean] =
+    Arbitrary(
+      if (protocolVersion >= ProtocolVersion.v36) Gen.const(false)
+      else Gen.oneOf(true, false)
+    )
 
   implicit val createdContractArb: Arbitrary[CreatedContract] = Arbitrary(
     for {
@@ -288,7 +299,7 @@ final class GeneratorsProtocol(
         genTime = Arbitrary.arbitrary[CreationTime.CreatedAt]
       ).arbitrary
       consumedInCore <- Gen.oneOf(true, false)
-      rolledBack <- Gen.oneOf(true, false)
+      rolledBack <- createdContractRolledBackArb.arbitrary
     } yield CreatedContract.create(contract, consumedInCore, rolledBack).value
   )
 

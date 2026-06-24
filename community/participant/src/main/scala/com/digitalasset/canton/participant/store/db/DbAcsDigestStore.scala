@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   HashedDigest,
   InternedParticipantId,
@@ -67,21 +67,21 @@ class DbAcsDigestStore(
       createJournalImplicitsF = ParticipantJournalImplicits(_),
     )
 
-  override def insertCheckpointTime(recordTime: RecordTime)(implicit
+  override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val insertCheckpoint = storage.profile match {
       case _: DbStorage.Profile.H2 =>
-        sqlu"""merge into par_acs_running_digests_checkpoint (synchronizer_idx, ts, tie_breaker)
-               values ($synchronizerIdx, ${recordTime.timestamp}, ${recordTime.tieBreaker})"""
+        sqlu"""merge into par_acs_running_digests_checkpoint (synchronizer_idx, change_offset, ts)
+               values ($synchronizerIdx, $offset, $timestamp)"""
       case _: DbStorage.Profile.Postgres =>
-        sqlu"""insert into par_acs_running_digests_checkpoint(synchronizer_idx, ts, tie_breaker)
-               values  ($synchronizerIdx, ${recordTime.timestamp}, ${recordTime.tieBreaker})
-               on conflict (synchronizer_idx, ts, tie_breaker) do nothing
+        sqlu"""insert into par_acs_running_digests_checkpoint(synchronizer_idx, change_offset, ts)
+               values  ($synchronizerIdx, $offset, $timestamp)
+               on conflict (synchronizer_idx, change_offset) do nothing
           """
     }
 
-    logger.trace(s"insertCheckpointTime at $recordTime: $insertCheckpoint")
+    logger.trace(s"insertCheckpointTime at $offset: $insertCheckpoint")
 
     storage
       .update(
@@ -95,15 +95,15 @@ class DbAcsDigestStore(
       )
   }
 
-  override def latestCheckpointUpTo(toInclusive: RecordTime)(implicit
+  override def latestCheckpointUpTo(toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[RecordTime]] = {
+  ): FutureUnlessShutdown[Option[Checkpoint]] = {
     val queryLatestCheckpoint =
       (sql"""
-        select ts, tie_breaker from par_acs_running_digests_checkpoint where synchronizer_idx = $synchronizerIdx
-          and (ts < ${toInclusive.timestamp} or (ts = ${toInclusive.timestamp} and tie_breaker <= ${toInclusive.tieBreaker}))
-        order by ts desc, tie_breaker desc
-        """ ++ storage.limitSql(1)).as[RecordTime].headOption
+        select change_offset, ts from par_acs_running_digests_checkpoint where
+          synchronizer_idx = $synchronizerIdx and change_offset <= $toInclusive
+        order by change_offset desc
+        """ ++ storage.limitSql(1)).as[Checkpoint].headOption
 
     logger.trace(s"querying latest checkpoint up to $toInclusive")
 
@@ -114,15 +114,16 @@ class DbAcsDigestStore(
       )
   }
 
-  override def firstCheckpointAfter(fromExclusive: RecordTime)(implicit
+  override def firstCheckpointAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[RecordTime]] = {
+  ): FutureUnlessShutdown[Option[Checkpoint]] = {
     val queryFirstCheckpointAfter =
       (sql"""
-        select ts, tie_breaker from par_acs_running_digests_checkpoint where synchronizer_idx = $synchronizerIdx
-          and (ts > ${fromExclusive.timestamp} or (ts = ${fromExclusive.timestamp} and tie_breaker > ${fromExclusive.tieBreaker}))
-        order by ts, tie_breaker
-        """ ++ storage.limitSql(1)).as[RecordTime].headOption
+        select change_offset, ts from par_acs_running_digests_checkpoint where
+          synchronizer_idx = $synchronizerIdx
+          and change_offset > $fromExclusive
+        order by change_offset
+        """ ++ storage.limitSql(1)).as[Checkpoint].headOption
 
     logger.trace(s"querying first checkpoint after $fromExclusive")
 
@@ -133,13 +134,13 @@ class DbAcsDigestStore(
       )
   }
 
-  override protected def deleteCheckpointsAfter(fromExclusive: RecordTime)(implicit
+  override protected def deleteCheckpointsAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val deleteFromCheckpointJournal = sqlu"""delete from par_acs_running_digests_checkpoint
           where synchronizer_idx = $synchronizerIdx
-            and (ts > ${fromExclusive.timestamp}
-                 or (ts = ${fromExclusive.timestamp} and tie_breaker > ${fromExclusive.tieBreaker}))"""
+            and change_offset > $fromExclusive
+    """
 
     logger.trace(s"delete from checkpoint journal, starting from $fromExclusive (exclusive)")
 
@@ -155,13 +156,13 @@ class DbAcsDigestStore(
       }
   }
 
-  override protected def deleteCheckpointsUpTo(toExclusive: RecordTime)(implicit
+  override protected def deleteCheckpointsUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val deleteUpToCheckpointJournal = sqlu"""delete from par_acs_running_digests_checkpoint
           where synchronizer_idx = $synchronizerIdx
-            and (ts < ${toExclusive.timestamp}
-                 or (ts = ${toExclusive.timestamp} and tie_breaker < ${toExclusive.tieBreaker}))"""
+            and change_offset < $toExclusive
+    """
 
     logger.trace(s"delete from checkpoint journal, up to $toExclusive (exclusive)...")
 

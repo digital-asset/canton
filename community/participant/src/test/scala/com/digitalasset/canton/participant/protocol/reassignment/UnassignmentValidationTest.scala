@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDat
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
   ParsedReassignmentRequest,
   ReassignmentProcessorError,
+  UnknownPhysicalSynchronizer,
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
   ContractValidationError,
@@ -153,12 +154,6 @@ class UnassignmentValidationTest
       val validation = performValidation().futureValueUS.value
 
       validation.isSuccessful.futureValueUS shouldBe true
-    }
-
-    "report non-validatable when cannot fetch target topology" in {
-      val validation = performValidation(targetTopology = None).futureValueUS.value
-
-      validation.reassigningParticipantValidationResult.isTargetTsValidatable shouldBe false
     }
 
     def testContractValidationAgainstRepresentativePackage(
@@ -465,16 +460,19 @@ class UnassignmentValidationTest
 
     val getTopologyAtTs = new GetTopologyAtTimestamp {
 
-      override def maybeAwaitTopologySnapshot(
-          targetPsid: Target[PhysicalSynchronizerId],
-          requestedTimestamp: Target[CantonTimestamp],
+      override def getTargetApproximateSnapshot(
+          targetPsid: Target[PhysicalSynchronizerId]
       )(implicit
           traceContext: TraceContext
       ): EitherT[
         FutureUnlessShutdown,
         ReassignmentProcessorError,
-        Option[Target[TopologySnapshot]],
-      ] = EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](targetTopology)
+        Target[TopologySnapshot],
+      ] = EitherT.fromEither[FutureUnlessShutdown](
+        targetTopology.toRight[ReassignmentProcessorError](
+          UnknownPhysicalSynchronizer(targetPsid.unwrap, "test: no target topology")
+        )
+      )
 
     }
 

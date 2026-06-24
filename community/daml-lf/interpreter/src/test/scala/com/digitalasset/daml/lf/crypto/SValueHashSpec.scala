@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package crypto
 
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Numeric, Ref, Time}
-import com.digitalasset.daml.lf.speedy.{SValue => SV}
+import com.digitalasset.daml.lf.speedy.SValue as SV
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
@@ -17,11 +17,7 @@ import scala.io.Source
 import scala.language.implicitConversions
 import scala.util.Using
 
-class SValueHashSpec
-    extends AnyWordSpec
-    with Matchers
-    with TableDrivenPropertyChecks
-    with Inside {
+class SValueHashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks with Inside {
 
   private val packageId0 = Ref.PackageId.assertFromString("package")
   private val packageId1 = Ref.PackageId.assertFromString("package-1")
@@ -108,8 +104,8 @@ class SValueHashSpec
   private val expectedComplexRecordKeyHash =
     "71c28060678dcc5b193f248769672af758205c0520b12d69c680edbc9d5d0ea6"
 
-  /** A list of values whose expected hashes are recorded in expected-stability-values-contract-hashes.txt and
-    * expected-stability-values-key-hashes.txt
+  /** A list of values whose expected hashes are recorded in
+    * expected-stability-values-contract-hashes.txt and expected-stability-values-key-hashes.txt
     */
   private val stabilityValues: List[SV] = {
     val pkgId = Ref.PackageId.assertFromString("pkgId")
@@ -253,7 +249,9 @@ class SValueHashSpec
     )
   }
 
-  /** A list of values whose expected hashes are recorded in expected-stability-values-key-hashes.txt */
+  /** A list of values whose expected hashes are recorded in
+    * expected-stability-values-key-hashes.txt
+    */
   private val contractIdValues: List[SV] =
     List(
       "0007e7b5534931dfca8e1b485c105bae4e10808bd13ddc8e897f258015f9d921c5",
@@ -329,7 +327,7 @@ class SValueHashSpec
   "key hasher" should {
     "reject contract IDs" in {
       forEvery(nestingCases) { nest =>
-        forEvery(Table("contract id", contractIdValues: _*)) { value =>
+        forEvery(Table("contract id", contractIdValues*)) { value =>
           inside(hashContractKey(packageName0, defQualName("module", "name"), nest(value))) {
             case Left(error) =>
               error shouldBe a[Hash.HashingError.ForbiddenContractId]

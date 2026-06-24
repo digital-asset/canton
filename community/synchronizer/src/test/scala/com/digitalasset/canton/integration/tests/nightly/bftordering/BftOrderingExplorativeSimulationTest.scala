@@ -40,7 +40,14 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         "but it cannot be verified in the currently known dissemination topology"
       )
       logEntry.loggerName should include("AvailabilityModule")
-    }
+    },
+    // We might get messages about waiting for new topology after epoch completion, don't count these as errors.
+    { logEntry =>
+      logEntry.message should include(
+        "Waiting for new topology after epoch completion"
+      )
+      logEntry.loggerName should include("IssConsensusModule")
+    },
   )
 
   private val zeroProbability: Probability = Probability(0)

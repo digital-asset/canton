@@ -829,7 +829,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         synchronizerOwners = distinctSequencers,
         synchronizerThreshold = PositiveInt.tryCreate(distinctSequencers.length),
         staticSynchronizerParameters =
-          data.StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+          data.StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         mediatorThreshold = PositiveInt.tryCreate(distinctMediators.size),
       ).logical
     }
@@ -847,7 +847,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         mediators: Seq[MediatorReference],
         synchronizerOwners: Seq[InstanceReference],
         synchronizerThreshold: PositiveInt,
-        staticSynchronizerParameters: data.StaticSynchronizerParameters,
+        staticSynchronizerParameters: data.StaticSynchronizerParameters =
+          data.StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         mediatorRequestAmplification: SubmissionRequestAmplification =
           SubmissionRequestAmplification.NoAmplification,
         mediatorThreshold: PositiveInt = PositiveInt.one,

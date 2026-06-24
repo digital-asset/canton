@@ -271,6 +271,7 @@ class InMemoryFanoutBuffer(
       case topologyTx: TransactionLogUpdate.TopologyTransactionEffective =>
         Some(topologyTx.updateId -> topologyTx)
       case _: TransactionLogUpdate.TransactionRejected => None
+      case _: TransactionLogUpdate.ReceivedAcsCommitment => None
     }
 
 }

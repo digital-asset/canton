@@ -66,6 +66,9 @@ final case class UnassignmentMediatorMessage(
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.UnassignmentMediatorMessage(toProtoV30)
 
+  override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+    v32.EnvelopeContent.SomeEnvelopeContent.UnassignmentMediatorMessage(toProtoV30)
+
   override def rootHash: RootHash = tree.rootHash
 
   override def viewType: ViewType = ViewType.UnassignmentViewType

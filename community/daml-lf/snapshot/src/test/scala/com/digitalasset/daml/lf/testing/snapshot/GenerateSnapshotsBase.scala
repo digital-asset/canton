@@ -146,11 +146,12 @@ abstract class GenerateSnapshotsBase
       exitCode match {
         case 1 =>
           // Check that all daml script test failures are due to GetTime calls and duplicate party allocation failures
+          val failureLines = stdout
+            .toString()
+            .split("\n")
+            .filter(_.contains("FAILURE"))
           assert(
-            stdout
-              .toString()
-              .split("\n")
-              .filter(_.contains("FAILURE"))
+            failureLines
               .forall { line =>
                 line.contains(
                   "UNIMPLEMENTED: Method not found: com.daml.ledger.api.v2.testing.TimeService/GetTime"
@@ -158,6 +159,9 @@ abstract class GenerateSnapshotsBase
                 || line.contains("Party already exists")
               },
             s"dpm script failed with exit code 1: \n" + stdout.toString(),
+          )
+          println(
+            s"Daml-script in dar file: $scriptDarPath had the following failures:\n ${failureLines.map("- " + _).mkString("\n")}"
           )
         case 0 =>
         // do nothing

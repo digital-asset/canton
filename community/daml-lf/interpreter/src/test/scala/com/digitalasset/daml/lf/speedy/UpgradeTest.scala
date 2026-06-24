@@ -8,20 +8,22 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{Identifier, TypeConId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error => IE, InterpretationConfig}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
-import com.digitalasset.daml.lf.testing.parser.Implicits._
+import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine}
-import com.digitalasset.daml.lf.transaction.GlobalKeyWithMaintainers
 import com.digitalasset.daml.lf.transaction.SerializationVersion.VDev
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.daml.lf.transaction.{
+  GlobalKeyWithMaintainers,
+  NextGenContractStateMachine as ContractStateMachine,
+}
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -483,7 +485,7 @@ class UpgradeTest
       MachineLogger(),
       interpretationConfig = InterpretationConfig.Default.copy(
         contractStateMode = ContractStateMachine.Mode.NUCK
-      )
+      ),
     )
 
     val contract = TransactionBuilder
@@ -527,16 +529,16 @@ class UpgradeTest
       Set(alice, bob),
       MachineLogger(),
       packageResolution = packageResolution,
-      interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+      interpretationConfig =
+        InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
     )
   }
 
-  def makeRecord(fields: Value*): Value = {
+  def makeRecord(fields: Value*): Value =
     ValueRecord(
       None,
-      fields.map { v => (None, v) }.to(ImmArray),
+      fields.map(v => (None, v)).to(ImmArray),
     )
-  }
 
   val v1_base =
     makeRecord(
@@ -733,7 +735,7 @@ class UpgradeTest
           globalContractKeyWithMaintainers = Some(key(i"'-pkg2-':M:T")),
           hashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
         ) shouldBe a[
-          Right[_, _]
+          Right[?, ?]
         ]
       }
 
@@ -1329,7 +1331,7 @@ class UpgradeTest
           globalContractKeyWithMaintainers = Some(v1_key),
           hashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
         )
-        res shouldBe a[Right[_, _]]
+        res shouldBe a[Right[?, ?]]
       }
     }
 
@@ -1376,7 +1378,7 @@ class UpgradeTest
           cidInCreateArgPkgId2 -> cidInCreateArgPkg2,
         ),
       )
-      res shouldBe a[Right[_, _]]
+      res shouldBe a[Right[?, ?]]
     }
 
     "be able to fetch by interface a locally created contract with a contract ID in its create argument using different versions" in {
@@ -1405,7 +1407,7 @@ class UpgradeTest
           cidInCreateArgPkg2.pkgName -> cidInCreateArgPkgId2
         ),
       )
-      res shouldBe a[Right[_, _]]
+      res shouldBe a[Right[?, ?]]
     }
 
     "be able to fetch by key a locally created contract using different versions" in {
@@ -1571,8 +1573,18 @@ class UpgradeTest
             expected shouldBe TypeConId.assertFromString("-pkg2-:M:T")
             actual shouldBe TypeConId.assertFromString("-pkg1-:M:T")
         },
-        logEntry => assert(logEntry.message.contains("unsafeFromInterface is deprecated, use fromInterface instead.")),
-        logEntry => assert(logEntry.message.contains("unsafeFromInterface is deprecated, use fromInterface instead.")),
+        logEntry =>
+          assert(
+            logEntry.message.contains(
+              "unsafeFromInterface is deprecated, use fromInterface instead."
+            )
+          ),
+        logEntry =>
+          assert(
+            logEntry.message.contains(
+              "unsafeFromInterface is deprecated, use fromInterface instead."
+            )
+          ),
       )
     }
 
@@ -1614,7 +1626,7 @@ class UpgradeTest
           globalContractKeyWithMaintainers = Some(v1_key),
           hashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
         )
-        res shouldBe a[Right[_, _]]
+        res shouldBe a[Right[?, ?]]
       }
     }
   }

@@ -107,17 +107,13 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
 }
-import com.google.rpc.status.Status
-import io.grpc.Status.Code.FAILED_PRECONDITION
 import monocle.macros.syntax.lens.*
 import org.scalatest
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.Instant
 import java.util.UUID
 import scala.annotation.nowarn
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
 
 @nowarn("msg=match may not be exhaustive")
@@ -298,7 +294,6 @@ final class UnassignmentProcessingStepsTest
   private def createReassignmentCoordination(
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
       approximateTimestamp: CantonTimestamp = CantonTimestamp.Epoch,
-      targetTimestampForwardTolerance: FiniteDuration = 30.seconds,
   ) =
     TestReassignmentCoordination(
       synchronizers = Set(Target(sourceSynchronizer.unwrap), targetSynchronizer),
@@ -307,7 +302,6 @@ final class UnassignmentProcessingStepsTest
       awaitTimestampOverride = Some(None),
       loggerFactory = loggerFactory,
       packages = Seq(ExampleContractFactory.packageId),
-      targetTimestampForwardTolerance = targetTimestampForwardTolerance,
     )(directExecutionContext)
 
   private lazy val coordination: ReassignmentCoordination =
@@ -317,10 +311,11 @@ final class UnassignmentProcessingStepsTest
       reassignmentCoordination: ReassignmentCoordination = coordination,
       cryptoClient: SynchronizerCryptoClient = cryptoClient,
       contractValidator: ContractValidator = ContractValidator.AllowAll,
+      participantId: ParticipantId = submittingParticipant,
   ) =
     new UnassignmentProcessingSteps(
       sourceSynchronizer,
-      submittingParticipant,
+      participantId,
       reassignmentCoordination,
       cryptoClient,
       seedGenerator,
@@ -368,6 +363,7 @@ final class UnassignmentProcessingStepsTest
       view: FullUnassignmentTree,
       recipients: Recipients,
       signatureO: Option[Signature],
+      snapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
   ): ParsedReassignmentRequest[FullUnassignmentTree] = ParsedReassignmentRequest(
     RequestCounter(1),
     CantonTimestamp.Epoch,
@@ -380,8 +376,8 @@ final class UnassignmentProcessingStepsTest
     areContractsUnknown = false,
     Seq.empty,
     sourceMediator,
-    cryptoSnapshot,
-    cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
+    snapshot,
+    snapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
     reassignmentId,
     NonNegativeLong.tryCreate(789),
   )
@@ -903,11 +899,13 @@ final class UnassignmentProcessingStepsTest
     def constructPendingDataAndResponseWith(
         unassignmentProcessingSteps: UnassignmentProcessingSteps,
         requestTargetTs: Target[CantonTimestamp] = targetTs,
+        reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant),
+        sourceSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
     ) = {
       val state = mkState
       val unassignmentRequest = UnassignmentRequest(
         submitterMetadata = submitterMetadata(party1),
-        reassigningParticipants = Set(submittingParticipant),
+        reassigningParticipants = reassigningParticipants,
         ContractsReassignmentBatch(
           contract,
           sourceValidationPackageId,
@@ -926,7 +924,7 @@ final class UnassignmentProcessingStepsTest
         .failOnShutdown
         .futureValue
 
-      val signature = cryptoSnapshot
+      val signature = sourceSnapshot
         .sign(
           fullUnassignmentTree.rootHash.unwrap,
           SigningKeyUsage.ProtocolOnly,
@@ -943,6 +941,7 @@ final class UnassignmentProcessingStepsTest
             fullUnassignmentTree,
             Recipients.cc(submittingParticipant),
             signatureO = signature,
+            snapshot = sourceSnapshot,
           ),
           state.reassignmentCache,
           FutureUnlessShutdown.pure(
@@ -972,7 +971,7 @@ final class UnassignmentProcessingStepsTest
     }
 
     // TODO(i13201) This should ideally be covered in integration tests as well
-    "prevent the contract being reassigned is not vetted on the target synchronizer" in {
+    "abstain when the contract package is not vetted on the target synchronizer" in {
       val unassignmentProcessingStepsWithoutPackages = {
         val f = createCryptoFactory(packages = Seq.empty)
         val s = createCryptoClient(f).currentSnapshotApproximation.futureValueUS
@@ -980,51 +979,63 @@ final class UnassignmentProcessingStepsTest
         createUnassignmentProcessingSteps(c)
       }
 
-      constructPendingDataAndResponseWith(
+      val result = constructPendingDataAndResponseWith(
         unassignmentProcessingStepsWithoutPackages
-      ).value.pendingData.unassignmentValidationResult.reassigningParticipantValidationResult.errors.head shouldBe a[
+      ).value
+
+      result.pendingData.unassignmentValidationResult.reassigningParticipantValidationResult.errors.head shouldBe a[
         PackageIdUnknownOrUnvetted
       ]
+
+      val responses =
+        result.confirmationResponsesF.value.futureValueUS.value.value._1.responses
+      responses should matchPattern { case Seq(ConfirmationResponse(_, _: LocalAbstain, _)) =>
+      }
     }
 
-    "with a requested target timestamp" should {
-      val localTs = CantonTimestamp.assertFromInstant(Instant.parse("2020-01-01T00:00:00Z"))
-      val forwardTolerance = 2.seconds
+    "reject when a common validation fails" in {
+      // package not vetted on target  -> would yield an abstain
+      // failing contract authentication -> common reject; the reject must win
+      val steps = {
+        val f = createCryptoFactory(packages = Seq.empty)
+        val s = createCryptoClient(f).currentSnapshotApproximation.futureValueUS
+        val c = createReassignmentCoordination(s)
+        val failingValidator =
+          new TestValidator(Map((contractId, sourceValidationPackageId.unwrap) -> "bad-contract"))
+        createUnassignmentProcessingSteps(c, contractValidator = failingValidator)
+      }
 
-      def getConfirmationResponses(requestTargetTs: CantonTimestamp): Seq[ConfirmationResponse] =
-        constructPendingDataAndResponseWith(
-          createUnassignmentProcessingSteps(
-            createReassignmentCoordination(
-              approximateTimestamp = localTs,
-              targetTimestampForwardTolerance = forwardTolerance,
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          val responses =
+            constructPendingDataAndResponseWith(
+              steps
+            ).value.confirmationResponsesF.value.futureValueUS.value.value._1.responses
+          responses should matchPattern { case Seq(ConfirmationResponse(_, _: LocalReject, _)) =>
+          }
+        },
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.ModelConformance),
+              "model conformance failure",
             )
-          ),
-          requestTargetTs = Target(requestTargetTs),
-        ).value.confirmationResponsesF.value.futureValueUS.value.value._1.responses
+          )
+        ),
+      )
+    }
 
-      "approve when less than forward-tolerance ahead of local timestamp" in {
-        getConfirmationResponses(
-          requestTargetTs = localTs.add(forwardTolerance).add(-1.millisecond)
-        ) should matchPattern { case Seq(ConfirmationResponse(_, _: LocalApprove, _)) =>
-        }
-      }
-      "approve when exactly forward-tolerance ahead of local timestamp" in {
-        getConfirmationResponses(
-          requestTargetTs = localTs.add(forwardTolerance)
-        ) should matchPattern { case Seq(ConfirmationResponse(_, _: LocalApprove, _)) =>
-        }
-      }
-      "abstain when more than forward-tolerance ahead of local timestamp" in {
-        getConfirmationResponses(
-          requestTargetTs = localTs.add(forwardTolerance).add(1.millisecond)
-        ) should matchPattern {
-          case Seq(ConfirmationResponse(_, LocalAbstain(Status(code, msg, _, _)), _))
-              if code == FAILED_PRECONDITION.value && msg.contains(
-                s"Non-validatable target timestamp when processing unassignment $reassignmentId"
-              ) =>
-        }
+    "validate at the local target timestamp" in {
+      // validation uses the local target timestamp and ignores the submitter target timestamp, so it approves.
+      val responses =
+        constructPendingDataAndResponseWith(
+          unassignmentProcessingSteps,
+          requestTargetTs = Target(CantonTimestamp.Epoch.plusSeconds(365 * 24 * 3600L)),
+        ).value.confirmationResponsesF.value.futureValueUS.value.value._1.responses
+      responses should matchPattern { case Seq(ConfirmationResponse(_, _: LocalApprove, _)) =>
       }
     }
+
   }
 
   "get commit set and contracts to be stored and event" should {

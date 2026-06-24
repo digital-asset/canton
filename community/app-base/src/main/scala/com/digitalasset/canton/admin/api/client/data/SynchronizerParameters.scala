@@ -97,6 +97,10 @@ object StaticSynchronizerParameters {
     StaticSynchronizerParameters(internal)
   }
 
+  @deprecated(
+    "Use StaticSynchronizerParameters.defaults(CryptoConfig(), ...) instead",
+    since = "3.6.0",
+  )
   def defaultsWithoutKMS(
       protocolVersion: ProtocolVersion,
       serial: NonNegativeInt = NonNegativeInt.zero,
@@ -123,6 +127,11 @@ object StaticSynchronizerParameters {
     StaticSynchronizerParameters(internal)
   }
 
+  def defaults(
+      protocolVersion: ProtocolVersion
+  ): StaticSynchronizerParameters =
+    defaults(CryptoConfig(), protocolVersion)
+
   private[canton] def initialValues(
       clock: Clock,
       protocolVersion: ProtocolVersion,
@@ -133,7 +142,7 @@ object StaticSynchronizerParameters {
         StaticSynchronizerParametersInternal.defaultTopologyChangeDelayNonStandardClock
       case _ => StaticSynchronizerParametersInternal.defaultTopologyChangeDelay
     }
-    defaultsWithoutKMS(protocolVersion, serial, topologyChangeDelay.toConfig)
+    defaults(CryptoConfig(), protocolVersion, serial, topologyChangeDelay.toConfig)
   }
 
   def apply(

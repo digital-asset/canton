@@ -16,7 +16,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.*
@@ -49,6 +49,10 @@ final case class LsuSequencingTestMessage(
   override protected[messages] def toProtoSomeEnvelopeContentV31
       : v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.LsuSequencingTestMessage(toProtoV30)
+
+  override protected[messages] def toProtoSomeEnvelopeContentV32
+      : v32.EnvelopeContent.SomeEnvelopeContent =
+    v32.EnvelopeContent.SomeEnvelopeContent.LsuSequencingTestMessage(toProtoV30)
 
   def toProtoV30: v30.LsuSequencingTestMessage =
     v30.LsuSequencingTestMessage(content.toByteString, signature.toProtoV30.some)

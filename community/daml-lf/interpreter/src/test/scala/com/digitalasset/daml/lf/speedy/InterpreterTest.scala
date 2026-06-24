@@ -5,21 +5,26 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy.SExpr.LfDefRef
-import com.digitalasset.daml.lf.speedy.SResult._
+import com.digitalasset.daml.lf.speedy.SResult.*
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 
 import scala.language.implicitConversions
 
-class InterpreterTest extends AnyWordSpec with Inside with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
+class InterpreterTest
+    extends AnyWordSpec
+    with Inside
+    with Matchers
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   private implicit def id(s: String): Ref.Name = Name.assertFromString(s)
 

@@ -12,15 +12,15 @@ import com.digitalasset.daml.lf.crypto.HashUtils.HashTracer.StringHashTracer.{
   inlineValue,
 }
 import com.digitalasset.daml.lf.data.Bytes
+
 import java.nio.ByteBuffer
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object HashUtils {
 
   private[crypto] def formatByteToHexString(byte: Byte): String = String.format("%02X", byte)
 
-  /** Interface to provide observability in the encoding algorithm.
-    * Use for debugging.
+  /** Interface to provide observability in the encoding algorithm. Use for debugging.
     */
   trait HashTracer {
     def trace(bytes: ByteBuffer, context: String): Unit
@@ -52,7 +52,8 @@ object HashUtils {
     }
 
     /** Hash tracer that accumulated encoded values into a string.
-      * @param traceSubNodes whether sub nodes should be traced as well (defaults to false)
+      * @param traceSubNodes
+      *   whether sub nodes should be traced as well (defaults to false)
       */
     case class StringHashTracer private (
         traceSubNodes: Boolean,
@@ -65,18 +66,15 @@ object HashUtils {
         string.indent(indent).replaceAll("\n", lineSeparator)
 
       // We indent the encoding based on the depth, this allows to visually represented nested nodes
-      private def appendLine(string: String): Unit = {
+      private def appendLine(string: String): Unit =
         discard(sb.append(crossPlatformIndent(string, level * 2))) // indent with 2 whitespaces
-      }
 
-      override def trace(b: Byte, context: String): Unit = {
+      override def trace(b: Byte, context: String): Unit =
         appendLine(inlineValue(Bytes.fromByteArray(Array(b)).toHexString) + inlineContext(context))
-      }
 
-      override def trace(b: Array[Byte], context: String) = {
+      override def trace(b: Array[Byte], context: String) =
         appendLine(inlineValue(Bytes.fromByteArray(b).toHexString) + inlineContext(context))
-      }
-      override def trace(byteBuffer: ByteBuffer, context: String): Unit = {
+      override def trace(byteBuffer: ByteBuffer, context: String): Unit =
         if (byteBuffer.hasArray) {
           trace(byteBuffer.array(), context)
         } else {
@@ -85,12 +83,12 @@ object HashUtils {
           trace(array, context)
           discard(byteBuffer.rewind())
         }
-      }
 
-      /** Returns a byte array of the encoding performed through this HashTracer.
-        * traceSubNodes does not affect the result of this function, only encoded bytes at the first level are returned.
+      /** Returns a byte array of the encoding performed through this HashTracer. traceSubNodes does
+        * not affect the result of this function, only encoded bytes at the first level are
+        * returned.
         */
-      def asByteArray: Array[Byte] = {
+      def asByteArray: Array[Byte] =
         result
           .lines()
           .iterator()
@@ -103,11 +101,9 @@ object HashUtils {
           .map(Bytes.assertFromString)
           .toArray
           .flatMap(_.toByteArray)
-      }
 
-      def context(context: String): Unit = {
+      def context(context: String): Unit =
         appendLine(context)
-      }
 
       override lazy val subNodeTracer: HashTracer =
         if (traceSubNodes) this.copy(level = level + 1) else HashTracer.NoOp

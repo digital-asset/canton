@@ -39,7 +39,7 @@ import com.digitalasset.canton.networking.grpc.{
   GrpcError,
   GrpcManagedChannel,
 }
-import com.digitalasset.canton.time.Clock.SystemClockRunningBackwards
+import com.digitalasset.canton.time.Clock.{ClockHandle, SystemClockRunningBackwards}
 import com.digitalasset.canton.topology.admin.v30.{
   CurrentTimeRequest,
   IdentityInitializationServiceGrpc,
@@ -83,25 +83,6 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     case _ => false
   }
   protected def warnIfClockRunsBackwards: Boolean = false
-
-  /** Handle for cancelling a scheduled task. */
-  sealed trait ClockHandle[-A] {
-    def cancel(outcome: UnlessShutdown[A]): Unit
-  }
-
-  /** Handle for cancelling a scheduled task.
-    *
-    * Contravariant in A (-A) because the type parameter only appears in contravariant position (as
-    * input to cancel()). This allows ClockHandle[Any] to be a supertype of all ClockHandle[A],
-    * enabling Dummy (which handles Any) to be used universally without casting.
-    */
-  private object ClockHandle {
-
-    /** Dummy handle for immediately-executed tasks that don't need cancellation */
-    private[Clock] case object Dummy extends ClockHandle[Any] {
-      override def cancel(outcome: UnlessShutdown[Any]): Unit = ()
-    }
-  }
 
   protected class Queued[A](val action: CantonTimestamp => A, val timestamp: CantonTimestamp)
       extends ClockHandle[A] {
@@ -392,6 +373,25 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
 }
 
 object Clock extends ClockErrorGroup {
+
+  /** Handle for cancelling a scheduled task. */
+  sealed trait ClockHandle[-A] {
+    def cancel(outcome: UnlessShutdown[A]): Unit
+  }
+
+  /** Handle for cancelling a scheduled task.
+    *
+    * Contravariant in A (-A) because the type parameter only appears in contravariant position (as
+    * input to cancel()). This allows ClockHandle[Any] to be a supertype of all ClockHandle[A],
+    * enabling Dummy (which handles Any) to be used universally without casting.
+    */
+  object ClockHandle {
+
+    /** Dummy handle for immediately-executed tasks that don't need cancellation */
+    case object Dummy extends ClockHandle[Any] {
+      override def cancel(outcome: UnlessShutdown[Any]): Unit = ()
+    }
+  }
 
   @Explanation("""This error is emitted if the unique time generation detects that the host system clock is lagging behind
       |the unique time source by more than a second. This can occur if the system processes more than 2e6 events per second (unlikely)

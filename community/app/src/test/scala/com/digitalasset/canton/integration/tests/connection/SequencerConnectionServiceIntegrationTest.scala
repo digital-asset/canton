@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -61,8 +62,11 @@ sealed trait SequencerConnectionServiceIntegrationTest
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
-                mediator1 -> (Seq(sequencer1, sequencer2),
-                /* trust threshold */ PositiveInt.one, /* liveness margin */ NonNegativeInt.zero)
+                mediator1 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.one,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               )
             ),
           )

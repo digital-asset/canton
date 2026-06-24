@@ -231,7 +231,9 @@ class GrpcSynchronizerRegistry(
         .connectedSynchronizerMetrics(storedConfig.config.synchronizerAlias)
         .sequencerClient
         .connectionPool,
-      metricsContext = MetricsContext.Empty,
+      metricsContext = storedConfig.configuredPsid.toOption
+        .map(psid => MetricsContext("psid" -> psid.toProtoPrimitive))
+        .getOrElse(MetricsContext.Empty),
       futureSupervisor = futureSupervisor,
       timeouts = timeouts,
       loggerFactory = synchronizerLoggerFactory,

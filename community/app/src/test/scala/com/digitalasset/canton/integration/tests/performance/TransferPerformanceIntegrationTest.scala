@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.performance
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
@@ -28,7 +29,6 @@ import com.digitalasset.canton.performance.{
   PerformanceRunnerConfig,
   RateSettings,
 }
-import com.digitalasset.canton.{BaseTest, config}
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.*
@@ -48,10 +48,6 @@ class TransferPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
           .replace(NonNegativeDuration.tryFromDuration(1.minute))
           .focus(_.parameters.enableAdditionalConsistencyChecks)
           .replace(false),
-        ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
-            .replace(config.NonNegativeFiniteDuration.ofSeconds(60))
-        ),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
 
@@ -81,7 +77,7 @@ class TransferPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
           synchronizerOwners = Seq(sequencer),
           synchronizerThreshold = PositiveInt.one,
           staticSynchronizerParameters =
-            StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion),
+            StaticSynchronizerParameters.defaults(testedProtocolVersion),
         )
         (alias, sequencer.sequencerConnection.withAlias(alias))
       }

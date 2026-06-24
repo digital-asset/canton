@@ -26,7 +26,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BftNodeId,
   EpochNumber,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderingMode
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
@@ -239,7 +238,6 @@ final class StateTransferBehavior[E <: Env[E]](
             newEpochInfo,
             membership,
             cryptoProvider: CryptoProvider[E],
-            origin,
           ) =>
         // Mainly so that the onboarding state transfer start epoch is not set as the latest completed epoch initially.
         // A new event can be introduced to avoid branching.
@@ -252,17 +250,11 @@ final class StateTransferBehavior[E <: Env[E]](
 
         cleanUpPostponedMessageQueue()
 
-        if (!origin.isStateTransfer) {
-          logger.info(
-            s"$messageType: state transfer transitioned back to consensus and then immediately to state transfer again"
-          )
-        } else {
-          stateTransferManager.stateTransferNewEpoch(
-            newEpochInfo.number,
-            membership,
-            initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
-          )(abort)
-        }
+        stateTransferManager.stateTransferNewEpoch(
+          newEpochInfo.number,
+          membership,
+          initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
+        )(abort)
 
       case Consensus.Admin.GetOrderingTopology(callback) =>
         callback(
@@ -337,7 +329,6 @@ final class StateTransferBehavior[E <: Env[E]](
           startEpochInfo,
           membership,
           cryptoProvider,
-          origin = OrderingMode.StateTransfer,
         )
     }
   }
@@ -437,7 +428,6 @@ final class StateTransferBehavior[E <: Env[E]](
           newEpochInfo,
           newMembership,
           newCryptoProvider,
-          origin = OrderingMode.StateTransfer,
         )
     }
   }

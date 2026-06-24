@@ -35,22 +35,26 @@ object SValueHash {
 
   // --- public interface ---
 
-  /** Hashes a contract key modulo trailing Nones. Throws [[com.digitalasset.daml.lf.crypto.Hash.HashingError]] if [key] contains non-serializable values. */
+  /** Hashes a contract key modulo trailing Nones. Throws
+    * [[com.digitalasset.daml.lf.crypto.Hash.HashingError]] if [key] contains non-serializable
+    * values.
+    */
   @throws[HashingError]
   def assertHashContractKey(
       packageName: Ref.PackageName,
       templateName: Ref.QualifiedName,
       key: SValue,
-  ): Hash = {
+  ): Hash =
     builder(Purpose.NextGenContractKey, noCid2String, HashTracer.NoOp)
       .addByte(1.toByte, "version") // version
       .addString(packageName)
       .addQualifiedName(templateName)
       .addSValue(key)
       .build
-  }
 
-  /** Hashes a contract key modulo trailing Nones. Returns a Left if [key] contains non-serializable values. */
+  /** Hashes a contract key modulo trailing Nones. Returns a Left if [key] contains non-serializable
+    * values.
+    */
   def hashContractKey(
       packageName: Ref.PackageName,
       templateName: Ref.QualifiedName,
@@ -58,21 +62,25 @@ object SValueHash {
   ): Either[HashingError, Hash] =
     Hash.handleError(assertHashContractKey(packageName, templateName, key))
 
-  /** Hashes a contract modulo trailing Nones. Throws [[com.digitalasset.daml.lf.crypto.Hash.HashingError]] if [arg] contains non-serializable values. */
+  /** Hashes a contract modulo trailing Nones. Throws
+    * [[com.digitalasset.daml.lf.crypto.Hash.HashingError]] if [arg] contains non-serializable
+    * values.
+    */
   @throws[HashingError]
   def assertHashContractInstance(
       packageName: Ref.PackageName,
       templateName: Ref.QualifiedName,
       arg: SValue,
-  ): Hash = {
+  ): Hash =
     builder(Purpose.ThinContractInstance, aCid2Bytes, HashTracer.NoOp)
       .addString(packageName)
       .addQualifiedName(templateName)
       .addSValue(arg)
       .build
-  }
 
-  /** Hashes a contract modulo trailing Nones. Returns a Left if [arg] contains non-serializable values. */
+  /** Hashes a contract modulo trailing Nones. Returns a Left if [arg] contains non-serializable
+    * values.
+    */
   def hashContractInstance(
       packageName: Ref.PackageName,
       templateName: Ref.QualifiedName,
@@ -139,7 +147,7 @@ object SValueHash {
         .addByte(purpose.id, s"${formatByteToHexString(purpose.id)} (Value Encoding Purpose)")
 
     private[crypto] def addSValue(svalue: SValue): this.type = {
-      import Constants._
+      import Constants.*
 
       svalue match {
         case SValue.SUnit =>

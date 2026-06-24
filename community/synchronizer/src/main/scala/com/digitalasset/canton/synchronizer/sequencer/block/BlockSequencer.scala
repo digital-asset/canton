@@ -23,6 +23,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.error.{CantonBaseError, FatalError}
+import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
@@ -41,7 +42,7 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.{
-  AggregateSubmissionAlreadySent,
+  AggregateSubmissionAlreadySentV2,
   AggregateSubmissionInvalidRule,
   Overloaded,
   SubmissionRequestRefused,
@@ -352,11 +353,11 @@ class BlockSequencer(
 
       step2
         .map(updateGenerator.extractBlockEvents)
-        .async
-        .via(stateManager.processBlock(updateGenerator))
         .wireTap { update =>
           throughputCap.addBlockUpdate(update.value)
         }
+        .async
+        .via(stateManager.processBlock(updateGenerator))
         .async
         .via(stateManager.applyBlockUpdate(this))
         .wireTap { lastTs =>
@@ -540,14 +541,18 @@ class BlockSequencer(
             // We can check if the aggregation has already been delivered by looking at the head
             // state. If the delivered at is not yet cached (after a crash) we just allow the submission
             // to go through for simplicity.
-            !stateManager.getProcessingHeadState.inFlightAggregations.byId
-              .get(aggregationId)
-              .exists(_.cachedDeliveredAt.exists(_.nonEmpty)),
+            protocolVersion < ProtocolVersion.v35 || // never reject for pv34
+              (protocolVersion == ProtocolVersion.v35 && // if pv35, only check if sender code is the set of codes
+                !parameters.enableRejectDeliveredAggregationsOnPv35
+                  .contains(submission.sender.code.threeLetterId.str)) ||
+              !stateManager.getProcessingHeadState.inFlightAggregations.byId
+                .get(aggregationId)
+                .exists(_.cachedDeliveredAt.exists(_.nonEmpty)),
             (), {
               val str =
                 s"Not accepting submission as aggregation ID $aggregationId is already marked as delivered"
               logger.debug(str)
-              AggregateSubmissionAlreadySent.apply(str)
+              AggregateSubmissionAlreadySentV2.apply(str)
             },
           )
         case None => Right(())
@@ -700,17 +705,6 @@ class BlockSequencer(
         rejectAcknowledgementIfOverloaded().leftMap(_.asGrpcError)
       )
 
-      _ = signedAcknowledgeRequest.content.member match {
-        case _: ParticipantId =>
-          // Participants should not ack before upgrade time because the events are on the old synchronizer.
-          EitherTUtil.toFutureUnlessShutdown(
-            rejectSubmissionsBeforeOrAtSequencingTimeLowerBound().leftMap(_.asGrpcError)
-          )
-
-        case _: SequencerId | _: MediatorId =>
-          // Synchronizer nodes can receive messages on the new synchronizer before upgrade time so they can ack
-          FutureUnlessShutdown.unit
-      }
       waitForAcknowledgementF = stateManager.waitForAcknowledgementToComplete(
         req.member,
         req.timestamp,
@@ -1237,6 +1231,10 @@ class BlockSequencer(
     blockOrderer.sequencingTime
 
   override private[canton] def orderer: Some[BlockOrderer] = Some(blockOrderer)
+
+  override private[sequencer] def backgroundWriterHealth: Option[HealthComponent] = Some(
+    stateManager.asyncWriterHealth
+  )
 
   override private[sequencer] def updateLsuSuccessor(
       successor: SynchronizerSuccessor,

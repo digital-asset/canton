@@ -387,6 +387,19 @@ private[backend] object AppendOnlySchema {
         "event_sequential_id_last" -> fieldStrategy.bigint(_ => _.event_sequential_id_last),
       )
 
+    val acsCommitments: Table[DbDto.AcsCommitment] =
+      fieldStrategy.insert("lapi_events_acs_commitments")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "event_offset" -> fieldStrategy.bigint(_ => _.event_offset),
+        "update_id" -> fieldStrategy.bytea(_ => _.update_id),
+        "synchronizer_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.synchronizerId.internalize(dbDto.synchronizer_id)
+        ),
+        "record_time" -> fieldStrategy.bigint(_ => _.record_time),
+        "payload" -> fieldStrategy.bytea(_ => _.payload),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
+      )
+
     val executes: Seq[Array[Array[?]] => Connection => Unit] = List(
       eventActivate.executeUpdate,
       idFilterActivateStakeholder.executeUpdate,
@@ -401,6 +414,7 @@ private[backend] object AppendOnlySchema {
       commandCompletions.executeUpdate,
       stringInterningTable.executeUpdate,
       transactionMeta.executeUpdate,
+      acsCommitments.executeUpdate,
     )
 
     new Schema[DbDto] {
@@ -429,6 +443,7 @@ private[backend] object AppendOnlySchema {
           commandCompletions.prepareData(collect[CommandCompletion], stringInterning),
           stringInterningTable.prepareData(collect[StringInterningDto], stringInterning),
           transactionMeta.prepareData(collect[TransactionMeta], stringInterning),
+          acsCommitments.prepareData(collect[AcsCommitment], stringInterning),
         )
       }
 

@@ -5,26 +5,27 @@ package com.digitalasset.daml
 package lf
 package value
 
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.SafeProto
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.transaction.{
   SerializationVersion,
   Versioned,
   ensuresNoUnknownFields,
   ensuresNoUnknownFieldsThenDecode,
 }
-import com.digitalasset.daml.lf.value.Value._
-import com.digitalasset.daml.lf.value.{ValueOuterClass => proto}
-import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.value.Value.*
+import com.digitalasset.daml.lf.value.ValueOuterClass as proto
 import com.google.protobuf
 import com.google.protobuf.{ByteString, CodedInputStream}
 
 import scala.Ordering.Implicits.infixOrderingOps
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Error type for signalling errors occurring during decoding serialized values
-  * @param errorMessage description
+  * @param errorMessage
+  *   description
   */
 final case class DecodeError(errorMessage: String)
 
@@ -34,7 +35,8 @@ object DecodeError extends (String => DecodeError) {
 }
 
 /** Error type for signalling errors occurring during encoding values
-  * @param errorMessage description
+  * @param errorMessage
+  *   description
   */
 final case class EncodeError(errorMessage: String)
 
@@ -45,8 +47,8 @@ object EncodeError extends (String => EncodeError) {
 
 object ValueCoder extends ValueCoder(allowNullCharacters = false)
 
-/** Utilities to serialize and de-serialize Values
-  * as they form part of transactions, nodes and contract instances
+/** Utilities to serialize and de-serialize Values as they form part of transactions, nodes and
+  * contract instances
   */
 class ValueCoder(allowNullCharacters: Boolean) {
   import Value.MAXIMUM_NESTING
@@ -59,8 +61,10 @@ class ValueCoder(allowNullCharacters: Boolean) {
 
   /** Simple encoding to wire of identifiers
     *
-    * @param id identifier value
-    * @return wire format identifier
+    * @param id
+    *   identifier value
+    * @return
+    *   wire format identifier
     */
   def decodeIdentifier(id: proto.Identifier): Either[DecodeError, Identifier] =
     ensuresNoUnknownFieldsThenDecode(id)(internal.decodeIdentifier)
@@ -70,42 +74,53 @@ class ValueCoder(allowNullCharacters: Boolean) {
 
   /** Serializes [[com.digitalasset.daml.lf.value.Value.VersionedValue]] to protobuf.
     *
-    * @param versionedValue value to be written
-    * @tparam Cid ContractId type
-    * @return protocol buffer serialized values
+    * @param versionedValue
+    *   value to be written
+    * @tparam Cid
+    *   ContractId type
+    * @return
+    *   protocol buffer serialized values
     */
   def encodeVersionedValue(
       versionedValue: VersionedValue
   ): Either[EncodeError, proto.VersionedValue] =
     internal.encodeVersionedValue(versionedValue)
 
-  /** Reads a serialized protobuf versioned value,
-    * checks if the value version is currently supported and
-    * converts the value to the type usable by engine/interpreter.
+  /** Reads a serialized protobuf versioned value, checks if the value version is currently
+    * supported and converts the value to the type usable by engine/interpreter.
     *
-    * @param protoValue0 the value to be read
-    * @tparam Cid ContractId type
-    * @return either error or [VersionedValue]
+    * @param protoValue0
+    *   the value to be read
+    * @tparam Cid
+    *   ContractId type
+    * @return
+    *   either error or [VersionedValue]
     */
   def decodeVersionedValue(protoValue0: proto.VersionedValue): Either[DecodeError, VersionedValue] =
     ensuresNoUnknownFieldsThenDecode(protoValue0)(internal.decodeVersionedValue)
 
   /** Serialize a Value to protobuf
     *
-    * @param v0           value to be written
-    * @param valueVersion version of value specification to encode to, or fail
-    * @tparam Cid ContractId type
-    * @return protocol buffer serialized values
+    * @param v0
+    *   value to be written
+    * @param valueVersion
+    *   version of value specification to encode to, or fail
+    * @tparam Cid
+    *   ContractId type
+    * @return
+    *   protocol buffer serialized values
     */
   def encodeValue(valueVersion: SerializationVersion, v0: Value): Either[EncodeError, ByteString] =
     internal.encodeValue(valueVersion, v0)
 
-  /** Method to read a serialized protobuf value
-    * to engine/interpreter usable Value type
+  /** Method to read a serialized protobuf value to engine/interpreter usable Value type
     *
-    * @param protoValue0 the value to be read
-    * @tparam Cid ContractId type
-    * @return either error or Value
+    * @param protoValue0
+    *   the value to be read
+    * @tparam Cid
+    *   ContractId type
+    * @return
+    *   either error or Value
     */
   def decodeValue(version: SerializationVersion, bytes: ByteString): Either[DecodeError, Value] =
     internal.decodeValue(version, bytes)
@@ -130,14 +145,13 @@ class ValueCoder(allowNullCharacters: Boolean) {
       else
         decodeCoid(cid).map(Some(_))
 
-    def encodeIdentifier(id: Identifier): proto.Identifier = {
+    def encodeIdentifier(id: Identifier): proto.Identifier =
       proto.Identifier
         .newBuilder()
         .setPackageId(id.packageId)
         .addAllModuleName((id.qualifiedName.module.segments.toSeq: Seq[String]).asJava)
         .addAllName((id.qualifiedName.name.segments.toSeq: Seq[String]).asJava)
         .build()
-    }
 
     def decodeIdentifier(id: proto.Identifier): Either[DecodeError, Identifier] =
       for {
@@ -224,7 +238,7 @@ class ValueCoder(allowNullCharacters: Boolean) {
         else
           s
 
-      def go(nesting: Int, protoValue: proto.Value): Value = {
+      def go(nesting: Int, protoValue: proto.Value): Value =
         if (nesting > MAXIMUM_NESTING) {
           throw Err(
             s"Provided proto value to decode exceeds maximum nesting level of $MAXIMUM_NESTING"
@@ -318,7 +332,6 @@ class ValueCoder(allowNullCharacters: Boolean) {
               throw Err(s"Value not set")
           }
         }
-      }
 
       try {
         Right(go(0, protoValue0))
@@ -360,7 +373,7 @@ class ValueCoder(allowNullCharacters: Boolean) {
         else
           s
 
-      def go(nesting: Int, v: Value): proto.Value = {
+      def go(nesting: Int, v: Value): proto.Value =
         if (nesting > MAXIMUM_NESTING) {
           throw Err(
             s"Provided Daml-LF value to encode exceeds maximum nesting level of $MAXIMUM_NESTING"
@@ -449,7 +462,6 @@ class ValueCoder(allowNullCharacters: Boolean) {
 
           }
         }
-      }
 
       try {
         SafeProto.toByteString(go(0, v0)).left.map(EncodeError)

@@ -205,13 +205,40 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
   }
 
   "configuration file with unknown keys" should {
-    "should return an error" in {
+    "return an error" in {
       val result =
         loggerFactory.assertLogs(
           loadFile("invalid-configs/unknown-key-in-nested-config.conf"),
           _.errorMessage should include("canton.monitoring.this-is-not-a-key"),
         )
       result.left.value shouldBe a[GenericConfigError.Error]
+    }
+
+    "not return an error if unknown keys are allowed" in {
+      val filename = "invalid-configs/unknown-key-allowed-in-nested-config.conf"
+      val config = loadFile(filename).valueOrFail(s"failed to load $filename")
+
+      config.participants.keySet shouldBe Set(InstanceName.tryCreate("participant1"))
+    }
+  }
+
+  // Technically it's the same scenario as above,
+  // but it wasn't covered before https://github.com/DACH-NY/canton/issues/33636
+  "configuration file with no-longer-existing keys" should {
+    "return an error" in {
+      val result =
+        loggerFactory.assertLogs(
+          loadFile("invalid-configs/no-longer-existing-key.conf"),
+          _.errorMessage should include("ledger-api-jdbc-url"),
+        )
+      result.left.value shouldBe a[GenericConfigError.Error]
+    }
+
+    "not return an error if unknown keys are allowed" in {
+      val filename = "invalid-configs/no-longer-existing-allowed-key.conf"
+      val config = loadFile(filename).valueOrFail(s"failed to load $filename")
+
+      config.participants.keySet shouldBe Set(InstanceName.tryCreate("participant1"))
     }
   }
 

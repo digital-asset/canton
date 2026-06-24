@@ -4,11 +4,10 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.Party
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.SExpr
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -25,8 +24,13 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class CompilerTest extends AnyWordSpec with TableDrivenPropertyChecks with Matchers with Inside with SuppressingLogging {
-  import CompilerTest._
+class CompilerTest
+    extends AnyWordSpec
+    with TableDrivenPropertyChecks
+    with Matchers
+    with Inside
+    with SuppressingLogging {
+  import CompilerTest.*
 
   "unsafeCompile" should {
     "handle 10k commands" in {

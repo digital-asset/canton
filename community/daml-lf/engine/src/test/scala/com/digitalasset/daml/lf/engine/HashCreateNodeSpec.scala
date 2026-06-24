@@ -15,7 +15,7 @@ import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{Node, SerializationVersion}
-import com.digitalasset.daml.lf.value.{Value => V}
+import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -114,7 +114,11 @@ class HashCreateNodeSpec
         .value
 
       newEngine
-        .hashCreateNode(createNode(createArg(cid0)), cidMapping, HashingMethod.UpgradeFriendlyUnsafe)
+        .hashCreateNode(
+          createNode(createArg(cid0)),
+          cidMapping,
+          HashingMethod.UpgradeFriendlyUnsafe,
+        )
         .consume() shouldBe Right(
         expectedHash
       )
@@ -145,7 +149,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[_, _]]
+        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[?, ?]]
     }
 
     "contract with trailing nones is reported as a SResultError" in {
@@ -155,7 +159,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[_, _]]
+        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[?, ?]]
     }
 
     "missing package is reported as a SResultError" in {
@@ -165,7 +169,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map.empty) shouldBe a[Left[_, _]]
+        .consume(pkgs = Map.empty) shouldBe a[Left[?, ?]]
     }
   }
 

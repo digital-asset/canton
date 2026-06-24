@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.event.RecordTime
-import com.digitalasset.canton.participant.event.RecordTime.recordTimeOrdering
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.participant.store.{
   AcsDigestJournal,
@@ -21,7 +20,6 @@ import com.digitalasset.canton.util.ErrorUtil
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable
 import scala.collection.immutable.TreeMap
-import scala.math.Ordering.Implicits.*
 import scala.util.Try
 
 class InMemoryAcsDigestJournal[K, V](
@@ -32,7 +30,7 @@ class InMemoryAcsDigestJournal[K, V](
     with NamedLogging {
   import InMemoryAcsDigestJournal.*
 
-  private val journal = TrieMap[K, TreeMap[RecordTime, AcsDigestUpdate[K, V]]]()
+  private val journal = TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K, V]]]()
 
   override def upsertDigestUpdates(digests: immutable.Iterable[AcsDigestUpdate[K, V]])(implicit
       traceContext: TraceContext
@@ -41,14 +39,14 @@ class InMemoryAcsDigestJournal[K, V](
       digests.foreach { update =>
         journal
           .updateWith(update.digestUpdate.key) {
-            case Some(historyMap) => Some(historyMap + (update.digestUpdate.recordTime -> update))
-            case None => Some(TreeMap(update.digestUpdate.recordTime -> update))
+            case Some(historyMap) => Some(historyMap + (update.digestUpdate.offset -> update))
+            case None => Some(TreeMap(update.digestUpdate.offset -> update))
           }
           .discard
       }
     }
 
-  override def lookup(key: K, toInclusive: RecordTime)(implicit
+  override def lookup(key: K, toInclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[AcsDigestUpdate[K, V]]] = FutureUnlessShutdown.pure {
     lookupInternal(key, toInclusive)
@@ -56,7 +54,7 @@ class InMemoryAcsDigestJournal[K, V](
 
   override def bulkLookup(
       keys: immutable.Iterable[K],
-      toInclusive: RecordTime,
+      toInclusive: Offset,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K, V]]] = FutureUnlessShutdown.pure {
@@ -103,7 +101,7 @@ class InMemoryAcsDigestJournal[K, V](
   override type SnapshotPaginationToken = SnapshotToken[K, V]
 
   override def changesBetween(
-      tokenOrStart: Either[ChangesBetweenPaginationToken, ChangesBetweenTimeRange],
+      tokenOrStart: Either[ChangesBetweenPaginationToken, ChangesBetweenOffsetRange],
       limit: Int,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
@@ -115,7 +113,7 @@ class InMemoryAcsDigestJournal[K, V](
   ] = {
     val stream = tokenOrStart match {
       case Left(SnapshotToken(remaining)) => remaining
-      case Right(ChangesBetweenTimeRange(fromInclusive, toExclusive)) =>
+      case Right(ChangesBetweenOffsetRange(fromInclusive, toExclusive)) =>
         LazyList
           .from(journal.values)
           .flatMap(history =>
@@ -139,7 +137,7 @@ class InMemoryAcsDigestJournal[K, V](
   }
   override type ChangesBetweenPaginationToken = SnapshotToken[K, V]
 
-  override def checkReplacesInvariant(upToInclusive: RecordTime)(implicit
+  override def checkReplacesInvariant(upToInclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.fromTry {
     Try {
@@ -155,36 +153,36 @@ class InMemoryAcsDigestJournal[K, V](
               _.map(window =>
                 (
                   prettyKey(window.digestUpdate.key),
-                  window.digestUpdate.recordTime,
-                  window.replacesRecordTime,
+                  window.digestUpdate.offset,
+                  window.replacesOffset,
                 )
               ) // (keyString, t_i, rt_i)
             }
 
           timeSeriesTuples.foreach { // find one where the link is broken
             // if `t_i` < `r_ti` --> referring to the future is not possible
-            case (key, currentRecordTime, Some(currentReplacesRecordTime)) :: _
-                if currentReplacesRecordTime >= currentRecordTime =>
+            case (key, currentOffset, Some(currentReplacesOffset)) :: _
+                if currentReplacesOffset >= currentOffset =>
               ErrorUtil.invalidState(
-                s"ReplacesRecordTime check error for Key $key - " +
-                  s"We cannot have replacesTime=$currentReplacesRecordTime which is gte to recordTime $currentRecordTime"
+                s"ReplacesOffset check error for Key $key - " +
+                  s"We cannot have replacesOffset=$currentReplacesOffset which is gte to change offset $currentOffset"
               )
             // if `1 < i <= M`, `rt_i` should be Some
-            case (key, rt, None) :: (_, recordTime, _) :: _ =>
+            case (key, currentOffset, None) :: (_, precedingOffset, _) :: _ =>
               ErrorUtil.invalidState(
-                s"ReplacesRecordTime check error for key $key at $rt - " +
-                  s"Replaces time should point to $recordTime but it is empty!"
+                s"ReplacesOffset check error for key $key at $currentOffset - " +
+                  s"Replaces offset should point to $precedingOffset but it is empty!"
               )
             // If `1 < i <= M` and `rt_i` != `t_i - 1`:
-            case (key, currentRecordTime, Some(currentReplacesRecordTime)) :: (
+            case (key, currentOffset, Some(currentReplacesOffset)) :: (
                   _,
-                  precedingRecordTime,
+                  precedingOffset,
                   _,
-                ) :: _ if currentReplacesRecordTime != precedingRecordTime =>
+                ) :: _ if currentReplacesOffset != precedingOffset =>
               ErrorUtil.invalidState(
-                s"ReplacesRecordTime check error for key $key - " +
-                  s"We cannot have an entry with (recordTime=$currentRecordTime, replacesTime=$currentReplacesRecordTime) " +
-                  s"which is not pointing to the preceding recordTime=$precedingRecordTime"
+                s"ReplacesOffset check error for key $key - " +
+                  s"We cannot have an entry with (offset=$currentOffset, replacesOffset=$currentReplacesOffset) " +
+                  s"which is not pointing to the preceding offset=$precedingOffset"
               )
             // eg. when rt_i doesn't have updates in the snapshot journal
             case _ => ()
@@ -193,7 +191,7 @@ class InMemoryAcsDigestJournal[K, V](
     }
   }
 
-  def deleteAfter(fromExclusive: RecordTime)(implicit
+  def deleteAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
     journal.keys.foreach { key =>
@@ -208,7 +206,7 @@ class InMemoryAcsDigestJournal[K, V](
     }
   }
 
-  def deleteUpTo(toExclusive: RecordTime)(implicit
+  def deleteUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
     journal.keys.foreach { key =>
@@ -235,7 +233,7 @@ class InMemoryAcsDigestJournal[K, V](
     }
   }
 
-  private def lookupInternal(key: K, toInclusive: RecordTime): Option[AcsDigestUpdate[K, V]] =
+  private def lookupInternal(key: K, toInclusive: Offset): Option[AcsDigestUpdate[K, V]] =
     for {
       history <- journal.get(key)
       (_, update) <- history.rangeTo(toInclusive).lastOption

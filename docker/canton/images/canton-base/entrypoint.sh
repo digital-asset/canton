@@ -19,7 +19,8 @@ fi
 ARGS+=( --log-encoder=json --log-level-stdout="${LOG_LEVEL_STDOUT:-DEBUG}" --log-level-canton="${LOG_LEVEL_CANTON:-DEBUG}" --log-file-appender=off --log-immediate-flush="${LOG_IMMEDIATE_FLUSH:-false}")
 
 if [ -f /app/logback.xml ]; then
-   export JAVA_TOOL_OPTIONS="-Dlogback.configurationFile=/app/logback.xml ${JAVA_TOOL_OPTIONS:-}"
+   DEFAULT_JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-}"
+   export JAVA_TOOL_OPTIONS="-Dlogback.configurationFile=/app/logback.xml ${DEFAULT_JAVA_TOOL_OPTIONS//CURRENT_DATE/$(date -Iseconds)}"
 fi
 
 if [ -f /app/pre-bootstrap.sh ]; then

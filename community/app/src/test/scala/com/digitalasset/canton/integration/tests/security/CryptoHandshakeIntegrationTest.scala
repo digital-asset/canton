@@ -145,7 +145,8 @@ trait CryptoHandshakeIntegrationTest
     EnvironmentDefinition
       .P4_S1M1_S1M1_S1M1(
         Map(
-          sync1 -> StaticSynchronizerParameters.defaults(jce, testedProtocolVersion),
+          sync1 -> StaticSynchronizerParameters
+            .defaults(cryptoConfig = jce, protocolVersion = testedProtocolVersion),
           sync2 -> StaticSynchronizerParameters.fromConfig(
             SynchronizerParametersConfig()
               .copy(

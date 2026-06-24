@@ -851,6 +851,10 @@ object ParallelIndexerSubscription {
           case dbDto: DbDto.CommandCompletion =>
             dbDto.copy(publication_time = publicationTime.underlying.micros)
 
+          case dbDto: DbDto.AcsCommitment =>
+            eventSeqId += 1
+            dbDto.copy(event_sequential_id = eventSeqId)
+
           case unChanged: DbDto.PartyEntry => unChanged
           case unChanged: DbDto.StringInterningDto => unChanged
           case unChanged: DbDto.SequencerIndexMoved => unChanged

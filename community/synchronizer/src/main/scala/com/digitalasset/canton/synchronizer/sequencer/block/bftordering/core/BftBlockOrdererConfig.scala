@@ -30,6 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultBlockingDbReadTimeout,
   DefaultConsensusBlockCompletionTimeout,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultConsensusNewEpochTopologyWarnTimeout,
   DefaultConsensusQueueMaxSize,
   DefaultConsensusQueuePerNodeQuota,
   DefaultDedicatedExecutionContextDivisor,
@@ -106,6 +107,11 @@ import scala.concurrent.duration.*
   *   advances at a regular frequency. Note that due to (i), it is recommended that this
   *   consensusEmptyBlockCreationTimeout be substantially less than the
   *   consensusBlockCompletionTimeout to account for latency, retransmissions, etc.
+  * @param consensusNewEpochTopologyWarnTimeout
+  *   The time that nodes will wait at the start of a new epoch for the topology to be activated. If
+  *   the timeout is reached, the node will create a warning log to indicate the reason for delay in
+  *   progress was the topology activation, but the node will continue to wait for the topology to
+  *   be activated.
   * @param delayedInitQueueMaxSize
   *   The maximum size of the delayed init queue. This queue is used by modules to save incoming
   *   events in memory while the module is still initializing. Once startup is complete, the module
@@ -181,6 +187,8 @@ final case class BftBlockOrdererConfig(
     consensusQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
     consensusBlockCompletionTimeout: FiniteDuration = DefaultConsensusBlockCompletionTimeout,
     consensusEmptyBlockCreationTimeout: FiniteDuration = DefaultConsensusEmptyBlockCreationTimeout,
+    consensusNewEpochTopologyWarnTimeout: FiniteDuration =
+      DefaultConsensusNewEpochTopologyWarnTimeout,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
@@ -229,6 +237,7 @@ object BftBlockOrdererConfig {
   val DefaultConsensusQueuePerNodeQuota: Int = 1024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 5.seconds
+  val DefaultConsensusNewEpochTopologyWarnTimeout: FiniteDuration = 2.seconds
   val DefaultDelayedInitQueueMaxSize: Int = 1024
   val DefaultEpochStateTransferTimeout: FiniteDuration = 10.seconds
   val DefaultOutputFetchTimeout: FiniteDuration = 500.milliseconds

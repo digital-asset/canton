@@ -25,6 +25,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -80,8 +81,16 @@ abstract class SubmissionRequestAmplificationIntegrationTest
               Map(
                 // A threshold of two ensures that the mediators connect to both sequencers.
                 // TODO(#19911) Make this properly configurable
-                mediator1 -> (Seq(sequencer1, sequencer2), PositiveInt.two, NonNegativeInt.zero),
-                mediator2 -> (Seq(sequencer1, sequencer2), PositiveInt.two, NonNegativeInt.zero),
+                mediator1 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
+                mediator2 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
               )
             )
           )

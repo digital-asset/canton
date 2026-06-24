@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party, TypeConId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
@@ -18,10 +19,10 @@ import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine as ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
+  NextGenContractStateMachine as ContractStateMachine,
   SerializationVersion,
 }
 import com.digitalasset.daml.lf.value.Value
@@ -32,7 +33,6 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.ArraySeq
 import scala.util.{Success, Try}
-import com.digitalasset.canton.logging.SuppressingLogging
 
 class AuthorizationTest_V2Dev extends AuthorizationTest(LanguageVersion.v2_dev, withKey = true)
 class AuthorizationTest_V23 extends AuthorizationTest(LanguageVersion.v2_3, withKey = true)
@@ -237,8 +237,9 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
         logger = MachineLogger(),
         readAs = readAs,
         interpretationConfig = InterpretationConfig.Default.copy(
-          contractStateMode = if (withKey) ContractStateMachine.Mode.NUCK
-          else ContractStateMachine.Mode.NoKey,
+          contractStateMode =
+            if (withKey) ContractStateMachine.Mode.NUCK
+            else ContractStateMachine.Mode.NoKey
         ),
         packageResolution = packageResolution,
       )

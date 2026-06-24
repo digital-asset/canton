@@ -88,7 +88,6 @@ sealed trait TickRequestIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateSynchronizerTimeTrackerConfigs_(_ => synchronizerTimeTrackerConfig),
-        ConfigTransforms.updateTargetTimestampForwardTolerance(Duration.ofHours(1)),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .addConfigTransforms(
@@ -226,18 +225,12 @@ sealed trait TickRequestIntegrationTest
 
     advanceTimeBeyondTimeouts(simClock)
 
-    val expectedRequests = Seq(
-      // The submitting participant of the unassignment needs to get a time proof for the target timestamp
-      participant2,
-      // Each reassigning participant needs to validate the target topology at the target timestamp
-      // and therefore has to observe the target timestamp. Since the submitting participant already requested
-      // a time proof during submission, it should not request another one.
-      participant1,
-    ).map(_.member)
     always() {
       collector1.collected shouldBe Seq.empty
-      // We can test for equality here because those tick requests must have happened during phases 1 and 3.
-      collector2.collected shouldBe expectedRequests
+      // The submitter and the reassigning participants validate the target topology and therefore
+      // request a time proof on the target synchronizer. The submitter may request it both during
+      // submission and validation, so compare as a set.
+      collector2.collected.toSet shouldBe Set(participant2.member, participant1.member)
     }
     collector2.clear()
 

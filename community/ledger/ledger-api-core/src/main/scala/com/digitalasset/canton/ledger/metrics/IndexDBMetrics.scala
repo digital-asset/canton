@@ -178,6 +178,15 @@ trait UpdateStreamsDbMetrics {
 
   val topologyTransactionsStream: TopologyTransactionsStreamMetrics =
     new TopologyTransactionsStreamMetrics
+
+  // Private constructor to avoid being instantiated multiple times by accident
+  final class AcsCommitmentsStreamMetrics private[UpdateStreamsDbMetrics] {
+    val fetchAcsCommitments: DatabaseMetrics =
+      createDbMetrics("fetch_acs_commitments")
+  }
+
+  val acsCommitmentsStream: AcsCommitmentsStreamMetrics =
+    new AcsCommitmentsStreamMetrics
 }
 
 trait UpdatePointwiseDbMetrics {

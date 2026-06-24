@@ -234,6 +234,8 @@ private[platform] object InMemoryStateUpdater {
           convertReassignmentAccepted(offset, u)
         case (offset, u: Update.TopologyTransactionEffective) =>
           convertTopologyTransactionEffective(offset, u)
+        case (offset, u: Update.ReceivedAcsCommitment) =>
+          convertReceivedAcsCommitment(offset, u)
       },
       ledgerEnd = batch.ledgerEnd,
       lastTraceContext = traceContext,
@@ -584,6 +586,15 @@ private[platform] object InMemoryStateUpdater {
         }
         .toVector,
     )(u.traceContext)
+
+  private def convertReceivedAcsCommitment(
+      offset: Offset,
+      u: Update.ReceivedAcsCommitment,
+  ) =
+    TransactionLogUpdate.ReceivedAcsCommitment(
+      offset = offset,
+      update = u,
+    )
 
   private def deduplicationInfo(
       completionInfo: CompletionInfo

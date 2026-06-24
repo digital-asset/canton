@@ -7,15 +7,15 @@ package crypto
 import com.digitalasset.daml.lf.crypto.Hash.{Purpose, noCid2String}
 import com.digitalasset.daml.lf.data.Ref.PackageName
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Numeric, Ref, SortedLookupList, Time}
-import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
-import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.*
+import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 import shapeless.record.Record as HRecord
 import shapeless.syntax.singleton.*
-import shapeless.{HNil, Coproduct as HSum}
+import shapeless.{Coproduct as HSum, HNil}
 
 import scala.language.implicitConversions
 

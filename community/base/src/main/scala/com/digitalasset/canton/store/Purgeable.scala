@@ -23,6 +23,8 @@ trait Purgeable {
 trait ChunkPurgeable {
   self: FlagCloseable =>
 
+  def name: String
+
   /** Deletes a chunk of items from this store. No guarantees are made around transactionality, nor
     * about which specific items are deleted.
     *

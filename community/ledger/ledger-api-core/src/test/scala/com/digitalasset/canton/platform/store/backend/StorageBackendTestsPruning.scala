@@ -997,6 +997,50 @@ private[backend] trait StorageBackendTestsPruning
 
   // TODO(i21351) Implement pruning tests for topology events
 
+  it should "prune acs commitments in the pruning range, retaining those before and after" in {
+    val commitments = Vector(
+      // before pruning start, retained
+      dtoAcsCommitment(offset(1), eventSequentialId = 100L),
+      dtoAcsCommitment(offset(2), eventSequentialId = 200L),
+      // in pruning range, pruned
+      dtoAcsCommitment(offset(3), eventSequentialId = 300L),
+      dtoAcsCommitment(offset(4), eventSequentialId = 400L),
+      dtoAcsCommitment(offset(5), eventSequentialId = 500L),
+      // after pruning range, retained
+      dtoAcsCommitment(offset(6), eventSequentialId = 600L),
+      dtoAcsCommitment(offset(7), eventSequentialId = 700L),
+    )
+    val metas = commitments.map(c =>
+      dtoTransactionMeta(
+        offset = Offset.tryFromLong(c.event_offset),
+        event_sequential_id_first = c.event_sequential_id,
+        event_sequential_id_last = c.event_sequential_id,
+      )
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(commitments ++ metas, _))
+    executeSql(updateLedgerEnd(offset(7), 700L))
+
+    assertIndexDbDataSql(
+      txMeta = (1L to 7L).map(TxMeta.apply),
+      acsCommitment = (1L to 7L).map(AcsCommitment.apply),
+    )
+
+    // Prune the range (2, 5]
+    pruneEventsSql(
+      previousPruneUpToInclusive = Some(offset(2)),
+      previousIncompleteReassignmentOffsets = Vector.empty,
+      pruneUpToInclusive = offset(5),
+      incompleteReassignmentOffsets = Vector.empty,
+    )(TraceContext.empty)
+
+    assertIndexDbDataSql(
+      txMeta = Seq(1L, 2L, 6L, 7L).map(TxMeta.apply),
+      acsCommitment = Seq(1L, 2L, 6L, 7L).map(AcsCommitment.apply),
+    )
+  }
+
   /** Asserts the content of the tables subject to pruning. By default, asserts the tables are
     * empty.
     */
@@ -1012,6 +1056,7 @@ private[backend] trait StorageBackendTestsPruning
       variousFilterWitness: Seq[Long] = Seq.empty,
       txMeta: Seq[TxMeta] = Seq.empty,
       completion: Seq[Completion] = Seq.empty,
+      acsCommitment: Seq[AcsCommitment] = Seq.empty,
   ): Assertion = executeSql { implicit c =>
     val queries = backend.pruningDtoQueries
     val cp = new Checkpoint
@@ -1059,6 +1104,11 @@ private[backend] trait StorageBackendTestsPruning
     // other
     cp(clue("meta")(Statement.discard(queries.updateMeta shouldBe txMeta)))
     cp(clue("completion")(Statement.discard(queries.completions shouldBe completion)))
+    cp(
+      clue("acs commitment")(
+        Statement.discard(queries.acsCommitments shouldBe acsCommitment)
+      )
+    )
     cp.reportAll()
     succeed
   }

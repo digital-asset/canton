@@ -4,9 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
 import com.daml.crypto.MessageSignaturePrototypeUtil
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error as IE
@@ -32,10 +31,15 @@ import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 import scala.util.{Failure, Try}
 
-class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with Inside with SuppressingLogging {
+class SBuiltinTest
+    extends AnyFreeSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with Inside
+    with SuppressingLogging {
 
   val helpers = new SBuiltinTestHelpers
-  import helpers.{parserParameters => _, _}
+  import helpers.{parserParameters as _, *}
 
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -66,31 +70,31 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
     "ADD_INT64" - {
       "throws an exception if it overflows" in {
         eval(e"ADD_INT64 $MaxInt64 -1") shouldBe Right(SInt64(MaxInt64 - 1))
-        eval(e"ADD_INT64 $MaxInt64 1") shouldBe a[Left[_, _]]
+        eval(e"ADD_INT64 $MaxInt64 1") shouldBe a[Left[?, ?]]
         eval(e"ADD_INT64 $MinInt64 1") shouldBe Right(SInt64(MinInt64 + 1))
-        eval(e"ADD_INT64 $MinInt64 -1") shouldBe a[Left[_, _]]
-        eval(e"ADD_INT64 $aBigOddInt64 $aBigOddInt64") shouldBe a[Left[_, _]]
+        eval(e"ADD_INT64 $MinInt64 -1") shouldBe a[Left[?, ?]]
+        eval(e"ADD_INT64 $aBigOddInt64 $aBigOddInt64") shouldBe a[Left[?, ?]]
       }
     }
 
     "SUB_INT64" - {
       "throws an exception if it overflows" in {
         eval(e"SUB_INT64 $MaxInt64 1") shouldBe Right(SInt64(MaxInt64 - 1))
-        eval(e"SUB_INT64 $MaxInt64 -1") shouldBe a[Left[_, _]]
+        eval(e"SUB_INT64 $MaxInt64 -1") shouldBe a[Left[?, ?]]
         eval(e"SUB_INT64 $MinInt64 -1") shouldBe Right(SInt64(MinInt64 + 1))
-        eval(e"SUB_INT64 $MinInt64 1") shouldBe a[Left[_, _]]
-        eval(e"SUB_INT64 -$aBigOddInt64 $aBigOddInt64") shouldBe a[Left[_, _]]
+        eval(e"SUB_INT64 $MinInt64 1") shouldBe a[Left[?, ?]]
+        eval(e"SUB_INT64 -$aBigOddInt64 $aBigOddInt64") shouldBe a[Left[?, ?]]
       }
     }
 
     "MUL_INT64" - {
       "throws an exception if it overflows" in {
         eval(e"MUL_INT64 ${1L << 31} ${1L << 31}") shouldBe Right(SInt64(1L << 62))
-        eval(e"MUL_INT64 ${1L << 32} ${1L << 31}") shouldBe a[Left[_, _]]
+        eval(e"MUL_INT64 ${1L << 32} ${1L << 31}") shouldBe a[Left[?, ?]]
         eval(e"MUL_INT64 ${1L << 32} -${1L << 31}") shouldBe Right(SInt64(1L << 63))
-        eval(e"MUL_INT64 ${1L << 32} -${1L << 32}") shouldBe a[Left[_, _]]
-        eval(e"MUL_INT64 ${1L << 32} -${1L << 32}") shouldBe a[Left[_, _]]
-        eval(e"MUL_INT64 $aBigOddInt64 42") shouldBe a[Left[_, _]]
+        eval(e"MUL_INT64 ${1L << 32} -${1L << 32}") shouldBe a[Left[?, ?]]
+        eval(e"MUL_INT64 ${1L << 32} -${1L << 32}") shouldBe a[Left[?, ?]]
+        eval(e"MUL_INT64 $aBigOddInt64 42") shouldBe a[Left[?, ?]]
       }
     }
 
@@ -104,13 +108,13 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
       "throws an exception if it overflows" in {
         eval(e"DIV_INT64 $MaxInt64 -1") shouldBe Right(SInt64(-MaxInt64))
-        eval(e"DIV_INT64 $MinInt64 -1") shouldBe a[Left[_, _]]
+        eval(e"DIV_INT64 $MinInt64 -1") shouldBe a[Left[?, ?]]
       }
 
       "throws an exception when dividing by 0" in {
         eval(e"DIV_INT64 1 $MaxInt64") shouldBe Right(SInt64(0))
-        eval(e"DIV_INT64 1 0") shouldBe a[Left[_, _]]
-        eval(e"DIV_INT64 $aBigOddInt64 0") shouldBe a[Left[_, _]]
+        eval(e"DIV_INT64 1 0") shouldBe a[Left[?, ?]]
+        eval(e"DIV_INT64 $aBigOddInt64 0") shouldBe a[Left[?, ?]]
       }
     }
 
@@ -127,23 +131,23 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
       "throws an exception if the exponent is negative" in {
         eval(e"EXP_INT64 1 0") shouldBe Right(SInt64(1))
-        eval(e"EXP_INT64 1 -1") shouldBe a[Left[_, _]]
-        eval(e"EXP_INT64 0 -1") shouldBe a[Left[_, _]]
-        eval(e"EXP_INT64 10 -1") shouldBe a[Left[_, _]]
-        eval(e"EXP_INT64 10 -20") shouldBe a[Left[_, _]]
-        eval(e"EXP_INT64 $aBigOddInt64 -42") shouldBe a[Left[_, _]]
+        eval(e"EXP_INT64 1 -1") shouldBe a[Left[?, ?]]
+        eval(e"EXP_INT64 0 -1") shouldBe a[Left[?, ?]]
+        eval(e"EXP_INT64 10 -1") shouldBe a[Left[?, ?]]
+        eval(e"EXP_INT64 10 -20") shouldBe a[Left[?, ?]]
+        eval(e"EXP_INT64 $aBigOddInt64 -42") shouldBe a[Left[?, ?]]
       }
 
       "throws an exception if it overflows" in {
         eval(e"EXP_INT64 ${1L << 6} 9") shouldBe Right(SInt64(1L << 54))
-        eval(e"EXP_INT64 ${1L << 7} 9") shouldBe a[Left[_, _]]
+        eval(e"EXP_INT64 ${1L << 7} 9") shouldBe a[Left[?, ?]]
         eval(e"EXP_INT64 ${-(1L << 7)} 9") shouldBe Right(SInt64(1L << 63))
-        eval(e"EXP_INT64 ${-(1L << 7)} 10") shouldBe a[Left[_, _]]
-        eval(e"EXP_INT64 3 $aBigOddInt64") shouldBe a[Left[_, _]]
+        eval(e"EXP_INT64 ${-(1L << 7)} 10") shouldBe a[Left[?, ?]]
+        eval(e"EXP_INT64 3 $aBigOddInt64") shouldBe a[Left[?, ?]]
       }
 
       "accepts huge exponents for bases -1, 0 and, 1" in {
-        eval(e"EXP_INT64 2 $aBigOddInt64") shouldBe a[Left[_, _]]
+        eval(e"EXP_INT64 2 $aBigOddInt64") shouldBe a[Left[?, ?]]
         eval(e"EXP_INT64 -1 $aBigOddInt64") shouldBe Right(SInt64(-1))
         eval(e"EXP_INT64 0 $aBigOddInt64") shouldBe Right(SInt64(0))
         eval(e"EXP_INT64 1 $aBigOddInt64") shouldBe Right(SInt64(1))
@@ -252,19 +256,19 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       val builtin = "ADD_NUMERIC"
 
       "throws an exception in case of overflow" in {
-        eval(e"$builtin @0 ${"9" * 38}. -1.") shouldBe a[Right[_, _]]
-        eval(e"$builtin @0 ${"9" * 38}. 1.") shouldBe a[Left[_, _]]
-        eval(e"$builtin @37 9.${"9" * 37} -0.${"0" * 36}1") shouldBe a[Right[_, _]]
-        eval(e"$builtin @37 9.${"9" * 37} 0.${"0" * 36}1") shouldBe a[Left[_, _]]
+        eval(e"$builtin @0 ${"9" * 38}. -1.") shouldBe a[Right[?, ?]]
+        eval(e"$builtin @0 ${"9" * 38}. 1.") shouldBe a[Left[?, ?]]
+        eval(e"$builtin @37 9.${"9" * 37} -0.${"0" * 36}1") shouldBe a[Right[?, ?]]
+        eval(e"$builtin @37 9.${"9" * 37} 0.${"0" * 36}1") shouldBe a[Left[?, ?]]
         eval(e"$builtin @10 ${s(10, bigBigDecimal)} ${s(10, two)}") shouldBe Right(
           SNumeric(n(10, bigBigDecimal + 2))
         )
-        eval(e"$builtin @10 ${s(10, maxNumeric)} ${s(10, minPosNumeric)}") shouldBe a[Left[_, _]]
+        eval(e"$builtin @10 ${s(10, maxNumeric)} ${s(10, minPosNumeric)}") shouldBe a[Left[?, ?]]
         eval(e"$builtin @10 ${s(10, maxNumeric.negate)} ${s(10, -minPosNumeric)}") shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
         eval(e"$builtin @10 ${s(10, bigBigDecimal)} ${s(10, bigBigDecimal - 1)}") shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
       }
     }
@@ -273,16 +277,16 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       val builtin = "SUB_NUMERIC"
 
       "throws an exception in case of overflow" in {
-        eval(e"$builtin @0 -${"9" * 38}. -1.") shouldBe a[Right[_, _]]
-        eval(e"$builtin @0 -${"9" * 38}. 1.") shouldBe a[Left[_, _]]
-        eval(e"$builtin @37 -9.${"9" * 37} -0.${"0" * 36}1") shouldBe a[Right[_, _]]
-        eval(e"$builtin @37 -9.${"9" * 37} 0.${"0" * 36}1") shouldBe a[Left[_, _]]
+        eval(e"$builtin @0 -${"9" * 38}. -1.") shouldBe a[Right[?, ?]]
+        eval(e"$builtin @0 -${"9" * 38}. 1.") shouldBe a[Left[?, ?]]
+        eval(e"$builtin @37 -9.${"9" * 37} -0.${"0" * 36}1") shouldBe a[Right[?, ?]]
+        eval(e"$builtin @37 -9.${"9" * 37} 0.${"0" * 36}1") shouldBe a[Left[?, ?]]
         eval(e"$builtin @10 $bigBigDecimal ${s(10, two)}") shouldBe Right(
           SNumeric(n(10, bigBigDecimal - 2))
         )
-        eval(e"$builtin @10 ${s(10, maxNumeric)} -$minPosNumeric") shouldBe a[Left[_, _]]
-        eval(e"$builtin @10 ${maxNumeric.negate} ${s(10, minPosNumeric)}") shouldBe a[Left[_, _]]
-        eval(e"$builtin @10 ${-bigBigDecimal} ${s(10, bigBigDecimal)}") shouldBe a[Left[_, _]]
+        eval(e"$builtin @10 ${s(10, maxNumeric)} -$minPosNumeric") shouldBe a[Left[?, ?]]
+        eval(e"$builtin @10 ${maxNumeric.negate} ${s(10, minPosNumeric)}") shouldBe a[Left[?, ?]]
+        eval(e"$builtin @10 ${-bigBigDecimal} ${s(10, bigBigDecimal)}") shouldBe a[Left[?, ?]]
       }
     }
 
@@ -292,12 +296,12 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
       val overSqrtOfTen = "3.1622776601683793319988935444327185338"
 
       "throws an exception in case of overflow" in {
-        eval(e"$builtin @0 @0 @0 ${w(0)} 1${"0" * 18}. 1${"0" * 19}.") shouldBe a[Right[_, _]]
-        eval(e"$builtin @0 @0 @0 ${w(0)} 1${"0" * 19}.  1${"0" * 19}.") shouldBe a[Left[_, _]]
+        eval(e"$builtin @0 @0 @0 ${w(0)} 1${"0" * 18}. 1${"0" * 19}.") shouldBe a[Right[?, ?]]
+        eval(e"$builtin @0 @0 @0 ${w(0)} 1${"0" * 19}.  1${"0" * 19}.") shouldBe a[Left[?, ?]]
         eval(e"$builtin @37 @37 @37 ${w(37)} $underSqrtOfTen $underSqrtOfTen") shouldBe a[
-          Right[_, _]
+          Right[?, ?]
         ]
-        eval(e"$builtin @37 @37 @37 ${w(37)} $overSqrtOfTen $underSqrtOfTen") shouldBe a[Left[_, _]]
+        eval(e"$builtin @37 @37 @37 ${w(37)} $overSqrtOfTen $underSqrtOfTen") shouldBe a[Left[?, ?]]
         eval(e"$builtin @10 @10 @10 ${w(10)} 1.1000000000 2.2000000000") shouldBe Right(
           SNumeric(n(10, 2.42))
         )
@@ -305,12 +309,12 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
           SNumeric(n(10, "1E27"))
         )
         eval(e"$builtin @10 @10 @10 ${w(10)}  ${tenPowerOf(14)} ${tenPowerOf(14)}") shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
         eval(
           e"$builtin @10 @10 @10 ${w(10)}  ${s(10, bigBigDecimal)} ${bigBigDecimal - 1}"
         ) shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
       }
     }
@@ -320,26 +324,26 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
       "throws an exception in case of overflow" in {
         eval(e"$builtin @37 @37 @37 ${w(37)} ${s(37, "1E-18")} ${s(37, "-1E-18")}") shouldBe a[
-          Right[_, _]
+          Right[?, ?]
         ]
         eval(e"$builtin @37 @37 @37 ${w(37)} ${s(37, "1E-18")} ${s(37, "-1E-19")}") shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
-        eval(e"$builtin @1 @1 @1 ${w(1)} ${s(1, "1E36")} 0.2") shouldBe a[Right[_, _]]
-        eval(e"$builtin @1 @1 @1 ${w(1)} ${s(1, "1E36")} 0.1") shouldBe a[Left[_, _]]
+        eval(e"$builtin @1 @1 @1 ${w(1)} ${s(1, "1E36")} 0.2") shouldBe a[Right[?, ?]]
+        eval(e"$builtin @1 @1 @1 ${w(1)} ${s(1, "1E36")} 0.1") shouldBe a[Left[?, ?]]
         eval(e"$builtin @10 @10 @10 ${w(10)} 1.1000000000 2.2000000000") shouldBe Right(
           SNumeric(n(10, 0.5))
         )
         eval(
           e"$builtin @10 @10 @10 ${w(10)} ${s(10, bigBigDecimal)} ${tenPowerOf(-10)}"
         ) shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
         eval(e"$builtin @10 @10 @10 ${w(10)} ${tenPowerOf(17)} ${tenPowerOf(-10)}") shouldBe Right(
           SNumeric(n(10, "1E27"))
         )
         eval(e"$builtin @10 @10 @10 ${w(10)} ${tenPowerOf(18)} ${tenPowerOf(-10)}") shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
       }
 
@@ -347,9 +351,9 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         eval(e"$builtin @10 @10 @10 ${w(10)} ${s(10, one)} ${tenPowerOf(-10)}") shouldBe Right(
           SNumeric(n(10, tenPowerOf(10)))
         )
-        eval(e"$builtin @10 @10 @10 ${w(10)} ${s(10, one)} ${s(10, zero)}") shouldBe a[Left[_, _]]
+        eval(e"$builtin @10 @10 @10 ${w(10)} ${s(10, one)} ${s(10, zero)}") shouldBe a[Left[?, ?]]
         eval(e"$builtin @10 @10 @10 ${w(10)} ${s(10, bigBigDecimal)} ${s(10, zero)}") shouldBe a[
-          Left[_, _]
+          Left[?, ?]
         ]
       }
     }
@@ -438,7 +442,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
         forEvery(testCases) { (inputScale, outputScale, x) =>
           eval(e"CAST_NUMERIC @$inputScale @$outputScale ${w(outputScale)} $x") shouldBe a[
-            Left[_, _]
+            Left[?, ?]
           ]
         }
 
@@ -455,7 +459,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
         forEvery(testCases) { (inputScale, outputScale, x) =>
           eval(e"CAST_NUMERIC @$inputScale @$outputScale ${w(outputScale)} $x") shouldBe a[
-            Left[_, _]
+            Left[?, ?]
           ]
         }
       }
@@ -683,7 +687,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         forEvery(testCases)(cp =>
           eval(
             e"""CODE_POINTS_TO_TEXT ${intList('\''.toLong, cp.toLong, '\''.toLong)}"""
-          ) shouldBe a[Left[_, _]]
+          ) shouldBe a[Left[?, ?]]
         )
       }
 
@@ -704,7 +708,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
         forEvery(testCases)(cp =>
           eval(e"""CODE_POINTS_TO_TEXT ${intList('\''.toLong, cp, '\''.toLong)}""") shouldBe a[
-            Left[_, _]
+            Left[?, ?]
           ]
         )
 
@@ -931,7 +935,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
           "favor" -> 9,
         )
 
-        eval(e"TEXTMAP_TO_LIST @Int64 ${buildMap("Int64", words: _*)}") shouldBe
+        eval(e"TEXTMAP_TO_LIST @Int64 ${buildMap("Int64", words*)}") shouldBe
           Right(
             SList(
               FrontStack(
@@ -981,7 +985,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
     val emptyMapV = s"GENMAP_EMPTY @($eitherT) @Int64"
     val nonEmptyMapV = s"GENMAP_INSERT @($eitherT) @Int64 ($rightV) 0 ($emptyMapV)"
 
-    eval(e"$nonEmptyMapV") shouldBe a[Right[_, _]]
+    eval(e"$nonEmptyMapV") shouldBe a[Right[?, ?]]
 
     "GENMAP_EMPTY" - {
       "produces an empty GenMap" in {
@@ -1103,7 +1107,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
       "returns the keys in order" in {
 
-        eval(e"GENMAP_KEYS @Text @Int64 ${buildMap("Int64", words: _*)}") shouldBe
+        eval(e"GENMAP_KEYS @Text @Int64 ${buildMap("Int64", words*)}") shouldBe
           Right(SList(sortedWords.map { case (k, _) => SText(k) }.to(FrontStack)))
       }
     }
@@ -1111,7 +1115,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
     "GENMAP_VALUES" - {
 
       "returns the values in order" in {
-        eval(e"GENMAP_VALUES @Text @Int64 ${buildMap("Int64", words: _*)}") shouldBe
+        eval(e"GENMAP_VALUES @Text @Int64 ${buildMap("Int64", words*)}") shouldBe
           Right(SList(sortedWords.map { case (_, v) => SInt64(v.toLong) }.to(FrontStack)))
       }
     }
@@ -1135,7 +1139,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
     "NUMERIC_TO_INT64" - {
       "throws exception in case of overflow" in {
-        eval(e"NUMERIC_TO_INT64 @0 ${s(0, -BigDecimal(2).pow(63) - 1)}") shouldBe a[Left[_, _]]
+        eval(e"NUMERIC_TO_INT64 @0 ${s(0, -BigDecimal(2).pow(63) - 1)}") shouldBe a[Left[?, ?]]
         eval(
           e"NUMERIC_TO_INT64 @3 ${s(3, -BigDecimal(2).pow(63) - 1 + almostZero(3))}"
         ) shouldBe Right(
@@ -1152,8 +1156,8 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         ) shouldBe Right(
           SInt64(Long.MaxValue)
         )
-        eval(e"NUMERIC_TO_INT64 @17 ${s(17, BigDecimal(2).pow(63))}") shouldBe a[Left[_, _]]
-        eval(e"NUMERIC_TO_INT64 @13 ${s(13, "1E22")}") shouldBe a[Left[_, _]]
+        eval(e"NUMERIC_TO_INT64 @17 ${s(17, BigDecimal(2).pow(63))}") shouldBe a[Left[?, ?]]
+        eval(e"NUMERIC_TO_INT64 @13 ${s(13, "1E22")}") shouldBe a[Left[?, ?]]
       }
 
       "works as expected" in {
@@ -1462,8 +1466,8 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
     "throw DamlArithmeticException with proper name and argument" in {
 
-      import SBuiltinFun._
-      import Numeric.Scale.{MinValue => MinScale, MaxValue => MaxScale}
+      import SBuiltinFun.*
+      import Numeric.Scale.{MinValue as MinScale, MaxValue as MaxScale}
       import java.math.BigDecimal
 
       val MaxNumeric0 = SNumeric(Numeric.maxValue(MinScale))
@@ -1581,7 +1585,7 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
     "ERROR" - {
       "throws an exception" in {
-        eval(e"""ERROR "message" """) shouldBe a[Left[_, _]]
+        eval(e"""ERROR "message" """) shouldBe a[Left[?, ?]]
       }
     }
   }
@@ -2205,7 +2209,7 @@ final class SBuiltinTestHelpers {
         transactionSeed = crypto.Hash.hashPrivateKey("SBuiltinTest"),
         updateSE = sexpr,
         committers = committers,
-        logger = MachineLogger()
+        logger = MachineLogger(),
       )
     SpeedyTestLib.run(machine, getContract = getContract)
   }

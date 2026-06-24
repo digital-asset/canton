@@ -26,8 +26,8 @@ import com.digitalasset.canton.participant.pruning.{
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
   CommitmentPeriodState,
+  Digest,
   ReceivedAcsCommitment,
   SentAcsCommitment,
   SynchronizerSearchCommitmentPeriod,
@@ -528,8 +528,8 @@ class GrpcParticipantInspectionService(
         )
 
         requestCommitment <- EitherT.fromEither[FutureUnlessShutdown](
-          AcsCommitment
-            .hashedCommitmentTypeFromByteString(request.commitment)
+          Digest
+            .hashedDigestTypeFromByteString(request.commitment)
             .leftMap[RpcError](err =>
               ParticipantInspectionServiceError.IllegalArgumentError
                 .Error(s"Failed to parse commitment hash: $err")

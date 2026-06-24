@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{ContractDeserializatio
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.common.annotations.VisibleForTesting
+import com.google.protobuf.ByteString
 import monocle.Lens
 import monocle.macros.GenLens
 
@@ -30,6 +31,12 @@ final case class CreatedContract private (
       contract = contract.encoded,
       consumedInCore = consumedInCore,
       rolledBack = rolledBack,
+    )
+
+  def toProtoV31: v31.CreatedContract =
+    v31.CreatedContract(
+      contract = contract.encoded,
+      consumedInCore = consumedInCore,
     )
 
   override protected def pretty: Pretty[CreatedContract] = prettyOfClass(
@@ -65,9 +72,20 @@ object CreatedContract {
   def fromProtoV30(
       createdContractP: v30.CreatedContract
   ): ParsingResult[CreatedContract] = {
-    val v30.CreatedContract(contractP, consumedInCore, rolledBack) =
-      createdContractP
+    val v30.CreatedContract(contractP, consumedInCore, rolledBack) = createdContractP
+    fromProto(contractP)(consumedInCore, rolledBack)
+  }
 
+  def fromProtoV31(
+      createdContractP: v31.CreatedContract
+  ): ParsingResult[CreatedContract] = {
+    val v31.CreatedContract(contractP, consumedInCore) = createdContractP
+    fromProto(contractP)(consumedInCore, rolledBack = false)
+  }
+
+  private def fromProto(
+      contractP: ByteString
+  )(consumedInCore: Boolean, rolledBack: Boolean): ParsingResult[CreatedContract] =
     for {
       contract <- ContractInstance
         .decodeCreated(contractP)
@@ -78,13 +96,12 @@ object CreatedContract {
         rolledBack = rolledBack,
       ).leftMap(OtherError.apply)
     } yield createdContract
-  }
 
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
   object Optics {
     val contractUnsafe: Lens[CreatedContract, NewContractInstance] =
-      GenLens[CreatedContract](_.contract)
+      GenLens.apply[CreatedContract](_.contract)
   }
 }
 

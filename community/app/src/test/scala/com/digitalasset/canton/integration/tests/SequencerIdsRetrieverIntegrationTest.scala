@@ -14,7 +14,8 @@ import com.digitalasset.canton.admin.api.client.data.{
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ExponentialBackoffConfig, NonNegativeDuration}
-import com.digitalasset.canton.console.{MediatorReference, SequencerReference}
+import com.digitalasset.canton.console.MediatorReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -51,12 +52,18 @@ final class SequencerIdsRetrieverIntegrationTest
          Ensure each mediator is connected to a single sequencer.
          The goal is that if a sequencer is stopped (sequencer4 in this test) it does not impact
          */
-        val mediatorToSequencers
-            : Map[MediatorReference, (Seq[SequencerReference], PositiveInt, NonNegativeInt)] =
+        val mediatorToSequencers: Map[MediatorReference, MediatorSequencersConfiguration] =
           sequencers
             .zip(mediators)
             .map { case (sequencer, mediator) =>
-              (mediator, (Seq(sequencer), PositiveInt.one, NonNegativeInt.zero))
+              (
+                mediator,
+                MediatorSequencersConfiguration(
+                  Seq(sequencer),
+                  trustThreshold = PositiveInt.one,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
+              )
             }
             .toMap
 

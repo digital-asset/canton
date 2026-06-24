@@ -173,6 +173,11 @@ abstract class ProtocolProcessor[
 
     val recentSnapshot = crypto.create(topologySnapshot)
     val explicitMediatorGroupIndex = steps.explicitMediatorGroup(submissionParam)
+
+    logger.debug(
+      s"Topology snapshot timestamp at submission: ${recentSnapshot.ipsSnapshot.timestamp}"
+    )
+
     for {
       _ <- steps.validateSubmittersNotOnboarding(submissionParam, topologySnapshot, participantId)
 
@@ -187,9 +192,7 @@ abstract class ProtocolProcessor[
       )
       (submission, pendingSubmission) =
         submissionData
-      _ = logger.debug(
-        s"Topology snapshot timestamp at submission: ${recentSnapshot.ipsSnapshot.timestamp}"
-      )
+
       result <- {
         submission match {
           case untracked: steps.UntrackedSubmission =>

@@ -66,7 +66,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
         .synchronizerId
         .toPhysical
     }
-    val static = StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion).toInternal
+    val static = StaticSynchronizerParameters.defaults(testedProtocolVersion).toInternal
     val storeId = SynchronizerStore(physicalSynchronizerId)
     val store = participant1.underlying.valueOrFail("is there").storage match {
       case _: MemoryStorage =>

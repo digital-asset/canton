@@ -12,7 +12,7 @@ import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, PackageId, QualifiedName}
 import com.digitalasset.daml.lf.language.{Ast, Reference}
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.transaction._
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
 
 // Provide methods to add missing information in values (and value containers):
@@ -247,14 +247,16 @@ private[refinement] final class EnricherImpl(
     create.copy(arg = arg, keyOpt = key)
   }
 
-  /** Verifies that [create] hashes to the same value according to all packages in [packageIds] (i.e. renders to
-    * the same value modulo package IDs) and returns the Create node enriched by the smallest package ID.
+  /** Verifies that [create] hashes to the same value according to all packages in [packageIds]
+    * (i.e. renders to the same value modulo package IDs) and returns the Create node enriched by
+    * the smallest package ID.
     *
     * Returns a Left if:
     *   - the contract hashes to different values according to different packages
     *   - the contract contains a key.
     *
-    * Returns a ResultError if the enrichment fails for unexpected reasons (e.g. typechecking fails).
+    * Returns a ResultError if the enrichment fails for unexpected reasons (e.g. typechecking
+    * fails).
     */
   private[lf] def unsafeEnrichCreateWithPackages(
       create: Node.Create,
@@ -288,7 +290,7 @@ private[refinement] final class EnricherImpl(
     otherHashes.find(_ != hash) match {
       case Some(otherPkgId) =>
         Left(
-          s"Contract ${create.coid} enriches to different values for packages ${targetPkgId} and ${otherPkgId}"
+          s"Contract ${create.coid} enriches to different values for packages $targetPkgId and $otherPkgId"
         )
       case None =>
         Right(create.copy(arg = toValue(sValue), keyOpt = enrichedKey))

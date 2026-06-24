@@ -96,9 +96,10 @@ class PostQuantumCryptoIntegrationTest
     EnvironmentDefinition
       .P4_S1M1_S1M1_S1M1(
         Map(
-          syncTrad -> StaticSynchronizerParameters.defaults(jce, testedProtocolVersion),
+          syncTrad -> StaticSynchronizerParameters
+            .defaults(cryptoConfig = jce, protocolVersion = testedProtocolVersion),
           syncPqcSupport -> StaticSynchronizerParameters
-            .defaults(jceWithExperimental, testedProtocolVersion),
+            .defaults(cryptoConfig = jceWithExperimental, protocolVersion = testedProtocolVersion),
           syncPqcOnly -> StaticSynchronizerParameters.fromConfig(
             SynchronizerParametersConfig()
               .copy(

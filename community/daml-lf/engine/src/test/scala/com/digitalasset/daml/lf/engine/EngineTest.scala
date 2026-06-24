@@ -8,32 +8,31 @@ import com.daml.logging.LoggingContext
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.tagToContainer
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.archive.DarDecoder
-import com.digitalasset.daml.lf.command._
+import com.digitalasset.daml.lf.command.*
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.engine.Error.{Interpretation => IErr}
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.engine.Error.Interpretation as IErr
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
+import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
-import com.digitalasset.daml.lf.speedy.SValue._
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue, svalue}
 import com.digitalasset.daml.lf.stablepackages.{StablePackages, StablePackagesV2}
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.Mode
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
   CreationTime,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
+  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
   Normalization,
@@ -41,14 +40,14 @@ import com.digitalasset.daml.lf.transaction.{
   SerializationVersion,
   SubmittedTransaction,
   Transaction,
+  Transaction as Tx,
   Validation,
   VersionedTransaction,
-  Transaction => Tx,
 }
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalactic.Equality
-import org.scalatest.Inside._
+import org.scalatest.Inside.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
@@ -85,7 +84,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     with SuppressingLogging {
 
   val helpers = new EngineTestHelpers(contractIdVersion, "BasicTests-nokey.dar", loggerFactory)
-  import helpers._
+  import helpers.*
 
   "minimal create command" should {
     val id = Identifier(basicTestsPkgId, "BasicTests:Simple")
@@ -101,7 +100,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupContract, lookupPackage, lookupKey)
-    res shouldBe a[Right[_, _]]
+    res shouldBe a[Right[?, ?]]
     val interpretResult = suffixLenientEngine
       .submit(
         submitters = submitters,
@@ -110,13 +109,14 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
         prefetchKeys = Seq.empty,
       )
       .consume(lookupContract, lookupPackage, lookupKey)
 
     "be translated" in {
-      interpretResult shouldBe a[Right[_, _]]
+      interpretResult shouldBe a[Right[?, ?]]
     }
 
     "reinterpret to the same result" in {
@@ -208,7 +208,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       val res = preprocessor
         .preprocessApiCommands(Map.empty, ImmArray(cmd))
         .consume(lookupContract, lookupPackage, lookupKey)
-      withClue("Preprocessing result: ")(res shouldBe a[Right[_, _]])
+      withClue("Preprocessing result: ")(res shouldBe a[Right[?, ?]])
 
       suffixLenientEngine
         .submit(
@@ -218,7 +218,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -226,7 +227,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
 
     "be translated" in {
       forAll(cases) { case (templateId, signatories, submitters) =>
-        interpretResult(templateId, signatories, submitters) shouldBe a[Right[_, _]]
+        interpretResult(templateId, signatories, submitters) shouldBe a[Right[?, ?]]
       }
     }
 
@@ -238,7 +239,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         val Right((rtx, _)) =
           reinterpret(
             suffixStrictEngine,
-            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+            interpretationConfig = InterpretationConfig.Default
+              .copy(contractStateMode = ContractStateMachine.Mode.NoKey),
             signatories.map(_._2),
             stx.roots,
             stx,
@@ -287,12 +289,13 @@ class EngineTest(contractIdVersion: ContractIdVersion)
             participantId = participant,
             preparationTime = let,
             contractIdVersion = contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+            interpretationConfig = InterpretationConfig.Default
+              .copy(contractStateMode = ContractStateMachine.Mode.NoKey),
             submissionSeed = submissionSeed,
           )
           .consume()
 
-        replayResult shouldBe a[Right[_, _]]
+        replayResult shouldBe a[Right[?, ?]]
       }
     }
 
@@ -308,7 +311,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           preparationTime = let,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           submissionSeed = submissionSeed,
         )
 
@@ -337,7 +341,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupContract, lookupPackage, lookupKey)
-    res shouldBe a[Right[_, _]]
+    res shouldBe a[Right[?, ?]]
     val interpretResult =
       res
         .flatMap { cmds =>
@@ -351,7 +355,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
               preparationTime = let,
               seeding = seeding,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+              interpretationConfig = InterpretationConfig.Default
+                .copy(contractStateMode = ContractStateMachine.Mode.NoKey),
             )
             .consume(lookupContract, lookupPackage, lookupKey)
         }
@@ -367,7 +372,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -380,7 +386,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           Set(party),
           stx.roots,
           stx,
@@ -403,7 +410,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
         )
         .consume(lookupContract, lookupPackage, lookupKey)
       validated match {
@@ -436,7 +444,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
                 preparationTime = let,
                 seeding = seeding,
                 contractIdVersion = contractIdVersion,
-                interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = sharedMode),
+                interpretationConfig =
+                  InterpretationConfig.Default.copy(contractStateMode = sharedMode),
                 metricPlugins = newMetricPlugins(),
               )
               .consume(lookupContract, lookupPackage, lookupKey)
@@ -455,7 +464,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
                 preparationTime = let,
                 seeding = seeding,
                 contractIdVersion = contractIdVersion,
-                interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = sharedMode),
+                interpretationConfig =
+                  InterpretationConfig.Default.copy(contractStateMode = sharedMode),
                 metricPlugins = newMetricPlugins(),
               )
               .consume(lookupContract, lookupPackage, lookupKey)
@@ -522,7 +532,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupContract, lookupPackage, lookupKey)
-    res shouldBe a[Right[_, _]]
+    res shouldBe a[Right[?, ?]]
     val interpretResult =
       res
         .flatMap { cmds =>
@@ -536,7 +546,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
               preparationTime = let,
               seeding = InitialSeeding.TransactionSeed(txSeed),
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+              interpretationConfig = InterpretationConfig.Default
+                .copy(contractStateMode = ContractStateMachine.Mode.NoKey),
             )
             .consume(lookupContract, lookupPackage, lookupKey)
         }
@@ -558,7 +569,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           Set(party),
           stx.roots,
           stx,
@@ -581,7 +593,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
         )
         .consume(lookupContract, lookupPackage, lookupKey)
       validated match {
@@ -671,7 +684,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           rec,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
-      res shouldBe a[Right[_, _]]
+      res shouldBe a[Right[?, ?]]
     }
 
     "work with fields with type parameters" in {
@@ -694,7 +707,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         )
         .consume(lookupContract, lookupPackage, lookupKey)
 
-      res shouldBe a[Right[_, _]]
+      res shouldBe a[Right[?, ?]]
     }
 
     "work with fields with labels, in the wrong order" in {
@@ -717,7 +730,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         )
         .consume(lookupContract, lookupPackage, lookupKey)
 
-      res shouldBe a[Right[_, _]]
+      res shouldBe a[Right[?, ?]]
     }
 
     "fail with fields with labels, with repetitions" in {
@@ -759,7 +772,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         )
         .consume(lookupContract, lookupPackage, lookupKey)
 
-      res shouldBe a[Right[_, _]]
+      res shouldBe a[Right[?, ?]]
     }
 
     "fail with fields without labels, in the wrong order" in {
@@ -810,7 +823,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
         prefetchKeys = Seq.empty,
       )
       .consume(lookupContract, lookupPackage, lookupKey)
@@ -832,7 +846,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
         preparationTime = preparationTime,
         seeding = InitialSeeding.TransactionSeed(txSeed),
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
       )
       .consume(lookupContract, lookupPackage, lookupKey)
 
@@ -848,7 +863,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           Set(bob),
           stx.transaction.roots,
           stx,
@@ -1008,7 +1024,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
               preparationTime = let,
               seeding = seeding,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+              interpretationConfig = InterpretationConfig.Default
+                .copy(contractStateMode = ContractStateMachine.Mode.NoKey),
             )
             .consume(lookupContract, lookupPackage, lookupKey)
         }
@@ -1080,7 +1097,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
               txMeta.preparationTime,
               let,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+              interpretationConfig = InterpretationConfig.Default
+                .copy(contractStateMode = ContractStateMachine.Mode.NoKey),
             )
             .consume(lookupContract, lookupPackage, lookupKey)
         isReplayedBy(fetchTx, reinterpreted) shouldBe Right(())
@@ -1143,11 +1161,12 @@ class EngineTest(contractIdVersion: ContractIdVersion)
             let,
             let,
             contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+            interpretationConfig =
+              InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           )
           .consume(lookupContract, lookupPackage, lookupKey)
 
-      reinterpreted shouldBe a[Right[_, _]]
+      reinterpreted shouldBe a[Right[?, ?]]
     }
   }
 
@@ -1173,7 +1192,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -1242,7 +1262,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(contracts, lookupPackage, lookupKey)
@@ -1300,7 +1321,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(PartialFunction.empty, lookupPackage, PartialFunction.empty)
@@ -1327,7 +1349,9 @@ class EngineTest(contractIdVersion: ContractIdVersion)
               metaData.preparationTime,
               submissionSeed,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode =
+                ContractStateMachine.Mode.NoKey
+              ),
             )
             .consume(PartialFunction.empty, lookupPackage, PartialFunction.empty)
             .left
@@ -1351,14 +1375,15 @@ class EngineTest(contractIdVersion: ContractIdVersion)
 
       reinterpret(
         suffixStrictEngine,
-        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
         Set(party),
         nids,
         stx,
         txMeta,
         let,
         lookupPackage,
-      ) shouldBe a[Right[_, _]]
+      ) shouldBe a[Right[?, ?]]
 
     }
   }
@@ -1389,17 +1414,17 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           if (i == -1) Int.MaxValue else i
         }
 
-    s"accept stable packages from ${devVersion} even if version is smaller than min version" in {
+    s"accept stable packages from $devVersion even if version is smaller than min version" in {
       for {
         lv <- compatibleLanguageVersions.filter(_ <= devVersion)
         eng = engine(compatibleLanguageVersions.filter(_ >= lv))
         pkg <- stablePackages
         pkgId = pkg.packageId
         pkg <- allPackagesDev.get(pkgId).toList
-      } yield eng.preloadPackage(pkgId, pkg) shouldBe a[ResultDone[_]]
+      } yield eng.preloadPackage(pkgId, pkg) shouldBe a[ResultDone[?]]
     }
 
-    s"reject stable packages from ${devVersion} if version is greater than max version" in {
+    s"reject stable packages from $devVersion if version is greater than max version" in {
       for {
         lv <- compatibleLanguageVersions
         eng = engine(compatibleLanguageVersions.filter(_ <= lv))
@@ -1456,7 +1481,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = hash("wrongly-typed contract"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(contracts, lookupPackage, lookupKey)
@@ -1578,7 +1604,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = hash("ill-formed contract"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(contracts, lookupPackage, lookupKey)
@@ -1703,7 +1730,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = hash("contract with trailing nones"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(
@@ -1736,7 +1764,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     def expectSuccess(
         result: Either[Error, (SubmittedTransaction, Transaction.Metadata)]
     ): Assertion =
-      result shouldBe a[Right[_, _]]
+      result shouldBe a[Right[?, ?]]
 
     def expectInvalidValue(
         result: Either[Error, (SubmittedTransaction, Transaction.Metadata)]
@@ -1817,11 +1845,21 @@ class EngineTest(contractIdVersion: ContractIdVersion)
 
     val expectedLegacyHash =
       Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendlyUnsafe = false)
+        .hashContractInstance(
+          simpleId,
+          createArg,
+          basicTestsPkg.pkgName,
+          upgradeFriendlyUnsafe = false,
+        )
         .value
     val expectedUpgradeFriendlyHash =
       Hash
-        .hashContractInstance(simpleId, createArg, basicTestsPkg.pkgName, upgradeFriendlyUnsafe = true)
+        .hashContractInstance(
+          simpleId,
+          createArg,
+          basicTestsPkg.pkgName,
+          upgradeFriendlyUnsafe = true,
+        )
         .value
     def expectedTypedNormalFormHash = SValueHash
       .hashContractInstance(
@@ -1848,7 +1886,8 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = hash("contract auth"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
           prefetchKeys = Seq.empty,
         )
         .consume(
@@ -1889,7 +1928,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           },
         )
         idValidatorCalledWithExpectedHash shouldBe true
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       }
     }
 
@@ -1916,7 +1955,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
           },
         )
         idValidatorCalledWithExpectedHash shouldBe true
-        result shouldBe a[Right[_, _]]
+        result shouldBe a[Right[?, ?]]
       }
     }
   }
@@ -1938,7 +1977,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
     with SuppressingLogging {
 
   val helpers = new EngineTestHelpers(contractIdVersion, "BasicTests-keys.dar", loggerFactory)
-  import helpers._
+  import helpers.*
 
   "exercise-by-key command with missing key" should {
     val submissionSeed = hash("exercise-by-key command with missing key")
@@ -1956,7 +1995,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupContract, lookupPackage, lookupKey)
-    res shouldBe a[Right[_, _]]
+    res shouldBe a[Right[?, ?]]
 
     "fail at submission" in {
       val submitResult = suffixStrictEngine
@@ -1967,7 +2006,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -2008,7 +2048,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
     val res = preprocessor
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupContract, lookupPackage, lookupKey)
-    res shouldBe a[Right[_, _]]
+    res shouldBe a[Right[?, ?]]
     val result =
       res
         .flatMap { cmds =>
@@ -2022,7 +2062,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
               preparationTime = let,
               seeding = seeding,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+              interpretationConfig = InterpretationConfig.Default
+                .copy(contractStateMode = ContractStateMachine.Mode.NUCK),
             )
             .consume(lookupContract, lookupPackage, lookupKey)
         }
@@ -2037,7 +2078,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -2051,7 +2093,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
           Set(alice),
           stx.roots,
           stx,
@@ -2076,7 +2119,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(lookupContract, lookupPackage, lookupKey)
       validated match {
@@ -2125,7 +2169,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2166,7 +2211,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(lookupContract, lookupPackage, lookupKey)
 
@@ -2309,7 +2355,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NoKey),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2339,7 +2386,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2389,7 +2437,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2454,7 +2503,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           participantId = participant,
           submissionSeed = seed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -2487,7 +2537,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2557,7 +2608,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = let,
           seeding = seeding,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(
           contracts,
@@ -2621,7 +2673,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(lookupContractMap, lookupPackage, lookupKey)
 
@@ -2688,7 +2741,8 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
         )
         .consume(lookupContractMap, lookupPackage, lookupKey)
 
@@ -2741,7 +2795,7 @@ class EngineTestExceptions(
     with SuppressingLogging {
 
   val helpers = new EngineTestHelpers(contractIdVersion, "BasicTests-nokey.dar", loggerFactory)
-  import helpers._
+  import helpers.*
 
   val (exceptionsPkgId, exceptionsPkg, allExceptionsPkgs) =
     // TODO(https://github.com/digital-asset/daml/issues/18457): split key test cases and revert
@@ -2818,7 +2872,8 @@ class EngineTestExceptions(
         preparationTime = let,
         seeding = seeding,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
       )
       .consume(contracts, allExceptionsPkgs, lookupKey)
   }
@@ -2834,7 +2889,7 @@ class EngineTestExceptions(
       )
       contractStateMode match {
         case Mode.NoKey =>
-          run(command) shouldBe a[Right[_, _]]
+          run(command) shouldBe a[Right[?, ?]]
         case Mode.NUCK =>
           inside(run(command)) {
             case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
@@ -2863,7 +2918,7 @@ class EngineTestExceptions(
       )
       contractStateMode match {
         case Mode.NoKey =>
-          run(command) shouldBe a[Right[_, _]]
+          run(command) shouldBe a[Right[?, ?]]
         case Mode.NUCK =>
           inside(run(command)) {
             case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
@@ -2891,7 +2946,7 @@ class EngineTestExceptions(
           "RollbackKey",
           ValueRecord(None, ImmArray((None, ValueInt64(0)))),
         )
-        run(command) shouldBe a[Left[_, _]]
+        run(command) shouldBe a[Left[?, ?]]
       }
     if (contractStateMode == ContractStateMachine.Mode.NUCK)
       "key updates in try are not rolled back if no exception is thrown" in {
@@ -2901,7 +2956,7 @@ class EngineTestExceptions(
           "Key",
           ValueRecord(None, ImmArray((None, ValueInt64(0)))),
         )
-        run(command) shouldBe a[Right[_, _]]
+        run(command) shouldBe a[Right[?, ?]]
       }
     // TEST_EVIDENCE: Integrity: Rollback creates cannot be exercise
     "creates in rollback are rolled back" in {
@@ -2931,7 +2986,7 @@ class EngineTestExceptions(
         "ThrowInHandler",
         ValueRecord(None, ImmArray.empty),
       )
-      run(command) shouldBe a[Right[_, _]]
+      run(command) shouldBe a[Right[?, ?]]
     }
     "ThrowPureInHandler" in {
       val command = ApiCommand.CreateAndExercise(
@@ -2940,7 +2995,7 @@ class EngineTestExceptions(
         "ThrowPureInHandler",
         ValueRecord(None, ImmArray.empty),
       )
-      run(command) shouldBe a[Right[_, _]]
+      run(command) shouldBe a[Right[?, ?]]
     }
     "ThrowPureInHandlerPattern" in {
       val command = ApiCommand.CreateAndExercise(
@@ -2949,7 +3004,7 @@ class EngineTestExceptions(
         "ThrowPureInHandlerPattern",
         ValueRecord(None, ImmArray.empty),
       )
-      run(command) shouldBe a[Right[_, _]]
+      run(command) shouldBe a[Right[?, ?]]
     }
   }
 
@@ -3002,7 +3057,7 @@ class EngineTestExceptions(
             meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 3, 4)
           }
         }
-      }
+    }
   }
 }
 
@@ -3014,7 +3069,7 @@ class EngineTestAllVersions
 
   "Engine.preloadPackage" should {
 
-    import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
+    import com.digitalasset.daml.lf.language.LanguageVersion as LV
 
     def engine(versions: Seq[language.LanguageVersion]) =
       new Engine(
@@ -3066,7 +3121,7 @@ class EngineTestHelpers(
   val defaultSerializationVersion =
     SerializationVersion.assign(hasKey = true)
 
-  import Matchers._
+  import Matchers.*
 
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
 
@@ -3259,63 +3314,64 @@ class EngineTestHelpers(
     }
 
     val finalState =
-      actionNodes.foldLeft[Either[Error, ReinterpretState]](Right(ReinterpretState(contracts, keys))) {
-        case (acc, nodeId) =>
-          for {
-            state <- acc
-            cmd = tx.transaction.nodes(nodeId) match {
-              case create: Node.Create =>
-                ReplayCommand.Create(create.templateId, create.arg)
-              case fetch: Node.Fetch if fetch.byKey =>
-                val key = fetch.keyOpt.getOrElse(sys.error("unexpected empty contract key")).value
-                ReplayCommand.FetchByKey(fetch.templateId, key)
-              case fetch: Node.Fetch =>
-                ReplayCommand.Fetch(fetch.templateId, None, fetch.coid)
-              case exe: Node.Exercise if exe.byKey =>
-                val key = exe.keyOpt.getOrElse(sys.error("unexpected empty contract key")).value
-                ReplayCommand.ExerciseByKey(
-                  exe.templateId,
-                  key,
-                  exe.choiceId,
-                  exe.chosenValue,
-                )
-              case exe: Node.Exercise =>
-                ReplayCommand.Exercise(
-                  exe.templateId,
-                  exe.interfaceId,
-                  exe.targetCoid,
-                  exe.choiceId,
-                  exe.chosenValue,
-                )
-              case _: Node.LookupByKey =>
-                sys.error("unexpected lookup node")
-              case _: Node.Rollback =>
-                sys.error("unexpected rollback node")
-            }
-            currentStep <- engine
-              .reinterpret(
-                submitters,
-                cmd,
-                nodeSeedMap.get(nodeId),
-                txMeta.preparationTime,
-                ledgerEffectiveTime,
-                contractIdVersion = contractIdVersion,
-                interpretationConfig = interpretationConfig,
+      actionNodes.foldLeft[Either[Error, ReinterpretState]](
+        Right(ReinterpretState(contracts, keys))
+      ) { case (acc, nodeId) =>
+        for {
+          state <- acc
+          cmd = tx.transaction.nodes(nodeId) match {
+            case create: Node.Create =>
+              ReplayCommand.Create(create.templateId, create.arg)
+            case fetch: Node.Fetch if fetch.byKey =>
+              val key = fetch.keyOpt.getOrElse(sys.error("unexpected empty contract key")).value
+              ReplayCommand.FetchByKey(fetch.templateId, key)
+            case fetch: Node.Fetch =>
+              ReplayCommand.Fetch(fetch.templateId, None, fetch.coid)
+            case exe: Node.Exercise if exe.byKey =>
+              val key = exe.keyOpt.getOrElse(sys.error("unexpected empty contract key")).value
+              ReplayCommand.ExerciseByKey(
+                exe.templateId,
+                key,
+                exe.choiceId,
+                exe.chosenValue,
               )
-              .consume(
-                state.contracts,
-                lookupPackages,
-                state.keys,
+            case exe: Node.Exercise =>
+              ReplayCommand.Exercise(
+                exe.templateId,
+                exe.interfaceId,
+                exe.targetCoid,
+                exe.choiceId,
+                exe.chosenValue,
               )
-            (tr0, meta0) = currentStep
-            tr1 = suffix(tr0)
-            n = state.nodes.size
-            nodeRenaming = (nid: NodeId) => NodeId(nid.index + n)
-            tr = tr1.transaction.mapNodeId(nodeRenaming)
-            meta = meta0.copy(nodeSeeds = meta0.nodeSeeds.map { case (nid, seed) =>
-              nodeRenaming(nid) -> seed
-            })
-          } yield state.commit(tr, meta)
+            case _: Node.LookupByKey =>
+              sys.error("unexpected lookup node")
+            case _: Node.Rollback =>
+              sys.error("unexpected rollback node")
+          }
+          currentStep <- engine
+            .reinterpret(
+              submitters,
+              cmd,
+              nodeSeedMap.get(nodeId),
+              txMeta.preparationTime,
+              ledgerEffectiveTime,
+              contractIdVersion = contractIdVersion,
+              interpretationConfig = interpretationConfig,
+            )
+            .consume(
+              state.contracts,
+              lookupPackages,
+              state.keys,
+            )
+          (tr0, meta0) = currentStep
+          tr1 = suffix(tr0)
+          n = state.nodes.size
+          nodeRenaming = (nid: NodeId) => NodeId(nid.index + n)
+          tr = tr1.transaction.mapNodeId(nodeRenaming)
+          meta = meta0.copy(nodeSeeds = meta0.nodeSeeds.map { case (nid, seed) =>
+            nodeRenaming(nid) -> seed
+          })
+        } yield state.commit(tr, meta)
       }
 
     finalState.map(state =>

@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.TransactionViewDecomposition.*
+import com.digitalasset.canton.data.TransactionViewDecompositionFactory.RollbackState
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{
@@ -34,6 +34,9 @@ class TransactionViewDecompositionTest
     with NeedsNewLfContractIds {
 
   lazy val factory: TransactionViewDecompositionFactory.type = TransactionViewDecompositionFactory
+
+  val rollbackContextFactory: RollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
+
   s"With factory ${factory.getClass.getSimpleName}" when {
 
     val exampleTransactionFactory = new ExampleTransactionFactory()()
@@ -47,8 +50,9 @@ class TransactionViewDecompositionTest
             .fromTransaction(
               exampleTransactionFactory.topologySnapshot,
               example.wellFormedUnsuffixedTransaction,
-              RollbackContext.empty,
+              rollbackContextFactory.empty,
               Some(ExampleTransactionFactory.submitter),
+              rollbackContextFactory,
             )
             .futureValueUS
             .toList shouldEqual example.rootViewDecompositions.toList
@@ -69,8 +73,9 @@ class TransactionViewDecompositionTest
             .fromTransaction(
               defaultTopologySnapshot,
               wftWithCreateNodes(flatTransactionSize, signatory, observer),
-              RollbackContext.empty,
+              rollbackContextFactory.empty,
               None,
+              rollbackContextFactory,
             )
             .failOnShutdown
         )
@@ -103,30 +108,47 @@ class TransactionViewDecompositionTest
         )
       )
 
+      class MutableRollbackState() {
+        var rollbackState: RollbackState = RollbackState.empty
+        def enter(): MutableRollbackState = {
+          rollbackState = rollbackState.enterRollback
+          this
+        }
+        def exit(): MutableRollbackState = {
+          rollbackState = rollbackState.tryExitRollback
+          this
+        }
+        def scope: RollbackScope =
+          rollbackContextFactory.fromRollbackState(rollbackState).rollbackScope
+      }
+      val state = new MutableRollbackState()
+
       val expected = List(
         RbNewTree(
-          rbScope(PositiveInt.one),
+          state.enter().scope,
           Set(alice),
           List[RollbackDecomposition](
-            RbSameTree(rbScope(PositiveInt.one)),
-            RbNewTree(rbScope(PositiveInt.one, PositiveInt.one), Set(alice, carol)),
-            RbNewTree(rbScope(PositiveInt.two), Set(alice, bob)),
+            RbSameTree(state.scope),
+            RbNewTree(state.enter().scope, Set(alice, carol)),
+            RbNewTree(state.exit().exit().enter().scope, Set(alice, bob)),
           ),
         )
       )
 
-      "does not re-used rollback contexts" in {
+      "correctly decomposes rollbacks" in {
 
         val decomposition = TransactionViewDecompositionFactory
           .fromTransaction(
             defaultTopologySnapshot,
             toWellFormedUnsuffixedTransaction(embeddedRollbackExample),
-            RollbackContext.empty,
+            rollbackContextFactory.empty,
             None,
+            rollbackContextFactory,
           )
           .futureValueUS
 
-        val actual = RollbackDecomposition.rollbackDecomposition(decomposition)
+        val actual =
+          RollbackDecomposition.rollbackDecomposition(decomposition, rollbackContextFactory)
 
         actual shouldBe expected
       }
@@ -135,7 +157,7 @@ class TransactionViewDecompositionTest
     "new view counting" can {
       object tif extends TestIdFactory
       val node = exerciseNode(tif.newCid, signatories = Set.empty)
-      val sameView = SameView(node, LfNodeId(0), RollbackContext.empty)
+      val sameView = SameView(node, LfNodeId(0), rollbackContextFactory.empty)
       var nextThreshold: NonNegativeInt = NonNegativeInt.zero
       def newView(children: TransactionViewDecomposition*): NewView = {
         // Trick: Use unique thresholds to get around NewView nesting check
@@ -150,7 +172,7 @@ class TransactionViewDecompositionTest
           None,
           LfNodeId(0),
           children,
-          RollbackContext.empty,
+          rollbackContextFactory.empty,
         )
       }
 
@@ -227,6 +249,7 @@ class TransactionViewDecompositionTest
           },
         ),
         WithoutSuffixes,
+        rollbackContextFactory,
       )
       .value
 
@@ -244,27 +267,33 @@ object RollbackDecomposition {
   final case class RbSameTree(rb: RollbackScope) extends RollbackDecomposition
 
   /** The purpose of this method is to map a tree [[TransactionViewDecomposition]] onto a
-    * [[RollbackDecomposition]] hierarchy aid comparison. The [[RollbackContext.nextChild]] value is
-    * significant but is not available for inspection or construction. For this reason we use trick
-    * of entering a rollback context and then converting to a rollback scope that has as its last
-    * sibling the nextChild value.
+    * [[RollbackDecomposition]] hierarchy aid comparison.
     */
   def rollbackDecomposition(
-      decompositions: Seq[TransactionViewDecomposition]
-  ): List[RollbackDecomposition] =
-    decompositions
-      .map[RollbackDecomposition] {
-        case view: NewView =>
-          RbNewTree(
-            view.rbContext.enterRollback.rollbackScope.toList,
-            view.viewConfirmationParameters.informees,
-            rollbackDecomposition(view.tailNodes),
-          )
-        case view: SameView =>
-          RbSameTree(view.rbContext.enterRollback.rollbackScope.toList)
-      }
-      .toList
+      init: Seq[TransactionViewDecomposition],
+      rollbackContextFactory: RollbackContextFactory,
+  ): List[RollbackDecomposition] = {
 
-  def rbScope(rollbackScope: RollbackSibling*): RollbackScope = rollbackScope.toList
+    def rbScope(context: RollbackContext): RollbackScope =
+      rollbackContextFactory
+        .fromRollbackState(rollbackContextFactory.toRollbackState(context).enterRollback)
+        .rollbackScope
 
+    def go(decompositions: Seq[TransactionViewDecomposition]): List[RollbackDecomposition] =
+      decompositions
+        .map[RollbackDecomposition] {
+          case view: NewView =>
+            RbNewTree(
+              rbScope(view.rbContext),
+              view.viewConfirmationParameters.informees,
+              go(view.tailNodes),
+            )
+          case view: SameView =>
+            RbSameTree(rbScope(view.rbContext))
+        }
+        .toList
+
+    go(init)
+
+  }
 }

@@ -5,11 +5,12 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.transaction.Transaction
-import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.resources.ResourceContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.AcsDelta
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse.ProtoUpdate
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.UseOriginalViewPackageId
@@ -807,7 +808,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
               descendingOrder = false,
             )
             .runWith(Sink.seq)
-          readOffsets = response flatMap { case (_, gtr) => Seq(gtr.getTransaction.offset) }
+          readOffsets = response flatMap {
+            case (_, ProtoUpdate(gtr)) => Seq(gtr.getTransaction.offset)
+            case other => fail(s"Expected a transaction update, got: ${other._2}")
+          }
           readCreates = extractAllTransactions(response) flatMap (_.events)
         } yield try {
           readCreates.size should ===(boolSeq count identity)
@@ -870,10 +874,11 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       .map(_.flatMap(_.toList.flatMap(_.update.transaction.toList)))
 
   private def transactionsOf(
-      source: Source[(Offset, GetUpdatesResponse), NotUsed]
+      source: Source[(Offset, UpdateResponse), NotUsed]
   ): Future[Seq[Transaction]] =
     source
       .map(_._2)
+      .collect { case UpdateResponse.ProtoUpdate(u) => u }
       .runWith(Sink.seq)
       .map(_.map(_.getTransaction))
 
@@ -883,9 +888,15 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
     txs.map(tx => tx.copy(events = tx.events.map(_.modifyWitnessParties(_.sorted))))
 
   private def extractAllTransactions(
-      responses: Seq[(Offset, GetUpdatesResponse)]
+      responses: Seq[(Offset, UpdateResponse)]
   ): Vector[Transaction] =
-    responses.foldLeft(Vector.empty[Transaction])((b, a) => b :+ a._2.getTransaction)
+    responses
+      .map {
+        case (offset, UpdateResponse.ProtoUpdate(u)) => offset -> u
+        case (offset, other) =>
+          fail(s"Expected a transaction update, got: $other at offset $offset")
+      }
+      .foldLeft(Vector.empty[Transaction])((b, a) => b :+ a._2.getTransaction)
 
   private def createLedgerDaoResourceOwner(
       pageSize: Int,
@@ -1011,6 +1022,7 @@ private[dao] object JdbcLedgerDaoTransactionsSpec {
       includeTransactions = txFormat,
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeAcsCommitments = None,
     )
   }
 
@@ -1037,6 +1049,7 @@ private[dao] object JdbcLedgerDaoTransactionsSpec {
       includeTransactions = Some(transactionFormatForWildcardParties(requestingParties)),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeAcsCommitments = None,
     )
 
 }

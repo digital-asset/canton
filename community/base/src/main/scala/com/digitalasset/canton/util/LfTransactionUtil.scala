@@ -179,11 +179,6 @@ object LfTransactionUtil {
     nodes.flatMap(_.informeesOfNode)
   }
 
-  val children: LfNode => Seq[LfNodeId] = {
-    case ex: LfNodeExercises => ex.children.toSeq
-    case _ => Seq.empty
-  }
-
   /** Yields the light-weight version (i.e. without exercise children and result) of this node.
     *
     * @throws java.lang.UnsupportedOperationException

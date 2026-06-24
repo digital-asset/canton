@@ -5,11 +5,12 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.daml.lf.speedy.Speedy.Env
+
 import data.{FrontStack, Ref}
 
 abstract class CostModel {
 
-  import CostModel._
+  import CostModel.*
 
   /* Builtins */
   val AddNumeric: CostFunction2[Numeric, Numeric]
@@ -338,8 +339,10 @@ object CostModel {
 
   /** Represents a first-degree polynomial (linear): `f(n) = A + B*n`.
     *
-    * @param a The fixed, base memory overhead (the y-intercept).
-    * @param b The per-element memory overhead (the slope).
+    * @param a
+    *   The fixed, base memory overhead (the y-intercept).
+    * @param b
+    *   The per-element memory overhead (the slope).
     */
   case class LinearPolynomial(a: Long, b: Long) {
     def calculate(n: Int) = a + b * n.toLong
@@ -347,8 +350,8 @@ object CostModel {
 
   def roundTo8(l: Long) = (l + 7) & ~7L
 
-  /** A conservative cost model based on a 64-bit JVM with memory optimizations
-    * like CompressedOops disabled (`-XX:-UseCompressedOops`).
+  /** A conservative cost model based on a 64-bit JVM with memory optimizations like CompressedOops
+    * disabled (`-XX:-UseCompressedOops`).
     */
   object CostModelV0 extends CostModel {
 
@@ -409,9 +412,8 @@ object CostModel {
         BOOL_BYTES // .hashIsZero
     )
 
-    /** Memory model for a `java.lang.String` of length `n`.
-      * We conservatively assume 2 bytes per character (UTF-16), which is the
-      * worst case for JVM strings since Java 9.
+    /** Memory model for a `java.lang.String` of length `n`. We conservatively assume 2 bytes per
+      * character (UTF-16), which is the worst case for JVM strings since Java 9.
       */
     val StringSize = LinearPolynomial(
       STRING_SHELL_BYTES +
@@ -419,8 +421,8 @@ object CostModel {
       ByteArraySize.b * 2, // Each char takes 2 bytes if string is not LATIN1.
     )
 
-    /** Memory model for an Ascii `java.lang.String` of length `n`.
-      * We know that each char takes 1 byte.
+    /** Memory model for an Ascii `java.lang.String` of length `n`. We know that each char takes 1
+      * byte.
       */
     val AsciiStringSize =
       LinearPolynomial(STRING_SHELL_BYTES + ByteArraySize.a, ByteArraySize.b)
@@ -816,10 +818,9 @@ object CostModel {
     override val BInt64ToText: CostFunction1[Int64] =
       // 20 = "-9223372036854775808".length
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(20))
-    override val BNumericToText: CostFunction1[Numeric] = {
+    override val BNumericToText: CostFunction1[Numeric] =
       // 40 = "-99999999999999999999999999999999999999.".length
       CostFunction1.Constant(STextWrapperSize + AsciiStringSize.calculate(40))
-    }
     override val BFoldl: CostConstant = CostConstant(0)
     override val BFoldr: CostConstant = CostConstant(0)
     override val BTimestampToText: CostFunction1[Timestamp] =

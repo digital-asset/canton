@@ -4,9 +4,9 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import org.scalatest.{Assertion, Inside}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Assertion, Inside}
 
 class TreeIteratorSpec extends AnyWordSpec with Inside with Matchers {
 

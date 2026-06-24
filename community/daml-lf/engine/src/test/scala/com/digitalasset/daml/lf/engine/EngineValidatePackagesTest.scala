@@ -5,10 +5,9 @@ package com.digitalasset.daml.lf
 package engine
 
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.archive.Dar
-import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.daml.lf.archive.{Dar, DarDecoder}
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.parser

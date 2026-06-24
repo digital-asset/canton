@@ -15,6 +15,7 @@ import com.digitalasset.canton.console.{
   MediatorReference,
   SequencerReference,
 }
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
 import com.digitalasset.canton.topology.{
   MediatorId,
@@ -48,13 +49,21 @@ class NetworkBootstrapper(networks: NetworkTopologyDescription*)(implicit
   private def bootstrapSynchronizer(desc: NetworkTopologyDescription): Unit = {
     val mediatorsToSequencers =
       desc.overrideMediatorToSequencers.getOrElse(
-        desc.mediators.map(_ -> (desc.sequencers, PositiveInt.one, NonNegativeInt.zero)).toMap
+        desc.mediators
+          .map(
+            _ -> MediatorSequencersConfiguration(
+              desc.sequencers,
+              trustThreshold = PositiveInt.one,
+              livenessMargin = NonNegativeInt.zero,
+            )
+          )
+          .toMap
       )
 
     val synchronizerId = env.bootstrap.synchronizer(
       synchronizerName = desc.synchronizerName,
       sequencers = desc.sequencers,
-      mediatorsToSequencers = mediatorsToSequencers,
+      mediatorsToSequencers = mediatorsToSequencers.view.mapValues(_.toTuple).toMap,
       synchronizerOwners = desc.synchronizerOwners,
       synchronizerThreshold = desc.synchronizerThreshold,
       staticSynchronizerParameters = desc.staticSynchronizerParameters,
@@ -82,7 +91,7 @@ object NetworkBootstrapper {
 
 /** @param overrideMediatorToSequencers
   *   By default, mediators connect to all sequencers. If set, the provided map will override the
-  *   default behavior. The positive int defines the mediator's sequencer trust threshold.
+  *   default behavior.
   */
 final case class NetworkTopologyDescription(
     synchronizerName: String,
@@ -92,9 +101,7 @@ final case class NetworkTopologyDescription(
     mediators: Seq[MediatorReference],
     staticSynchronizerParameters: StaticSynchronizerParameters,
     mediatorRequestAmplification: SubmissionRequestAmplification,
-    overrideMediatorToSequencers: Option[
-      Map[MediatorReference, (Seq[SequencerReference], PositiveInt, NonNegativeInt)]
-    ],
+    overrideMediatorToSequencers: Option[Map[MediatorReference, MediatorSequencersConfiguration]],
     mediatorThreshold: PositiveInt,
 ) {
   def withTopologyChangeDelay(
@@ -116,7 +123,7 @@ object NetworkTopologyDescription {
       mediatorRequestAmplification: SubmissionRequestAmplification =
         SubmissionRequestAmplification.NoAmplification,
       overrideMediatorToSequencers: Option[
-        Map[MediatorReference, (Seq[SequencerReference], PositiveInt, NonNegativeInt)]
+        Map[MediatorReference, MediatorSequencersConfiguration]
       ] = None,
       overrideStaticSynchronizerParameters: Option[StaticSynchronizerParameters] = None,
       mediatorThreshold: PositiveInt = PositiveInt.one,
@@ -155,6 +162,15 @@ object NetworkTopologyDescription {
       PositiveInt.one,
     )
 
+  /** Defines how mediators connect to the sequencers */
+  final case class MediatorSequencersConfiguration(
+      sequencers: Seq[SequencerReference],
+      trustThreshold: PositiveInt,
+      livenessMargin: NonNegativeInt,
+  ) {
+    def toTuple: (Seq[SequencerReference], PositiveInt, NonNegativeInt) =
+      (sequencers, trustThreshold, livenessMargin)
+  }
 }
 
 /** A data container to hold useful information for initialized synchronizers

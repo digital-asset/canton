@@ -21,26 +21,28 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.value.Value
 
 /** The Command Preprocessor is responsible of the following tasks:
-  *  - normalizes value representation (e.g. resolves missing type
-  *    reference in record/variant/enumeration, infers missing labeled
-  *    record fields, orders labeled record fields, ...);
-  *  - checks value nesting does not overpass 100;
-  *  - checks a LF command/value is properly typed according the
-  *    Daml-LF package definitions;
-  *  - checks for Contract ID suffix (see [[forbidLocalContractIds]]);
-  *  - translates a LF command/value into speedy command/value; and
-  *  - translates a complete transaction into a list of speedy
-  *    commands.
+  *   - normalizes value representation (e.g. resolves missing type reference in
+  *     record/variant/enumeration, infers missing labeled record fields, orders labeled record
+  *     fields, ...);
+  *   - checks value nesting does not overpass 100;
+  *   - checks a LF command/value is properly typed according the Daml-LF package definitions;
+  *   - checks for Contract ID suffix (see [[forbidLocalContractIds]]);
+  *   - translates a LF command/value into speedy command/value; and
+  *   - translates a complete transaction into a list of speedy commands.
   *
-  * @param compiledPackages a [[MutableCompiledPackages]] contains the
-  *   Daml-LF package definitions against the command should
-  *   resolved/typechecked. It is updated dynamically each time the
-  *   [[ResultNeedPackage]] continuation is called.
-  * @param forbidLocalContractIds when `true` the preprocessor will reject
-  *   any value/command/transaction that contains a local Contract ID.
-  * @param costModel the preprocessor input cost model that should be used
-  * @param initialInputCost initial input cost
-  * @param maxInputCost maximum input cost. Any input cost that exceeds this value will cause engine evaluation to
+  * @param compiledPackages
+  *   a [[MutableCompiledPackages]] contains the Daml-LF package definitions against the command
+  *   should resolved/typechecked. It is updated dynamically each time the [[ResultNeedPackage]]
+  *   continuation is called.
+  * @param forbidLocalContractIds
+  *   when `true` the preprocessor will reject any value/command/transaction that contains a local
+  *   Contract ID.
+  * @param costModel
+  *   the preprocessor input cost model that should be used
+  * @param initialInputCost
+  *   initial input cost
+  * @param maxInputCost
+  *   maximum input cost. Any input cost that exceeds this value will cause engine evaluation to
   *   terminate with an error.
   */
 private[engine] final class Preprocessor(
@@ -54,15 +56,14 @@ private[engine] final class Preprocessor(
 ) extends SafePackageResolver(compiledPackages, loadPackage, loggerFactory) {
 
   import compiledPackages.pkgInterface
-  import costModel._
+  import costModel.*
 
   private[this] var inputCost: CostModel.Cost = initialInputCost
 
-  def updateInputCost[A](value: A)(implicit cost: A => CostModel.Cost): Unit = {
+  def updateInputCost[A](value: A)(implicit cost: A => CostModel.Cost): Unit =
     inputCost += cost(value)
-  }
 
-  def getInputCost(implicit traceContext: TraceContext): Result[CostModel.Cost] = {
+  def getInputCost(implicit traceContext: TraceContext): Result[CostModel.Cost] =
     if (inputCost <= maxInputCost) {
       ResultDone(inputCost)
     } else {
@@ -74,7 +75,6 @@ private[engine] final class Preprocessor(
         )
       )
     }
-  }
 
   val commandPreprocessor =
     new CommandPreprocessor(
@@ -84,9 +84,8 @@ private[engine] final class Preprocessor(
 
   val transactionPreprocessor = new TransactionPreprocessor(commandPreprocessor)
 
-  /** Translates the LF value `v0` of type `ty0` to a speedy value.
-    * Fails if the nesting is too deep or if v0 does not match the type `ty0`.
-    * Assumes ty0 is a well-formed serializable typ.
+  /** Translates the LF value `v0` of type `ty0` to a speedy value. Fails if the nesting is too deep
+    * or if v0 does not match the type `ty0`. Assumes ty0 is a well-formed serializable typ.
     */
   def translateValue(ty0: Ast.Type, v0: Value)(implicit
       traceContext: TraceContext
@@ -146,7 +145,7 @@ private[engine] final class Preprocessor(
       templateId: Ref.TypeConId,
       contractKey: Value,
       extendLocalIdForbiddanceToRelativeV2: Boolean,
-  ): Result[GlobalKey] = {
+  ): Result[GlobalKey] =
     safelyRun(pullPackage(Seq(templateId))) {
       commandPreprocessor.unsafePreprocessContractKey(
         contractKey,
@@ -154,9 +153,8 @@ private[engine] final class Preprocessor(
         extendLocalIdForbiddanceToRelativeV2,
       )
     }
-  }
 
-  /** Translates  LF commands to a speedy commands.
+  /** Translates LF commands to a speedy commands.
     */
   def preprocessApiCommands(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],

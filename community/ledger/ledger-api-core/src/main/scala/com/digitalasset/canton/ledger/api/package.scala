@@ -214,6 +214,7 @@ package api {
       includeTransactions: Option[TransactionFormat],
       includeReassignments: Option[EventFormat],
       includeTopologyEvents: Option[TopologyFormat],
+      includeAcsCommitments: Option[SynchronizerId],
   )
 
   final case class TopologyFormat(

@@ -7,7 +7,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.*
@@ -23,6 +23,9 @@ final case class EnvelopeContent(message: UnsignedProtocolMessage)(
 
   private def toProtoV31: v31.EnvelopeContent =
     v31.EnvelopeContent(message.toProtoSomeEnvelopeContentV31)
+
+  private def toProtoV32: v32.EnvelopeContent =
+    v32.EnvelopeContent(message.toProtoSomeEnvelopeContentV32)
 }
 
 object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeContent, HashOps] {
@@ -39,6 +42,12 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
     )(v31.EnvelopeContent)(
       supportedProtoVersion(_)(fromProtoV31),
       _.toProtoV31,
+    ),
+    ProtoVersion(32) -> VersionedProtoCodec(
+      ProtocolVersion.v36
+    )(v32.EnvelopeContent)(
+      supportedProtoVersion(_)(fromProtoV32),
+      _.toProtoV32,
     ),
   )
 
@@ -106,7 +115,45 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.AcsCommitmentProtocolMessage(messageP) =>
-          AcsCommitmentProtocolMessage.fromProtoV30(expectedProtocolVersion, messageP)
+          LegacyAcsCommitmentProtocolMessage.fromProtoV30(expectedProtocolVersion, messageP)
+        case Content.LsuSequencingTestMessage(messageP) =>
+          LsuSequencingTestMessage.fromProtoV30(expectedProtocolVersion, messageP)
+        case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
+      }): ParsingResult[UnsignedProtocolMessage]
+    } yield EnvelopeContent(content)(rpv)
+  }
+
+  private def fromProtoV32(
+      context: (HashOps, ProtocolVersion),
+      contentP: v32.EnvelopeContent,
+  ): ParsingResult[EnvelopeContent] = {
+    val (hashOps, expectedProtocolVersion) = context
+    import v32.EnvelopeContent.SomeEnvelopeContent as Content
+    for {
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
+      content <- (contentP.someEnvelopeContent match {
+        case Content.InformeeMessage(messageP) =>
+          InformeeMessage.fromProtoV30(context)(messageP)
+        case Content.EncryptedMultipleViewsMessage(messageP) =>
+          EncryptedMultipleViewsMessage.fromProto(messageP)
+        case Content.UnassignmentMediatorMessage(messageP) =>
+          UnassignmentMediatorMessage.fromProtoV30(
+            (hashOps, Source(ProtocolVersionValidation.PV(expectedProtocolVersion)))
+          )(messageP)
+        case Content.AssignmentMediatorMessage(messageP) =>
+          AssignmentMediatorMessage.fromProtoV30(
+            (hashOps, Target(expectedProtocolVersion))
+          )(messageP)
+        case Content.RootHashMessage(messageP) =>
+          RootHashMessage.fromProtoV30(SerializedRootHashMessagePayload.fromByteString)(messageP)
+        case Content.TopologyTransactionsBroadcast(messageP) =>
+          TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
+        case Content.AcsCommitmentProtocolMessage(messageP) =>
+          AcsCommitmentProtocolMessage.fromProtoV32(expectedProtocolVersion, messageP)
+        case Content.LegacyAcsCommitmentProtocolMessage(messageP) =>
+          LegacyAcsCommitmentProtocolMessage.fromProtoV30(expectedProtocolVersion, messageP)
+        case Content.AcsCommitmentSummaryProtocolMessage(messageP) =>
+          AcsCommitmentSummaryProtocolMessage.fromProtoV32(expectedProtocolVersion, messageP)
         case Content.LsuSequencingTestMessage(messageP) =>
           LsuSequencingTestMessage.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))

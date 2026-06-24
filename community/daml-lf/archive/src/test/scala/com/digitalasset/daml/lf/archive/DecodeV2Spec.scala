@@ -1357,7 +1357,7 @@ class DecodeV2Spec
         .setUpdate(update)
         .build()
 
-      forEveryVersionSuchThat(LV.featureNUCK.enabledIn(_)) { version =>
+      forEveryVersionSuchThat(LV.featureContractKeys.enabledIn(_)) { version =>
         val decoder = new DecodeV2(version.minor)
         val env = decoder.Env(
           packageId = Ref.PackageId.assertFromString("noPkgId"),
@@ -1387,14 +1387,14 @@ class DecodeV2Spec
         .setUpdate(update)
         .build()
 
-      forEveryVersionSuchThat(!LV.featureNUCK.enabledIn(_)) { version =>
+      forEveryVersionSuchThat(!LV.featureContractKeys.enabledIn(_)) { version =>
         val decoder = new DecodeV2(version.minor)
         val env = decoder.Env(
           packageId = Ref.PackageId.assertFromString("noPkgId"),
           internedDottedNames = ImmArraySeq("Mod", "T").map(Ref.DottedName.assertFromString),
         )
         inside(Try(env.decodeExprForTest(expr, "test"))) { case Failure(Error.Parsing(message)) =>
-          message should include("Non-unique contract keys is not supported by Daml-LF")
+          message should include("Contract Keys is not supported by Daml-LF")
         }
       }
     }

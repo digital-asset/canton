@@ -106,6 +106,9 @@ class ModelConformanceChecker(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
+
+    val transactionMerge: TransactionMerge = TransactionMerge(protocolVersion)
+
     val CommonData(updateId, ledgerTime, preparationTime) = commonData
 
     // Previous checks in Phase 3 ensure that all the root views are sent to the same
@@ -203,7 +206,7 @@ class ModelConformanceChecker(
       val (errors, viewsTxs) = errorsAndViewTxs
       val (_, effects, txs) = viewsTxs.unzip3
 
-      val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(WellFormedTransaction.merge(_)).separate
+      val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(transactionMerge.merge(_)).separate
       val mergeErrorO = mergeErrorOO.flatten.map(MergeError.apply)
 
       NonEmpty.from(errors ++ mergeErrorO ++ conflictingStoredContractErrors) match {
@@ -338,7 +341,6 @@ class ModelConformanceChecker(
   ]] = {
     val submittingParticipantO = submitterMetadataO.map(_.submittingParticipant)
     val viewParticipantData = view.viewParticipantData.tryUnwrap
-
     val rbContext = viewParticipantData.rollbackContext
     for {
       // If we already have the re-interpreted view then re-use it
@@ -376,7 +378,7 @@ class ModelConformanceChecker(
 
       wfTx <- EitherT.fromEither[FutureUnlessShutdown](
         WellFormedTransaction
-          .check(lfTx, metadata, WithoutSuffixes)
+          .check(lfTx, metadata, WithoutSuffixes, RollbackContextFactory(protocolVersion))
           .leftMap[Error](err => TransactionNotWellFormed(err, view.viewHash))
       )
 
@@ -417,7 +419,10 @@ class ModelConformanceChecker(
         ViewReconstructionError(view, reconstructedView): Error,
       )
 
-    } yield WithRollbackScope(rbContext.rollbackScope, suffixedTx)
+    } yield WithRollbackScope(
+      rbContext.rollbackScope,
+      suffixedTx,
+    )
   }
 
   private def checkPackageVetting(
@@ -773,13 +778,13 @@ object ModelConformanceChecker {
     *   update id to be used for indexing if the transaction commits
     * @param suffixedTransaction
     *   the merged transaction with suffixed contract ids to use for indexing
-    * @param unmergedTransactionsWithoutToplevelRollbackNodes
+    * @param unmergedTransactionsWithoutTopLevelRollbackNodes
     *   the unmerged root transactions to use for internal lf transaction consistency checks
     */
   final case class Result(
       updateId: UpdateId,
       suffixedTransaction: WellFormedTransaction[WithSuffixesAndMerged],
-      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfVersionedTransaction],
+      unmergedTransactionsWithoutTopLevelRollbackNodes: Seq[LfVersionedTransaction],
   )
 
 }

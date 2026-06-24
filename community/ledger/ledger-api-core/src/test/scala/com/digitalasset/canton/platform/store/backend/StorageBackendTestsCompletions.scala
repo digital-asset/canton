@@ -52,7 +52,7 @@ private[backend] trait StorageBackendTestsCompletions
           .commandCompletions(
             Offset.firstOffset,
             offset(2),
-            userId,
+            Some(userId),
             Set(party),
             limit = 10,
           )
@@ -62,7 +62,7 @@ private[backend] trait StorageBackendTestsCompletions
           .commandCompletions(
             offset(2),
             offset(2),
-            userId,
+            Some(userId),
             Set(party),
             limit = 10,
           )
@@ -72,7 +72,7 @@ private[backend] trait StorageBackendTestsCompletions
           .commandCompletions(
             Offset.firstOffset,
             offset(9),
-            userId,
+            Some(userId),
             Set(party),
             limit = 10,
           )
@@ -89,6 +89,46 @@ private[backend] trait StorageBackendTestsCompletions
       completions0to9(2).completionResponse.completion.map(_.traceContext) shouldBe Some(
         SerializableTraceContext(aTraceContext).toDamlProto
       )
+    }
+  }
+
+  it should "return completions considering the userId filtering" in {
+    TraceContext.withNewTraceContext("test") { _ =>
+      val party = someParty
+      val otherUserId = Ref.UserId.assertFromString("other_user_id")
+
+      val dtos = Vector(
+        dtoCompletion(offset(1), submitters = Set(party), userId = someUserId),
+        dtoCompletion(offset(2), submitters = Set(party), userId = otherUserId),
+      )
+
+      executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+      executeSql(ingest(dtos, _))
+      executeSql(updateLedgerEnd(offset(2), 2L))
+
+      val completionsNoUserFilter = executeSql(
+        backend.completion
+          .commandCompletions(
+            Offset.firstOffset,
+            offset(2),
+            None,
+            Set(party),
+            limit = 10,
+          )
+      )
+      val completionsSomeUserFilter = executeSql(
+        backend.completion
+          .commandCompletions(
+            Offset.firstOffset,
+            offset(2),
+            Some(someUserId),
+            Set(party),
+            limit = 10,
+          )
+      )
+
+      completionsNoUserFilter should have length 2
+      completionsSomeUserFilter should have length 1
     }
   }
 
@@ -109,7 +149,7 @@ private[backend] trait StorageBackendTestsCompletions
         .commandCompletions(
           Offset.firstOffset,
           offset(1),
-          userId,
+          Some(userId),
           Set(party),
           limit = 10,
         )
@@ -139,7 +179,7 @@ private[backend] trait StorageBackendTestsCompletions
         .commandCompletions(
           Offset.firstOffset,
           offset(2),
-          someUserId,
+          Some(someUserId),
           Set(party),
           limit = 10,
         )
@@ -180,7 +220,7 @@ private[backend] trait StorageBackendTestsCompletions
         .commandCompletions(
           Offset.firstOffset,
           offset(2),
-          someUserId,
+          Some(someUserId),
           Set(party),
           limit = 10,
         )
@@ -228,7 +268,7 @@ private[backend] trait StorageBackendTestsCompletions
         .commandCompletions(
           Offset.firstOffset,
           offset(2),
-          someUserId,
+          Some(someUserId),
           Set(party),
           limit = 10,
         )
@@ -271,7 +311,7 @@ private[backend] trait StorageBackendTestsCompletions
         .commandCompletions(
           Offset.firstOffset,
           offset(2),
-          someUserId,
+          Some(someUserId),
           Set(party, party2),
           limit = 10,
         )
@@ -316,7 +356,7 @@ private[backend] trait StorageBackendTestsCompletions
         backend.completion.commandCompletions(
           Offset.firstOffset,
           offset(1),
-          someUserId,
+          Some(someUserId),
           Set(party),
           limit = 10,
         )
@@ -341,7 +381,7 @@ private[backend] trait StorageBackendTestsCompletions
         backend.completion.commandCompletions(
           offset(2),
           offset(2),
-          someUserId,
+          Some(someUserId),
           Set(party),
           limit = 10,
         )

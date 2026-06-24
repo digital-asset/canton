@@ -21,7 +21,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   CommitCertificate,
   OrderedBlock,
-  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
@@ -375,10 +374,14 @@ object Consensus {
       newEpochInfo: EpochInfo,
       membership: Membership,
       cryptoProvider: CryptoProvider[E],
-      origin: OrderingMode,
   ) extends Message[E]
 
   final case object SegmentCancelledEpoch extends Message[Nothing]
+
+  sealed trait Internal extends Message[Nothing]
+  object Internal {
+    case object WarnWaitingForNewEpochTopology extends Internal
+  }
 }
 
 trait Consensus[E <: Env[E]] extends Module[E, Consensus.Message[E]] {

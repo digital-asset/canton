@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.component
 
 import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -22,6 +23,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     ),
     includeReassignments = None,
     includeTopologyEvents = None,
+    includeAcsCommitments = None,
   )
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 
@@ -38,7 +40,10 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         descendingOrder = true,
         skipPruningChecks = false,
       )
-      val updates = updatesStream.runWith(Sink.seq).futureValue
+      val updates = updatesStream
+        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .runWith(Sink.seq)
+        .futureValue
       updates.flatMap(
         _.update.transaction.value.events.map(_.getCreated.contractId)
       ) should contain theSameElementsInOrderAs (createContracts.reverse.flatMap(
@@ -58,7 +63,10 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         descendingOrder = true,
         skipPruningChecks = false,
       )
-      val updates = updatesStream.runWith(Sink.seq).futureValue
+      val updates = updatesStream
+        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .runWith(Sink.seq)
+        .futureValue
       updates.map(
         _.update.transaction.value.events.map(_.getCreated.contractId)
       ) should contain theSameElementsInOrderAs (createContracts.reverse.map(
@@ -91,7 +99,10 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
 
-      val updates = updatesStream.runWith(Sink.seq).futureValue
+      val updates = updatesStream
+        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .runWith(Sink.seq)
+        .futureValue
 
       updates.map(_.update.isTopologyTransaction) should contain theSameElementsInOrderAs (Seq(
         false, false, true, true, false, false, false))
@@ -140,7 +151,10 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
 
-      val updates = updatesStream.runWith(Sink.seq).futureValue
+      val updates = updatesStream
+        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .runWith(Sink.seq)
+        .futureValue
 
       updates should have size 5
 
@@ -205,7 +219,10 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
 
-      val updates = updatesStream.runWith(Sink.seq).futureValue
+      val updates = updatesStream
+        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .runWith(Sink.seq)
+        .futureValue
 
       updates should have size 6
       updates.map(u =>

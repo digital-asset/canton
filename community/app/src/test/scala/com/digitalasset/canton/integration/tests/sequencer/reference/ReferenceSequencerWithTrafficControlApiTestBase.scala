@@ -313,6 +313,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      enableRejectDeliveredAggregationsOnPv35 = Seq("MED"),
       disableSubmissionChecksForTesting = disableSubmissionChecksForTesting,
       lsuConfig = SequencerLsuConfig(),
       enablePrevalidation = true,

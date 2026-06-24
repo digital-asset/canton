@@ -6,27 +6,28 @@ package speedy
 
 /** The simplified AST for the speedy interpreter.
   *
-  * This reduces the number of binding forms by moving update and scenario
-  * expressions into builtins.
+  * This reduces the number of binding forms by moving update and scenario expressions into
+  * builtins.
   *
-  * These are the expression forms which remain at the end of the speedy-compiler
-  * pipeline. (after ANF).
+  * These are the expression forms which remain at the end of the speedy-compiler pipeline. (after
+  * ANF).
   *
   * These are the expressions forms which execute on the Speedy machine.
   */
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.speedy.Speedy._
-import com.digitalasset.daml.lf.speedy.SBuiltinFun._
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 => compileTime}
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
+import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.Speedy.*
+import com.digitalasset.daml.lf.speedy.compiler.SExpr0 as compileTime
+
 import scala.collection.immutable.ArraySeq
 
 /** The speedy expression:
-  * - variables represented by their runtime location
-  * - closure converted.
-  * - multi-argument applications and abstractions.
-  * - all update and scenario operations converted to builtin functions.
+  *   - variables represented by their runtime location
+  *   - closure converted.
+  *   - multi-argument applications and abstractions.
+  *   - all update and scenario operations converted to builtin functions.
   */
 
 @SuppressWarnings(Array("org.wartremover.warts.Any"))
@@ -40,22 +41,20 @@ private[lf] object SExpr {
   }
 
   private[lf] sealed abstract class SExprAtomic extends SExpr {
-    def lookupValue(machine: Machine[_]): SValue
+    def lookupValue(machine: Machine[?]): SValue
 
-    final override def execute[Q](machine: Machine[Q]): Control.Value = {
+    final override def execute[Q](machine: Machine[Q]): Control.Value =
       Control.Value(lookupValue(machine))
-    }
   }
 
   // This is used to delay errors happening during evaluation of question continuations
   private[speedy] final case class SEDelayedCrash(location: String, reason: String)
       extends SExprAtomic {
-    override def lookupValue(machine: Machine[_]): SValue =
+    override def lookupValue(machine: Machine[?]): SValue =
       throw SError.SErrorCrash(location, reason)
   }
 
-  /** Reference to a value. On first lookup the evaluated expression is
-    * stored in 'cached'.
+  /** Reference to a value. On first lookup the evaluated expression is stored in 'cached'.
     */
   final case class SEVal(ref: SDefinitionRef) extends SExpr {
 
@@ -75,14 +74,13 @@ private[lf] object SExpr {
 
     def setCached(sValue: SValue): Unit = _cached = Some(sValue)
 
-    override def execute[Q](machine: Machine[Q]): Control[Q] = {
+    override def execute[Q](machine: Machine[Q]): Control[Q] =
       machine.lookupVal(this)
-    }
   }
 
   /** Reference to a builtin function */
   final case class SEBuiltinFun(b: SBuiltinFun) extends SExprAtomic {
-    override def lookupValue(machine: Machine[_]): SValue = {
+    override def lookupValue(machine: Machine[?]): SValue =
       /* special case for nullary record constructors */
       b match {
         case SBRecCon(id, fields) if b.arity == 0 =>
@@ -90,23 +88,20 @@ private[lf] object SExpr {
         case _ =>
           SPAP(PBuiltin(b), ArraySeq.empty, b.arity)
       }
-    }
   }
 
   /** A pre-computed value, usually primitive literal, e.g. integer, text, boolean etc. */
   final case class SEValue(v: SValue) extends SExprAtomic {
-    override def lookupValue(machine: Machine[_]): SValue = {
+    override def lookupValue(machine: Machine[?]): SValue =
       v
-    }
   }
 
   object SEValue extends SValueContainer[SEValue] // used by Compiler
 
   object SEApp {
     // Helper: build an application of an unrestricted expression, to value-arguments.
-    def apply(fun: SExpr, args: ArraySeq[SValue]): SExpr = {
+    def apply(fun: SExpr, args: ArraySeq[SValue]): SExpr =
       SELet1(fun, SEAppAtomic(SELocS(1), args.map(SEValue(_))))
-    }
   }
 
   /** Function application: ANF case: 'fun' and 'args' are atomic expressions */
@@ -121,8 +116,8 @@ private[lf] object SExpr {
       }
   }
 
-  /** Function application: ANF case: 'fun' is builtin; 'args' are atomic expressions.  Size
-    * of `args' matches the builtin arity.
+  /** Function application: ANF case: 'fun' is builtin; 'args' are atomic expressions. Size of
+    * `args' matches the builtin arity.
     */
   final case class SEAppAtomicSaturatedBuiltin(builtin: SBuiltinFun, args: ArraySeq[SExprAtomic])
       extends SExpr {
@@ -136,21 +131,19 @@ private[lf] object SExpr {
 
   object SEAppAtomic {
     // smart constructor (used in Anf.scala): detect special case of saturated builtin application
-    def apply(func: SExprAtomic, args: ArraySeq[SExprAtomic]): SExpr = {
+    def apply(func: SExprAtomic, args: ArraySeq[SExprAtomic]): SExpr =
       func match {
         case SEBuiltinFun(builtin) if builtin.arity == args.length =>
           SEAppAtomicSaturatedBuiltin(builtin, args)
         case _ =>
           SEAppAtomicGeneral(func, args) // general case
       }
-    }
   }
 
-  /** Closure creation. Create a new closure object storing the free variables
-    * in 'body'.
+  /** Closure creation. Create a new closure object storing the free variables in 'body'.
     */
   final case class SEMakeClo(fvs: ArraySeq[SELoc], arity: Int, body: SExpr) extends SExprAtomic {
-    override def lookupValue(machine: Machine[_]): SValue = {
+    override def lookupValue(machine: Machine[?]): SValue = {
       val sValues = fvs.map(_.lookupValue(machine))
       SPAP(PClosure(Profile.LabelUnset, body, sValues), ArraySeq.empty, arity)
     }
@@ -158,30 +151,27 @@ private[lf] object SExpr {
 
   /** SELoc -- Reference to the runtime location of a variable.
     *
-    *    This is the closure-converted form of SEVar. There are three sub-forms, with sufffix:
-    *    S/A/F, indicating [S]tack, [A]argument, or [F]ree variable captured by a closure.
+    * This is the closure-converted form of SEVar. There are three sub-forms, with sufffix: S/A/F,
+    * indicating [S]tack, [A]argument, or [F]ree variable captured by a closure.
     */
   sealed abstract class SELoc extends SExprAtomic
 
   // SELocS -- variable is located on the stack (SELet & binding forms of SECasePat)
   final case class SELocS(n: Int) extends SELoc {
-    override def lookupValue(machine: Machine[_]): SValue = {
+    override def lookupValue(machine: Machine[?]): SValue =
       machine.getEnvStack(n)
-    }
   }
 
   // SELocA -- variable is located in the args array of the application
   final case class SELocA(n: Int) extends SELoc {
-    override def lookupValue(machine: Machine[_]): SValue = {
+    override def lookupValue(machine: Machine[?]): SValue =
       machine.getEnvArg(n)
-    }
   }
 
   // SELocF -- variable is located in the free-vars array of the closure being applied
   final case class SELocF(n: Int) extends SELoc {
-    override def lookupValue(machine: Machine[_]): SValue = {
+    override def lookupValue(machine: Machine[?]): SValue =
       machine.getEnvFree(n)
-    }
   }
 
   /** (Atomic) Pattern match. */
@@ -234,7 +224,7 @@ private[lf] object SExpr {
 
   object SELet1 {
     // smart constructor (used in Anf.scala)
-    def apply(rhs: SExpr, body: SExpr): SExpr = {
+    def apply(rhs: SExpr, body: SExpr): SExpr =
       rhs match {
         case SEAppAtomicSaturatedBuiltin(builtin: SBuiltinPure, args) =>
           SELet1Builtin(builtin, args, body)
@@ -243,11 +233,10 @@ private[lf] object SExpr {
         case _ =>
           SELet1General(rhs, body)
       }
-    }
   }
 
-  /** Location annotation. When encountered the location is stored in the 'lastLocation'
-    * variable of the machine. When commit is begun the location is stored in 'commitLocation'.
+  /** Location annotation. When encountered the location is stored in the 'lastLocation' variable of
+    * the machine. When commit is begun the location is stored in 'commitLocation'.
     */
   final case class SELocation(loc: Location, expr: SExpr) extends SExpr {
     override def execute[Q](machine: Machine[Q]): Control.Expression = {
@@ -256,14 +245,12 @@ private[lf] object SExpr {
     }
   }
 
-  /** This is used only during profiling. When a package is compiled with
-    * profiling enabled, the right hand sides of top-level and let bindings,
-    * lambdas and some builtins are wrapped into [[SELabelClosure]]. During
-    * runtime, if the value resulting from evaluating [[expr]] is a
-    * (partially applied) closure, the label of the closure is set to the
-    * [[label]] given here.
-    * See [[com.digitalasset.daml.lf.speedy.Profile]] for an explanation why we use
-    * [[AnyRef]] for the label.
+  /** This is used only during profiling. When a package is compiled with profiling enabled, the
+    * right hand sides of top-level and let bindings, lambdas and some builtins are wrapped into
+    * [[SELabelClosure]]. During runtime, if the value resulting from evaluating [[expr]] is a
+    * (partially applied) closure, the label of the closure is set to the [[label]] given here. See
+    * [[com.digitalasset.daml.lf.speedy.Profile]] for an explanation why we use [[AnyRef]] for the
+    * label.
     */
   final case class SELabelClosure(label: Profile.Label, expr: SExpr) extends SExpr {
     override def execute[Q](machine: Machine[Q]): Control.Expression = {
@@ -284,12 +271,11 @@ private[lf] object SExpr {
 
   /** Exercise scope (begin..end) */
   final case class SEScopeExercise(body: SExpr) extends SExpr {
-    override def execute[Q](machine: Machine[Q]): Control[Q] = {
+    override def execute[Q](machine: Machine[Q]): Control[Q] =
       machine.asUpdateMachine(productPrefix) { machine =>
         machine.pushKont(KCloseExercise)
         Control.Expression(body)
       }
-    }
   }
 
   final case class SEPreventCatch(body: SExpr) extends SExpr {
@@ -331,8 +317,8 @@ private[lf] object SExpr {
 
   final case object SCPSome extends SCasePat
 
-  /** Case alternative. If the 'pattern' matches, then the environment is accordingly
-    * extended and 'body' is evaluated.
+  /** Case alternative. If the 'pattern' matches, then the environment is accordingly extended and
+    * 'body' is evaluated.
     */
   final case class SCaseAlt(pattern: SCasePat, body: SExpr)
 
@@ -372,19 +358,14 @@ private[lf] object SExpr {
   final case class ChoiceObserverDefRef(ref: DefinitionRef, choiceName: ChoiceName)
       extends SDefinitionRef
 
-  /** InterfaceInstanceDefRef(parent, interfaceId, templateId)
-    * points to the Unit value if 'parent' defines an interface instance
-    * of the interface for the template.
+  /** InterfaceInstanceDefRef(parent, interfaceId, templateId) points to the Unit value if 'parent'
+    * defines an interface instance of the interface for the template.
     *
-    * invariants:
-    *   * parent == interfaceId || parent == templateId
-    *   * at most one of the following is defined:
-    *       InterfaceInstanceDefRef(i, i, t)
-    *       InterfaceInstanceDefRef(t, i, t)
+    * invariants: * parent == interfaceId || parent == templateId * at most one of the following is
+    * defined: InterfaceInstanceDefRef(i, i, t) InterfaceInstanceDefRef(t, i, t)
     *
-    * The parent is used to determine what package and module define
-    * the interface instance, which is used to fetch the appropriate
-    * package in case it's missing.
+    * The parent is used to determine what package and module define the interface instance, which
+    * is used to fetch the appropriate package in case it's missing.
     */
   final case class InterfaceInstanceDefRef(
       parent: TypeConId,
@@ -394,8 +375,8 @@ private[lf] object SExpr {
     override def ref = parent;
   }
 
-  /** InterfaceInstanceMethodDefRef(interfaceInstance, method) invokes
-    * the interface instance's implementation of the method.
+  /** InterfaceInstanceMethodDefRef(interfaceInstance, method) invokes the interface instance's
+    * implementation of the method.
     */
   final case class InterfaceInstanceMethodDefRef(
       interfaceInstance: InterfaceInstanceDefRef,
@@ -404,8 +385,8 @@ private[lf] object SExpr {
     override def ref = interfaceInstance.ref;
   }
 
-  /** InterfaceInstanceViewDefRef(interfaceInstance) invokes
-    * the interface instance's implementation of the view.
+  /** InterfaceInstanceViewDefRef(interfaceInstance) invokes the interface instance's implementation
+    * of the view.
     */
   final case class InterfaceInstanceViewDefRef(
       interfaceInstance: InterfaceInstanceDefRef
@@ -419,7 +400,7 @@ private[lf] object SExpr {
     x match {
       case i: Array[Any] => i.mkString("[", ",", "]")
       case i: Array[Int] => i.mkString("[", ",", "]")
-      case i: java.util.ArrayList[_] => i.toArray().mkString("[", ",", "]")
+      case i: java.util.ArrayList[?] => i.toArray().mkString("[", ",", "]")
       case other: Any => other.toString
     }
 

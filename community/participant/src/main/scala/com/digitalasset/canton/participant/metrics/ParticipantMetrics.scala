@@ -152,9 +152,7 @@ class ParticipantMetrics(
           new ConnectedSynchronizerMetrics(
             inventory.connectedSynchronizer,
             openTelemetryMetricsFactory,
-          )(
-            mc.withExtraLabels("synchronizer" -> alias.unwrap)
-          )
+          )(mc.withExtraLabels("synchronizer" -> alias.unwrap))
         ),
       )
       .value

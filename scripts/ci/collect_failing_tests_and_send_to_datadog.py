@@ -21,6 +21,16 @@ metric_short_version = "canton.failed_test_grouped"
 CONSECUTIVE_FAILURES_THRESHOLD: Final[int] = 3
 CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE: Final[int] = 10
 
+# A test that fails on this many consecutive *nightly* runs is treated as broken
+# (not merely flaky) and the CI rota is pinged. Nightly runs are days apart and
+# land on non-adjacent commits, so the per-commit streak check never fires for
+# them; this is the nightly-specific equivalent.
+NIGHTLY_CONSECUTIVE_FAILURES: Final[int] = 3
+# Label applied to the tracking issue when a nightly streak is detected.
+NIGHTLY_BROKEN_LABEL: Final[str] = "broken-nightly"
+# Nightly cron from .circleci/config/workflows/canton_nightly.yml: "0 22 * * 1-5".
+NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
+
 milestone = "Flaky Tests" # flaky tests milestone M97 (milestone number 31)
 flaky_test_project = "PVT_kwDOAJX-Fc4AbncN" # https://github.com/orgs/DACH-NY/projects/38/
 
@@ -409,7 +419,18 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
     commit_hash = get_ci_commit_hash()
     commit_link = f"<https://github.com/DACH-NY/canton/commit/{commit_hash}|{commit_hash[:8]}>"
     mention = f"<@{volunteer}> " if volunteer else ""
-    description = f"Flaky tests have failed on several consecutive commits ending at {commit_link} on branch `{branch}`."
+    nightly = is_nightly_job(get_ci_job_name())
+    if nightly:
+        alert = f"Broken nightly test alert on {branch}"
+        description = (
+            f"The following test(s) failed on the last {NIGHTLY_CONSECUTIVE_FAILURES} nightly runs "
+            f"on `{branch}` (latest at {commit_link}). Likely genuinely broken, not flaky."
+        )
+        prompt = "Can you have a look?"
+    else:
+        alert = f"Flaky test alert on {branch}"
+        description = f"Flaky tests have failed on several consecutive commits ending at {commit_link} on branch `{branch}`."
+        prompt = "Main may be broken, can you have a look?"
     issue_lines = []
     for idx, title, _ in duplicates:
         issue_url = f"https://github.com/DACH-NY/canton/issues/{idx}"
@@ -417,11 +438,11 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f":this-is-fine-fire: Flaky test alert on {branch}", "emoji": True},
+            "text": {"type": "plain_text", "text": f":this-is-fine-fire: {alert}", "emoji": True},
         },
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"{mention}{description}\nMain may be broken, can you have a look?"},
+            "text": {"type": "mrkdwn", "text": f"{mention}{description}\n{prompt}"},
         },
         {
             "type": "section",
@@ -432,7 +453,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
         "channel": channel,
         "blocks": blocks,
         "icon_emoji": ":rotating_light:",
-        "text": f"Flaky test alert on {branch}",  # fallback summary for push notifications and screen readers
+        "text": alert,  # fallback summary for push notifications and screen readers
     }).encode("utf-8")
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
@@ -460,6 +481,120 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]):
 def extract_commit_hashes_from_body(body: str) -> list[str]:
     return re.findall(r'commit/([0-9a-f]{40})', body)
 
+# --- nightly streak detection ---------------------------------------------
+#
+# Nightly runs are days apart and land on non-adjacent commits, so the per-commit
+# adjacency check (are_consecutive_commits) never fires for them. Instead we ask:
+# did this test fail on each of the last N nightly runs? The nightly runs are
+# enumerated from `main` history at the nightly cron times (no CircleCI API token
+# exists in the repo); the current run is always counted as the most recent one.
+
+# Matches a failure-history table row, capturing (job, 40-char commit).
+_NIGHTLY_ROW_RE = re.compile(
+    r'^\|[^|]*\|\s*([^|]+?)\s*\|[^|]*\|[^|]*\|[^|]*commit/([0-9a-f]{40})[^|]*\|',
+    re.MULTILINE,
+)
+
+_nightly_commits_cache: Optional[tuple] = None
+
+
+def is_nightly_job(job: str) -> bool:
+    """Nightly test jobs are the `nightly_*` jobs in canton_nightly.yml.
+
+    `unstable_test` also runs nightly but is intentionally allowed to fail, so it
+    is excluded: broken-nightly is for genuinely broken tests, not unstable ones.
+    """
+    return bool(job) and job.startswith("nightly_")
+
+
+def _git_commit_before(when: datetime.datetime) -> Optional[str]:
+    # `when` is a naive UTC datetime; the trailing Z makes git interpret it as
+    # UTC instead of the runner's local timezone (which would skew the cutoff).
+    iso = when.strftime("%Y-%m-%dT%H:%M:%SZ")
+    result = subprocess.run(
+        ["git", "rev-list", "-1", f"--before={iso}", "origin/main"],
+        capture_output=True, text=True,
+    )
+    sha = result.stdout.strip()
+    return sha if result.returncode == 0 and len(sha) == 40 else None
+
+
+def _previous_nightly_datetimes(count: int, before: datetime.datetime) -> list:
+    """The `count` most recent nightly cron times strictly before `before` (Mon-Fri, UTC)."""
+    out: list = []
+    day = before.date()
+    guard = 0
+    while len(out) < count and guard < 30:
+        guard += 1
+        dt = datetime.datetime(day.year, day.month, day.day, NIGHTLY_CRON_HOUR_UTC, 0, 0)
+        if dt < before and dt.weekday() < 5:  # Mon-Fri
+            out.append(dt)
+        day -= datetime.timedelta(days=1)
+    return out
+
+
+def recent_nightly_commits() -> tuple:
+    """Commits of the last NIGHTLY_CONSECUTIVE_FAILURES nightly runs: the current run plus
+    the previous ones, derived from `main` history at the nightly cron times. Cached per
+    process."""
+    global _nightly_commits_cache
+    if _nightly_commits_cache is not None:
+        return _nightly_commits_cache
+
+    current = get_ci_commit_hash()
+    if current == "unknown":
+        _nightly_commits_cache = tuple()
+        return _nightly_commits_cache
+
+    fetch = subprocess.run(["git", "fetch", "--quiet", "origin", "main"], capture_output=True, text=True)
+    if fetch.returncode != 0:
+        # Stale origin/main would mis-enumerate the nightly commits; log and carry on.
+        print(f"recent_nightly_commits: 'git fetch origin main' failed, using local origin/main: {fetch.stderr.strip()}")
+    now = datetime.datetime.utcnow()
+    commits = [current]
+    for dt in _previous_nightly_datetimes(NIGHTLY_CONSECUTIVE_FAILURES - 1, now):
+        sha = _git_commit_before(dt)
+        if sha:
+            commits.append(sha)
+
+    seen: set = set()
+    deduped: list = []
+    for c in commits:
+        if c not in seen:
+            seen.add(c)
+            deduped.append(c)
+    _nightly_commits_cache = tuple(deduped[:NIGHTLY_CONSECUTIVE_FAILURES])
+    return _nightly_commits_cache
+
+
+def extract_nightly_commits_from_body(body: str) -> list:
+    """Commits from failure rows whose job is a nightly job."""
+    return [commit for job, commit in _NIGHTLY_ROW_RE.findall(body) if is_nightly_job(job)]
+
+
+def nightly_streak(body: str) -> bool:
+    """True if the test failed on each of the last NIGHTLY_CONSECUTIVE_FAILURES nightly runs.
+
+    The current (failing) run counts as the most recent nightly run, so its commit
+    is added to the set of nightly failures parsed from the issue body.
+    """
+    last = recent_nightly_commits()
+    if len(last) < NIGHTLY_CONSECUTIVE_FAILURES:
+        return False
+    failures = set(extract_nightly_commits_from_body(body))
+    failures.add(get_ci_commit_hash())
+    return set(last).issubset(failures)
+
+
+def add_broken_nightly_label(idx: str) -> None:
+    """Best-effort: label the issue. A missing label or transient error is logged, not fatal."""
+    result = run_gh_with_retries(
+        ["issue", "edit", str(idx), "--repo", "DACH-NY/canton", "--add-label", NIGHTLY_BROKEN_LABEL]
+    )
+    if result.returncode != 0:
+        print(f"Could not add '{NIGHTLY_BROKEN_LABEL}' label to #{idx}: {result.stderr.strip()}")
+
+
 def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
     """Returns True if newer_hash is a direct child of older_hash in git history."""
     result = run_gh_with_retries(
@@ -480,21 +615,29 @@ def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, st
     commit_hash = get_ci_commit_hash()
 
     consecutive_streak = False
+    nightly = is_nightly_job(job)
 
     if commit_hash != 'unknown':
-        # Collapse consecutive same-commit entries (multi-shard / retries) so they
-        # don't shadow the check: are_consecutive_commits(X, X) is always False.
-        distinct = [c for c, _ in groupby(extract_commit_hashes_from_body(body) + [commit_hash])]
-        recent = distinct[-threshold:]
-        if len(recent) >= threshold and all(
-            are_consecutive_commits(a, b) for a, b in zip(recent, recent[1:])
-        ):
-            consecutive_streak = True
+        if nightly:
+            # Nightly runs are days apart on non-adjacent commits, so check whether
+            # the test failed on each of the last N nightly runs instead.
+            consecutive_streak = nightly_streak(body)
+        else:
+            # Collapse consecutive same-commit entries (multi-shard / retries) so they
+            # don't shadow the check: are_consecutive_commits(X, X) is always False.
+            distinct = [c for c, _ in groupby(extract_commit_hashes_from_body(body) + [commit_hash])]
+            recent = distinct[-threshold:]
+            if len(recent) >= threshold and all(
+                are_consecutive_commits(a, b) for a, b in zip(recent, recent[1:])
+            ):
+                consecutive_streak = True
 
     new_body = f"{body}\n{create_issue_table_row()}"
     gh_issue_edit_cmd(idx, title, new_body)
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if consecutive_streak:
+        if nightly:
+            add_broken_nightly_label(idx)
         return (idx, title, commit_hash)
     return None
 
@@ -514,7 +657,95 @@ def self_test():
     test_update_issue_returns_consecutive_streak_info('unstable_test', CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE)
     test_update_issue_dedupes_shard_duplicates()
     test_report_issue_skips_slack_if_assignee()
+    test_is_nightly_job()
+    test_nightly_streak_detection()
+    test_update_issue_nightly_streak_labels_and_returns()
     print("All self-checks passed")
+
+
+def _nightly_body(commits: list) -> str:
+    rows = "\n".join(
+        f"| 2026-04-{20 + i} 00:00:00 | nightly_integration_test | 0 | [{i}](url) | "
+        f"[{c[:8]}](https://github.com/DACH-NY/canton/commit/{c}) |"
+        for i, c in enumerate(commits)
+    )
+    header = "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
+    return "auto-created\n\n" + header + ("\n" + rows if rows else "")
+
+
+def test_is_nightly_job():
+    assert is_nightly_job("nightly_integration_test")
+    assert is_nightly_job("nightly_test_upgrades_matrix")
+    assert not is_nightly_job("test_with_java17")
+    assert not is_nightly_job("unstable_test")  # intentionally unstable, excluded
+    assert not is_nightly_job("")
+
+
+def test_nightly_streak_detection():
+    n = NIGHTLY_CONSECUTIVE_FAILURES
+    commits = [format(i, '040x') for i in range(n)]  # n distinct commits
+    current = commits[-1]
+    prior = commits[:-1]  # the n-1 previous nightly commits
+
+    env = {
+        'CIRCLECI': 'true', 'GITHUB_ACTIONS': 'false', 'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test', 'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    # failed on each of the last 3 nightly runs (priors in body + current) -> streak
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)):
+        assert nightly_streak(_nightly_body(prior)) is True
+
+    # one of the last-3 nightly commits is missing from the body -> no streak
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)):
+        assert nightly_streak(_nightly_body(prior[:-1])) is False
+
+    # the prior failures are non-nightly rows -> ignored -> no streak
+    nonnightly = _nightly_body(prior).replace("nightly_integration_test", "test_with_java17")
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)):
+        assert nightly_streak(nonnightly) is False
+
+    # fewer than N nightly runs known -> never flag
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits[:1])):
+        assert nightly_streak(_nightly_body(prior)) is False
+
+
+def test_update_issue_nightly_streak_labels_and_returns():
+    n = NIGHTLY_CONSECUTIVE_FAILURES
+    commits = [format(i, '040x') for i in range(n)]
+    current = commits[-1]
+    prior = commits[:-1]
+    env = {
+        'CIRCLECI': 'true', 'GITHUB_ACTIONS': 'false', 'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test', 'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    labelled: list = []
+    # streak -> returns issue tuple and applies the broken-nightly label
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)), \
+         patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)):
+        result = update_issue("77", "Flaky NightlyIntegrationTest", _nightly_body(prior))
+        assert result is not None, "Expected a nightly streak to fire"
+        assert result[0] == "77"
+        assert labelled == ["77"], "Expected the broken-nightly label to be applied"
+
+    # no streak -> no label, returns None
+    labelled.clear()
+    with patch.dict(os.environ, env, clear=False), \
+         patch(f'{__name__}.gh_issue_edit_cmd'), \
+         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)), \
+         patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)):
+        result = update_issue("77", "Flaky NightlyIntegrationTest", _nightly_body(prior[:-1]))
+        assert result is None
+        assert labelled == [], "Expected no label when there is no streak"
 
 def test_format_test_name_collapses_shards():
     # Shard partitions of the same logical test must collapse to the same name

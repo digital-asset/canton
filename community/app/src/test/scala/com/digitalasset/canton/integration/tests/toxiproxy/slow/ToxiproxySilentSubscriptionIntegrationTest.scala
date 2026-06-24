@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -81,8 +82,11 @@ sealed trait ToxiproxySilentSubscriptionIntegrationTest
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
-                mediator1 -> (sequencers.local,
-                /* trust threshold */ PositiveInt.two, /* liveness margin */ NonNegativeInt.two)
+                mediator1 -> MediatorSequencersConfiguration(
+                  sequencers.local,
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.two,
+                )
               )
             ),
           )

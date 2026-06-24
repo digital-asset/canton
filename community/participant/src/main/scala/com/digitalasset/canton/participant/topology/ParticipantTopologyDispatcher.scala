@@ -202,6 +202,7 @@ class ParticipantTopologyDispatcher(
               ),
               serial = None,
               signingKeys = Seq.empty,
+              namespacesToSignFor = Seq.empty,
               protocolVersion = state.staticSynchronizerParameters.protocolVersion,
               expectFullAuthorization = true,
               waitToBecomeEffective = None,

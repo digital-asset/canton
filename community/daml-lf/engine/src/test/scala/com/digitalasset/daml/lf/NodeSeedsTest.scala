@@ -11,23 +11,34 @@ import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, Node, NodeId}
+import com.digitalasset.daml.lf.transaction.{
+  NextGenContractStateMachine as ContractStateMachine,
+  Node,
+  NodeId,
+}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.zip.ZipInputStream
 
-
 class NodeSeedsTestV2 extends NodeSeedsTest(LanguageVersion.Major.V2)
 
-class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWordSpec with Matchers with SuppressingLogging {
+class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
+    extends AnyWordSpec
+    with Matchers
+    with SuppressingLogging {
 
   // Test for https://github.com/DACH-NY/canton/issues/14712
 
   val (mainPkgId, mainPkg, packages) = {
-    val stream = getClass.getClassLoader.getResourceAsStream(s"Demonstrator-v${majorLanguageVersion.pretty}3.dar")
-    val packages = DarDecoder.readArchive(s"Demonstrator-v${majorLanguageVersion.pretty}3.dar", new ZipInputStream(stream)).toOption.get
+    val stream = getClass.getClassLoader.getResourceAsStream(
+      s"Demonstrator-v${majorLanguageVersion.pretty}3.dar"
+    )
+    val packages = DarDecoder
+      .readArchive(s"Demonstrator-v${majorLanguageVersion.pretty}3.dar", new ZipInputStream(stream))
+      .toOption
+      .get
     (packages.main._1, packages.main._2, packages.all.toMap)
   }
 
@@ -90,7 +101,8 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
         participantId = Ref.ParticipantId.assertFromString("participant"),
         submissionSeed = crypto.Hash.hashPrivateKey(getClass.getName + time.toString),
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         prefetchKeys = Seq.empty,
       )
       .consume(pcs = contracts, pkgs = packages)
@@ -158,7 +170,8 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
           time,
           time,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         )
         .consume(pcs = contracts, pkgs = packages)
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet

@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v32;
+
+import "com/digitalasset/canton/protocol/v30/acs_commitments.proto";
+import "com/digitalasset/canton/protocol/v30/participant_reassignment.proto";
+import "com/digitalasset/canton/protocol/v30/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v30/synchronization.proto";
+import "com/digitalasset/canton/protocol/v30/topology.proto";
+import "com/digitalasset/canton/protocol/v31/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v32/acs_commitments.proto";
+import "scalapb/scalapb.proto";
+
+/*
+   Compared to v31:
+     - Renamed: v30.AcsCommitmentProtocolMessage from acs_commitment_protocol_message to legacy_acs_commitment_protocol_message
+     - Added: v32.AcsCommitmentProtocolMessage
+     - Added: v32.AcsCommitmentSummaryProtocolMessage
+*/
+message EnvelopeContent {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  oneof some_envelope_content {
+    v30.InformeeMessage informee_message = 1;
+    v31.EncryptedMultipleViewsMessage encrypted_multiple_views_message = 2;
+    v30.UnassignmentMediatorMessage unassignment_mediator_message = 3;
+    v30.AssignmentMediatorMessage assignment_mediator_message = 4;
+    v30.RootHashMessage root_hash_message = 5;
+    v30.TopologyTransactionsBroadcast topology_transactions_broadcast = 6;
+    v32.AcsCommitmentProtocolMessage acs_commitment_protocol_message = 7;
+    // TODO(#33615) Remove the legacy type once we switch to the new ACS commitment processor
+    v30.AcsCommitmentProtocolMessage legacy_acs_commitment_protocol_message = 8;
+    v32.AcsCommitmentSummaryProtocolMessage acs_commitment_summary_protocol_message = 9;
+    v30.LsuSequencingTestMessage lsu_sequencing_test_message = 10;
+  }
+}

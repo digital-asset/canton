@@ -83,6 +83,7 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CommandCompletionServiceGrpc,
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.CommandServiceGrpc.CommandService
 import com.daml.ledger.api.v2.command_service.{
@@ -522,16 +523,35 @@ private final class LedgerServicesJson(
     } yield response
   }
 
-  def commandCompletion: CommandCompletionService = (
-      request: CompletionStreamRequest,
-      responseObserver: StreamObserver[CompletionStreamResponse],
-  ) =>
-    wsCall(
-      JsCommandService.completionStreamEndpoint,
-      request,
-      responseObserver,
-      Future.successful(_: CompletionStreamResponse),
-    )
+  def commandCompletion: CommandCompletionService = new CommandCompletionService {
+
+    /** Deprecated: please use ``GetCompletions`` instead. Subscribe to command completion events.
+      */
+    override def completionStream(
+        request: CompletionStreamRequest,
+        responseObserver: StreamObserver[CompletionStreamResponse],
+    ): Unit =
+      wsCall(
+        JsCommandService.completionStreamEndpoint,
+        request,
+        responseObserver,
+        Future.successful(_: CompletionStreamResponse),
+      )
+
+    /** Subscribe to command completion events. This streaming endpoint provides more flexibility in
+      * filtering than the predecessor ``CompletionStream``.
+      */
+    override def getCompletions(
+        request: GetCompletionsRequest,
+        responseObserver: StreamObserver[CompletionStreamResponse],
+    ): Unit =
+      wsCall(
+        JsCommandService.getCompletionsEndpoint,
+        request,
+        responseObserver,
+        Future.successful(_: CompletionStreamResponse),
+      )
+  }
 
   def commandSubmission: CommandSubmissionService = new CommandSubmissionService {
 

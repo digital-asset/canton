@@ -5,17 +5,15 @@ package com.digitalasset.daml.lf
 package typesig
 package reader
 
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
-import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.{QualifiedName, DottedName}
-import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.data.Ref.{DottedName, QualifiedName}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import scalaz.\/-
-import scalaz.syntax.functor._
+import scalaz.syntax.functor.*
 
 import java.io.File
 import scala.language.implicitConversions
@@ -190,16 +188,17 @@ class SignatureReaderSpec extends AnyWordSpec with Matchers with Inside {
 
   def testDar(v: LanguageVersion.Major) = s"a real LF $v dar" should {
     val file =
-      new File(getClass.getClassLoader.getResource(s"InterfaceTestPackage-v${v.pretty}.dar").getFile)
+      new File(
+        getClass.getClassLoader.getResource(s"InterfaceTestPackage-v${v.pretty}.dar").getFile
+      )
 
     if (v == LanguageVersion.Major.V2 || file.exists()) {
 
       import archive.DarReader.readArchiveFromFile
-      import QualifiedName.{assertFromString => qn}
-      import Ref.ChoiceName.{assertFromString => cn}
+      import QualifiedName.assertFromString as qn
+      import Ref.ChoiceName.assertFromString as cn
 
-      lazy val itp = {
-
+      lazy val itp =
         inside(readArchiveFromFile(file)) { case Right(dar) =>
           dar.map { payload =>
             val (errors, ii) = typesig.PackageSignature.read(payload)
@@ -207,7 +206,6 @@ class SignatureReaderSpec extends AnyWordSpec with Matchers with Inside {
             ii
           }
         }
-      }
       lazy val itpES = EnvironmentSignature.fromPackageSignatures(itp).resolveChoices
 
       lazy val itpWithoutRetroImplements = itp.copy(
@@ -231,7 +229,7 @@ class SignatureReaderSpec extends AnyWordSpec with Matchers with Inside {
       val LibTIfView = qn("InterfaceTestLib:TIfView")
       val Useless = cn("Useless")
       val UselessTy = qn("InterfaceTestPackage:Useless")
-      import itp.main.{packageId => itpPid}
+      import itp.main.packageId as itpPid
 
       "exclude interface choices with template choices" in {
         inside(itp.main.typeDecls get Foo) { case Some(TypeDecl.Template(_, tpl)) =>
@@ -425,7 +423,7 @@ class SignatureReaderSpec extends AnyWordSpec with Matchers with Inside {
     field -> Ast.TVar(var_)
 
   private def primField(field: Ref.Name, primType: Ast.BuiltinType, args: Ast.Type*) =
-    field -> (args foldLeft (Ast.TBuiltin(primType): Ast.Type))(Ast.TApp.apply)
+    field -> (args foldLeft (Ast.TBuiltin(primType): Ast.Type)) (Ast.TApp.apply)
 
   private def typeConstructorField(field: Ast.FieldName, segments: List[String]) =
     field -> typeConId(segments)

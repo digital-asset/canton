@@ -7,11 +7,11 @@ package speedy
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.support.crypto.MessageSignatureUtil
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.{
-  SBSECP256K1WithEcdsaBool,
   SBSECP256K1ValidateKey,
+  SBSECP256K1WithEcdsaBool,
 }
 import com.digitalasset.daml.lf.speedy.SValue.{SBool, SText}
 import com.digitalasset.daml.lf.speedy.Speedy.Control
@@ -20,9 +20,9 @@ import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
-import java.security.{KeyPairGenerator, Security}
 import java.security.interfaces.ECPublicKey
 import java.security.spec.{ECGenParameterSpec, InvalidKeySpecException}
+import java.security.{KeyPairGenerator, Security}
 import scala.collection.immutable.ArraySeq
 
 class SBSECP256K1CryptoPrimitiveTest
@@ -30,7 +30,7 @@ class SBSECP256K1CryptoPrimitiveTest
     with Matchers
     with ScalaCheckPropertyChecks
     with SuppressingLogging {
-  import DERTestLib._
+  import DERTestLib.*
 
   Security.addProvider(new BouncyCastleProvider)
 

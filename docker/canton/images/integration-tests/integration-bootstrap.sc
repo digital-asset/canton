@@ -85,7 +85,7 @@
 
 
   nodes.local.foreach(nodeInit)
-  bootstrap.synchronizer("synchronizer", synchronizerOwners = Seq(sequencer), sequencers = Seq(sequencer), mediators = Seq(mediator), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
+  bootstrap.synchronizer("synchronizer", synchronizerOwners = Seq(sequencer), sequencers = Seq(sequencer), mediators = Seq(mediator), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer))
   participant.synchronizers.connect_local(sequencer, alias = "synchronizer")
   utils.retry_until_true {
     participant.synchronizers.active("synchronizer")

@@ -22,7 +22,6 @@ import com.digitalasset.canton.protocol.{
   LfTemplateId,
   LfTransaction,
   LfVersionedTransaction,
-  RollbackContext,
 }
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -172,24 +171,6 @@ object InternalConsistencyChecker {
       param("contractIds", _.contractIds)
     )
   }
-
-  private[validation] def checkRollbackScopeOrder(
-      presented: Seq[RollbackContext]
-  ): Either[String, Unit] =
-    Either.cond(
-      presented == presented.sorted,
-      (),
-      s"Detected out of order rollback scopes in: $presented",
-    )
-
-  private[validation] def checkRollbackScopes(
-      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
-  ): Result[Unit] =
-    checkRollbackScopeOrder(
-      rootViewTrees.map(_.viewParticipantData.rollbackContext)
-    ).left.map { error =>
-      ErrorWithInternalConsistencyCheck(IncorrectRollbackScopeOrder(error))
-    }
 
   private[validation] def checkNotUsedBeforeCreation(
       previouslyReferenced: Set[LfContractId],

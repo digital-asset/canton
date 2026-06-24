@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.data.PathRollbackContextFactory
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{Stage, WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageName, LfPartyId}
@@ -243,7 +244,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
     )
 
   // Well-formed transactions are mostly covered by ExampleTransactionFactoryTest. So we test only a special cases here.
-  val wellformedExamples: TableFor3[String, (LfVersionedTransaction, TransactionMetadata), Stage] =
+  val wellFormedExamples: TableFor3[String, (LfVersionedTransaction, TransactionMetadata), Stage] =
     Table(
       ("Description", "Transaction and seeds", "Suffixing"),
       (
@@ -264,20 +265,25 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         description must {
           "be reported as malformed" in {
             WellFormedTransaction
-              .check(transaction, metadata, state)
+              .check(transaction, metadata, state, PathRollbackContextFactory)
               .left
               .value should fullyMatch regex expectedError
             an[IllegalArgumentException] must be thrownBy
-              WellFormedTransaction.checkOrThrow(transaction, metadata, WithoutSuffixes)
+              WellFormedTransaction.checkOrThrow(
+                transaction,
+                metadata,
+                WithoutSuffixes,
+                PathRollbackContextFactory,
+              )
           }
         }
     }
 
-    wellformedExamples.forEvery { case (description, (transaction, metadata), state) =>
+    wellFormedExamples.forEvery { case (description, (transaction, metadata), state) =>
       description must {
         "be accepted as well-formed" in {
           WellFormedTransaction
-            .check(transaction, metadata, state)
+            .check(transaction, metadata, state, PathRollbackContextFactory)
             .value shouldBe a[WellFormedTransaction[?]]
         }
       }
@@ -308,7 +314,9 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         val expectedMetadata =
           factory.mkMetadata(Map(NodeId(0) -> lfHash(0), NodeId(1) -> lfHash(1)))
 
-        val wfTx = WellFormedTransaction.check(tx, metadata, WithoutSuffixes).value
+        val wfTx = WellFormedTransaction
+          .check(tx, metadata, WithoutSuffixes, PathRollbackContextFactory)
+          .value
         wfTx.unwrap shouldBe expectedTx
         wfTx.metadata shouldBe expectedMetadata
       }

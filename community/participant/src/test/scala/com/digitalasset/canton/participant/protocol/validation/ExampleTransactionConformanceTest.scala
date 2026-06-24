@@ -207,6 +207,7 @@ class ExampleTransactionConformanceTest
         updatedTransaction,
         example.metadata,
         WellFormedTransaction.WithoutSuffixes,
+        PathRollbackContextFactory,
       )
     }
 

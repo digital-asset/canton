@@ -148,6 +148,7 @@ class GrpcTopologyManagerWriteService(
               validatedMapping,
               serial,
               signingKeys,
+              namespacesToSignFor = Seq.empty,
               manager.managerVersion.serialization,
               expectFullAuthorization = mustFullyAuthorize,
               forceChanges = forceChanges,
@@ -184,7 +185,7 @@ class GrpcTopologyManagerWriteService(
 
       extendedTransactions <- signedTxs.parTraverse(tx =>
         targetManager
-          .extendSignature(tx, signingKeys, forceFlags)
+          .extendSignature(tx, signingKeys, namespacesToSignFor = Seq.empty, forceFlags)
           .leftWiden[RpcError]
       )
     } yield extendedTransactions

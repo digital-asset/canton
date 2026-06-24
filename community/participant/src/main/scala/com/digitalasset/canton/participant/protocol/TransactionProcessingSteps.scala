@@ -883,7 +883,7 @@ class TransactionProcessingSteps(
                 internalConsistencyChecker
                   .check(
                     parsedRequest.rootViewTrees,
-                    mcResult.unmergedTransactionsWithoutToplevelRollbackNodes,
+                    mcResult.unmergedTransactionsWithoutTopLevelRollbackNodes,
                     topologySnapshot = ipsSnapshot,
                   )
                   .value

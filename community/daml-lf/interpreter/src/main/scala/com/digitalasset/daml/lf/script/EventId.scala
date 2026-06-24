@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package script
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.transaction.NodeId
 
 // transactionId should be small so the concatenation in toLedgerString does not exceed 255 chars

@@ -3,14 +3,14 @@
 
 package com.digitalasset.daml.lf.typesig
 
+import com.digitalasset.daml.lf.data.BackStack
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, QualifiedName}
-import com.digitalasset.daml.lf.data.BackStack
+import com.digitalasset.daml.lf.language.{Ast as Pkg, Util as PkgUtil}
+import com.digitalasset.daml.lf.testing.parser.Implicits.*
+import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.daml.lf.testing.parser.Implicits._
-import com.digitalasset.daml.lf.language.{Ast => Pkg, Util => PkgUtil}
-import com.digitalasset.daml.lf.testing.parser.ParserParameters
 
 import scala.language.implicitConversions
 

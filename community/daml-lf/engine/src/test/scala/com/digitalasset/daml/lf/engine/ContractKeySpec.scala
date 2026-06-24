@@ -7,6 +7,7 @@ package engine
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
+import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{
   Identifier,
   Name,
@@ -16,18 +17,19 @@ import com.digitalasset.daml.lf.data.Ref.{
   TypeConId,
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.engine.Error.{Interpretation => IErr}
+import com.digitalasset.daml.lf.engine.Error.Interpretation as IErr
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
+import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
+import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
+  NextGenContractStateMachine as ContractStateMachine,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.digitalasset.daml.lf.value.Value.{
   ContractId,
   ValueContractId,
@@ -35,10 +37,7 @@ import com.digitalasset.daml.lf.value.Value.{
   ValueParty,
   ValueRecord,
 }
-import com.digitalasset.daml.lf.crypto.SValueHash
-import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
-import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-
+import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.EitherValues
 import org.scalatest.Inside.inside
 import org.scalatest.matchers.should.Matchers
@@ -63,7 +62,7 @@ class ContractKeySpec
     with EitherValues
     with SuppressingLogging {
 
-  import ContractKeySpec._
+  import ContractKeySpec.*
 
   private[this] val version = SerializationVersion.minContractKeys
   private[this] val contractIdVersion = ContractIdVersion.V2
@@ -72,7 +71,8 @@ class ContractKeySpec
   private[this] val compiledPackages = ConcurrentCompiledPackages(
     suffixLenientEngine.config.getCompilerConfig
   )
-  private[this] val preprocessor = refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
+  private[this] val preprocessor =
+    refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
@@ -155,17 +155,15 @@ class ContractKeySpec
         ),
       )
         ->
-        Vector(withKeyContractInst)
+          Vector(withKeyContractInst)
     )
   }
 
-  private[this] val lookupKey
-  : PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
-    case
-      GlobalKey(
-      BasicTests_WithKey,
-      ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
-      ) =>
+  private[this] val lookupKey: PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
+    case GlobalKey(
+          BasicTests_WithKey,
+          ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
+        ) =>
       Vector(withKeyContractInst)
   }
 
@@ -214,7 +212,7 @@ class ContractKeySpec
           interpretationConfig = InterpretationConfig.Default,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
-      result shouldBe a[Right[_, _]]
+      result shouldBe a[Right[?, ?]]
     }
 
     // TEST_EVIDENCE: Integrity: contract keys should be evaluated after ensure clause
@@ -245,7 +243,7 @@ class ContractKeySpec
           interpretationConfig = InterpretationConfig.Default,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
-      result shouldBe a[Left[_, _]]
+      result shouldBe a[Left[?, ?]]
       val Left(err) = result
       err.message should not include ("Boom")
       err.message should include("Template precondition violated")
@@ -291,7 +289,7 @@ class ContractKeySpec
     // these tests serve only as an indication of the current behavior
     // but can be changed freely.
     "multi keys" should {
-      import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
+      import com.digitalasset.daml.lf.language.LanguageVersion as LV
       val engine = new Engine(
         EngineConfig(
           allowedLanguageVersions = LV.allLfVersions,
@@ -337,22 +335,22 @@ class ContractKeySpec
 
       val contracts =
         List(keyedInst(cid1), keyedInst(cid2)).map(inst => inst.contractId -> inst).toMap
-      val lookupKey: PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
+      val lookupKey: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
         contracts.foldLeft(Map.empty[GlobalKey, Vector[FatContractInstance]]) {
           case (acc, (_, inst)) =>
             inst.contractKeyWithMaintainers match {
-              case Some(key) => acc.updated(key.globalKey, acc.getOrElse(key.globalKey, Vector.empty) :+ inst)
+              case Some(key) =>
+                acc.updated(key.globalKey, acc.getOrElse(key.globalKey, Vector.empty) :+ inst)
               case None => acc
             }
         }
-      }
 
       def run(
-               engine: Engine,
-               choice: String,
-               argument: Value,
-               contractStateMode: ContractStateMachine.Mode,
-             ) = {
+          engine: Engine,
+          choice: String,
+          argument: Value,
+          contractStateMode: ContractStateMachine.Mode,
+      ) = {
         val cmd = ApiCommand.CreateAndExercise(
           opsId.toRef,
           ValueRecord(None, ImmArray((None, ValueParty(party)))),
@@ -372,7 +370,8 @@ class ContractKeySpec
             preparationTime = let,
             seeding = seeding,
             contractIdVersion = contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+            interpretationConfig =
+              InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
           )
           .consume(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey)
       }
@@ -438,7 +437,7 @@ class ContractKeySpec
               case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
             }
           } else {
-            run(engine, name, arg, contractStateMode) shouldBe a[Right[_, _]]
+            run(engine, name, arg, contractStateMode) shouldBe a[Right[?, ?]]
           }
         }
       }

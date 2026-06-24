@@ -4,13 +4,13 @@
 package com.digitalasset.daml.lf
 package engine
 
-import java.util.zip.ZipInputStream
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.command.*
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.script.IdeLedger
 import com.digitalasset.daml.lf.transaction.{
   CommittedTransaction,
@@ -19,15 +19,15 @@ import com.digitalasset.daml.lf.transaction.{
   SubmittedTransaction,
   VersionedTransaction,
 }
+import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
-import com.digitalasset.daml.lf.value.Value._
-import com.digitalasset.daml.lf.command._
 import org.scalameter
 import org.scalameter.Quantity
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.zip.ZipInputStream
 import scala.language.implicitConversions
 
 class LargeTransactionTestV2_V1
@@ -44,12 +44,11 @@ class LargeTransactionTest(
 
   private val verbose = false
 
-  /** Tiny wrapper around IdeLedger that provides
-    * a mutable API for ease of use in tests.
+  /** Tiny wrapper around IdeLedger that provides a mutable API for ease of use in tests.
     */
   class MutableLedger {
 
-    import IdeLedger.{initialLedger => _, _}
+    import IdeLedger.{initialLedger as _, *}
 
     private var ledger: IdeLedger = initialLedger()
 
@@ -394,7 +393,7 @@ class LargeTransactionTest(
 
     val fields: ImmArray[(Option[String], Value)] =
       arg match {
-        case ValueRecord(_, x: ImmArray[_]) => x
+        case ValueRecord(_, x: ImmArray[?]) => x
         case v @ _ => fail(s"Unexpected match: $v")
       }
 

@@ -18,8 +18,4 @@ object UnassignmentValidationError {
     override def message: String =
       s"Cannot unassign contracts `$contractIds` on synchronizer `$synchronizerId`: ${unknownTo.mkString(", ")}"
   }
-
-  case object TargetTimestampTooFarInFuture extends UnassignmentValidationError {
-    override def message: String = "Target timestamp is too far in the future"
-  }
 }

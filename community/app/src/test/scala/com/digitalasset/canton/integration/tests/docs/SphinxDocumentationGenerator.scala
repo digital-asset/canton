@@ -757,7 +757,6 @@ class UpgradingDocumentationIntegrationTest
     val flyway = Flyway.configure
       .locations("filesystem:" + fakeMigrationPath.toString())
       .dataSource(DbMigrations.createDataSource(database.source))
-      .cleanOnValidationError(false)
       .baselineOnMigrate(false)
       .lockRetryCount(60)
       .load()
@@ -959,7 +958,7 @@ class OperateTrafficSnippetGeneratorTest
           synchronizerOwners = Seq(sequencer1),
           synchronizerThreshold = PositiveInt.one,
           staticSynchronizerParameters =
-            StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion),
+            StaticSynchronizerParameters.defaults(testedProtocolVersion),
         )
         mediator1.health.wait_for_initialized()
         participant1.synchronizers.connect_local(sequencer1, daName)

@@ -83,7 +83,7 @@ class DbSynchronizerConnectivityStatusStore(
         functionFullName,
       )
 
-  def isTopologyInitialized(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+  def isTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     storage
       .query(
         sql"""select is_topology_initialized

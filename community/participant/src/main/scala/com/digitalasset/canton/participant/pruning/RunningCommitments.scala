@@ -17,7 +17,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.CommitmentSnapshot
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.protocol.messages.AcsCommitment.CommitmentType
+import com.digitalasset.canton.protocol.messages.Digest
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.{InternedPartyId, LfPartyId, lfPartyOrdering}
 
@@ -130,7 +130,7 @@ abstract class GenericRunningCommitments[T: Pretty](
 
   def watermark: RecordTime = rt
 
-  def reinitialize(snapshot: Map[SortedSet[T], CommitmentType], recordTime: RecordTime): Unit =
+  def reinitialize(snapshot: Map[SortedSet[T], Digest.DigestType], recordTime: RecordTime): Unit =
     lock.exclusive {
       ensureNotClosed()
       // delete all active

@@ -255,6 +255,7 @@ class StoreBasedSynchronizerOutboxTest
           tx.mapping,
           tx.serial.some,
           signingKeys = Seq(publicKey.fingerprint),
+          namespacesToSignFor = Seq.empty,
           testedProtocolVersion,
           expectFullAuthorization = false,
           waitToBecomeEffective = waitToBecomeEffective,

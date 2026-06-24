@@ -6,11 +6,7 @@ package com.digitalasset.canton.platform.apiserver
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.daml.ledger.api.v2.update_service.{
-  GetUpdateResponse,
-  GetUpdatesPageResponse,
-  GetUpdatesResponse,
-}
+import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesPageResponse}
 import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
@@ -19,6 +15,7 @@ import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.index.*
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
@@ -40,7 +37,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
 
   override def getCompletions(
       begin: Option[Offset],
-      userId: Ref.UserId,
+      userId: Option[Ref.UserId],
       parties: Set[Ref.Party],
   )(implicit loggingContext: LoggingContextWithTrace): Source[CompletionStreamResponse, NotUsed] =
     Timed.source(
@@ -54,10 +51,16 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       updateFormat: UpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
-  )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed] =
+  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdateResponse, NotUsed] =
     Timed.source(
       metrics.services.index.transactions,
-      delegate.updates(begin, endAt, updateFormat, descendingOrder, skipPruningChecks),
+      delegate.updates(
+        begin = begin,
+        endAt = endAt,
+        updateFormat = updateFormat,
+        descendingOrder = descendingOrder,
+        skipPruningChecks = skipPruningChecks,
+      ),
     )
 
   def getUpdateBy(

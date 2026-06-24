@@ -20,11 +20,11 @@ import com.digitalasset.daml.lf.transaction.{
   Node,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.value.{Value => V}
-import org.scalatest.{EitherValues, Inside}
+import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{EitherValues, Inside}
 
 import scala.collection.immutable.ArraySeq
 
@@ -282,7 +282,7 @@ class ValidateContractInstanceSpec
             .consume(pkgs = Map(targetPackageId -> targetPackage))
 
           inside(result) { case Right(res) =>
-            res shouldBe a[Left[_, _]]
+            res shouldBe a[Left[?, ?]]
           }
         }
       }
@@ -309,7 +309,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId3 -> pkg3))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -335,7 +335,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId4 -> pkg4))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -361,7 +361,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId5 -> pkg5))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -387,7 +387,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId6 -> pkg6))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -412,7 +412,7 @@ class ValidateContractInstanceSpec
           )
           .consume(pkgs = Map.empty) // We reply with "not found" to any NeedPackage question
 
-        result shouldBe a[Left[_, _]] // consume reports ResultError as a Left
+        result shouldBe a[Left[?, ?]] // consume reports ResultError as a Left
       }
     }
   }

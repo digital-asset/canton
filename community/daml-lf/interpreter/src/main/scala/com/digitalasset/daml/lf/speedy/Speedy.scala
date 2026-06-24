@@ -6,27 +6,26 @@ package speedy
 
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.logging.HasLoggerName
-import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.{CostModel => _, _}
-import com.digitalasset.daml.lf.interpretation.{Error => IError}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{CostModel as _, *}
+import com.digitalasset.daml.lf.interpretation.Error as IError
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.PackageInterface
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
-import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, StepCount}
 import com.digitalasset.daml.lf.speedy.PartialTransaction.NodeSeeds
-import com.digitalasset.daml.lf.speedy.SError._
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.speedy.SResult._
+import com.digitalasset.daml.lf.speedy.SError.*
+import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.speedy.SValue.{SAnyException, SArithmeticError, SRecord, SText}
+import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, StepCount}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
-  IncompleteTransaction => IncompleteTx,
+  IncompleteTransaction as IncompleteTx,
   NeedKeyProgression,
   Node,
   NodeId,
@@ -34,7 +33,7 @@ import com.digitalasset.daml.lf.transaction.{
   SubmittedTransaction,
 }
 import com.digitalasset.daml.lf.value.Value.ValueArithmeticError
-import com.digitalasset.daml.lf.value.{ContractIdVersion, Value => V}
+import com.digitalasset.daml.lf.value.{ContractIdVersion, Value as V}
 
 import scala.annotation.{nowarn, tailrec}
 import scala.collection.immutable.ArraySeq
@@ -50,21 +49,18 @@ private[lf] object Speedy {
     private[this] val registeredPlugins: Map[String, MetricPlugin] =
       plugins.map(p => p.getClass.getSimpleName -> p).toMap
 
-    private[speedy] def incrCount[P <: MetricPlugin: ClassTag](ctx: MetricPlugin.Ctx*): Unit = {
+    private[speedy] def incrCount[P <: MetricPlugin: ClassTag](ctx: MetricPlugin.Ctx*): Unit =
       registeredPlugins.get(implicitly[ClassTag[P]].runtimeClass.getSimpleName).foreach {
-        _.incrCount(ctx: _*)
+        _.incrCount(ctx*)
       }
-    }
 
-    private[lf] def totalCount[P <: MetricPlugin: ClassTag]: Option[P#Result] = {
+    private[lf] def totalCount[P <: MetricPlugin: ClassTag]: Option[P#Result] =
       registeredPlugins
         .get(implicitly[ClassTag[P]].runtimeClass.getSimpleName)
         .map(_.totalCount.asInstanceOf[P#Result])
-    }
 
-    private[lf] def reset(): Unit = {
+    private[lf] def reset(): Unit =
       registeredPlugins.values.foreach(_.reset())
-    }
   }
 
   /** Instrumentation counters. */
@@ -142,11 +138,10 @@ private[lf] object Speedy {
     def templateId: TypeConId = globalKey.templateId
     def maintainers: Set[Party] = globalKeyWithMaintainers.maintainers
     val lfValue: V = globalKey.key
-    def renormalizedGlobalKeyWithMaintainers: GlobalKeyWithMaintainers = {
+    def renormalizedGlobalKeyWithMaintainers: GlobalKeyWithMaintainers =
       globalKeyWithMaintainers.copy(
         globalKey = GlobalKey.assertWithRenormalizedValue(globalKey, key.toNormalizedValue)
       )
-    }
   }
 
   final case class ContractMetadata(
@@ -282,90 +277,93 @@ private[lf] object Speedy {
     // The following needXXXX methods take care to emit question while ensuring no exceptions are
     // thrown during the question callbacks execution
 
-    final private[speedy] def needTime(
-        continue: Time.Timestamp => Control[Question.Update]
-    ): Control[Question.Update] = {
-      Control.Question(
-        Question.Update.NeedTime { time =>
-          safelyContinue(
-            NameOf.qualifiedNameOfCurrentFunc,
-            "NeedTime", {
-              require(
-                timeBoundaries.min <= time && time <= timeBoundaries.max,
-                s"NeedTime pre-condition failed: time $time lies outside time boundaries $timeBoundaries",
-              )
+    final private[speedy] def needTime: ContU[Time.Timestamp] =
+      ContU.wrap1[Time.Timestamp] { continue =>
+        Control.Question(
+          Question.Update.NeedTime { time =>
+            safelyContinue(
+              NameOf.qualifiedNameOfCurrentFunc,
+              "NeedTime", {
+                require(
+                  timeBoundaries.min <= time && time <= timeBoundaries.max,
+                  s"NeedTime pre-condition failed: time $time lies outside time boundaries $timeBoundaries",
+                )
 
-              continue(time).ensuring(
-                timeBoundaries.min <= time && time <= timeBoundaries.max,
-                s"NeedTime post-condition failed: time $time lies outside time boundaries $timeBoundaries",
-              )
-            },
-          )
-        }
-      )
-    }
+                continue(time).ensuring(
+                  timeBoundaries.min <= time && time <= timeBoundaries.max,
+                  s"NeedTime post-condition failed: time $time lies outside time boundaries $timeBoundaries",
+                )
+              },
+            )
+          }
+        )
+      }
 
     final private[speedy] def needContract(
         location: => String,
         contractId: V.ContractId,
-        continue: (
-            FatContractInstance,
-            Hash.HashingMethod,
-            Hash => Boolean,
-        ) => Control[Question.Update],
-    ): Control.Question[Question.Update] =
-      Control.Question(
-        Question.Update.NeedContract(
-          contractId,
-          committers,
-          (coinst, hashMethod, authenticator) =>
-            safelyContinue(location, "NeedContract", continue(coinst, hashMethod, authenticator)),
+    ): ContU[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)] =
+      ContU.wrap1 { continue =>
+        Control.Question(
+          Question.Update.NeedContract(
+            contractId,
+            committers,
+            (coinst, hashMethod, authenticator) =>
+              safelyContinue(
+                location,
+                "NeedContract",
+                continue((coinst, hashMethod, authenticator)),
+              ),
+          )
         )
-      )
+      }
 
     final private[speedy] def needPackage(
         location: => String,
         packageId: PackageId,
         context: language.Reference,
-        continue: () => Control[Question.Update],
-    ): Control.Question[Question.Update] =
-      Control.Question(
-        Question.Update.NeedPackage(
-          packageId,
-          context,
-          packages =>
-            safelyContinue(
-              location,
-              "NeedPackage", {
-                this.compiledPackages = packages
-                // To avoid infinite loop in case the packages are not updated properly by the caller
-                assert(compiledPackages.contains(packageId))
-                continue()
-              },
-            ),
+    ): ContU[Unit] =
+      ContU.wrap0 { continue =>
+        Control.Question(
+          Question.Update.NeedPackage(
+            packageId,
+            context,
+            packages =>
+              safelyContinue(
+                location,
+                "NeedPackage", {
+                  this.compiledPackages = packages
+                  // To avoid infinite loop in case the packages are not updated properly by the caller
+                  assert(compiledPackages.contains(packageId))
+                  continue()
+                },
+              ),
+          )
         )
-      )
+      }
 
     final private[speedy] def needKeys(
         location: => String,
         key: GlobalKey,
         n: Int,
         progress: NeedKeyProgression.CanContinue,
-    ): ContU[(Vector[FatContractInstance], NeedKeyProgression.HasStarted)] =
-      cats.data.ContT(
-        (k: (
-            (Vector[FatContractInstance], NeedKeyProgression.HasStarted)
-        ) => Control[Question.Update]) =>
-          Control.Question(
-            Question.Update.NeedKey(
-              key,
-              n,
-              progress,
-              committers,
-              (result, progress) => safelyContinue(location, "NeedKey", k((result, progress))),
-            )
-          )
+    ): ContU[
+      (
+          Vector[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)],
+          NeedKeyProgression.HasStarted,
       )
+    ] =
+      ContU.wrap1 { k =>
+        Control.Question(
+          Question.Update.NeedKey(
+            key,
+            n,
+            progress,
+            committers,
+            (result, progress) => safelyContinue(location, "NeedKey", k((result, progress))),
+          )
+        )
+      }
 
     final private[speedy] def needExternalCall(
         extensionId: String,
@@ -390,22 +388,21 @@ private[lf] object Speedy {
         )
       )
 
-    private[speedy] def lookupContract(coid: V.ContractId)(
-        f: (FatContractInstance, Hash.HashingMethod, Hash => Boolean) => Control[Question.Update]
-    ): Control[Question.Update] =
+    private[speedy] def lookupContract(
+        coid: V.ContractId
+    ): ContU[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)] =
       contractLookupCache.get(coid) match {
         case Some(res) =>
-          f.tupled(res)
+          ContU.pure(res)
         case None =>
           needContract(
             NameOf.qualifiedNameOfCurrentFunc,
             coid,
-            (coinst, hashingMethod, idValidator) => {
-              contractLookupCache =
-                contractLookupCache.updated(coid, (coinst, hashingMethod, idValidator))
-              f(coinst, hashingMethod, idValidator)
-            },
-          )
+          ).map { case entry @ (coinst, hashingMethod, idValidator) =>
+            contractLookupCache =
+              contractLookupCache.updated(coid, (coinst, hashingMethod, idValidator))
+            entry
+          }
       }
 
     private[speedy] override def asUpdateMachine(location: String)(
@@ -413,12 +410,11 @@ private[lf] object Speedy {
     ): Control[Question.Update] =
       f(this)
 
-    /** unwindToHandler is called when an exception is thrown by the builtin SBThrow or
-      * re-thrown by the builtin SBTryHandler. If a rollback of an effectful
-      * node is attempted, we error out with the rollback error. If a
-      * catch-handler is found, we initiate execution of the handler code (which
-      * might decide to re-throw). Otherwise we call unhandledException to apply
-      * the message function to the exception payload, producing a text message.
+    /** unwindToHandler is called when an exception is thrown by the builtin SBThrow or re-thrown by
+      * the builtin SBTryHandler. If a rollback of an effectful node is attempted, we error out with
+      * the rollback error. If a catch-handler is found, we initiate execution of the handler code
+      * (which might decide to re-throw). Otherwise we call unhandledException to apply the message
+      * function to the exception payload, producing a text message.
       */
     private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] = {
       @tailrec
@@ -475,9 +471,9 @@ private[lf] object Speedy {
       }
     }
 
-    /** Tracks the lower and upper bounds on the ledger time for a given Daml interpretation
-      * run. At any point during interpretation, the interpretation up to then is invariant
-      * for any ledger time within these bounds.
+    /** Tracks the lower and upper bounds on the ledger time for a given Daml interpretation run. At
+      * any point during interpretation, the interpretation up to then is invariant for any ledger
+      * time within these bounds.
       */
     private[this] var timeBoundaries: Time.Range = Time.Range.unconstrained
 
@@ -500,27 +496,23 @@ private[lf] object Speedy {
     def incompleteTransaction: IncompleteTx = ptx.finishIncomplete
     def nodesToString: String = ptx.nodesToString
 
-    /** Local Contract Store:
-      *      Maps contract-id to type+svalue, for LOCALLY-CREATED contracts.
-      *      - Consulted (getIfLocalContract) by fetchAny (SBuiltin).
-      *      - Updated   (storeLocalContract) by SBUCreate.
+    /** Local Contract Store: Maps contract-id to type+svalue, for LOCALLY-CREATED contracts.
+      *   - Consulted (getIfLocalContract) by fetchAny (SBuiltin).
+      *   - Updated (storeLocalContract) by SBUCreate.
       */
     private[speedy] var localContractStore: Map[V.ContractId, (TypeConId, SValue)] = Map.empty
-    private[speedy] def getIfLocalContract(coid: V.ContractId): Option[(TypeConId, SValue)] = {
+    private[speedy] def getIfLocalContract(coid: V.ContractId): Option[(TypeConId, SValue)] =
       localContractStore.get(coid)
-    }
     private[speedy] def storeLocalContract(
         coid: V.ContractId,
         templateId: TypeConId,
         templateArg: SValue,
-    ): Unit = {
+    ): Unit =
       localContractStore = localContractStore + (coid -> (templateId, templateArg))
-    }
 
-    /** Contract Info Cache:
-      *      Maps contract-id to contract-info, for EVERY referenced contract-id.
-      *      - Consulted (lookupContractInfoCache) by getContractInfo (SBuiltin).
-      *      - Updated   (insertContractInfoCache) by getContractInfo + SBUCreate.
+    /** Contract Info Cache: Maps contract-id to contract-info, for EVERY referenced contract-id.
+      *   - Consulted (lookupContractInfoCache) by getContractInfo (SBuiltin).
+      *   - Updated (insertContractInfoCache) by getContractInfo + SBUCreate.
       */
     // TODO: https://github.com/digital-asset/daml/issues/17082
     // - Must be template-id aware when we support ResultNeedUpgradeVerification
@@ -540,13 +532,11 @@ private[lf] object Speedy {
         loc: => String,
         packageId: PackageId,
         ref: => language.Reference,
-    )(
-        k: () => Control[Question.Update]
-    ): Control[Question.Update] =
+    ): ContU[Unit] =
       if (compiledPackages.contains(packageId))
-        k()
+        ContU.Unit
       else
-        needPackage(loc, packageId, ref, k)
+        needPackage(loc, packageId, ref)
 
     private[speedy] def enforceLimitSignatoriesAndObservers(
         cid: V.ContractId,
@@ -648,7 +638,7 @@ private[lf] object Speedy {
         ptx.locationInfo(),
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
         ptx.contractState.keyInputs.transform((_, v) => v.queue),
-        ptx.contractState.contractOrder
+        ptx.contractState.contractOrder,
       )
     }
 
@@ -719,7 +709,8 @@ private[lf] object Speedy {
         iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         validating: Boolean = false,
-        interpretationConfig: interpretation.InterpretationConfig = interpretation.InterpretationConfig.Default,
+        interpretationConfig: interpretation.InterpretationConfig =
+          interpretation.InterpretationConfig.Default,
         contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
         commitLocation: Option[Location] = None,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
@@ -1069,7 +1060,7 @@ private[lf] object Speedy {
       if (this.envBase < envBase) {
         throw SErrorCrash(
           NameOf.qualifiedNameOfCurrentFunc,
-          s"restoreBase: ${this.envBase} -> ${envBase} -- NOT A REDUCTION",
+          s"restoreBase: ${this.envBase} -> $envBase -- NOT A REDUCTION",
         )
       }
       this.envBase = envBase
@@ -1086,7 +1077,7 @@ private[lf] object Speedy {
       if (count < 0) {
         throw SErrorCrash(
           NameOf.qualifiedNameOfCurrentFunc,
-          s"popTempStackToBase: ${env.size} --> ${envSizeToBeRestored} -- WRONG DIRECTION",
+          s"popTempStackToBase: ${env.size} --> $envSizeToBeRestored -- WRONG DIRECTION",
         )
       }
       if (count > 0) {
@@ -1103,13 +1094,12 @@ private[lf] object Speedy {
 
     /** Track the location of the expression being evaluated
       */
-    final def pushLocation(loc: Location): Unit = {
+    final def pushLocation(loc: Location): Unit =
       lastLocation = Some(loc)
-    }
 
-    /** Reuse an existing speedy machine to evaluate a new expression.
-      *      Do not use if the machine is partway though an existing evaluation.
-      *      i.e. run() has returned an `SResult` requiring a callback.
+    /** Reuse an existing speedy machine to evaluate a new expression. Do not use if the machine is
+      * partway though an existing evaluation.
+      * i.e. run() has returned an `SResult` requiring a callback.
       */
     final def setExpressionToEvaluate(expr: SExpr): Unit = {
       setControl(Control.Expression(expr))
@@ -1121,12 +1111,13 @@ private[lf] object Speedy {
       track.reset()
     }
 
-    final def setControl(x: Control[Q]): Unit = {
+    final def setControl(x: Control[Q]): Unit =
       control = x
-    }
 
-    /** Run a machine until we get a result: either a final-value or a request for data, with a callback */
-    final def run(): SResult[Q] = {
+    /** Run a machine until we get a result: either a final-value or a request for data, with a
+      * callback
+      */
+    final def run(): SResult[Q] =
       try {
         @tailrec
         def loop(): SResult[Q] = {
@@ -1169,9 +1160,8 @@ private[lf] object Speedy {
         case ex: RuntimeException =>
           SResultError(SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, s"exception: $ex")) // stop
       }
-    }
 
-    final def lookupVal(eval: SEVal): Control[Q] = {
+    final def lookupVal(eval: SEVal): Control[Q] =
       eval.cached match {
         case Some(v) =>
           Control.Value(v)
@@ -1200,16 +1190,14 @@ private[lf] object Speedy {
                     NameOf.qualifiedNameOfCurrentFunc,
                     ref.packageId,
                     language.Reference.Package(ref.packageId),
-                    () => Control.Expression(eval),
-                  )
+                  ).run(_ => Control.Expression(eval))
                 )
               }
           }
       }
-    }
 
-    /** This function is used to enter an ANF application.  The function has been evaluated to
-      *      a value, and so have the arguments - they just need looking up
+    /** This function is used to enter an ANF application. The function has been evaluated to a
+      * value, and so have the arguments - they just need looking up
       */
     // TODO: share common code with executeApplication
     private[speedy] final def enterApplication(
@@ -1320,9 +1308,10 @@ private[lf] object Speedy {
         readAs: Set[Party] = Set.empty,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-        interpretationConfig: interpretation.InterpretationConfig = interpretation.InterpretationConfig.Default,
+        interpretationConfig: interpretation.InterpretationConfig =
+          interpretation.InterpretationConfig.Default,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
-    ): UpdateMachine = {
+    ): UpdateMachine =
       UpdateMachine(
         compiledPackages = compiledPackages,
         preparationTime = Time.Timestamp.MinValue,
@@ -1337,7 +1326,6 @@ private[lf] object Speedy {
         interpretationConfig = interpretationConfig,
         logger = logger,
       )
-    }
 
     @throws[PackageNotFound]
     @throws[CompilationError]
@@ -1450,9 +1438,8 @@ private[lf] object Speedy {
     }
   }
 
-  /** Kont, or continuation. Describes the next step for the machine
-    * after an expression has been evaluated into a 'SValue'.
-    * Not sealed, so we can define Kont variants in SBuiltin.scala
+  /** Kont, or continuation. Describes the next step for the machine after an expression has been
+    * evaluated into a 'SValue'. Not sealed, so we can define Kont variants in SBuiltin.scala
     */
   private[speedy] sealed abstract class Kont[Q] {
 
@@ -1493,7 +1480,7 @@ private[lf] object Speedy {
 
   /** The scrutinee of a match has been evaluated, now match the alternatives against it. */
   private[speedy] def executeMatchAlts(
-      machine: Machine[_],
+      machine: Machine[?],
       alts: ArraySeq[SCaseAlt],
       v: SValue,
   ): Control[Nothing] = {
@@ -1581,11 +1568,10 @@ private[lf] object Speedy {
     Control.Expression(e)
   }
 
-  /** Push the evaluated value to the array 'to', and start evaluating the expression 'next'.
-    * This continuation is used to implement both function application and lets. In
-    * the case of function application the arguments are pushed into the 'actuals' array of
-    * the PAP that is being built, and in the case of lets the evaluated value is pushed
-    * directly into the environment.
+  /** Push the evaluated value to the array 'to', and start evaluating the expression 'next'. This
+    * continuation is used to implement both function application and lets. In the case of function
+    * application the arguments are pushed into the 'actuals' array of the PAP that is being built,
+    * and in the case of lets the evaluated value is pushed directly into the environment.
     */
   private[speedy] final case class KPushTo[Q] private (
       savedBase: Int,
@@ -1683,12 +1669,11 @@ private[lf] object Speedy {
       KFoldr(machine.currentFrame, machine.currentActuals, func, list, lastIndex)
   }
 
-  /** Store the evaluated value in the definition and in the 'SEVal' from which the
-    * expression came from. This in principle makes top-level values lazy. It is a
-    * useful optimization to allow creation of large constants (for example records
-    * that are repeatedly accessed. In older compilers which did not use the builtin
-    * record and struct updates this solves the blow-up which would happen when a
-    * large record is updated multiple times.
+  /** Store the evaluated value in the definition and in the 'SEVal' from which the expression came
+    * from. This in principle makes top-level values lazy. It is a useful optimization to allow
+    * creation of large constants (for example records that are repeatedly accessed. In older
+    * compilers which did not use the builtin record and struct updates this solves the blow-up
+    * which would happen when a large record is updated multiple times.
     */
   private[speedy] final case class KCacheVal[Q](
       v: SEVal,
@@ -1705,9 +1690,9 @@ private[lf] object Speedy {
     }
   }
 
-  /** KCloseExercise. Marks an open-exercise which needs to be closed. Either:
-    * (1) by 'endExercises' if this continuation is entered normally, or
-    * (2) by 'abortExercises' if we unwind the stack through this continuation
+  /** KCloseExercise. Marks an open-exercise which needs to be closed. Either: (1) by 'endExercises'
+    * if this continuation is entered normally, or (2) by 'abortExercises' if we unwind the stack
+    * through this continuation
     */
   private[speedy] final case object KCloseExercise extends Kont[Question.Update] {
 
@@ -1725,10 +1710,10 @@ private[lf] object Speedy {
     }
   }
 
-  /** KTryCatchV1Handler marks the kont-stack to allow unwinding when throw is executed. If
-    * the continuation is entered normally, the environment is restored but the handler is
-    * not executed.  When a throw is executed, the kont-stack is unwound to the nearest
-    * enclosing KTryCatchV1Handler (if there is one), and the code for the handler executed.
+  /** KTryCatchV1Handler marks the kont-stack to allow unwinding when throw is executed. If the
+    * continuation is entered normally, the environment is restored but the handler is not executed.
+    * When a throw is executed, the kont-stack is unwound to the nearest enclosing
+    * KTryCatchV1Handler (if there is one), and the code for the handler executed.
     */
   private[speedy] final case class KTryCatchV1Handler private (
       machine: UpdateMachine,
@@ -1795,9 +1780,9 @@ private[lf] object Speedy {
     }
   }
 
-  /** Continuation produced by [[SELabelClosure]] expressions. This is only
-    * used during profiling. Its purpose is to attach a label to closures such
-    * that entering the closure can write an "open event" with that label.
+  /** Continuation produced by [[SELabelClosure]] expressions. This is only used during profiling.
+    * Its purpose is to attach a label to closures such that entering the closure can write an "open
+    * event" with that label.
     */
   private[speedy] final case class KLabelClosure[Q](label: Profile.Label) extends Kont[Q] {
     override def execute(machine: Machine[Q], v: SValue): Control.Value = {
@@ -1812,8 +1797,7 @@ private[lf] object Speedy {
     }
   }
 
-  /** Continuation marking the exit of a closure. This is only used during
-    * profiling.
+  /** Continuation marking the exit of a closure. This is only used during profiling.
     */
   private[speedy] final case class KLeaveClosure[Q](machine: Machine[Q], label: Profile.Label)
       extends Kont[Q] {
@@ -1850,14 +1834,24 @@ private[lf] object Speedy {
   type ContU[X] = Cont[Question.Update, X]
 
   object ContU {
+
     def pure[A](a: A): Cont[Question.Update, A] = ContT.pure(a)
+    val Unit: ContU[Unit] = pure(())
+
+    def assert(cond: Boolean, err: => interpretation.Error): ContU[Unit] =
+      if (cond) Unit else throwError(err)
+
+    def from[X](either: Either[interpretation.Error, X]): ContU[X] =
+      either match {
+        case Left(err) => throwError(err)
+        case Right(x) => pure(x)
+      }
 
     def wrap0(f: (() => Control[Question.Update]) => Control[Question.Update]): ContU[Unit] =
       ContT(k => f(() => k(())))
 
-    def wrap1[A](f: (A => Control[Question.Update]) => Control[Question.Update]): ContU[A] = ContT(
-      f
-    )
+    def wrap1[A](f: (A => Control[Question.Update]) => Control[Question.Update]): ContU[A] =
+      ContT(f)
 
     def wrap2[A, B](
         f: ((A, B) => Control[Question.Update]) => Control[Question.Update]

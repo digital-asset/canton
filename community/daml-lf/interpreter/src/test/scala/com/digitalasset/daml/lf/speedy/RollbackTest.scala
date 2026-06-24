@@ -8,13 +8,11 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.language.Ast.Expr
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import com.digitalasset.daml.lf.transaction.Node
-import com.digitalasset.daml.lf.transaction.NodeId
-import com.digitalasset.daml.lf.transaction.SubmittedTransaction
+import com.digitalasset.daml.lf.transaction.{Node, NodeId, SubmittedTransaction}
 import com.digitalasset.daml.lf.value.Value.{ValueInt64, ValueRecord}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -22,9 +20,13 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class RollbackTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
+class RollbackTest
+    extends AnyFreeSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
-  import RollbackTest._
+  import RollbackTest.*
 
   private[this] implicit val defaultParserParameters: ParserParameters[RollbackTest.this.type] =
     ParserParameters.default
@@ -220,7 +222,7 @@ object RollbackTest {
   final case class R(x: List[Tree]) extends Tree // Rollback Node
 
   private def shapeOfTransaction(tx: SubmittedTransaction): List[Tree] = {
-    def trees(nid: NodeId): List[Tree] = {
+    def trees(nid: NodeId): List[Tree] =
       tx.nodes(nid) match {
         case create: Node.Create =>
           create.arg match {
@@ -236,7 +238,6 @@ object RollbackTest {
         case node: Node.Rollback =>
           List(R(node.children.toList.flatMap(nid => trees(nid))))
       }
-    }
     tx.roots.toList.flatMap(nid => trees(nid))
   }
 

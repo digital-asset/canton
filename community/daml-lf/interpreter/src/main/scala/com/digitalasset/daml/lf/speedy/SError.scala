@@ -15,9 +15,9 @@ object SError {
       with Product
       with Serializable
 
-  /** A malformed expression was encountered. The assumption is that the
-    * expressions are type-checked and the loaded packages have been validated,
-    * hence we do not have separate errors for e.g. unknown values.
+  /** A malformed expression was encountered. The assumption is that the expressions are
+    * type-checked and the loaded packages have been validated, hence we do not have separate errors
+    * for e.g. unknown values.
     */
   final case class SErrorCrash(location: String, reason: String) extends SError {
     override def getMessage: String = s"SPEEDY CRASH ($location): $reason"

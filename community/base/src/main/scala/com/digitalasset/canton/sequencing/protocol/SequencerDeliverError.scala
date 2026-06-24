@@ -17,6 +17,7 @@ import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.error.{CantonBaseError, TransactionError, TransactionErrorImpl}
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.rpc.status.Status
 
 import java.time.Instant
@@ -199,6 +200,28 @@ object SequencerErrors extends SequencerErrorGroup {
     """This is expected to happen during operation of a system with aggregate submissions enabled. No action required."""
   )
   case object AggregateSubmissionAlreadySent
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+
+    def apply(message: String, protocolVersion: ProtocolVersion): SequencerDeliverError =
+      // for backward compatibility reasons, we need to keep the message format unchanged
+      if (protocolVersion <= ProtocolVersion.v35)
+        super.apply(message)
+      else
+        AggregateSubmissionAlreadySentV2.apply(message)
+  }
+
+  @Explanation(
+    """This error occurs when the sequencer has already sent out the aggregate submission for the request."""
+  )
+  @Resolution(
+    """This is expected to happen during operation of a system with aggregate submissions enabled. No action required.
+      |This error code has been modified to report Grpc RESOURCE_EXISTS and is used for synchronous rejects and
+      |async rejects starting with PV36."""
+  )
+  case object AggregateSubmissionAlreadySentV2
       extends SequencerDeliverErrorCode(
         id = "SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,

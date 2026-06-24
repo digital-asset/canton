@@ -10,15 +10,12 @@ final class TxNodeCount extends MetricPlugin {
 
   private[this] var txNodeCount: Long = 0
 
-  override def incrCount(@unused ctx: MetricPlugin.Ctx*): Unit = {
+  override def incrCount(@unused ctx: MetricPlugin.Ctx*): Unit =
     txNodeCount += 1
-  }
 
-  override def totalCount: Result = {
+  override def totalCount: Result =
     txNodeCount
-  }
 
-  override def reset(): Unit = {
+  override def reset(): Unit =
     txNodeCount = 0
-  }
 }

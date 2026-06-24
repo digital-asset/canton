@@ -519,6 +519,7 @@ class PackageOpsImpl(
             mapping = mapping,
             serial = Some(nextSerial),
             signingKeys = Seq.empty,
+            namespacesToSignFor = Seq.empty,
             protocolVersion = initialProtocolVersion,
             expectFullAuthorization = true,
             forceChanges = forceFlags,

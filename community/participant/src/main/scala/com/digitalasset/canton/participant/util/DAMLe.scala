@@ -375,7 +375,21 @@ class DAMLe(
             else NeedKeyProgression.Finished
           FutureUnlessShutdown
             .pure(result)
-            .flatMap(r => handleResultInternal(resume(r, hasStarted)))
+            .flatMap { r =>
+              val entries = r.map { contract =>
+                CantonContractIdVersion.extractCantonContractIdVersion(contract.contractId) match {
+                  case Right(version) =>
+                    ResultNeedKey.Response.AuthenticableFatContractInstance(
+                      contract,
+                      version.contractHashingMethod,
+                      hash => contractAuthenticator(contract, hash).isRight,
+                    )
+                  case Left(_) =>
+                    ResultNeedKey.Response.UnsupportedContractIdVersion(contract.contractId)
+                }
+              }
+              handleResultInternal(resume(ResultNeedKey.Response(entries, hasStarted)))
+            }
 
         case ResultNeedContract(acoid, resume) =>
           val response: Response =

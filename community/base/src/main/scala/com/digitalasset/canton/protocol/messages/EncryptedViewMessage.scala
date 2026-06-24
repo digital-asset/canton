@@ -331,6 +331,11 @@ final case class EncryptedSingleViewMessage[+VT <: ViewType](
       "Cannot serialize an EncryptedSingleViewMessage to proto version 31"
     )
 
+  override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+    throw new UnsupportedOperationException(
+      "Cannot serialize an EncryptedSingleViewMessage to proto version 32"
+    )
+
   /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
     * provided that the argument is the same as [[viewType]]
     * @return
@@ -777,6 +782,9 @@ final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
 
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
+
+  override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+    v32.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
 
   /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
     * provided that the argument is the same as [[viewType]]

@@ -5,9 +5,9 @@ package com.digitalasset.daml.lf
 package transaction
 
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref.{Party, Identifier, PackageName, TypeConId, ChoiceName}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
-import com.digitalasset.daml.lf.value.{Value => V}
+import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Identifier, PackageName, Party, TypeConId}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
+import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -33,12 +33,10 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
   private class Tweak[X](val run: X => List[X])
 
   private object Tweak {
-    def single[X](f1: PartialFunction[X, X]): Tweak[X] = {
+    def single[X](f1: PartialFunction[X, X]): Tweak[X] =
       apply(f1.andThen(List(_)))
-    }
-    def apply[X](f: PartialFunction[X, List[X]]): Tweak[X] = {
+    def apply[X](f: PartialFunction[X, List[X]]): Tweak[X] =
       new Tweak(f.orElse { case _ => List.empty })
-    }
   }
 
   // --[types]--
@@ -202,13 +200,12 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
       )
     }
 
-  private def preTweakedVTXs: Seq[VTX] = {
+  private def preTweakedVTXs: Seq[VTX] =
     // we ensure the preTweaked txs are properly normalized.
     for {
       txVersion <- SerializationVersion.All
       vtx <- flatVTXs(txVersion) ++ nestedVTXs(txVersion)
     } yield Normalization.normalizeTx(vtx)
-  }
 
   private def runTweak(tweak: Tweak[VTX]): Seq[(VTX, VTX)] =
     for {
@@ -219,27 +216,22 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
   // --[changes]--
   // Change functions must never be identity.
 
-  private def changeBoolean(x: Boolean) = { !x }
+  private def changeBoolean(x: Boolean) = !x
 
-  private def changeContractId(x: V.ContractId): V.ContractId = {
+  private def changeContractId(x: V.ContractId): V.ContractId =
     if (x != samContractId1) samContractId1 else samContractId2
-  }
 
-  private def changeTemplateId(x: TypeConId): TypeConId = {
+  private def changeTemplateId(x: TypeConId): TypeConId =
     if (x != samTemplateId1) samTemplateId1 else samTemplateId2
-  }
 
-  private def changeChoiceId(x: ChoiceName): ChoiceName = {
+  private def changeChoiceId(x: ChoiceName): ChoiceName =
     if (x != samChoiceName1) samChoiceName1 else samChoiceName2
-  }
 
-  private def changeValue(x: Val): Val = {
+  private def changeValue(x: Val): Val =
     if (x != samValue1) samValue1 else samValue2
-  }
 
-  private def changeVersion(x: SerializationVersion): SerializationVersion = {
+  private def changeVersion(x: SerializationVersion): SerializationVersion =
     if (x != samVersion1) samVersion1 else samVersion2
-  }
 
   // --[predicates]--
   // Some tweaks have version dependant significance.
@@ -284,14 +276,14 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
     nc.copy(arg = changeValue(nc.arg))
   }
   private val tweakCreateSignatories = Tweak[Node] { case nc: Node.Create =>
-    tweakPartySet.run(nc.signatories).map { x => nc.copy(signatories = x) }
+    tweakPartySet.run(nc.signatories).map(x => nc.copy(signatories = x))
   }
   private val tweakCreateStakeholders = Tweak[Node] { case nc: Node.Create =>
-    tweakPartySet.run(nc.stakeholders).map { x => nc.copy(stakeholders = x) }
+    tweakPartySet.run(nc.stakeholders).map(x => nc.copy(stakeholders = x))
   }
   private def tweakCreateKey(tweakOptKeyMaintainers: Tweak[OKWM]) =
     Tweak[Node] { case nc: Node.Create =>
-      tweakOptKeyMaintainers.run(nc.keyOpt).map { x => nc.copy(keyOpt = x) }
+      tweakOptKeyMaintainers.run(nc.keyOpt).map(x => nc.copy(keyOpt = x))
     }
   private val tweakCreateVersion = Tweak.single[Node] { case nc: Node.Create =>
     nc.copy(version = changeVersion(nc.version))
@@ -317,17 +309,17 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
     nf.copy(templateId = changeTemplateId(nf.templateId))
   }
   private val tweakFetchActingPartiesNonEmpty = Tweak[Node] { case nf: Node.Fetch =>
-    tweakPartySet.run(nf.actingParties).map { x => nf.copy(actingParties = x) }
+    tweakPartySet.run(nf.actingParties).map(x => nf.copy(actingParties = x))
   }
   private val tweakFetchSignatories = Tweak[Node] { case nf: Node.Fetch =>
-    tweakPartySet.run(nf.signatories).map { x => nf.copy(signatories = x) }
+    tweakPartySet.run(nf.signatories).map(x => nf.copy(signatories = x))
   }
   private val tweakFetchStakeholders = Tweak[Node] { case nf: Node.Fetch =>
-    tweakPartySet.run(nf.stakeholders).map { x => nf.copy(stakeholders = x) }
+    tweakPartySet.run(nf.stakeholders).map(x => nf.copy(stakeholders = x))
   }
   private def tweakFetchKey(tweakOptKeyMaintainers: SerializationVersion => Tweak[OKWM]) =
     Tweak[Node] { case nf: Node.Fetch =>
-      tweakOptKeyMaintainers(nf.version).run(nf.keyOpt).map { x => nf.copy(keyOpt = x) }
+      tweakOptKeyMaintainers(nf.version).run(nf.keyOpt).map(x => nf.copy(keyOpt = x))
     }
   private def tweakFetchByKey(whenVersion: SerializationVersion => Boolean) = Tweak.single[Node] {
     case nf: Node.Fetch if whenVersion(nf.version) =>
@@ -355,10 +347,10 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
     nl.copy(templateId = changeTemplateId(nl.templateId))
   }
   private val tweakLookupKey = Tweak[Node] { case nl: Node.LookupByKey =>
-    tweakKeyMaintainers.run(nl.key).map { x => nl.copy(key = x) }
+    tweakKeyMaintainers.run(nl.key).map(x => nl.copy(key = x))
   }
   private val tweakLookupResult = Tweak[Node] { case nl: Node.LookupByKey =>
-    tweakOptContractId.run(nl.result.asCidOption).map { x => nl.copy(result = x.asCidVector) }
+    tweakOptContractId.run(nl.result.asCidOption).map(x => nl.copy(result = x.asCidVector))
   }
   private val tweakLookupVersion = Tweak.single[Node] { case nl: Node.LookupByKey =>
     nl.copy(version = changeVersion(nl.version))
@@ -387,19 +379,19 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
     ne.copy(consuming = changeBoolean(ne.consuming))
   }
   private val tweakExerciseActingParties = Tweak[Node] { case ne: Node.Exercise =>
-    tweakPartySet.run(ne.actingParties).map { x => ne.copy(actingParties = x) }
+    tweakPartySet.run(ne.actingParties).map(x => ne.copy(actingParties = x))
   }
   private val tweakExerciseChosenValue = Tweak.single[Node] { case ne: Node.Exercise =>
     ne.copy(chosenValue = changeValue(ne.chosenValue))
   }
   private val tweakExerciseStakeholders = Tweak[Node] { case ne: Node.Exercise =>
-    tweakPartySet.run(ne.stakeholders).map { x => ne.copy(stakeholders = x) }
+    tweakPartySet.run(ne.stakeholders).map(x => ne.copy(stakeholders = x))
   }
   private val tweakExerciseSignatories = Tweak[Node] { case ne: Node.Exercise =>
-    tweakPartySet.run(ne.signatories).map { x => ne.copy(signatories = x) }
+    tweakPartySet.run(ne.signatories).map(x => ne.copy(signatories = x))
   }
   private val tweakExerciseChoiceObservers = Tweak[Node] { case ne: Node.Exercise =>
-    tweakPartySet.run(ne.choiceObservers).map { x => ne.copy(choiceObservers = x) }
+    tweakPartySet.run(ne.choiceObservers).map(x => ne.copy(choiceObservers = x))
   }
   private val tweakExerciseExerciseResult = Tweak[Node] { case ne: Node.Exercise =>
     ne.exerciseResult match {
@@ -414,7 +406,7 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
 
   private def tweakExerciseKey(tweakOptKeyMaintainers: SerializationVersion => Tweak[OKWM]) =
     Tweak[Node] { case ne: Node.Exercise =>
-      tweakOptKeyMaintainers(ne.version).run(ne.keyOpt).map { x => ne.copy(keyOpt = x) }
+      tweakOptKeyMaintainers(ne.version).run(ne.keyOpt).map(x => ne.copy(keyOpt = x))
     }
   private def tweakExerciseByKey(whenVersion: SerializationVersion => Boolean) =
     Tweak.single[Node] {
@@ -458,10 +450,9 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
     }
   }
 
-  private def significantTweaks: Map[String, Tweak[VTX]] = {
+  private def significantTweaks: Map[String, Tweak[VTX]] =
     (sigCreateTweaks ++ sigFetchTweaks ++ sigLookupTweaks ++ sigExeTweaks)
       .map { case (name, tw) => (name, tweakTxNodes(tw)) }
-  }
 
   // --[per tweak tests]--
 
@@ -471,9 +462,9 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
       val n = pairs.length
       assert(n > 0) // ensure tweak actualy applies to something
       s"[#$n] $name" in {
-        val testCases = Table[VTX, VTX](("txA", "txB"), pairs: _*)
+        val testCases = Table[VTX, VTX](("txA", "txB"), pairs*)
         forEvery(testCases) { case (txA, txB) =>
-          Validation.isReplayedBy(txA, txB) shouldBe a[Left[_, _]]
+          Validation.isReplayedBy(txA, txB) shouldBe a[Left[?, ?]]
         }
       }
     }

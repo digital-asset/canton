@@ -101,9 +101,7 @@ object ParticipantNodeParameters {
     commandProgressTracking = CommandProgressTrackerConfig(),
     alphaOnlinePartyReplicationSupport = None,
     lsuConfig = LsuConfig(),
-    reassignmentsConfig = ReassignmentsConfig(
-      targetTimestampForwardTolerance = config.NonNegativeFiniteDuration.ofSeconds(30)
-    ),
+    reassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments = false,
     disableOptionalTopologyChecks = false,
     commitmentAsynchronousInitialization = true,

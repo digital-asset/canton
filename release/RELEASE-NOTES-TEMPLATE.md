@@ -22,7 +22,7 @@ Template for a bigger topic
 
 ## Bugfixes
 
-### (YY-nnn, Severity): Title
+### (YY-nnn, Risk): Title
 
 #### Issue Description
 

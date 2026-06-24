@@ -4,20 +4,19 @@
 package com.digitalasset.daml.lf
 package script
 
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLoggingContext}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Ref, Time}
+import com.digitalasset.daml.lf.engine.refinement.Enricher as LfEnricher
 import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone}
-import com.digitalasset.daml.lf.engine.refinement.{Enricher => LfEnricher}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
+import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
-import com.digitalasset.daml.lf.speedy.SResult._
-import com.digitalasset.daml.lf.speedy._
+import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, _}
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine as ContractStateMachine, *}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import scala.annotation.tailrec
@@ -29,23 +28,21 @@ private[lf] object IdeLedgerRunner {
   private def crash(reason: String) =
     throw Error.Internal(reason)
 
-  private def handleUnsafe[T](unsafe: => T): Either[Error, T] = {
+  private def handleUnsafe[T](unsafe: => T): Either[Error, T] =
     Try(unsafe) match {
       case Failure(err: Error) => Left(err: Error)
       case Failure(other) => throw other
       case Success(t) => Right(t)
     }
-  }
 
   sealed abstract class SubmissionResult[+R] {
     @tailrec
-    private[lf] final def resolve(): Either[SubmissionError, Commit[R]] = {
+    private[lf] final def resolve(): Either[SubmissionError, Commit[R]] =
       this match {
         case commit: Commit[R] => Right(commit)
         case error: SubmissionError => Left(error)
         case Interruption(continue) => continue().resolve()
       }
-    }
   }
 
   final case class Commit[+R](
@@ -202,9 +199,8 @@ private[lf] object IdeLedgerRunner {
       loggerFactory: NamedLoggerFactory,
   ) extends Enricher {
     val config = Engine.DevConfig
-    def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] = {
+    def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] =
       crash(LookupError.MissingPackage.pretty(pkgId, context))
-    }
     val strictEnricher = LfEnricher(
       compiledPackages = compiledPackages,
       loadPackage = loadPackage,
@@ -238,9 +234,9 @@ private[lf] object IdeLedgerRunner {
       consume(lenientEnricher.enrichIncompleteTransaction(tx))
   }
 
-  /** A class for suffixing all the local contract IDs of a transaction with the TypedNormalForm hash of their Create
-    * argument. Assumes that the creation package of these contract and its transitive dependencies are all present in
-    * [compiledPackages].
+  /** A class for suffixing all the local contract IDs of a transaction with the TypedNormalForm
+    * hash of their Create argument. Assumes that the creation package of these contract and its
+    * transitive dependencies are all present in [compiledPackages].
     */
   private[this] class CidSuffixer(compiledPackages: CompiledPackages) {
     private[this] val valueTranslator = new speedy.ValueTranslator(
@@ -319,7 +315,8 @@ private[lf] object IdeLedgerRunner {
       readAs = readAs,
       commitLocation = location,
       limits = interpretation.Limits.Lenient,
-      interpretationConfig = interpretation.InterpretationConfig.Default.copy(contractStateMode = ledger.csmMode),
+      interpretationConfig =
+        interpretation.InterpretationConfig.Default.copy(contractStateMode = ledger.csmMode),
       logger = machineLogger,
     )
     // TODO (drsk) validate and propagate errors back to submitter
@@ -327,7 +324,7 @@ private[lf] object IdeLedgerRunner {
     val enricher =
       if (doEnrichment) new EnricherImpl(compiledPackages, loggingContext.loggerFactory)
       else NoEnricher
-    import enricher._
+    import enricher.*
     val suffixer = new CidSuffixer(compiledPackages)
 
     def continue = () => go()
@@ -337,7 +334,7 @@ private[lf] object IdeLedgerRunner {
         extends NeedKeyProgression.Token
 
     @tailrec
-    def go(): SubmissionResult[R] = {
+    def go(): SubmissionResult[R] =
       ledgerMachine.run() match {
         case SResultQuestion(question) =>
           question match {
@@ -403,7 +400,7 @@ private[lf] object IdeLedgerRunner {
                 case Right(contracts) =>
                   val (result, rest) = contracts.splitAt(limit)
                   callback(
-                    result,
+                    result.map(x => (x, Hash.HashingMethod.TypedNormalForm, (_: Hash) => true)),
                     // it is important not return `Finished` if result.length == n
                     // See NeedKeyProgression for more details
                     if (result.length == limit)
@@ -439,7 +436,6 @@ private[lf] object IdeLedgerRunner {
         case SResultError(err) =>
           SubmissionError(Error.RunnerException(err), enrich(ledgerMachine.incompleteTransaction))
       }
-    }
     go()
   }
 

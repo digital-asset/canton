@@ -34,7 +34,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
+import com.digitalasset.canton.data.{CantonTimestamp, RollbackContextFactory, ViewPosition}
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
@@ -151,7 +151,12 @@ class TrafficCostEstimator(
         )
       )
       wfTransaction <- EitherT.fromEither[FutureUnlessShutdown](
-        WellFormedTransaction.check(transaction, transactionMetadata, WithoutSuffixes)
+        WellFormedTransaction.check(
+          transaction,
+          transactionMetadata,
+          WithoutSuffixes,
+          RollbackContextFactory(psid.protocolVersion),
+        )
       )
       disclosedContractInstances <- EitherT.fromEither[FutureUnlessShutdown](
         disclosedContracts.toList

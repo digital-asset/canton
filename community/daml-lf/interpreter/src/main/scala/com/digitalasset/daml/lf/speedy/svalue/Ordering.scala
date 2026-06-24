@@ -6,6 +6,7 @@ package speedy
 package svalue
 
 import com.daml.nameof.NameOf
+
 import data.{Bytes, Utf8}
 import language.TypeOrdering
 import value.Value.ContractId
@@ -16,7 +17,7 @@ object Ordering extends scala.math.Ordering[SValue] {
   // Ordering between two SValues of same type.
   // This follows the equality defined in the daml-lf spec.
   def compare(x: SValue, y: SValue): Int = {
-    import SValue._
+    import SValue.*
 
     var diff = 0
     var stackX = List(Iterator.single(x))

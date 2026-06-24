@@ -303,6 +303,19 @@ object DbDto {
       builder.addSynchronizerId(synchronizerId)
   }
 
+  final case class AcsCommitment(
+      event_sequential_id: Long,
+      event_offset: Long,
+      update_id: Array[Byte],
+      synchronizer_id: SynchronizerId,
+      record_time: Long,
+      payload: Array[Byte],
+      trace_context: Array[Byte],
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit =
+      builder.addSynchronizerId(synchronizer_id)
+  }
+
   def createDbDtos(
       // update related columns
       event_offset: Long,

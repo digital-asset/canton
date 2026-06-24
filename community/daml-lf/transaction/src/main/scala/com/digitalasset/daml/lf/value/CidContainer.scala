@@ -4,11 +4,12 @@
 package com.digitalasset.daml.lf
 package value
 
-import com.digitalasset.daml.lf.data.Bytes
 import com.daml.scalautil.Statement.discard
-import Value.ContractId
+import com.digitalasset.daml.lf.data.Bytes
 
 import scala.util.control.NoStackTrace
+
+import Value.ContractId
 
 trait CidContainer[+A] {
 

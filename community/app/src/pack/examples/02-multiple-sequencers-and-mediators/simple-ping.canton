@@ -8,7 +8,7 @@ bootstrap.synchronizer(
   mediators = Seq(mediator1, mediator2),
   synchronizerOwners = Seq(sequencer1, sequencer2),
   synchronizerThreshold = PositiveInt.two,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 // Connect participant1 to da using the connect macro.

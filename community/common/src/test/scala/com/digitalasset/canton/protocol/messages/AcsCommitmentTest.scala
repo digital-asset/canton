@@ -21,14 +21,14 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
     UniqueIdentifier.tryFromProtoPrimitive("participant2::da")
   )
   private val interval = PositiveSeconds.tryOfSeconds(1)
-  private val period1 = CommitmentPeriod
+  private val period1 = LegacyCommitmentPeriod
     .create(
       CantonTimestamp.Epoch,
       CantonTimestamp.Epoch.plusSeconds(2),
       interval,
     )
     .value
-  private val period2 = CommitmentPeriod
+  private val period2 = LegacyCommitmentPeriod
     .create(
       CantonTimestamp.Epoch.plusSeconds(2),
       CantonTimestamp.Epoch.plusSeconds(4),
@@ -40,7 +40,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
   h.add("abc".getBytes())
   private val cmt = h.getByteString()
 
-  private val commitment1 = AcsCommitment
+  private val commitment1 = LegacyAcsCommitment
     .create(
       synchronizerId.toPhysical,
       sender,
@@ -50,7 +50,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
       testedProtocolVersion,
     )
 
-  private val commitment2 = AcsCommitment
+  private val commitment2 = LegacyAcsCommitment
     .create(
       synchronizerId.toPhysical,
       sender,
@@ -60,8 +60,8 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
       testedProtocolVersion,
     )
 
-  private def fromByteString(bytes: ByteString): AcsCommitment =
-    AcsCommitment.fromByteString(testedProtocolVersion, bytes) match {
+  private def fromByteString(bytes: ByteString): LegacyAcsCommitment =
+    LegacyAcsCommitment.fromByteString(testedProtocolVersion, bytes) match {
       case Left(x) => fail(x.toString)
       case Right(x) => x
     }

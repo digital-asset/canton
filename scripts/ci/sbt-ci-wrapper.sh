@@ -18,6 +18,34 @@ fi
 
 _print_header "Wrapper for ${c_lgreen}CI/CD${c_reset} run SBT (GHA: $IS_GHA, CCI: $IS_CCI)"
 
+# GHA MIGRATION: In observed GHA runs, /bin/bash subprocess locale behavior differs from the
+# expected shell.nix locale setup. Instead of assuming why, validate locales in the same shell
+# context and fall back only when that subprocess reports "cannot change locale".
+# This block is gated to GHA to avoid changing CircleCI behavior in this PR.
+if [[ "$IS_GHA" == "true" ]]; then
+  choose_working_locale() {
+    local candidate output
+    for candidate in en_US.UTF-8 C.UTF-8 C; do
+      output=$(LC_ALL="$candidate" LANG="$candidate" /bin/bash -c 'locale >/dev/null' 2>&1 || true)
+      if [[ "$output" != *"cannot change locale"* ]]; then
+        echo "$candidate"
+        return 0
+      fi
+    done
+    echo "C"
+  }
+
+  TARGET_LOCALE="$(choose_working_locale)"
+  export LANG="$TARGET_LOCALE"
+  export LC_ALL="$TARGET_LOCALE"
+  if [[ "$TARGET_LOCALE" == "en_US.UTF-8" ]]; then
+    info "Using locale ${TARGET_LOCALE} for sbt-ci-wrapper"
+  else
+    info "en_US.UTF-8 is not usable in this GHA subprocess context, using ${TARGET_LOCALE} instead."
+  fi
+fi
+
+
 # GHA Migration: Added new condition for GHA
 if [ -z "${EXECUTOR_NUM_CPUS##*[!0-9]*}" ]; then
   if [[ "$IS_GHA" == "true" ]]; then
@@ -54,6 +82,9 @@ TIMEOUT="${TIMEOUT:-25m}"
 SUCCEED_ON_ERROR="${SUCCEED_ON_ERROR:-0}"
 RETRY_FETCH="${RETRY_FETCH:-0}"
 REPORT_TO_DATADOG="${REPORT_TO_DATADOG:-true}"
+SBT_BOOTSTRAP_RETRY_ATTEMPTS="${SBT_BOOTSTRAP_RETRY_ATTEMPTS:-2}"
+SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS="${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS:-30}"
+SBT_BOOTSTRAP_RETRY_PATTERN="${SBT_BOOTSTRAP_RETRY_PATTERN:-Server returned HTTP response code: 429|CantDownloadModule|could not retrieve sbt}"
 FAIL_ON_ERROR_IN_OUTPUT="${FAIL_ON_ERROR_IN_OUTPUT:-1}"
 
 if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
@@ -159,6 +190,9 @@ for i in EXECUTION_CONTEXT_SIZE \
          SUCCEED_ON_ERROR \
          REPORT_TO_DATADOG \
          RETRY_FETCH \
+         SBT_BOOTSTRAP_RETRY_ATTEMPTS \
+         SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS \
+         SBT_BOOTSTRAP_RETRY_PATTERN \
          FAIL_ON_ERROR_IN_OUTPUT \
          CUSTOM_JAVA_HOME \
          EXTRA_PARAMETERS \
@@ -284,12 +318,33 @@ done
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]} ${PIPESTATUS[2]}"
 #   false | true
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"
-python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
-  timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
-  tee "${SBT_OUTPUT_FILE}"
+attempt=1
+# Note: RETRY_FETCH pipes newlines into sbt to prompt it to resume stalled dependency downloads
+# (in-process, single run). The outer bootstrap retry loop below is complementary: it re-invokes
+# the entire sbt process when the resolver itself is throttled (429) or the sbt launcher fails to
+# bootstrap. These two mechanisms target different failure modes and are not redundant.
+# Worst-case wall clock time is SBT_BOOTSTRAP_RETRY_ATTEMPTS x TIMEOUT (default: 2 x 25m = 50m).
+# Ensure the GHA job's timeout-minutes is set to at least that value.
+while true; do
+  python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
+    timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
+    tee "${SBT_OUTPUT_FILE}"
 
-# save sbt command exit code for use on exit
-CODE=${PIPESTATUS[1]}
+  # save sbt command exit code for use on exit
+  CODE=${PIPESTATUS[1]}
+
+  # Retry only for transient bootstrap and repository throttling errors.
+  if [[ "$CODE" != 0 ]] && grep -E -q "${SBT_BOOTSTRAP_RETRY_PATTERN}" "${SBT_OUTPUT_FILE}"; then
+    if [[ "$attempt" -lt "$SBT_BOOTSTRAP_RETRY_ATTEMPTS" ]]; then
+      err "sbt bootstrap/download failed (attempt ${attempt}/${SBT_BOOTSTRAP_RETRY_ATTEMPTS}), retrying in ${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS}s..."
+      attempt=$((attempt + 1))
+      sleep "${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS}"
+      continue
+    fi
+  fi
+
+  break
+done
 
 # Use filter 'ansi2txt' to remove control characters starting with '\e' like:
 #   reset text formatting: '\e[m'

@@ -7,7 +7,6 @@ import com.digitalasset.canton.ProtoDeserializationError.UnrecognizedEnum
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.messages.AcsCommitment.HashedCommitmentType
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -118,10 +117,10 @@ object CommitmentPeriodState extends {
 
 final case class SentAcsCommitment(
     synchronizerId: SynchronizerId,
-    interval: CommitmentPeriod,
+    interval: LegacyCommitmentPeriod,
     counterParticipant: ParticipantId,
-    sentCommitment: Option[HashedCommitmentType],
-    counterCommitment: Option[HashedCommitmentType],
+    sentCommitment: Option[Digest.HashedDigestType],
+    counterCommitment: Option[Digest.HashedDigestType],
     state: ValidSentPeriodState,
 )
 
@@ -129,9 +128,11 @@ object SentAcsCommitment {
 
   def compare(
       synchronizerId: SynchronizerId,
-      computed: Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.HashedCommitmentType)],
-      received: Iterable[AcsCommitment],
-      outstanding: Iterable[(CommitmentPeriod, ParticipantId, ValidSentPeriodState)],
+      computed: Iterable[
+        (LegacyCommitmentPeriod, ParticipantId, Digest.HashedDigestType)
+      ],
+      received: Iterable[LegacyAcsCommitment],
+      outstanding: Iterable[(LegacyCommitmentPeriod, ParticipantId, ValidSentPeriodState)],
       verbose: Boolean,
   ): Iterable[SentAcsCommitment] =
     for {
@@ -182,8 +183,8 @@ object SentAcsCommitment {
               )
             ),
             comm.counterParticipant.toProtoPrimitive,
-            comm.sentCommitment.map(AcsCommitment.hashedCommitmentTypeToProto),
-            comm.counterCommitment.map(AcsCommitment.hashedCommitmentTypeToProto),
+            comm.sentCommitment.map(Digest.hashedDigestTypeToProto),
+            comm.counterCommitment.map(Digest.hashedDigestTypeToProto),
             comm.state.toSentCommitmentStateProtoV30,
           )
         }.toSeq,
@@ -194,10 +195,10 @@ object SentAcsCommitment {
 
 final case class ReceivedAcsCommitment(
     synchronizerId: SynchronizerId,
-    interval: CommitmentPeriod,
+    interval: LegacyCommitmentPeriod,
     originCounterParticipant: ParticipantId,
-    receivedCommitment: Option[HashedCommitmentType],
-    ownCommitment: Option[HashedCommitmentType],
+    receivedCommitment: Option[Digest.HashedDigestType],
+    ownCommitment: Option[Digest.HashedDigestType],
     state: CommitmentPeriodState,
 )
 
@@ -205,10 +206,12 @@ object ReceivedAcsCommitment {
 
   def compare(
       synchronizerId: SynchronizerId,
-      received: Iterable[AcsCommitment],
-      computed: Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.HashedCommitmentType)],
+      received: Iterable[LegacyAcsCommitment],
+      computed: Iterable[
+        (LegacyCommitmentPeriod, ParticipantId, Digest.HashedDigestType)
+      ],
       buffering: Iterable[BufferedAcsCommitment],
-      outstanding: Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)],
+      outstanding: Iterable[(LegacyCommitmentPeriod, ParticipantId, CommitmentPeriodState)],
       verbose: Boolean,
   ): Iterable[ReceivedAcsCommitment] = {
     (for {
@@ -296,8 +299,8 @@ object ReceivedAcsCommitment {
               )
             ),
             cmt.originCounterParticipant.toProtoPrimitive,
-            cmt.receivedCommitment.map(AcsCommitment.hashedCommitmentTypeToProto),
-            cmt.ownCommitment.map(AcsCommitment.hashedCommitmentTypeToProto),
+            cmt.receivedCommitment.map(Digest.hashedDigestTypeToProto),
+            cmt.ownCommitment.map(Digest.hashedDigestTypeToProto),
             cmt.state.toReceivedCommitmentStateProtoV30,
           )
         }.toSeq,

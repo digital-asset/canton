@@ -4,30 +4,30 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.daml.nameof.NameOf
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, PackageName, Party, TypeConId}
 import com.digitalasset.daml.lf.data.{BackStack, Bytes, ImmArray, Time}
+import com.digitalasset.daml.lf.interpretation.Error as IErr
 import com.digitalasset.daml.lf.ledger.Authorize
-import com.digitalasset.daml.lf.interpretation.{Error => IErr}
 import com.digitalasset.daml.lf.speedy.Speedy.{CachedKey, ContractInfo}
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
   ExternalCallResult,
   GlobalKeyWithMaintainers,
   KeyMapping,
+  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
-  SubmittedTransaction => SubmittedTx,
-  Transaction => Tx,
-  TransactionError => TxErr,
   SerializationVersion,
+  SubmittedTransaction as SubmittedTx,
+  Transaction as Tx,
+  TransactionError as TxErr,
 }
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
-import com.daml.nameof.NameOf
-import com.daml.scalautil.Statement.discard
 
-import scala.collection.immutable.HashMap
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.annotation.tailrec
+import scala.collection.immutable.HashMap
 
 private[lf] object PartialTransaction {
 
@@ -84,8 +84,8 @@ private[lf] object PartialTransaction {
     }
   }
 
-  /** Contexts of the transaction graph builder, which we use to record
-    * the sub-transaction structure due to 'exercises' statements.
+  /** Contexts of the transaction graph builder, which we use to record the sub-transaction
+    * structure due to 'exercises' statements.
     */
   final case class Context(
       info: ContextInfo,
@@ -94,9 +94,8 @@ private[lf] object PartialTransaction {
       nextActionChildIdx: Int,
   ) {
     // when we add a child node we must pass the minimum-version contained in that child
-    def addActionChild(child: NodeId, version: SerializationVersion): Context = {
+    def addActionChild(child: NodeId, version: SerializationVersion): Context =
       Context(info, minChildVersion min version, children :+ child, nextActionChildIdx + 1)
-    }
     def addNonActionChild(
         child: NodeId,
         version: SerializationVersion,
@@ -124,27 +123,35 @@ private[lf] object PartialTransaction {
       }
   }
 
-  /** Context information to remember when building a sub-transaction
-    *  due to an 'exercises' statement.
+  /** Context information to remember when building a sub-transaction due to an 'exercises'
+    * statement.
     *
-    *  @param targetId Contract-id referencing the contract-instance on
-    *                  which we are exercising a choice.
-    *  @param templateId Template-id referencing the template of the
-    *                    contract on which we are exercising a choice.
-    *  @param interfaceId The interface where the choice is defined if inherited.
-    *  @param contractKey Optional contract key, if defined for the
-    *                     contract on which we are exercising a choice.
-    *  @param choiceId Label of the choice that we are exercising.
-    *  @param consuming True if the choice consumes the contract.
-    *  @param actingParties The parties exercising the choice.
-    *  @param chosenValue The chosen value.
-    *  @param signatories The signatories of the contract.
-    *  @param stakeholders The stakeholders of the contract.
-    *  @param nodeId The node to be inserted once we've
-    *                         finished this sub-transaction.
-    *  @param parent The context in which the exercises is
-    *                       happening.
-    *  @param byKey True if the exercise is done "by key"
+    * @param targetId
+    *   Contract-id referencing the contract-instance on which we are exercising a choice.
+    * @param templateId
+    *   Template-id referencing the template of the contract on which we are exercising a choice.
+    * @param interfaceId
+    *   The interface where the choice is defined if inherited.
+    * @param contractKey
+    *   Optional contract key, if defined for the contract on which we are exercising a choice.
+    * @param choiceId
+    *   Label of the choice that we are exercising.
+    * @param consuming
+    *   True if the choice consumes the contract.
+    * @param actingParties
+    *   The parties exercising the choice.
+    * @param chosenValue
+    *   The chosen value.
+    * @param signatories
+    *   The signatories of the contract.
+    * @param stakeholders
+    *   The stakeholders of the contract.
+    * @param nodeId
+    *   The node to be inserted once we've finished this sub-transaction.
+    * @param parent
+    *   The context in which the exercises is happening.
+    * @param byKey
+    *   True if the exercise is done "by key"
     */
   final case class ExercisesContextInfo(
       targetId: Value.ContractId,
@@ -206,15 +213,21 @@ private[lf] object PartialTransaction {
 
 /** A transaction under construction
   *
-  *  @param nodes The nodes of the transaction graph being built up.
-  *  @param actionNodeSeeds The seeds of create and exercise nodes in pre-order. NodeIds are determined by finish.
-  *   Note that only other node types do not have seeds and are not included.
-  *  @param context The context of what sub-transaction is being
-  *                 built.
-  *  @param contractState summarizes the changes to the contract states caused by nodes up to now
-  *  @param actionNodeLocations The optional locations of create/exercise/fetch/lookup nodes in pre-order.
-  *   Used by 'locationInfo()', called by 'finish()' and 'finishIncomplete()'
-  *   @param disclosedContracts contracts that have been explicitly disclosed to Speedy (usage will be determined by 'finish()')
+  * @param nodes
+  *   The nodes of the transaction graph being built up.
+  * @param actionNodeSeeds
+  *   The seeds of create and exercise nodes in pre-order. NodeIds are determined by finish. Note
+  *   that only other node types do not have seeds and are not included.
+  * @param context
+  *   The context of what sub-transaction is being built.
+  * @param contractState
+  *   summarizes the changes to the contract states caused by nodes up to now
+  * @param actionNodeLocations
+  *   The optional locations of create/exercise/fetch/lookup nodes in pre-order. Used by
+  *   'locationInfo()', called by 'finish()' and 'finishIncomplete()'
+  * @param disclosedContracts
+  *   contracts that have been explicitly disclosed to Speedy (usage will be determined by
+  *   'finish()')
   */
 private[speedy] case class PartialTransaction(
     nextNodeIdx: Int,
@@ -227,7 +240,7 @@ private[speedy] case class PartialTransaction(
     externalCallResults: HashMap[NodeId, BackStack[ExternalCallResult]],
 ) {
 
-  import PartialTransaction._
+  import PartialTransaction.*
 
   @throws[SError.SErrorDamlException]
   private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
@@ -238,9 +251,8 @@ private[speedy] case class PartialTransaction(
         throw SError.SErrorDamlException(convTxError(nodes, context, err))
     }
 
-  def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] = {
+  def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] =
     contractState.consumedByOrInactive(cid)
-  }
 
   def nodesToString: String =
     if (nodes.isEmpty) "<empty transaction>"
@@ -251,7 +263,7 @@ private[speedy] case class PartialTransaction(
           nid: NodeId,
           node: Node,
           rootPrefix: String,
-      ): Unit = {
+      ): Unit =
         discard(
           sb.append(rootPrefix)
             .append("node ")
@@ -260,11 +272,9 @@ private[speedy] case class PartialTransaction(
             .append(node.toString)
             .append(", ")
         )
-      }
 
-      def removeTrailingComma(): Unit = {
+      def removeTrailingComma(): Unit =
         if (sb.length >= 2) sb.setLength(sb.length - 2) // remove trailing ", "
-      }
 
       // roots field is not initialized when this method is executed on a failed transaction,
       // so we need to compute them.
@@ -288,27 +298,24 @@ private[speedy] case class PartialTransaction(
       sb.toString
     }
 
-  private[speedy] def locationInfo(): Map[NodeId, Location] = {
+  private[speedy] def locationInfo(): Map[NodeId, Location] =
     this.actionNodeLocations.toImmArray.toSeq.view.zipWithIndex.collect { case (Some(loc), n) =>
       (NodeId(n), loc)
     }.toMap
-  }
 
-  private[this] def normByKey(version: SerializationVersion, byKey: Boolean): Boolean = {
+  private[this] def normByKey(version: SerializationVersion, byKey: Boolean): Boolean =
     if (version < SerializationVersion.minContractKeys) {
       false
     } else {
       byKey
     }
-  }
 
-  /** Finish building a transaction; i.e., try to extract a complete
-    *  transaction from the given 'PartialTransaction'. This returns:
-    * - a SubmittedTransaction in case of success ;
-    * - the 'PartialTransaction' itself if it is not yet complete or
-    *   has been aborted ;
-    * - an error in case the transaction cannot be serialized using
-    *   the `outputSerializationVersions`.
+  /** Finish building a transaction; i.e., try to extract a complete transaction from the given
+    * 'PartialTransaction'. This returns:
+    *   - a SubmittedTransaction in case of success ;
+    *   - the 'PartialTransaction' itself if it is not yet complete or has been aborted ;
+    *   - an error in case the transaction cannot be serialized using the
+    *     `outputSerializationVersions`.
     */
   private[speedy] def finish: Either[SError.SErrorCrash, (SubmittedTx, ImmArray[NodeId])] =
     context.info match {
@@ -342,8 +349,7 @@ private[speedy] case class PartialTransaction(
     )
   }
 
-  /** Extend the 'PartialTransaction' with a node for creating a
-    * contract instance.
+  /** Extend the 'PartialTransaction' with a node for creating a contract instance.
     */
   def insertCreate(
       preparationTime: Time.Timestamp,
@@ -564,8 +570,7 @@ private[speedy] case class PartialTransaction(
       }
     }
 
-  /** Close normally an exercise context.
-    * Must match a `beginExercises`.
+  /** Close normally an exercise context. Must match a `beginExercises`.
     */
   def endExercises(result: Value): PartialTransaction =
     context.info match {
@@ -588,8 +593,8 @@ private[speedy] case class PartialTransaction(
         )
     }
 
-  /** Close a abruptly an exercise context du to an uncaught exception.
-    * Must match a `beginExercises`.
+  /** Close a abruptly an exercise context du to an uncaught exception. Must match a
+    * `beginExercises`.
     */
   def abortExercises: PartialTransaction =
     context.info match {
@@ -637,9 +642,8 @@ private[speedy] case class PartialTransaction(
     )
   }
 
-  /** Record an external call result in the nearest enclosing exercise context,
-    * walking up through try/catch scopes. A missing exercise context indicates
-    * an interpreter invariant violation.
+  /** Record an external call result in the nearest enclosing exercise context, walking up through
+    * try/catch scopes. A missing exercise context indicates an interpreter invariant violation.
     */
   def recordExternalCallResult(
       extensionId: String,
@@ -647,7 +651,7 @@ private[speedy] case class PartialTransaction(
       config: Bytes,
       input: Bytes,
       output: Bytes,
-  ): Option[PartialTransaction] = {
+  ): Option[PartialTransaction] =
     findEnclosingExercise(context.info) match {
       case Some(ec) =>
         val nodeId = ec.nodeId
@@ -666,19 +670,16 @@ private[speedy] case class PartialTransaction(
         // (they would be at the root level, which is not supported)
         None
     }
-  }
 
   @scala.annotation.tailrec
-  private def findEnclosingExercise(info: ContextInfo): Option[ExercisesContextInfo] = {
+  private def findEnclosingExercise(info: ContextInfo): Option[ExercisesContextInfo] =
     info match {
       case ec: ExercisesContextInfo => Some(ec)
       case tc: TryContextInfo => findEnclosingExercise(tc.parent.info)
       case _: RootContextInfo => None
     }
-  }
 
-  /** Open a Try context.
-    *  Must be closed by `endTry` or `rollbackTry`.
+  /** Open a Try context. Must be closed by `endTry` or `rollbackTry`.
     */
   def beginTry: PartialTransaction = {
     val nid = NodeId(nextNodeIdx)
@@ -690,8 +691,7 @@ private[speedy] case class PartialTransaction(
     )
   }
 
-  /** Close a try context normally , i.e. no exception occurred.
-    * Must match a `beginTry`.
+  /** Close a try context normally , i.e. no exception occurred. Must match a `beginTry`.
     */
   def endTry: PartialTransaction =
     context.info match {
@@ -711,9 +711,10 @@ private[speedy] case class PartialTransaction(
     }
 
   /** Close a try context, by catching an exception,
-    * i.e. a exception was thrown inside the context, and the catch associated to the try context did handle it.
+    * i.e. a exception was thrown inside the context, and the catch associated to the try context
+    * did handle it.
     */
-  def rollbackTry: Either[IErr.EffectfulRollback, PartialTransaction] = {
+  def rollbackTry: Either[IErr.EffectfulRollback, PartialTransaction] =
     context.info match {
       case info: TryContextInfo =>
         // In the case of there being no children we could drop the entire rollback node.
@@ -742,10 +743,8 @@ private[speedy] case class PartialTransaction(
           "rollbackTry called in non-catch context",
         )
     }
-  }
 
-  /** Double check the execution of a step with the unconsumedness of a
-    * `ContractId`.
+  /** Double check the execution of a step with the unconsumedness of a `ContractId`.
     */
   private[this] def mustBeActive[T](
       loc: => String,

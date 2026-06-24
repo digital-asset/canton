@@ -197,7 +197,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
           assertThrowsAndLogsCommandFailures(
             sequencerToFail.setup.assign_from_genesis_stateV2(
               ByteString.copyFrom(out.toByteArray),
-              StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion),
+              StaticSynchronizerParameters.defaults(testedProtocolVersion),
             ),
             _.shouldBeCommandFailure(
               TopologyManagerError.InconsistentTopologySnapshot,

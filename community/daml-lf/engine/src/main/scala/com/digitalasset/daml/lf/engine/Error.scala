@@ -109,7 +109,9 @@ object Error {
         location: String,
         override val message: String,
         cause: Option[Throwable],
-    )(implicit loggingContext: ErrorLoggingContext) extends Error with InternalError {
+    )(implicit loggingContext: ErrorLoggingContext)
+        extends Error
+        with InternalError {
       protected override def logError(): Unit = {
         loggingContext.error(s"LF internal error in $location: $message")
         cause.foreach(err => loggingContext.error(s"root cause: ${err.getMessage}", err))
@@ -188,7 +190,7 @@ object Error {
         key: Value,
     ) extends Error {
       override def message: String =
-        s"Template of prefetched contract key does not define a key: ${templateId} ($key)"
+        s"Template of prefetched contract key does not define a key: $templateId ($key)"
     }
 
     final case class ContractIdInContractKey(key: Value) extends Error {

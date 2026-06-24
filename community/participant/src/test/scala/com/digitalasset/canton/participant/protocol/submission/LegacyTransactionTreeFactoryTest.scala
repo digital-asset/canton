@@ -48,7 +48,10 @@ final class LegacyTransactionTreeFactoryTest
   private def failedLookup(testErrorMessage: String): ContractInstanceOfId =
     id => EitherT.leftT(ContractLookupError(id, testErrorMessage))
 
-  forAll(Table("contract id version", CantonContractIdVersion.all*)) { contractIdVersion =>
+  private val testedContractIdVersions: Seq[CantonContractIdVersion] =
+    if (testedProtocolVersion < ProtocolVersion.v35) CantonContractIdVersion.all else Seq.empty
+
+  forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
     )(cantonContractIdVersion = contractIdVersion)

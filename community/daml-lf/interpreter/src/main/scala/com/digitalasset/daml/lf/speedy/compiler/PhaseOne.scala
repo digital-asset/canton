@@ -5,27 +5,26 @@ package com.digitalasset.daml.lf
 package speedy
 package compiler
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.{ImmArray, Struct}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.{LookupError, PackageInterface}
-import com.digitalasset.daml.lf.speedy.Compiler.{ProfilingMode, StackTraceMode, CompilationError}
-import com.digitalasset.daml.lf.speedy.SBuiltinFun._
-import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.speedy.compiler.SExpr0._
-import com.digitalasset.daml.lf.speedy.{SExpr => t}
 import com.daml.nameof.NameOf
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{ImmArray, Struct}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{LookupError, PackageInterface}
+import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, ProfilingMode, StackTraceMode}
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
+import com.digitalasset.daml.lf.speedy.SExpr as t
+import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.compiler.SExpr0.*
 
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 
 /** Initial Conversion (Phase of the speedy compiler pipeline)
   *
-  * This compilation phase transforms from LF to SExpr0.
-  * Include among other:
-  *  - type erasure
-  *  - translation of LF builtin into Speedy builtin
-  *  - de Bruijn indexes transformation
+  * This compilation phase transforms from LF to SExpr0. Include among other:
+  *   - type erasure
+  *   - translation of LF builtin into Speedy builtin
+  *   - de Bruijn indexes transformation
   */
 
 private[compiler] object PhaseOne {
@@ -99,18 +98,16 @@ private[lf] final class PhaseOne(
     config: PhaseOne.Config,
 ) {
 
-  import PhaseOne._
+  import PhaseOne.*
   import Work.{Return, Bind, CompileExp}
 
-  private[this] def bindWork(work: Work)(f: SExpr => Work): Work = {
+  private[this] def bindWork(work: Work)(f: SExpr => Work): Work =
     Bind(work, f)
-  }
 
   // Entry point for stage1 of speedy compilation pipeline
   @throws[CompilationError]
-  def translateFromLF(env: Env, exp: Expr): SExpr = {
+  def translateFromLF(env: Env, exp: Expr): SExpr =
     outerCompile(env, exp)
-  }
 
   private[this] def handleLookup[X](location: String, x: Either[LookupError, X]) =
     x match {
@@ -119,12 +116,11 @@ private[lf] final class PhaseOne(
     }
 
   // Stack-trace support is disabled by avoiding the construction of SELocation nodes.
-  private[this] def maybeSELocation(loc: Location, sexp: SExpr): SExpr = {
+  private[this] def maybeSELocation(loc: Location, sexp: SExpr): SExpr =
     config.stacktracing match {
       case Compiler.NoStackTrace => sexp
       case Compiler.FullStackTrace => SELocation(loc, sexp)
     }
-  }
 
   private[this] def withLabel(label: Profile.Label, sexp: SExpr): SExpr =
     config.profiling match {
@@ -138,56 +134,51 @@ private[lf] final class PhaseOne(
 
   private[this] def app(f: SExpr, a: SExpr) = SEApp(f, List(a))
 
-  private[this] def let(env: Env, bound: SExpr)(f: (Position, Env) => Work): Work = {
+  private[this] def let(env: Env, bound: SExpr)(f: (Position, Env) => Work): Work =
     bindWork(f(env.nextPosition, env.pushVar)) {
       case SELet(bounds, body) =>
         Return(SELet(bound :: bounds, body))
       case otherwise =>
         Return(SELet(List(bound), otherwise))
     }
-  }
 
-  private[this] def unaryFunction(env: Env)(f: (Position, Env) => Work): Work = {
+  private[this] def unaryFunction(env: Env)(f: (Position, Env) => Work): Work =
     bindWork(f(env.nextPosition, env.pushVar)) {
       case SEAbs(n, body) => Return(SEAbs(n + 1, body))
       case otherwise => Return(SEAbs(1, otherwise))
     }
-  }
 
   private[this] def outerCompile(env: Env, exp: Expr): SExpr = {
-    import Work._
+    import Work.*
 
     @tailrec
-    def loop(work: Work): SExpr = {
+    def loop(work: Work): SExpr =
       work match {
         case Return(result) => result // The final result of the tail-recursive 'loop'.
         case CompileExp(env, exp, cont) => loop(Bind(processExp(env, exp), cont))
         case Bind(work0, f0) => loop(processBind(work0, f0))
       }
-    }
 
     @tailrec
-    def processBind(work: Work, f: SExpr => Work): Work = {
+    def processBind(work: Work, f: SExpr => Work): Work =
       work match {
         case Return(result) => f(result)
         case CompileExp(env, exp, cont) =>
-          Bind(processExp(env, exp), { result => Bind(cont(result), f) })
+          Bind(processExp(env, exp), result => Bind(cont(result), f))
         case Bind(work, cont) =>
-          processBind(work, { result => Bind(cont(result), f) })
+          processBind(work, result => Bind(cont(result), f))
       }
-    }
 
     loop(CompileExp(env, exp, Return.apply))
   }
 
-  private[this] def compileExp(env: Env, exp: Expr)(cont: SExpr => Work): Work = {
+  private[this] def compileExp(env: Env, exp: Expr)(cont: SExpr => Work): Work =
     CompileExp(env, exp, cont)
-  }
 
   private[this] def compileExps(env: Env, exps: List[Expr])(
       k: List[SExpr] => Work
   ): Work = {
-    def loop(acc: List[SExpr], exps: List[Expr]): Work = {
+    def loop(acc: List[SExpr], exps: List[Expr]): Work =
       exps match {
         case Nil => k(acc.reverse)
         case exp :: exps =>
@@ -195,7 +186,6 @@ private[lf] final class PhaseOne(
             loop(exp :: acc, exps)
           }
       }
-    }
     loop(Nil, exps)
   }
 
@@ -575,22 +565,21 @@ private[lf] final class PhaseOne(
         }
       case _ =>
         compileExps(env, record :: updates) { exps =>
-          Return(SBRecUpdMulti(tapp.tycon, fieldNums)(exps: _*))
+          Return(SBRecUpdMulti(tapp.tycon, fieldNums)(exps*))
         }
     }
   }
 
-  private[this] def compileECase(env: Env, scrut: Expr, alts: ImmArray[CaseAlt]): Work = {
+  private[this] def compileECase(env: Env, scrut: Expr, alts: ImmArray[CaseAlt]): Work =
     compileExp(env, scrut) { scrut =>
       compileAlts(Nil, env, alts.toList) { alts =>
         Return(SECase(scrut, alts))
       }
     }
-  }
 
   private[this] def compileAlts(acc: List[SCaseAlt], env: Env, exps: List[CaseAlt])(
       k: List[SCaseAlt] => Work
-  ): Work = {
+  ): Work =
     exps match {
       case Nil => k(acc.reverse)
       case alt :: alts =>
@@ -601,9 +590,8 @@ private[lf] final class PhaseOne(
             }
         }
     }
-  }
 
-  private[this] def compileAlt(env: Env, pat: CasePat, rhs: Expr)(k: SCaseAlt => Work): Work = {
+  private[this] def compileAlt(env: Env, pat: CasePat, rhs: Expr)(k: SCaseAlt => Work): Work =
     pat match {
       case CPVariant(tycon, variant, binder) =>
         val rank = handleLookup(
@@ -646,9 +634,8 @@ private[lf] final class PhaseOne(
           k(SCaseAlt(t.SCPDefault, rhs))
         }
     }
-  }
 
-  private[this] def compileELet(env0: Env, eLet0: ELet, bounds0: List[SExpr]): Work = {
+  private[this] def compileELet(env0: Env, eLet0: ELet, bounds0: List[SExpr]): Work =
     eLet0 match {
       case ELet(Binding(binder, _, bound), body) =>
         compileExp(env0, bound) { bound0 =>
@@ -672,7 +659,6 @@ private[lf] final class PhaseOne(
           }
         }
     }
-  }
 
   private[this] def compileEUpdate(env: Env, update: Update): Work =
     update match {
@@ -758,7 +744,7 @@ private[lf] final class PhaseOne(
     }
 
   @tailrec
-  private[this] def compileAbss(env: Env, exp: Expr, arity: Int): Work = {
+  private[this] def compileAbss(env: Env, exp: Expr, arity: Int): Work =
     exp match {
       case EAbs((binder, typ @ _), body) =>
         compileAbss(
@@ -771,9 +757,8 @@ private[lf] final class PhaseOne(
           Return(withLabel(t.AnonymousClosure, SEAbs(arity, exp)))
         }
     }
-  }
 
-  private[this] def compileApps(env: Env, exp: Expr, args: List[SExpr]): Work = {
+  private[this] def compileApps(env: Env, exp: Expr, args: List[SExpr]): Work =
     exp match {
       case EApp(fun, arg) =>
         compileExp(env, arg) { arg =>
@@ -788,7 +773,6 @@ private[lf] final class PhaseOne(
           Return(SEApp(fun, args))
         }
     }
-  }
 
   private[this] def compileEmbedExpr(env: Env, exp: Expr): Work =
     // EmbedExpr's get wrapped into an extra layer of abstraction

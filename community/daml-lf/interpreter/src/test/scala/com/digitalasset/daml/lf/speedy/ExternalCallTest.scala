@@ -7,7 +7,7 @@ package speedy
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SValue.{SParty, SText}
@@ -152,7 +152,7 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
     assertPreparationFailed(result)
   }
 
-  private def assertPreparationFailed(result: Either[SError.SError, SValue]): Unit = {
+  private def assertPreparationFailed(result: Either[SError.SError, SValue]): Unit =
     discard(
       inside(result) {
         case Left(
@@ -164,9 +164,8 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
           message should include("expected canonical lowercase hex")
       }
     )
-  }
 
-  private def assertInvalidOutput(result: Either[SError.SError, SValue]): Unit = {
+  private def assertInvalidOutput(result: Either[SError.SError, SValue]): Unit =
     discard(
       inside(result) {
         case Left(
@@ -184,9 +183,8 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
           message should include("expected canonical lowercase hex")
       }
     )
-  }
 
-  private def assertCallFailed(result: Either[SError.SError, SValue]): Unit = {
+  private def assertCallFailed(result: Either[SError.SError, SValue]): Unit =
     discard(
       inside(result) {
         case Left(
@@ -203,7 +201,6 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
           message shouldBe "upstream unavailable"
       }
     )
-  }
 
   "SBExternalCall" should {
     "resume through NeedExternalCall and record the result on the exercise node" in {
@@ -218,7 +215,8 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       var questions = 0
       val result = SpeedyTestLib.runTxQ[Question.Update](
         {
-          case Question.Update.NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+          case Question.Update
+                .NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
             questions += 1
             extensionId shouldBe "ext"
             functionId shouldBe "fun"
@@ -235,7 +233,9 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       questions shouldBe 1
 
       inside(machine.finish) { case Right(commit) =>
-        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) =>
+          exercise
+        }
         exerciseNodes should have size 1
         exerciseNodes.head.version shouldBe SerializationVersion.minExternalCallResults
         exerciseNodes.head.externalCallResults shouldBe ImmArray(
@@ -262,7 +262,8 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       var questions = 0
       val result = SpeedyTestLib.runTxQ[Question.Update](
         {
-          case Question.Update.NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+          case Question.Update
+                .NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
             questions += 1
             extensionId shouldBe "ext"
             functionId shouldBe "fun"
@@ -279,7 +280,9 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       questions shouldBe 1
 
       inside(machine.finish) { case Right(commit) =>
-        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) =>
+          exercise
+        }
         exerciseNodes should have size 1
         exerciseNodes.head.externalCallResults shouldBe ImmArray(
           ExternalCallResult(
@@ -305,7 +308,8 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       var questions = 0
       val result = SpeedyTestLib.runTxQ[Question.Update](
         {
-          case Question.Update.NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+          case Question.Update
+                .NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
             questions += 1
             extensionId shouldBe "ext"
             functionId shouldBe "fun"
@@ -322,7 +326,9 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       questions shouldBe 1
 
       inside(machine.finish) { case Right(commit) =>
-        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) =>
+          exercise
+        }
         exerciseNodes should have size 1
         exerciseNodes.head.externalCallResults shouldBe ImmArray(
           ExternalCallResult(

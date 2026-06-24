@@ -3,8 +3,7 @@
 
 package com.digitalasset.daml.lf.speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.LoggerNameFromClass
+import com.digitalasset.canton.logging.{LoggerNameFromClass, NamedLoggingContext}
 import com.digitalasset.daml.lf.data.Ref.Location
 import org.apache.commons.text.StringEscapeUtils
 import org.slf4j.event.Level
@@ -16,9 +15,9 @@ private[lf] trait MachineLogger {
 
 private[lf] object MachineLogger {
   def apply(
-    enabled: Boolean = true,
-    logLevel: Level = Level.DEBUG,
-    matching: Seq[String] = Seq.empty,
+      enabled: Boolean = true,
+      logLevel: Level = Level.DEBUG,
+      matching: Seq[String] = Seq.empty,
   )(implicit loggingContext: NamedLoggingContext): MachineLogger = {
     val traceFilter =
       if (!enabled) (_: String) => false
@@ -34,8 +33,8 @@ private[lf] object MachineLogger {
       }
 
     new MachineLogger {
-      def trace(message: String, location: Option[Location])(
-        implicit loggerName: LoggerNameFromClass
+      def trace(message: String, location: Option[Location])(implicit
+          loggerName: LoggerNameFromClass
       ): Unit = {
         implicit val traceContext = loggingContext.traceContext
         val logger = loggingContext.tracedLogger
@@ -52,12 +51,12 @@ private[lf] object MachineLogger {
           }
         }
       }
-      def warn(message: String, location: Option[Location])(
-        implicit loggerName: LoggerNameFromClass
+      def warn(message: String, location: Option[Location])(implicit
+          loggerName: LoggerNameFromClass
       ): Unit = {
         val prettyLocation = Pretty.prettyLoc(location).renderWideStream.mkString
         loggingContext.warn(s"$prettyLocation: $message")
-      } 
+      }
     }
   }
 }

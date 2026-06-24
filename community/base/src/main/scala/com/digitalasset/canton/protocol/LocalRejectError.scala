@@ -227,20 +227,6 @@ object LocalRejectError extends LocalRejectionGroup {
     }
 
     @Explanation(
-      """This rejection is made by a participant if the contract id formatting is unsupported."""
-    )
-    @Resolution("Submit the contract to a participant that supports the contract id format.")
-    object UnsupportedContractId
-        extends MalformedErrorCode(
-          id = "LOCAL_VERDICT_UNSUPPORTED_CONTRACT_ID"
-        ) {
-      final case class Reject(override val _details: String)
-          extends Malformed(
-            _causePrefix = "Rejected transaction due to unsupported contract ID formatting "
-          )
-    }
-
-    @Explanation(
       """This rejection is made by a participant if a transaction fails a model conformance check."""
     )
     @Resolution("This indicates either malicious or faulty behaviour.")

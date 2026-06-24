@@ -7,17 +7,21 @@ package engine
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{Error => IE, InterpretationConfig}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{SerializationVersion, SubmittedTransaction, Transaction}
+import com.digitalasset.daml.lf.transaction.{
+  SerializationVersion,
+  SubmittedTransaction,
+  Transaction,
+}
 import com.digitalasset.daml.lf.value.ContractIdVersion
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.EitherValues
-import org.scalatest.Inside._
+import org.scalatest.Inside.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
@@ -41,12 +45,13 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
     with EitherValues
     with SuppressingLogging {
 
-  import InterfacesTest._
+  import InterfacesTest.*
 
   private[this] val engine = Engine.DevEngine(loggerFactory)
   private[this] val interpreationConfig = InterpretationConfig.Default
   private[this] val compiledPackages = ConcurrentCompiledPackages(engine.config.getCompilerConfig)
-  private[this] val preprocessor = refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
+  private[this] val preprocessor =
+    refinement.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
@@ -124,7 +129,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C1",
         ValueRecord(None, ImmArray.empty),
       )
-      runApi(command) shouldBe a[Right[_, _]]
+      runApi(command) shouldBe a[Right[?, ?]]
     }
     "be able to exercise interface I1 on a T2 contract" in {
       val command = ApiCommand.Exercise(
@@ -133,7 +138,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C1",
         ValueRecord(None, ImmArray.empty),
       )
-      runApi(command) shouldBe a[Right[_, _]]
+      runApi(command) shouldBe a[Right[?, ?]]
     }
     "be able to exercise interface I2 on a T2 contract" in {
       val command = ApiCommand.Exercise(
@@ -142,7 +147,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C2",
         ValueRecord(None, ImmArray.empty),
       )
-      runApi(command) shouldBe a[Right[_, _]]
+      runApi(command) shouldBe a[Right[?, ?]]
     }
     "be unable to exercise interface I2 on a T1 contract" in {
       val command = ApiCommand.Exercise(
@@ -164,7 +169,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C1",
         ValueRecord(None, ImmArray.empty),
       )
-      runApi(command) shouldBe a[Right[_, _]]
+      runApi(command) shouldBe a[Right[?, ?]]
     }
     "be able to exercise T2 by interface I1" in {
       val command = ApiCommand.Exercise(
@@ -173,7 +178,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C1",
         ValueRecord(None, ImmArray.empty),
       )
-      runApi(command) shouldBe a[Right[_, _]]
+      runApi(command) shouldBe a[Right[?, ?]]
     }
     "be able to exercise T2 by interface I2" in {
       val command = ApiCommand.Exercise(
@@ -182,7 +187,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C2",
         ValueRecord(None, ImmArray.empty),
       )
-      runApi(command) shouldBe a[Right[_, _]]
+      runApi(command) shouldBe a[Right[?, ?]]
     }
     "be unable to exercise T1 by interface I2 (stopped in preprocessor)" in {
       val command = ApiCommand.Exercise(
@@ -191,7 +196,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         "C2",
         ValueRecord(None, ImmArray.empty),
       )
-      preprocessApi(command) shouldBe a[Left[_, _]]
+      preprocessApi(command) shouldBe a[Left[?, ?]]
     }
   }
 }

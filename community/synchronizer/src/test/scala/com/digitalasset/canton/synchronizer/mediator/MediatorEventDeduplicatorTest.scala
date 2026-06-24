@@ -379,7 +379,7 @@ class MediatorEventDeduplicatorTest
           batch: Batch[DefaultOpenEnvelope],
           decisionTime: CantonTimestamp,
           aggregationRule: Option[AggregationRule],
-          sendVerdict: Boolean,
+          sendVerdictWithDelay: Option[Duration],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
         FutureUnlessShutdown.never
 

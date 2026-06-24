@@ -1453,7 +1453,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           }
 
         case PLF.Update.SumCase.EXERCISE_BY_KEY =>
-          assertVersionSupports(LV.featureNUCK)
+          assertVersionSupports(LV.featureContractKeys)
           val exerciseByKey = lfUpdate.getExerciseByKey
           val templateId = decodeTypeConId(exerciseByKey.getTemplate)
           val choice = getInternedName(exerciseByKey.getChoiceInternedStr)
@@ -1487,13 +1487,13 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           }
 
         case PLF.Update.SumCase.FETCH_BY_KEY =>
-          assertVersionSupports(LV.featureNUCK)
+          assertVersionSupports(LV.featureContractKeys)
           Work.bind(decodeRetrieveByKey(lfUpdate.getFetchByKey)) { tmplId =>
             Ret(UpdateFetchByKey(tmplId))
           }
 
         case PLF.Update.SumCase.QUERY_N_BY_KEY =>
-          assertVersionSupports(LV.featureNUCK)
+          assertVersionSupports(LV.featureContractKeys)
           val queryNByKey = lfUpdate.getQueryNByKey
           Ret(UpdateQueryNByKey(decodeTypeConId(queryNByKey.getTemplate)))
 

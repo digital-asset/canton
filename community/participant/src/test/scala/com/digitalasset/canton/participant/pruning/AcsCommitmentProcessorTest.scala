@@ -835,7 +835,7 @@ class AcsCommitmentProcessorTest
   // Also assumes that all the contracts in the map have the same stakeholders
   private def stakeholderCommitment(
       contracts: Map[LfContractId, ReassignmentCounter]
-  ): AcsCommitment.CommitmentType = {
+  ): Digest.DigestType = {
     val h = LtHash16()
     contracts.foreach { case (cid, reassignmentCounter) =>
       AcsCommitmentProcessor.addContractToCommitmentDigest(h, cid, reassignmentCounter)
@@ -844,10 +844,10 @@ class AcsCommitmentProcessorTest
   }
 
   private def commitmentsForCounterParticipants(
-      stkhdCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
+      stkhdCommitments: Map[SortedSet[LfPartyId], Digest.DigestType],
       localId: ParticipantId,
       topology: Map[ParticipantId, Set[LfPartyId]],
-  ): Map[ParticipantId, AcsCommitment.CommitmentType] = {
+  ): Map[ParticipantId, Digest.DigestType] = {
 
     def isCommonStakeholder(
         stkhd: Set[LfPartyId],
@@ -881,7 +881,7 @@ class AcsCommitmentProcessorTest
           CantonTimestampSecond,
           Option[PositiveSeconds],
       )
-  ): FutureUnlessShutdown[SignedProtocolMessage[AcsCommitment]] = {
+  ): FutureUnlessShutdown[SignedProtocolMessage[LegacyAcsCommitment]] = {
     val (remote, contracts, fromExclusive, toInclusive, reconciliationInterval) = params
 
     val syncCrypto =
@@ -893,7 +893,7 @@ class AcsCommitmentProcessorTest
     val cmt = commitmentsFromStkhdCmts(Seq(stakeholderCommitment(contracts)))
     val snapshotF = syncCrypto.snapshot(CantonTimestamp.Epoch)
     val period =
-      CommitmentPeriod
+      LegacyCommitmentPeriod
         .create(
           fromExclusive.forgetRefinement,
           toInclusive.forgetRefinement,
@@ -901,7 +901,14 @@ class AcsCommitmentProcessorTest
         )
         .value
     val payload =
-      AcsCommitment.create(synchronizerId, remote, localId, period, cmt, testedProtocolVersion)
+      LegacyAcsCommitment.create(
+        synchronizerId,
+        remote,
+        localId,
+        period,
+        cmt,
+        testedProtocolVersion,
+      )
 
     snapshotF.flatMap { snapshot =>
       SignedProtocolMessage
@@ -918,7 +925,7 @@ class AcsCommitmentProcessorTest
       at: CantonTimestampSecond,
       contractSetup: Map[LfContractId, (Set[Ref.IdString.Party], NonEmpty[Seq[Lifespan]])],
       crypto: SyncCryptoClient[SynchronizerSnapshotSyncCryptoApi],
-  ): FutureUnlessShutdown[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
+  ): FutureUnlessShutdown[Map[ParticipantId, Digest.DigestType]] = {
     val stakeholderLookup = { (cid: LfContractId) =>
       contractSetup
         .map { case (cid, tuple) => (cid, tuple) }
@@ -966,7 +973,7 @@ class AcsCommitmentProcessorTest
   private def addCommonContractId(
       rc: InternalizedRunningCommitments,
       reassignmentCounter: ReassignmentCounter,
-  ): (AcsCommitment.CommitmentType, AcsCommitment.CommitmentType) = {
+  ): (Digest.DigestType, Digest.DigestType) = {
     val commonContractId = coid(0, 0)
     rc.watermark shouldBe RecordTime.MinValue
     rc.snapshot() shouldBe CommitmentSnapshot[InternedPartyId](
@@ -1433,7 +1440,7 @@ class AcsCommitmentProcessorTest
       } yield {
         computed.size shouldBe 1
         inside(computed.headOption.value) { case (commitmentPeriod, participantId, _) =>
-          commitmentPeriod shouldBe CommitmentPeriod
+          commitmentPeriod shouldBe LegacyCommitmentPeriod
             .create(ts(10) - reconInterval, ts(10))
             .value
           participantId shouldBe remoteId1
@@ -1444,13 +1451,13 @@ class AcsCommitmentProcessorTest
         inside(received.headOption.value) {
           case SignedProtocolMessage(
                 TypedSignedProtocolMessageContent(
-                  AcsCommitment(_, sender, counterParticipant, period, _)
+                  LegacyAcsCommitment(_, sender, counterParticipant, period, _)
                 ),
                 _,
               ) =>
             sender shouldBe remoteId1
             counterParticipant shouldBe localId
-            period shouldBe CommitmentPeriod.create(ts(5), ts(10)).value
+            period shouldBe LegacyCommitmentPeriod.create(ts(5), ts(10)).value
         }
 
         outstanding shouldBe empty
@@ -4555,7 +4562,7 @@ class AcsCommitmentProcessorTest
         processor <- proc
         _ <- processor
           .indicateLocallyProcessed(
-            new CommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
+            new LegacyCommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
           )
         remote <- remoteCommitments.parTraverse(commitmentMsg)
         delivered = remote.map(cmt =>
@@ -4652,7 +4659,7 @@ class AcsCommitmentProcessorTest
         processor <- proc
         _ <- processor
           .indicateLocallyProcessed(
-            new CommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
+            new LegacyCommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
           )
         remote <- remoteCommitments.parTraverse(commitmentMsg)
         delivered = remote.map(cmt =>

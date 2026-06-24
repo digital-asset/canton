@@ -13,8 +13,8 @@ package object transaction {
 
   val MaxContractKeyFetches: Int = 1_000_000
 
-  /** This traversal fails the identity law so is unsuitable for [[scalaz.Traverse]].
-    * It is, nevertheless, what is meant sometimes.
+  /** This traversal fails the identity law so is unsuitable for [[scalaz.Traverse]]. It is,
+    * nevertheless, what is meant sometimes.
     */
   private[lf] def sequence[A, B, That](
       seq: Iterable[Either[A, B]]

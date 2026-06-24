@@ -6,9 +6,9 @@ package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Time
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.testing.parser.ParserParameters
+import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
+import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -17,7 +17,12 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import scala.collection.immutable.ArraySeq
 import scala.util.{Success, Try}
 
-class LedgerTimeTest extends AnyFreeSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
+class LedgerTimeTest
+    extends AnyFreeSpec
+    with Matchers
+    with Inside
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   private[this] implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default
@@ -202,7 +207,7 @@ class LedgerTimeTest extends AnyFreeSpec with Matchers with Inside with TableDri
         getTime = recordingLogger.tracePartialFunction("queried time", { case () => now }),
       )
     )
-  
+
     (result, machine.getTimeBoundaries, recordingLogger.recordedMessages)
   }
 }

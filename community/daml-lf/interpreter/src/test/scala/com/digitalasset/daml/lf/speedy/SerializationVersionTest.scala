@@ -4,8 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId, Party, TypeConId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -38,7 +37,7 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
     with SuppressingLogging {
 
   val helpers = new SerializationVersionTestHelpers
-  import helpers._
+  import helpers.*
 
   "interface and transaction versioning" - {
 
@@ -116,9 +115,15 @@ private[lf] class SerializationVersionTestHelpers {
   val oldLfVersion: LanguageVersion = LanguageVersion.v2_2
   val newLfVersion: LanguageVersion = LanguageVersion.v2_3
 
-  val commonVersion: SerializationVersion = SerializationVersion.assign(hasKey = LanguageVersion.featureContractKeys.enabledIn(commonLfVersion))
-  val oldVersion: SerializationVersion = SerializationVersion.assign(hasKey = LanguageVersion.featureContractKeys.enabledIn(oldLfVersion))
-  val newVersion: SerializationVersion = SerializationVersion.assign(hasKey = LanguageVersion.featureContractKeys.enabledIn(newLfVersion))
+  val commonVersion: SerializationVersion = SerializationVersion.assign(hasKey =
+    LanguageVersion.featureContractKeys.enabledIn(commonLfVersion)
+  )
+  val oldVersion: SerializationVersion = SerializationVersion.assign(hasKey =
+    LanguageVersion.featureContractKeys.enabledIn(oldLfVersion)
+  )
+  val newVersion: SerializationVersion = SerializationVersion.assign(hasKey =
+    LanguageVersion.featureContractKeys.enabledIn(newLfVersion)
+  )
 
   implicit val parserParameters: parser.ParserParameters[this.type] =
     parser.ParserParameters(
@@ -282,7 +287,7 @@ private[lf] class SerializationVersionTestHelpers {
           ),
         ),
         committers = committers,
-        logger = MachineLogger()
+        logger = MachineLogger(),
       )
 
     SpeedyTestLib.buildTransaction(machine, getContract = getContract)

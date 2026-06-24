@@ -610,8 +610,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)

@@ -98,10 +98,19 @@ final class SerializationDeserializationTest
         test(DynamicSynchronizerParameters, version)
         test(SequencingParameters, version)
 
-        test(AcsCommitment, version)
-        if (version >= ProtocolVersion.v35) {
+        if (version >= ProtocolVersion.v36) {
+          test(AcsCommitment, version)
           testContext(AcsCommitmentProtocolMessage, version, version)
+
+          test(AcsCommitmentSummary, version)
+          testContext(AcsCommitmentSummaryProtocolMessage, version, version)
         }
+
+        if (version >= ProtocolVersion.v35) {
+          testContext(LegacyAcsCommitmentProtocolMessage, version, version)
+        }
+
+        test(LegacyAcsCommitment, version)
         testContext(LsuSequencingTestMessage, version, version)
         test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)

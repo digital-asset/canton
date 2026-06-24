@@ -258,6 +258,21 @@ protocol_continuity_test_latest:
         num_parallel_tasks: "1"
         timeout: "30m"
 
+# Job used to run the ACS commitment tests in PV DEV, which are currently excluded from the regular test runs on dev branches.
+# This allows us to run them more frequently and get faster feedback during development of the redesigned ACS commitment feature.
+# TODO(#33536): Remove this job and usages once the ACS commitment redesign development is complete
+temp_acs_commitment_tests_pv_dev:
+  parameters:
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 1
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: "DEV"
+    - run_temp_acs_commitment_tests
+
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   steps:

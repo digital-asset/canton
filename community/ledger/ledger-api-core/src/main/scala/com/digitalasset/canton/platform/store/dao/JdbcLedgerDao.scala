@@ -293,6 +293,15 @@ private[platform] class JdbcLedgerDao(
     loggerFactory = loggerFactory,
   )(queryExecutionContext)
 
+  private val acsCommitmentsStreamReader = new AcsCommitmentsStreamReader(
+    globalPayloadQueriesLimiter = globalPayloadQueriesLimiter,
+    dbDispatcher = dbDispatcher,
+    queryValidRange = queryValidRange,
+    eventStorageBackend = readStorageBackend.eventStorageBackend,
+    metrics = metrics,
+    loggerFactory = loggerFactory,
+  )(queryExecutionContext)
+
   private val updatesStreamReader = new UpdatesStreamReader(
     config = updatesStreamsConfig,
     globalIdQueriesLimiter = globalIdQueriesLimiter,
@@ -305,6 +314,7 @@ private[platform] class JdbcLedgerDao(
     metrics = metrics,
     tracer = tracer,
     topologyTransactionsStreamReader = topologyTransactionsStreamReader,
+    acsCommitmentsStreamReader = acsCommitmentsStreamReader,
     pruningOffsetService = pruningOffsetService,
     loggerFactory = loggerFactory,
   )(queryExecutionContext)

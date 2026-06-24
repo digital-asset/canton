@@ -23,7 +23,7 @@ abstract class SafePackageResolver private[refinement] (
   final protected def collectNewPackagesFromTypes(
       types: List[Ast.Type],
       acc: Map[Ref.PackageId, language.Reference] = Map.empty,
-  )(implicit traceContext: TraceContext): Result[Map[Ref.PackageId, language.Reference]] = {
+  )(implicit traceContext: TraceContext): Result[Map[Ref.PackageId, language.Reference]] =
     types match {
       case typ :: rest =>
         typ match {
@@ -53,7 +53,6 @@ abstract class SafePackageResolver private[refinement] (
       case Nil =>
         ResultDone(acc)
     }
-  }
 
   final protected def collectNewPackagesFromTemplatesOrInterfaces(
       pkgResolution: Map[Ref.PackageName, Ref.PackageId],
@@ -80,7 +79,7 @@ abstract class SafePackageResolver private[refinement] (
 
   final protected def collectNewPackagesFromTemplatesOrInterfaces(
       tycons: Iterable[Ref.TypeConId]
-  ): Map[Ref.PackageId, language.Reference] = {
+  ): Map[Ref.PackageId, language.Reference] =
     tycons
       .foldLeft(Map.empty[Ref.PackageId, language.Reference]) { (acc, tycon) =>
         val pkgId = tycon.packageId
@@ -89,7 +88,6 @@ abstract class SafePackageResolver private[refinement] (
         else
           acc.updated(pkgId, language.Reference.TemplateOrInterface(tycon.toRef))
       }
-  }
 
   final protected def pullPackages(
       pkgIds: Map[Ref.PackageId, language.Reference]

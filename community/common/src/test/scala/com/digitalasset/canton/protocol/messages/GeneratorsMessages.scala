@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.daml.nonempty.NonEmptyUtil
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{
   AsymmetricEncrypted,
   Encrypted,
@@ -52,6 +53,8 @@ final class GeneratorsMessages(
     generatorTransactions: GeneratorsTransaction,
     generatorsTrafficData: GeneratorsTrafficData,
 ) {
+
+  import com.digitalasset.canton.config.GeneratorsConfig.*
   import com.digitalasset.canton.Generators.*
   import generatorsLf.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
@@ -63,7 +66,7 @@ final class GeneratorsMessages(
   import generatorsVerdict.*
   import generatorTransactions.*
 
-  implicit val acsCommitmentArb: Arbitrary[AcsCommitment] = Arbitrary(
+  implicit val legacyAcsCommitmentArb: Arbitrary[LegacyAcsCommitment] = Arbitrary(
     for {
       synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       sender <- Arbitrary.arbitrary[ParticipantId]
@@ -71,10 +74,10 @@ final class GeneratorsMessages(
 
       periodFrom <- Arbitrary.arbitrary[CantonTimestampSecond]
       periodDuration <- Gen.choose(1, 86400L).map(PositiveSeconds.tryOfSeconds)
-      period = CommitmentPeriod(periodFrom, periodDuration)
+      period = LegacyCommitmentPeriod(periodFrom, periodDuration)
 
       commitment <- byteStringArb.arbitrary
-    } yield AcsCommitment.create(
+    } yield LegacyAcsCommitment.create(
       synchronizerId,
       sender,
       counterParticipant,
@@ -84,11 +87,80 @@ final class GeneratorsMessages(
     )
   )
 
+  implicit val acsCommitmentArb: Arbitrary[AcsCommitment] = Arbitrary(
+    for {
+      synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+      sender <- Arbitrary.arbitrary[ParticipantId]
+      counterparticipant <- Arbitrary.arbitrary[ParticipantId]
+
+      periodFrom <- Arbitrary.arbitrary[CantonTimestamp]
+      periodDuration <- Gen.choose(1, 86400L).map(PositiveSeconds.tryOfSeconds)
+      periodTo = periodFrom.add(periodDuration.duration)
+      period = CommitmentPeriod.tryCreate(periodFrom, periodTo)
+
+      commitment <- byteStringArb.arbitrary
+    } yield AcsCommitment.create(
+      synchronizerId,
+      sender.toLf,
+      counterparticipant.toLf,
+      period,
+      commitment,
+      protocolVersion,
+    )
+  )
+
+  implicit val digestForCounterparticipantArb: Arbitrary[DigestForCounterparticipant] = Arbitrary(
+    for {
+      digest <- byteStringArb.arbitrary
+      counterparticipant <- Arbitrary.arbitrary[ParticipantId]
+    } yield DigestForCounterparticipant(
+      Digest.hashDigest(digest),
+      counterparticipant.toLf,
+    )
+  )
+
+  implicit val acsCommitmentSummaryArb: Arbitrary[AcsCommitmentSummary] =
+    Arbitrary(
+      for {
+        synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+        counterparticipants <- Gen.nonEmptyListOf(Arbitrary.arbitrary[ParticipantId])
+        commitmentTick <- Arbitrary.arbitrary[CantonTimestamp]
+        unsentDigests <- Gen.nonEmptyListOf(Arbitrary.arbitrary[DigestForCounterparticipant])
+        batchIndex <- Arbitrary.arbitrary[NonNegativeInt]
+        lastBatch <- Arbitrary.arbitrary[Boolean]
+      } yield AcsCommitmentSummary.create(
+        synchronizerId,
+        commitmentTick,
+        counterparticipants.map(_.toLf),
+        unsentDigests,
+        batchIndex,
+        lastBatch,
+        protocolVersion,
+      )
+    )
+
+  implicit val acsCommitmentSummaryProtocolMessageArb
+      : Arbitrary[AcsCommitmentSummaryProtocolMessage] =
+    Arbitrary(
+      for {
+        acsCommitmentSummary <- Arbitrary.arbitrary[AcsCommitmentSummary]
+        signature <- Arbitrary.arbitrary[Signature]
+      } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)
+    )
+
+  implicit val legacyAcsCommitmentProtocolMessageArb
+      : Arbitrary[LegacyAcsCommitmentProtocolMessage] = Arbitrary(
+    for {
+      acsCommitment <- Arbitrary.arbitrary[LegacyAcsCommitment]
+      signatures <- nonEmptyListGen(implicitly[Arbitrary[Signature]])
+    } yield LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures)
+  )
+
   implicit val acsCommitmentProtocolMessageArb: Arbitrary[AcsCommitmentProtocolMessage] = Arbitrary(
     for {
       acsCommitment <- Arbitrary.arbitrary[AcsCommitment]
-      signatures <- nonEmptyListGen(implicitly[Arbitrary[Signature]])
-    } yield AcsCommitmentProtocolMessage(acsCommitment, signatures)
+      signature <- Arbitrary.arbitrary[Signature]
+    } yield AcsCommitmentProtocolMessage(acsCommitment, signature)
   )
 
   implicit val confirmationResultMessageArb: Arbitrary[ConfirmationResultMessage] = Arbitrary(
@@ -145,7 +217,7 @@ final class GeneratorsMessages(
 
   implicit val signedProtocolMessageContentArb: Arbitrary[SignedProtocolMessageContent] =
     arbitraryForAllSubclasses(classOf[SignedProtocolMessageContent])(
-      GeneratorForClass(Arbitrary.arbitrary[AcsCommitment], classOf[AcsCommitment]),
+      GeneratorForClass(Arbitrary.arbitrary[LegacyAcsCommitment], classOf[LegacyAcsCommitment]),
       GeneratorForClass(Arbitrary.arbitrary[ConfirmationResponses], classOf[ConfirmationResponses]),
       GeneratorForClass(
         generatorsTrafficData.setTrafficPurchasedArb.arbitrary,
@@ -337,9 +409,19 @@ final class GeneratorsMessages(
       GeneratorForClass(
         // Serializing an ACS commitment using protocol version v30 is not supported.
         // In that case, do not generate anything.
-        if (protocolVersion < ProtocolVersion.v35) Gen.fail
+        if (protocolVersion != ProtocolVersion.v35) Gen.fail
+        else legacyAcsCommitmentProtocolMessageArb.arbitrary,
+        classOf[LegacyAcsCommitmentProtocolMessage],
+      ),
+      GeneratorForClass(
+        if (protocolVersion < ProtocolVersion.v36) Gen.fail
         else acsCommitmentProtocolMessageArb.arbitrary,
         classOf[AcsCommitmentProtocolMessage],
+      ),
+      GeneratorForClass(
+        if (protocolVersion < ProtocolVersion.v36) Gen.fail
+        else acsCommitmentSummaryProtocolMessageArb.arbitrary,
+        classOf[AcsCommitmentSummaryProtocolMessage],
       ),
     )
 

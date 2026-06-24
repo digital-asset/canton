@@ -33,7 +33,7 @@ import com.digitalasset.canton.participant.store.{AcsCommitmentStore, AcsCounter
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
+import com.digitalasset.canton.protocol.messages.{LegacyAcsCommitment, LegacyCommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId, OpenEnvelope, Recipients}
@@ -566,7 +566,7 @@ class AcsCommitmentBenchmark
           CantonTimestamp,
           CantonTimestamp,
       )
-  ): FutureUnlessShutdown[Set[SignedProtocolMessage[AcsCommitment]]] = {
+  ): FutureUnlessShutdown[Set[SignedProtocolMessage[LegacyAcsCommitment]]] = {
     val (contractDefinition, fromExclusive, toInclusive) = params
     FutureUnlessShutdown.sequence(
       contractDefinition.counterParticipants.map { participant =>
@@ -600,7 +600,7 @@ class AcsCommitmentBenchmark
         val cmt = commitmentsFromStkhdCmts(Seq(stakeholderCommitment(stakeholderCommitments)))
         val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
         val period =
-          CommitmentPeriod
+          LegacyCommitmentPeriod
             .create(
               fromExclusive,
               toInclusive,
@@ -608,7 +608,7 @@ class AcsCommitmentBenchmark
             )
             .getOrElse(throw new Exception("missing commitment period"))
         val payload =
-          AcsCommitment
+          LegacyAcsCommitment
             .create(synchronizerId, participant, localId, period, cmt, testedProtocolVersion)
         snapshotF.flatMap { snapshot =>
           SignedProtocolMessage
@@ -623,7 +623,7 @@ class AcsCommitmentBenchmark
   }
   private def stakeholderCommitment(
       contracts: Map[LfContractId, ReassignmentCounter]
-  ): AcsCommitment.CommitmentType = {
+  ): LegacyAcsCommitment.CommitmentType = {
     val h = LtHash16()
     contracts.keySet.foreach { cid =>
       h.add(

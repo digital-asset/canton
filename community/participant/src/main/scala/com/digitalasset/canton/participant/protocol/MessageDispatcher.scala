@@ -116,7 +116,8 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
   )(implicit traceContext: TraceContext): ProcessingResult = {
-    val acsCommitments = envelopes.mapFilter(select[SignedProtocolMessage[messages.AcsCommitment]])
+    val acsCommitments =
+      envelopes.mapFilter(select[SignedProtocolMessage[messages.LegacyAcsCommitment]])
     if (acsCommitments.nonEmpty) {
       // When a participant receives an ACS commitment from a counter-participant, the counter-participant
       // expects to receive the corresponding commitment from the local participant.
@@ -716,7 +717,7 @@ trait MessageDispatcher { this: NamedLogging =>
           }
         case (_, SignedProtocolMessage(typedMessage, _)) =>
           typedMessage.content match {
-            case messages.AcsCommitment(_, sender, _, period, _) =>
+            case messages.LegacyAcsCommitment(_, sender, _, period, _) =>
               s"commitment=$sender for ts=${period.toInclusive}"
             case ConfirmationResultMessage(_, viewType, requestId, _, verdict) =>
               s"verdict=$requestId, type=$viewType, is=$verdict"

@@ -11,7 +11,7 @@ def main() = {
     mediators = Seq(mediator1),
     synchronizerOwners = Seq(sequencer1),
     synchronizerThreshold = PositiveInt.one,
-    staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+    staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
   )
   logger.info("=== Bootstrapping synchronizer complete ===")
 }

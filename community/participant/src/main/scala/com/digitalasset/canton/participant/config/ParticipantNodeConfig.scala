@@ -495,7 +495,7 @@ final case class LsuHandshake(
 /** Control incremental purges
   *
   * @param chunkSize
-  *   The amount of data that should be removed per purge iteration
+  *   The amount of data that should be removed per purge iteration.
   * @param cron
   *   A cron expression, defining when the purges can take place
   * @param maxDuration
@@ -506,6 +506,8 @@ final case class PurgeConfig(
     chunkSize: PositiveInt = PurgeConfig.DefaultChunkSize,
     cron: String = PurgeConfig.DefaultCron,
     maxDuration: config.PositiveFiniteDuration = PurgeConfig.DefaultMaxDuration,
+    purgeableStoresListValidity: config.NonNegativeFiniteDuration =
+      config.NonNegativeFiniteDuration.ofMinutes(1),
 )
 
 object PurgeConfig {

@@ -4,18 +4,17 @@
 package com.digitalasset.daml.lf
 package engine
 
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogging}
 import com.digitalasset.daml.lf.crypto.SValueHash
-import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
-  CreateKey,
-  CreateSerializationVersion,
-}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits._
+import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
+  CreateKey,
+  CreateSerializationVersion,
+}
+import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.digitalasset.daml.lf.transaction.test.{
   TestIdFactory,
   TestNodeBuilder,
@@ -35,8 +34,8 @@ class MetaDataTest
     with SuppressingLogging {
 
   val helpers = new MetaDataTestHelper(loggerFactory)
-  import helpers._
-  import TreeTransactionBuilder._
+  import helpers.*
+  import TreeTransactionBuilder.*
 
   "Engine#desp" should {
 
@@ -207,7 +206,7 @@ class MetaDataTestHelper(loggerFactory: NamedLoggerFactory) {
     "pkgImplLib" -> emptyPkg("pkgImplLibName"),
     "pkgImpl" -> emptyPkg("pkgImplName").copy(directDeps = Set("pkgImplLib", "pkgInt")),
   ).foreach { case (pkgId, pkg) =>
-    require(engine.preloadPackage(pkgId, pkg).isInstanceOf[ResultDone[_]])
+    require(engine.preloadPackage(pkgId, pkg).isInstanceOf[ResultDone[?]])
   }
 
   val parties = Set[Ref.Party]("alice")

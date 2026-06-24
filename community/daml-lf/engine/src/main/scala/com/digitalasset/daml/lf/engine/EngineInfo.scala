@@ -6,7 +6,7 @@ package engine
 
 class EngineInfo(config: EngineConfig) {
 
-  import language.{LanguageVersion => LV}
+  import language.LanguageVersion as LV
 
   override def toString: String = show
   def show: String = {

@@ -102,13 +102,6 @@
         </rewrite>
 
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>org.flywaydb.core.Flyway</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>cleanOnValidationError is deprecated and will be removed in a later release</contains>
-            <testing>true</testing>
-        </rewrite>
-
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.auth.AuthInterceptor</logger>
             <maxLevel>INFO</maxLevel>
             <contains>The command is missing a (valid) JWT token </contains>
@@ -336,6 +329,16 @@
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.synchronizer.sequencer.time.TimeAdvancingTopologySubscriberV1</logger>
             <contains>Could not send a time-advancing message</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+        <!-- Warnings emitted by caffeine when refreshAfterWrite triggers and the reload fails -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>
+                com.github.benmanes.caffeine.cache.BoundedLocalCache
+            </logger>
+            <contains>Exception thrown during refresh</contains>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>

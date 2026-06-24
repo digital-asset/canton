@@ -405,6 +405,22 @@ object EventStorageBackendTemplate {
         stringInterning: StringInterning
     ): RowDef[SynchronizerOffset] =
       synchronizerOffsetParser("event_offset", stringInterning)
+
+    val payload: RowDef[Array[Byte]] = column("payload", byteArray(_))
+
+    def acsCommitmentEventParser(
+        stringInterning: StringInterning
+    ): RowDef[RawAcsCommitment] =
+      (
+        eventOffset,
+        eventSequentialId,
+        synchronizerId(stringInterning).map(_.toProtoPrimitive),
+        recordTime,
+        payload,
+        traceContext,
+      ).mapN(
+        RawAcsCommitment.apply
+      )
   }
 
   val EventSequentialIdFirstLast: RowParser[(Long, Long)] =
@@ -752,6 +768,15 @@ abstract class EventStorageBackendTemplate(
         WHERE
           event_offset <= $pruneUpToInclusiveOffset AND
           ${QueryStrategy.offsetIsGreater("event_offset", previousPruneUpToInclusiveOffset)}"""
+      }
+
+      // prune acs commitments table
+      pruneWithLogging("Pruning lapi_events_acs_commitments table") {
+        SQL"""
+        DELETE FROM lapi_events_acs_commitments
+        WHERE
+          event_sequential_id <= $pruningToInclusiveEventSeqId AND
+          event_sequential_id > $pruningFromExclusiveEventSeqId"""
       }
 
       logger.info("Truncate table for storing pruning candidates")
@@ -1358,6 +1383,27 @@ abstract class EventStorageBackendTemplate(
           """)(connection)
           .filter(offset => Option(offset) <= ledgerEndCache().map(_.lastOffset))
       )
+
+  override def fetchAcsCommitments(
+      eventSequentialIds: SequentialIdBatch,
+      synchronizerId: SynchronizerId,
+      descendingOrder: Boolean,
+  )(connection: Connection): Vector[EventStorageBackend.RawAcsCommitment] =
+    stringInterning.synchronizerId
+      .tryInternalize(synchronizerId)
+      .fold(Vector.empty[EventStorageBackend.RawAcsCommitment]) { synchronizerIdInterned =>
+        val ordering = if (descendingOrder) cSQL"DESC" else cSQL"ASC"
+        val query = (columns: CompositeSql) =>
+          SQL"""
+            SELECT $columns
+            FROM lapi_events_acs_commitments e
+            WHERE ${queryStrategy.inBatch("e.event_sequential_id", eventSequentialIds)}
+                  AND e.synchronizer_id = $synchronizerIdInterned
+            ORDER BY e.event_sequential_id $ordering
+            """
+            .withFetchSize(Some(fetchSize(eventSequentialIds)))
+        RowDefs.acsCommitmentEventParser(stringInterning).queryMultipleRows(query)(connection)
+      }
 
   private def fetchByEventSequentialIds(
       tableName: String,

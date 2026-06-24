@@ -64,7 +64,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
     crypto: Crypto,
     seedForRandomnessO: Option[Long],
     metrics: SequencerConnectionPoolMetrics,
-    metricsContext: MetricsContext,
+    override val metricsContext: MetricsContext,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -138,7 +138,8 @@ class SequencerConnectionPoolImpl private[sequencing] (
   override def staticSynchronizerParametersO: Option[StaticSynchronizerParameters] =
     bootstrapCell.get.map(_.staticParameters)
 
-  private implicit def mc: MetricsContext = metricsContext
+  private implicit val mc: MetricsContext = metricsContext
+
   metrics.trustThreshold.updateValue(config.trustThreshold.value)
 
   override def start()(implicit
@@ -153,7 +154,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
       updateTrackedConnections(
         toBeAdded = config.connections,
         toBeRemoved = Set.empty,
-        isInitialUpdate = true,
       )
     }
 
@@ -236,7 +236,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
   private def updateTrackedConnections(
       toBeAdded: immutable.Iterable[ConnectionConfig],
       toBeRemoved: Set[ConnectionConfig],
-      isInitialUpdate: Boolean,
   )(implicit traceContext: TraceContext): Unit =
     lock.exclusive {
       val removedConnections =
@@ -260,11 +259,8 @@ class SequencerConnectionPoolImpl private[sequencing] (
       removedConnections.foreach { connection =>
         connection.fatal("Removed from configuration")
       }
-      if (isInitialUpdate) {
-        metrics.removeMetricsForAllConnections()
-      } else {
-        metrics.removeMetricsForConnection(toBeRemoved.map(_.name))
-      }
+
+      metrics.removeMetricsForConnection(toBeRemoved.map(_.name), mc.labels.get("psid"))
 
       // If start() or updateConfig() is called after the pool has been closed, we don't want to start new connections
       if (!isClosing) {
@@ -464,7 +460,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
         updateTrackedConnections(
           toBeAdded = changedConnections.added,
           toBeRemoved = changedConnections.removed,
-          isInitialUpdate = false,
         )
       }
     }
@@ -573,6 +568,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
     // We close the connections outside the critical section to avoid shutdown problems in case
     // it triggers health callbacks
     LifeCycle.close(instances*)(logger)
+    metrics.removeMetricsForAllConnections(mc.labels.get("psid"))
     super.onClosed()
   }
 

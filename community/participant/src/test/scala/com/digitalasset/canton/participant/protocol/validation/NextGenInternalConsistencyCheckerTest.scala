@@ -31,8 +31,6 @@ class NextGenInternalConsistencyCheckerTest extends InternalConsistencyCheckerTe
     val participantId: ParticipantId = ParticipantId("test")
     val sut = new NextGenInternalConsistencyChecker(participantId, loggerFactory)
 
-    "rollback scope order" should checkRollbackScopeOrder()
-
     "standard happy cases" should checkStandardHappyCases(sut)
 
     "key consistency cases" should checkKeyConsistencyCases(sut)

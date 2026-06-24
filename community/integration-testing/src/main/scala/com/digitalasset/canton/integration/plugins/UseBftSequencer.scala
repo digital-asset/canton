@@ -73,6 +73,8 @@ final class UseBftSequencer(
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
+    // Use a longer topology warn timeout in tests to avoid flakes under concurrent CI load.
+    consensusNewEpochTopologyWarnTimeout: FiniteDuration = 10.seconds,
     sequencingParameters: Option[topology.SequencingParameters] = None,
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
@@ -127,6 +129,7 @@ final class UseBftSequencer(
                     leaderSelectionPolicyConfigForPv34 =
                       getLeaderSelectionPolicyConfigForPv34(sequencingParameters, bftOrdererConfig),
                     consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
+                    consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
                     maxRequestsInBatch = maxRequestsInBatch,
                     minRequestsInBatch = minRequestsInBatch,
                     maxBatchCreationInterval = maxBatchCreationInterval,
@@ -262,6 +265,7 @@ final class UseBftSequencer(
                 BftBlockOrdererConfig(),
               ),
               consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
+              consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
               maxRequestsInBatch = maxRequestsInBatch,
               minRequestsInBatch = minRequestsInBatch,
               maxBatchCreationInterval = maxBatchCreationInterval,

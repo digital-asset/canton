@@ -37,7 +37,7 @@ private[dao] final class CommandCompletionsReader(
   override def getCommandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
   )(implicit
       loggingContext: LoggingContextWithTrace

@@ -37,6 +37,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
   SubmitAndWaitForTransactionRequest,
@@ -1679,6 +1680,43 @@ final class SingleParticipantTestContext private[participant] (
       p: Completion => Boolean
   ): Future[Option[Completion]] =
     findCompletion(completionStreamRequest()(parties*))(p)
+
+  // GetCompletions helpers. Intentionally not sharing plumbing with the completionStream helpers
+  // above, which are deprecated and slated for removal.
+  override def getCompletionsRequest(from: Long = referenceOffset)(
+      parties: Party*
+  ): GetCompletionsRequest =
+    new GetCompletionsRequest(
+      parties = parties.map(_.getValue),
+      beginExclusive = from,
+    )
+
+  override def completions(
+      within: NonNegativeFiniteDuration,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.getCompletions(request, _)
+    )
+      .within(within.toScala)
+      .map(_.map(_.completionResponse))
+
+  override def completions(
+      take: Int,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.getCompletions(request, _)
+    ).filterTake(_.completionResponse.isCompletion)(take)
+      .map(_.map(_.completionResponse))
+
+  override def findCompletion(
+      request: GetCompletionsRequest
+  )(p: Completion => Boolean): Future[Option[Completion]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.getCompletions(request, _)
+    ).find(_.completionResponse.completion.exists(p))
+      .map(_.completionResponse.completion.filter(p))
 
   override def offsets(n: Int, request: CompletionStreamRequest): Future[Vector[Long]] =
     new StreamConsumer[CompletionStreamResponse](

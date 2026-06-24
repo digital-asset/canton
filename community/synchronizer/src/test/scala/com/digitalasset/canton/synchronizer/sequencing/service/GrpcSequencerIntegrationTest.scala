@@ -60,6 +60,7 @@ import com.digitalasset.canton.protocol.{
   TestSynchronizerParameters,
   v30 as protocolV30,
   v31 as protocolV31,
+  v32 as protocolV32,
 }
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
@@ -652,6 +653,9 @@ class GrpcSequencerIntegrationTest
 
     override def toProtoSomeEnvelopeContentV31: protocolV31.EnvelopeContent.SomeEnvelopeContent =
       protocolV31.EnvelopeContent.SomeEnvelopeContent.Empty
+
+    override def toProtoSomeEnvelopeContentV32: protocolV32.EnvelopeContent.SomeEnvelopeContent =
+      protocolV32.EnvelopeContent.SomeEnvelopeContent.Empty
   }
 }
 

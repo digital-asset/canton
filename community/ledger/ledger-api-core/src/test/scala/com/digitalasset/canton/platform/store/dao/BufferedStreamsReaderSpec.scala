@@ -7,6 +7,7 @@ import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
@@ -632,9 +633,4 @@ object BufferedStreamsReaderSpec {
       recordTime = Timestamp.Epoch,
       externalTransactionHash = None,
     )(TraceContext.empty)
-
-  private def offset(idx: Long): Offset = {
-    val base = 1000000000L
-    Offset.tryFromLong(base + idx)
-  }
 }

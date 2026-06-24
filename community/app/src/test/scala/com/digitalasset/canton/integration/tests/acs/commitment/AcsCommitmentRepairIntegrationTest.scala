@@ -37,7 +37,7 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Receiv
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.participant.store.UpdateMode
 import com.digitalasset.canton.participant.store.db.DbIncrementalCommitmentStore
-import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod}
+import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
@@ -109,7 +109,7 @@ trait AcsCommitmentRepairIntegrationTest
 
   def createContractsAndCheck(sequencer: LocalSequencerReference, synchronizerId: SynchronizerId)(
       implicit env: FixtureParam
-  ): (Seq[Iou.Contract], CommitmentPeriod, AcsCommitment.HashedCommitmentType) = {
+  ): (Seq[Iou.Contract], LegacyCommitmentPeriod, Digest.HashedDigestType) = {
     import env.*
     val nContracts = PositiveInt.three
     val simClock = environment.simClock.value
@@ -349,7 +349,7 @@ trait AcsCommitmentRepairIntegrationTest
         },
       )
 
-      def checkMatch(period: CommitmentPeriod) = {
+      def checkMatch(period: LegacyCommitmentPeriod) = {
         val timeRange = SynchronizerTimeRange(
           daId,
           Some(

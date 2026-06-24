@@ -98,8 +98,10 @@ sealed trait AlphaVersionSupportIntegrationTest
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1),
           synchronizerThreshold = PositiveInt.one,
-          staticSynchronizerParameters =
-            StaticSynchronizerParameters.defaults(sequencer1.config.crypto, ProtocolVersion.dev),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
+            cryptoConfig = sequencer1.config.crypto,
+            protocolVersion = ProtocolVersion.dev,
+          ),
         )
 
         bootstrap.synchronizer(

@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.resource.MemoryStorage
@@ -212,6 +213,7 @@ final class BlockSequencerTest
           asyncWriter = AsyncWriterParameters(),
           timeAdvancingTopology = TimeAdvancingTopologyConfig(),
           delayRequestsBeforeLsuTrafficInit = false,
+          enableRejectDeliveredAggregationsOnPv35 = Seq.empty,
           lsuConfig = SequencerLsuConfig(),
           enablePrevalidation = true,
         ),
@@ -302,6 +304,12 @@ final class BlockSequencerTest
       )
 
     override def getProcessingHeadState: BlockUpdateGenerator.AccumulatedStateProcessingBlocks = ???
+
+    override def asyncWriterHealth: HealthComponent =
+      new HealthComponent.AlwaysHealthyComponent(
+        "fake-block-sequencer-async-writer",
+        BlockSequencerTest.this.logger,
+      )
 
     override protected def timeouts: ProcessingTimeout = BlockSequencerTest.this.timeouts
     override protected def logger: TracedLogger = BlockSequencerTest.this.logger

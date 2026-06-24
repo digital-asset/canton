@@ -37,6 +37,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   LfVersioned,
   ProtoDeserializationError,
+  checked,
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
@@ -100,6 +101,7 @@ final case class ViewParticipantData private (
 ) extends MerkleTreeLeaf[ViewParticipantData](hashOps)
     with HasProtocolVersionedWrapper[ViewParticipantData]
     with ProtocolVersionedMemoizedEvidence {
+
   {
     def requireDistinct[A](vals: Seq[A])(message: A => String): Unit = {
       val set = scala.collection.mutable.Set[A]()
@@ -288,13 +290,23 @@ final case class ViewParticipantData private (
   @transient override protected lazy val companionObj: ViewParticipantData.type =
     ViewParticipantData
 
+  private def tryToProtoV30RollbackContext: Option[v30.ViewParticipantData.RollbackContext] =
+    rollbackContext match {
+      case pathRollbackContext: PathRollbackContext =>
+        if (pathRollbackContext.isEmpty) None else Some(pathRollbackContext.toProtoV30)
+      case _ =>
+        throw new IllegalStateException(
+          s"Unexpected rollback context type ${rollbackContext.getClass} in ViewParticipantData"
+        )
+    }
+
   private[ViewParticipantData] def toProtoV30: v30.ViewParticipantData = v30.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
     createdCore = createdCore.map(_.toProtoV30),
     createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
     resolvedKeys = Seq.empty, // Always empty, see tryCheckKeyResolution
     actionDescription = Some(actionDescription.toProtoV30),
-    rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV30),
+    rollbackContext = checked(tryToProtoV30RollbackContext),
     salt = Some(salt.toProtoV30),
   )
 
@@ -306,21 +318,21 @@ final case class ViewParticipantData private (
       KeyResolutionWithMaintainers.toProtoV31(k, v)
     },
     actionDescription = Some(actionDescription.toProtoV31),
-    rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV30),
+    rollbackContext = checked(tryToProtoV30RollbackContext),
     salt = Some(salt.toProtoV30),
   )
 
   private[ViewParticipantData] def toProtoV32: v32.ViewParticipantData = v32.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
-    createdCore = createdCore.map(_.toProtoV30),
+    createdCore = createdCore.map(_.toProtoV31),
     createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
     resolvedKeys = keyResolution.toList.map { case (k, v) =>
       KeyResolutionWithMaintainers.toProtoV31(k, v)
     },
     actionDescription = Some(actionDescription.toProtoV31),
-    rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV30),
     salt = Some(salt.toProtoV30),
     externalCallResults = externalCallResults.toSeq.map(_.toProtoV32),
+    rolledBack = rollbackContext.inRollback,
   )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -334,7 +346,7 @@ final case class ViewParticipantData private (
     paramIfNonEmpty("created in subview, archived in core", _.createdInSubviewArchivedInCore),
     paramIfNonEmpty("resolved keys", _.keyResolution),
     param("action description", _.actionDescription),
-    param("rollback context", _.rollbackContext),
+    paramIfTrue("rolled back", _.rollbackContext.inRollback),
     param("salt", _.salt),
     paramIfNonEmpty(
       "external call results",
@@ -388,7 +400,17 @@ object ViewParticipantData
       supportedProtoVersionMemoized(_)(ic(fromProtoV31)),
       _.toProtoV31,
     ),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(v32.ViewParticipantData)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
+      v32.ViewParticipantData
+    )(
+      supportedProtoVersionMemoized(_)(ic(fromProtoV32)),
+      _.toProtoV32,
+    ),
+    // Temporary proto version, not backed by protobuf message used to allow
+    // constructor validation for external call to switch on representative protocol version.
+    ProtoVersion(33) -> VersionedProtoCodec(ProtocolVersion.dev)(
+      v32.ViewParticipantData
+    )(
       supportedProtoVersionMemoized(_)(ic(fromProtoV32)),
       _.toProtoV32,
     ),
@@ -552,22 +574,26 @@ object ViewParticipantData
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV30)
+      rollbackContext <- PathRollbackContext
+        .fromProtoV30(rbContextP)
+        .leftMap(_.inField("rollback_context"))
       _ <- EitherUtil.condUnit( // Invariant violation, see tryCheckKeyResolution
         resolvedKeysP.isEmpty,
         InvariantViolation(Some("resolved-keys"), "Unexpected contract keys"),
       )
+      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
       viewParticipantData <- fromProto(
         hashOps,
         Map.empty,
         actionDescription,
+        rollbackContext,
+        createdCore,
         protocolVersion,
         bytes,
       )(
         saltP,
         coreInputsP,
-        createdCoreP,
         createdInSubviewArchivedInCoreP,
-        rbContextP,
         ImmArray.Empty,
       )
     } yield {
@@ -597,18 +623,22 @@ object ViewParticipantData
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV31)
+      rollbackContext <- PathRollbackContext
+        .fromProtoV30(rbContextP)
+        .leftMap(_.inField("rollback_context"))
+      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
       viewParticipantData <- fromProto(
         hashOps,
         resolvedKeys.toMap,
         actionDescription,
+        rollbackContext,
+        createdCore,
         protocolVersion,
         bytes,
       )(
         saltP,
         coreInputsP,
-        createdCoreP,
         createdInSubviewArchivedInCoreP,
-        rbContextP,
         ImmArray.Empty,
       )
     } yield viewParticipantData
@@ -628,8 +658,8 @@ object ViewParticipantData
       createdInSubviewArchivedInCoreP,
       resolvedKeysP,
       actionDescriptionP,
-      rbContextP,
       externalCallResultsP,
+      rolledBackP,
     ) = dataP
 
     for {
@@ -638,18 +668,19 @@ object ViewParticipantData
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV31)
       externalCallResults <- externalCallResultsP.traverse(ViewExternalCallResult.fromProtoV32)
+      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV31)
       viewParticipantData <- fromProto(
         hashOps,
         resolvedKeys.toMap,
         actionDescription,
+        NoPathRollbackContext(rolledBackP),
+        createdCore,
         protocolVersion,
         bytes,
       )(
         saltP,
         coreInputsP,
-        createdCoreP,
         createdInSubviewArchivedInCoreP,
-        rbContextP,
         ImmArray.from(externalCallResults),
       )
     } yield viewParticipantData
@@ -659,14 +690,14 @@ object ViewParticipantData
       hashOps: HashOps,
       resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
+      rollbackContext: RollbackContext,
+      createdCore: Seq[CreatedContract],
       protocolVersion: ProtocolVersion,
       bytes: ByteString,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
       coreInputsP: Seq[v30.InputContract],
-      createdCoreP: Seq[v30.CreatedContract],
       createdInSubviewArchivedInCoreP: Seq[String],
-      rollbackContextP: Option[v30.ViewParticipantData.RollbackContext],
       externalCallResults: ImmArray[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
@@ -674,15 +705,11 @@ object ViewParticipantData
       coreInputs = coreInputsSeq.view
         .map(inputContract => inputContract.contract.contractId -> inputContract)
         .toMap
-      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
       createdInSubviewArchivedInCore <- createdInSubviewArchivedInCoreP
         .traverse(ProtoConverter.parseLfContractId)
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
         .leftMap(_.inField("salt"))
-      rollbackContext <- RollbackContext
-        .fromProtoV30(rollbackContextP)
-        .leftMap(_.inField("rollbackContext"))
       viewParticipantData <- returnLeftWhenInitializationFails(
         ViewParticipantData.tryCreate(
           coreInputs = coreInputs,

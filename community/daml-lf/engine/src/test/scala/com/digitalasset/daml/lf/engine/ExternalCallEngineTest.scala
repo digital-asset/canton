@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IE}
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -18,11 +18,7 @@ import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class ExternalCallEngineTest
-    extends AnyWordSpec
-    with Matchers
-    with Inside
-    with SuppressingLogging {
+class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with SuppressingLogging {
 
   implicit private val parserParameters: ParserParameters[this.type] =
     ParserParameters(
@@ -109,30 +105,29 @@ class ExternalCallEngineTest
     "surface external call failures through the engine continuation" in {
       val result = submit(newEngine())
 
-      inside(result) {
-        case ResultNeedExternalCall(_, _, _, _, resume) =>
-          inside(
-            resume(Left(ResultNeedExternalCall.Error("upstream unavailable"))).consume()
-          ) {
-            case Left(
-                  err @ Error.Interpretation(
-                    Error.Interpretation.DamlException(
-                      IE.ExternalCall(
-                        IE.ExternalCall.ExecutionFailed(
-                          "ext",
-                          "fun",
-                          IE.ExternalCall.ExecutionFailed.CallFailed(message),
-                        )
+      inside(result) { case ResultNeedExternalCall(_, _, _, _, resume) =>
+        inside(
+          resume(Left(ResultNeedExternalCall.Error("upstream unavailable"))).consume()
+        ) {
+          case Left(
+                err @ Error.Interpretation(
+                  Error.Interpretation.DamlException(
+                    IE.ExternalCall(
+                      IE.ExternalCall.ExecutionFailed(
+                        "ext",
+                        "fun",
+                        IE.ExternalCall.ExecutionFailed.CallFailed(message),
                       )
-                    ),
-                    _,
-                  )
-                ) =>
-              message shouldBe "upstream unavailable"
-              err.message should include("External call execution failed")
-              err.message should include("extensionId=ext")
-              err.message should include("functionId=fun")
-          }
+                    )
+                  ),
+                  _,
+                )
+              ) =>
+            message shouldBe "upstream unavailable"
+            err.message should include("External call execution failed")
+            err.message should include("extensionId=ext")
+            err.message should include("functionId=fun")
+        }
       }
     }
   }

@@ -456,6 +456,13 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
       )
       logEntry.loggerName should include("AvailabilityModule")
     },
+    // We might get messages about waiting for new topology after epoch completion, don't count these as errors.
+    { logEntry =>
+      logEntry.message should include(
+        "Waiting for new topology after epoch completion"
+      )
+      logEntry.loggerName should include("IssConsensusModule")
+    },
   )
 
   override def generateSettings: SimulationTestSettings = SimulationTestSettings(

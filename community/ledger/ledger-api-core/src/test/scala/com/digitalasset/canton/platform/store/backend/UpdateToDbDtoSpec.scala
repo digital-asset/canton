@@ -73,6 +73,7 @@ import com.digitalasset.daml.lf.transaction.test.{
 }
 import com.digitalasset.daml.lf.transaction.{CreationTime, GlobalKey, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value
+import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as StatusProto
 import io.grpc.Status
 import org.scalatest.matchers.should.Matchers
@@ -2849,6 +2850,46 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizerId = someSynchronizerId1
       )
       dtos.size shouldEqual 1
+    }
+
+    "handle ReceivedAcsCommitment" in {
+      val payload = ByteString.copyFromUtf8("some-acs-commitment-payload")
+      val recordTime = CantonTimestamp.ofEpochMicro(12345678)
+      val update = state.Update.ReceivedAcsCommitment(
+        synchronizerId = someSynchronizerId1,
+        recordTime = recordTime,
+        payload = payload,
+      )
+      val dtos = updateToDtos(update)
+
+      val updateId = dtos
+        .collectFirst { case acsCommitment: DbDto.AcsCommitment =>
+          acsCommitment.update_id
+        }
+        .getOrElse(fail("Expected an AcsCommitment DbDto to be produced"))
+
+      updateId shouldBe update.updateId.toProtoPrimitive.toByteArray
+
+      dtos should contain theSameElementsInOrderAs List(
+        DbDto.AcsCommitment(
+          event_sequential_id = 0,
+          event_offset = someOffset.unwrap,
+          update_id = updateId,
+          synchronizer_id = someSynchronizerId1,
+          record_time = recordTime.toMicros,
+          payload = payload.toByteArray,
+          trace_context = serializedEmptyTraceContext,
+        ),
+        DbDto.TransactionMeta(
+          update_id = updateId,
+          event_offset = someOffset.unwrap,
+          publication_time = 0,
+          record_time = recordTime.toMicros,
+          synchronizer_id = someSynchronizerId1,
+          event_sequential_id_first = 0,
+          event_sequential_id_last = 0,
+        ),
+      )
     }
 
   }

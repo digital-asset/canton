@@ -96,8 +96,8 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
 
         val staticParameters =
           StaticSynchronizerParameters.defaults(
-            sequencer1.config.crypto,
-            testedProtocolVersion,
+            cryptoConfig = sequencer1.config.crypto,
+            protocolVersion = testedProtocolVersion,
             topologyChangeDelay = topologyChangeDelay,
           )
         val synchronizerId = bootstrap.synchronizer(

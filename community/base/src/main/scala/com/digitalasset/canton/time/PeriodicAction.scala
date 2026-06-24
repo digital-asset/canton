@@ -5,7 +5,7 @@ package com.digitalasset.canton.time
 
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -17,10 +17,11 @@ class PeriodicAction(
     protected val loggerFactory: NamedLoggerFactory,
     protected val timeouts: ProcessingTimeout,
     description: String,
-)(check: TraceContext => FutureUnlessShutdown[?])(implicit
+)(check: TraceContext => FutureUnlessShutdown[Any])(implicit
     executionContext: ExecutionContext
 ) extends NamedLogging
-    with FlagCloseable {
+    with FlagCloseable
+    with HasCloseContext {
 
   TraceContext.withNewTraceContext(description)(setupNextCheck()(_))
 
@@ -30,7 +31,8 @@ class PeriodicAction(
 
   private def setupNextCheck()(implicit traceContext: TraceContext): Unit =
     synchronizeWithClosingSync(s"setup-$description") {
-      val _ = clock.scheduleAfter(_ => runCheck(), interval.duration)
+      val _ =
+        clock.scheduleAfterCancelledOnShutdown(_ => runCheck(), description, interval.duration)
     }.discard
 
 }

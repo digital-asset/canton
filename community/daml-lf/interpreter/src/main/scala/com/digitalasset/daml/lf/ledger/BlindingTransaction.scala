@@ -4,13 +4,11 @@
 package com.digitalasset.daml.lf
 package ledger
 
+import com.daml.nameof.NameOf
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.Relation
-import com.digitalasset.daml.lf.transaction.BlindingInfo
-import com.digitalasset.daml.lf.transaction.Node
-import com.digitalasset.daml.lf.transaction.{NodeId, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{BlindingInfo, Node, NodeId, VersionedTransaction}
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.daml.nameof.NameOf
 
 object BlindingTransaction {
 
@@ -39,7 +37,7 @@ object BlindingTransaction {
       )
     }
 
-    def divulgeCoidTo(witnesses: Set[Party], acoid: ContractId): BlindState = {
+    def divulgeCoidTo(witnesses: Set[Party], acoid: ContractId): BlindState =
       if (witnesses.nonEmpty) {
         copy(
           divulgences = divulgences
@@ -48,7 +46,6 @@ object BlindingTransaction {
       } else {
         this
       }
-    }
 
   }
 

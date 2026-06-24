@@ -50,7 +50,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
 import java.io.File
@@ -82,12 +81,7 @@ sealed trait PackageVettingIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.updateAllParticipantConfigs_(
-          // Setting a high value, because otherwise reassignment participants get dropped
-          _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
-            .replace(config.NonNegativeFiniteDuration.ofMinutes(10))
-        ),
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*
@@ -449,29 +443,24 @@ sealed trait PackageVettingIntegrationTest
 
       logger.info("Unassigning contract from da...")
 
+      // participant2 abstains locally because it has not vetted the package on the target
+      // synchronizer, then we override that with a Local approve. A local abstain is
+      // compatible with the mediator's approve, so no alarm is raised.
       val (_, events) =
-        loggerFactory.assertLogs(
-          // participant2 would reject as participant has not vetted the package on the target synchronizer.
-          // Override that by approve.
-          replacingConfirmationResponses(
-            participant2,
-            sequencer1,
-            daId,
-            withLocalVerdict(
-              LocalApprove(testedProtocolVersion)
-            ),
-          ) {
-            trackingLedgerEvents(Seq(participant2), Seq.empty) {
-              TraceContext.withNewTraceContext("attack")(implicit traceContext =>
-                maliciousP2.submitUnassignmentRequest(unassignmentTree).futureValueUS
-              )
-            }
-          },
-          _.shouldBeCantonError(
-            SyncServiceAlarm,
-            _ shouldBe "Mediator approved a request that has been locally rejected.",
+        replacingConfirmationResponses(
+          participant2,
+          sequencer1,
+          daId,
+          withLocalVerdict(
+            LocalApprove(testedProtocolVersion)
           ),
-        )
+        ) {
+          trackingLedgerEvents(Seq(participant2), Seq.empty) {
+            TraceContext.withNewTraceContext("attack")(implicit traceContext =>
+              maliciousP2.submitUnassignmentRequest(unassignmentTree).futureValueUS
+            )
+          }
+        }
 
       val unassignment = events.unassignments(participant2).futureValue.loneElement
 

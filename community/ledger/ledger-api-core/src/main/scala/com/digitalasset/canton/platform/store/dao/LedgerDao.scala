@@ -6,12 +6,13 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
@@ -32,7 +33,7 @@ private[platform] trait LedgerDaoUpdateReader {
       skipPruningChecks: Boolean = false,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, GetUpdatesResponse), NotUsed]
+  ): Source[(Offset, UpdateResponse), NotUsed]
 
   def lookupUpdateBy(
       lookupKey: LookupKey,
@@ -53,7 +54,7 @@ private[platform] trait LedgerDaoCommandCompletionsReader {
   def getCommandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
   )(implicit
       loggingContext: LoggingContextWithTrace

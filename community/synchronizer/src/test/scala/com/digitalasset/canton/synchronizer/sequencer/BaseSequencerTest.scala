@@ -110,6 +110,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
             EitherTUtil.unitUS
         },
         testedProtocolVersion,
+        lsuSequencingBounds = None,
         disableSubmissionChecksForTesting = false,
       )
       with FlagCloseable {

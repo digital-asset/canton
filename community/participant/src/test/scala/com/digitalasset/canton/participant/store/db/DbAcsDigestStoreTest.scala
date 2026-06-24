@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.store.AcsDigestStoreTest
 import com.digitalasset.canton.resource.DbStorage
@@ -53,5 +54,8 @@ trait DbAcsDigestStoreTest extends AsyncWordSpec with BaseTest with AcsDigestSto
   }
 }
 
+@AcsCommitmentTest
 class AcsDigestStoreTestH2 extends DbAcsDigestStoreTest with H2Test
+
+@AcsCommitmentTest
 class AcsDigestStoreTestPostgres extends DbAcsDigestStoreTest with PostgresTest
