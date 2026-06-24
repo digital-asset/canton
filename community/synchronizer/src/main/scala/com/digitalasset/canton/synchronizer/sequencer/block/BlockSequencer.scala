@@ -41,6 +41,8 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.{
+  AggregateSubmissionAlreadySentV2,
+  AggregateSubmissionInvalidRule,
   Overloaded,
   SubmissionRequestRefused,
 }
@@ -58,7 +60,10 @@ import com.digitalasset.canton.sequencing.traffic.{
 import com.digitalasset.canton.sequencing.{GroupAddressResolver, GrpcSequencerConnection}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
-import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl
+import com.digitalasset.canton.synchronizer.block.update.{
+  BlockProcessingParameters,
+  BlockUpdateGeneratorImpl,
+}
 import com.digitalasset.canton.synchronizer.block.{BlockSequencerStateManagerBase, RawLedgerBlock}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
@@ -77,7 +82,6 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   SequencerPastUpgradeTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.{PayloadId, SequencerStore}
-import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.*
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   LsuTrafficState,
@@ -105,6 +109,7 @@ import com.digitalasset.canton.util.{
   PekkoUtil,
   SimpleExecutionQueue,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RichGeneratedMessage, SequencerAlias}
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
@@ -122,8 +127,6 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise}
 import scala.util.{Failure, Success}
 
-import BlockSequencerFactory.OrderingTimeFixMode
-
 class BlockSequencer(
     blockOrderer: BlockOrderer,
     name: String,
@@ -140,12 +143,11 @@ class BlockSequencer(
     health: Option[SequencerHealthConfig],
     clock: Clock,
     blockRateLimitManager: SequencerRateLimitManager,
-    orderingTimeFixMode: OrderingTimeFixMode,
-    lsuSequencingBounds: Option[LsuSequencingBounds],
+    blockProcessingParameters: BlockProcessingParameters,
+    parameters: SequencerNodeParameters,
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     runtimeReady: FutureUnlessShutdown[Unit],
-    parameters: SequencerNodeParameters,
 )(implicit
     executionContext: ExecutionContextExecutor,
     materializer: Materializer,
@@ -172,7 +174,7 @@ class BlockSequencer(
       metrics,
       loggerFactory,
       blockSequencerMode = true,
-      lsuSequencingBounds,
+      blockProcessingParameters.lsuSequencingBounds,
       parameters.drSequencingTimeUpperBound,
       rateLimitManagerO = Some(blockRateLimitManager),
       disableSubmissionChecksForTesting = parameters.disableSubmissionChecksForTesting,
@@ -182,6 +184,8 @@ class BlockSequencer(
     with FlagCloseableAsync {
 
   private val protocolVersion = cryptoApi.protocolVersion
+
+  private def lsuSequencingBounds = blockProcessingParameters.lsuSequencingBounds
 
   private[sequencer] val pruningQueue = new SimpleExecutionQueue(
     "block-sequencer-pruning-queue",
@@ -251,17 +255,23 @@ class BlockSequencer(
   private val trafficPurchasedSubmissionHandler =
     new TrafficPurchasedSubmissionHandler(clock, loggerFactory)
 
+  private val postProcessingLock = new AtomicReference[Future[Unit]](Future.unit)
+  override def applyPostProcessingLockForTesting(
+      continueAfter: scala.concurrent.Future[Unit]
+  ): Unit =
+    postProcessingLock.set(continueAfter)
+
   override protected def resetWatermarkTo: SequencerWriter.ResetWatermark =
     lsuSequencingBounds match {
       case Some(lsuSequencingBounds) =>
         SequencerWriter.ResetWatermarkToTimestamp(
-          stateManager.getHeadState.block.lastTs
+          stateManager.getPersistenceHeadState.block.lastTs
             .max(lsuSequencingBounds.lowerBoundSequencingTimeExclusive)
         )
 
       case None =>
         SequencerWriter.ResetWatermarkToTimestamp(
-          stateManager.getHeadState.block.lastTs
+          stateManager.getPersistenceHeadState.block.lastTs
         )
     }
 
@@ -289,21 +299,19 @@ class BlockSequencer(
   private val latestLsuSequencerConnectionSuccessorSerial: AtomicInteger = new AtomicInteger(0)
 
   private val (killSwitchF, done) = {
-    val headState = stateManager.getHeadState
+    val headState = stateManager.getPersistenceHeadState
     noTracingLogger.info(s"Subscribing to block source from ${headState.block.height + 1}")
 
     val updateGenerator = new BlockUpdateGeneratorImpl(
       cryptoApi,
       sequencerId,
       blockRateLimitManager,
-      orderingTimeFixMode,
-      lsuSequencingBounds = lsuSequencingBounds,
       drSequencingTimeUpperBound = parameters.drSequencingTimeUpperBound,
       getAnnouncedLsu = announcedLsu.get(),
-      producePostOrderingTopologyTicks,
-      metrics,
-      parameters.batchingConfig,
+      producePostOrderingTopologyTicks = producePostOrderingTopologyTicks,
       consistencyChecks = parameters.enableAdditionalConsistencyChecks,
+      parameters = blockProcessingParameters,
+      metrics = metrics,
       memberValidator = memberValidator,
       loggerFactory,
     )(CloseContext(cryptoApi), tracer)
@@ -321,29 +329,40 @@ class BlockSequencer(
             FutureUnlessShutdown.pure(block)
         }
       }
-    val driverSource = Source
-      .futureSource(runtimeReady.unwrap.map {
-        case UnlessShutdown.AbortedDueToShutdown =>
-          noTracingLogger.debug("Not initiating subscription to block source due to shutdown")
-          Source.empty.viaMat(KillSwitches.single)(Keep.right)
-        case UnlessShutdown.Outcome(_) =>
-          noTracingLogger.debug("Subscribing to block source")
-          blockOrderer.subscribe()
-      })
-      .via(pauseAtUpgradeTimeUntilLsuTrafficInitialized)
-      // Explicit async to make sure that the block processing runs in parallel with the block retrieval
-      .async
-      .map(updateGenerator.extractBlockEvents)
-      .async
-      .via(stateManager.processBlock(updateGenerator))
-      .wireTap { update =>
-        throughputCap.addBlockUpdate(update.value)
-      }
-      .async
-      .via(stateManager.applyBlockUpdate(this))
-      .wireTap { lastTs =>
-        circuitBreaker.registerLastBlockTimestamp(lastTs)
-      }
+
+    val driverSource = {
+      val step1 = Source
+        .futureSource(runtimeReady.unwrap.map {
+          case UnlessShutdown.AbortedDueToShutdown =>
+            noTracingLogger.debug("Not initiating subscription to block source due to shutdown")
+            Source.empty.viaMat(KillSwitches.single)(Keep.right)
+          case UnlessShutdown.Outcome(_) =>
+            noTracingLogger.debug("Subscribing to block source")
+            blockOrderer.subscribe()
+        })
+        .via(pauseAtUpgradeTimeUntilLsuTrafficInitialized)
+        // Explicit async to make sure that the block processing runs in parallel with the block retrieval
+        .async
+
+      val step2 =
+        if (parameters.enableTestingFeatures)
+          // If necessary apply post-processing lock for testing
+          step1.mapAsync(parallelism = 1)(x => postProcessingLock.get().map(_ => x))
+        else step1
+
+      step2
+        .map(updateGenerator.extractBlockEvents)
+        .wireTap { update =>
+          throughputCap.addBlockUpdate(update.value)
+        }
+        .async
+        .via(stateManager.processBlock(updateGenerator))
+        .async
+        .via(stateManager.applyBlockUpdate(this))
+        .wireTap { lastTs =>
+          circuitBreaker.registerLastBlockTimestamp(lastTs)
+        }
+    }
     PekkoUtil.runSupervised(
       driverSource.toMat(Sink.ignore)(Keep.both),
       errorLogMessagePrefix = "Fatally failed to handle state changes",
@@ -430,13 +449,13 @@ class BlockSequencer(
         // Use the timestamp of the latest chunk here, such that top ups that happened in an earlier chunk of the
         // current block can be reflected in the traffic state used to validate the request
         {
-          val headChunkLastTs = stateManager.getHeadState.chunk.lastTs
+          val headChunkLastTs = stateManager.getPersistenceHeadState.chunk.lastTs
           lsuSequencingBounds
             .map(_.upgradeTime)
             .getOrElse(headChunkLastTs)
             .max(headChunkLastTs)
         },
-        stateManager.getHeadState.chunk.latestSequencerEventTimestamp
+        stateManager.getPersistenceHeadState.chunk.latestSequencerEventTimestamp
           .orElse(lsuSequencingBounds.map(_.upgradeTime)),
       )
       .leftMap {
@@ -503,6 +522,42 @@ class BlockSequencer(
     }
   }
 
+  private def validateAggregationAlreadyDelivered(
+      submission: SubmissionRequest
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
+    submission
+      .aggregationId(cryptoApi.pureCrypto)
+      .leftMap { err =>
+        AggregateSubmissionInvalidRule.apply(
+          s"Failed to compute aggregation ID for submission with id ${submission.messageId}: $err"
+        )
+      }
+      .flatMap {
+        case Some((aggregationId, _)) =>
+          Either.cond(
+            // We can check if the aggregation has already been delivered by looking at the head
+            // state. If the delivered at is not yet cached (after a crash) we just allow the submission
+            // to go through for simplicity.
+            protocolVersion < ProtocolVersion.v35 || // never reject for pv34
+              (protocolVersion == ProtocolVersion.v35 && // if pv35, only check if sender code is the set of codes
+                !parameters.enableRejectDeliveredAggregationsOnPv35
+                  .contains(submission.sender.code.threeLetterId.str)) ||
+              !stateManager.getProcessingHeadState.inFlightAggregations.byId
+                .get(aggregationId)
+                .exists(_.cachedDeliveredAt.exists(_.nonEmpty)),
+            (), {
+              val str =
+                s"Not accepting submission as aggregation ID $aggregationId is already marked as delivered"
+              logger.debug(str)
+              AggregateSubmissionAlreadySentV2.apply(str)
+            },
+          )
+        case None => Right(())
+      }
+      .toEitherT[FutureUnlessShutdown]
+
   private def rejectSubmissionsIfOverloaded(
       submission: SubmissionRequest
   ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
@@ -548,7 +603,8 @@ class BlockSequencer(
     val validateET: EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
       if (disableSubmissionChecksForTesting) {
         EitherTUtil.unitUS
-      } else
+      } else {
+
         for {
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
             !parameters.delayRequestsBeforeLsuTrafficInit || skipLsuChecks || lsuTrafficInitialized.isCompleted,
@@ -564,6 +620,7 @@ class BlockSequencer(
           _ <- enforceThroughputCap(submission)
           _ <- rejectSubmissionsIfOverloaded(submission)
           _ <- validateMaxSequencingTime(submission)
+          _ <- validateAggregationAlreadyDelivered(submission)
           // TODO(#19476): Why we don't check group recipients here?
           approximateSnapshot <- EitherT.liftF(
             cryptoApi.currentSnapshotApproximation
@@ -589,6 +646,7 @@ class BlockSequencer(
             )
           _ <- enforceRateLimiting(signedSubmission).leftWiden[CantonBaseError]
         } yield ()
+      }
 
     validateET.flatMap { _ =>
       EitherT(
@@ -629,17 +687,6 @@ class BlockSequencer(
         rejectAcknowledgementIfOverloaded().leftMap(_.asGrpcError)
       )
 
-      _ = signedAcknowledgeRequest.content.member match {
-        case _: ParticipantId =>
-          // Participants should not ack before upgrade time because the events are on the old synchronizer.
-          EitherTUtil.toFutureUnlessShutdown(
-            rejectSubmissionsBeforeOrAtSequencingTimeLowerBound().leftMap(_.asGrpcError)
-          )
-
-        case _: SequencerId | _: MediatorId =>
-          // Synchronizer nodes can receive messages on the new synchronizer before upgrade time so they can ack
-          FutureUnlessShutdown.unit
-      }
       waitForAcknowledgementF = stateManager.waitForAcknowledgementToComplete(
         req.member,
         req.timestamp,
@@ -662,7 +709,7 @@ class BlockSequencer(
         s"$functionFullName($timestamp)",
       )
         .unlessShutdown(
-          FutureUnlessShutdown.pure(timestamp <= stateManager.getHeadState.block.lastTs),
+          FutureUnlessShutdown.pure(timestamp <= stateManager.getPersistenceHeadState.block.lastTs),
           DbExceptionRetryPolicy,
         )
     )
@@ -693,7 +740,7 @@ class BlockSequencer(
   ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] = {
 
     val timestampsSet = SortedSet.from(timestamps)
-    val headBlock = stateManager.getHeadState.block
+    val headBlock = stateManager.getPersistenceHeadState.block
     val latestSequencedTimestamp = headBlock.lastTs
     val latestSequencerEventTimestamp = headBlock.latestSequencerEventTimestamp.orElse(
       lsuSequencingBounds.map(_.upgradeTime)
@@ -1051,7 +1098,7 @@ class BlockSequencer(
         // all the changes of that last block.
         case LatestSafe =>
           Some(
-            stateManager.getHeadState.block.lastTs.immediateSuccessor
+            stateManager.getPersistenceHeadState.block.lastTs.immediateSuccessor
               /*
                 Just after LSU (before any block is sequenced), we allow querying traffic state at upgrade time.
                 This is safe to do because we know we are past upgrade time and traffic is initialized.
@@ -1059,7 +1106,7 @@ class BlockSequencer(
               .max(lsuSequencingBounds.fold(CantonTimestamp.MinValue)(_.upgradeTime))
           )
         case LatestApproximate =>
-          Some(clock.now.max(stateManager.getHeadState.block.lastTs.immediateSuccessor))
+          Some(clock.now.max(stateManager.getPersistenceHeadState.block.lastTs.immediateSuccessor))
       }
 
       logger.info(s"Using $timestampO to fetch traffic state with selector $selector")
@@ -1067,7 +1114,7 @@ class BlockSequencer(
       blockRateLimitManager.getStates(
         requestedMembers,
         timestampO,
-        stateManager.getHeadState.block.latestSequencerEventTimestamp.orElse(
+        stateManager.getPersistenceHeadState.block.latestSequencerEventTimestamp.orElse(
           lsuSequencingBounds.map(_.upgradeTime)
         ),
         // TODO(#18401) set warnIfApproximate to true and check that we don't get warnings
@@ -1148,7 +1195,7 @@ class BlockSequencer(
       ),
     )
     latestSequencerEventTimestamp =
-      stateManager.getHeadState.block.latestSequencerEventTimestamp.orElse(
+      stateManager.getPersistenceHeadState.block.latestSequencerEventTimestamp.orElse(
         lsuSequencingBounds.map(_.upgradeTime)
       )
     result <- blockRateLimitManager.getTrafficStateForMemberAt(
@@ -1344,8 +1391,9 @@ class BlockSequencer(
         //  it has become consistent (accounting reached the upgrade time)
         store.readHeadBlockInfo().map(_.map(_.lastTs))
       )
-      latestSequencerEventTimestamp = stateManager.getHeadState.block.latestSequencerEventTimestamp
-        .orElse(lsuSequencingBounds.map(_.upgradeTime))
+      latestSequencerEventTimestamp =
+        stateManager.getPersistenceHeadState.block.latestSequencerEventTimestamp
+          .orElse(lsuSequencingBounds.map(_.upgradeTime))
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         latestPersistedBlockTimeO.exists(_ >= ts),
         SequencerError.NotAtUpgradeTimeOrBeyond.Error(
@@ -1455,10 +1503,10 @@ class BlockSequencer(
           )
           // - Check that the node has not progressed beyond the upgrade time
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-            stateManager.getHeadState.block.lastTs <= upgradeTime,
+            stateManager.getPersistenceHeadState.block.lastTs <= upgradeTime,
             SequencerPastUpgradeTime.Error(
               cryptoApi.psid,
-              stateManager.getHeadState.block.lastTs,
+              stateManager.getPersistenceHeadState.block.lastTs,
               upgradeTime,
             ),
           )

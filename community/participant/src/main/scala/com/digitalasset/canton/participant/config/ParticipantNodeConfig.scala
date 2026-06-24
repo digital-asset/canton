@@ -397,6 +397,9 @@ object TestingTimeServiceConfig {
   * @param validateLegacyContractsV11
   *   Enables an extra validation for contracts with contract id version V11. Keep this enabled in
   *   production.
+  * @param connectToSynchronizersOnStartup
+  *   If true, connects to synchronizers that have manualConnect=false on startup. Default: true.
+  *   Has impact only if manual-start is false.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -438,6 +441,7 @@ final case class ParticipantNodeParameterConfig(
     commitAfterFailedActivenessCheck: Boolean = false,
     lsu: LsuConfig = LsuConfig(),
     validateLegacyContractsV11: Boolean = true,
+    connectToSynchronizersOnStartup: Boolean = true,
 ) extends LocalNodeParametersConfig
 
 /** Config for LSU.
@@ -499,7 +503,7 @@ final case class LsuHandshake(
 /** Control incremental purges
   *
   * @param chunkSize
-  *   The amount of data that should be removed per purge iteration
+  *   The amount of data that should be removed per purge iteration.
   * @param cron
   *   A cron expression, defining when the purges can take place
   * @param maxDuration
@@ -510,6 +514,8 @@ final case class PurgeConfig(
     chunkSize: PositiveInt = PurgeConfig.DefaultChunkSize,
     cron: String = PurgeConfig.DefaultCron,
     maxDuration: config.PositiveFiniteDuration = PurgeConfig.DefaultMaxDuration,
+    purgeableStoresListValidity: config.NonNegativeFiniteDuration =
+      config.NonNegativeFiniteDuration.ofMinutes(1),
 )
 
 object PurgeConfig {

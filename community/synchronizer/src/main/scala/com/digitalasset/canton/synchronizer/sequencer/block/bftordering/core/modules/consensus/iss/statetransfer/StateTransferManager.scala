@@ -113,7 +113,7 @@ class StateTransferManager[E <: Env[E]](
       abort: String => Nothing
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
     if (inStateTransfer) {
-      logger.debug(s"State transfer requesting new epoch $newEpochNumber")
+      logger.info(s"State transfer requesting new epoch $newEpochNumber")
     } else {
       logger.info(s"Starting onboarding state transfer from epoch $newEpochNumber")
       initStateTransfer(newEpochNumber)(abort)

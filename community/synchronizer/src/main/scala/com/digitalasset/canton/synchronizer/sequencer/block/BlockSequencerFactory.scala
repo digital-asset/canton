@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -126,9 +127,10 @@ abstract class BlockSequencerFactory(
       health: Option[SequencerHealthConfig],
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
-      orderingTimeFixMode: OrderingTimeFixMode,
-      synchronizerLoggerFactory: NamedLoggerFactory,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      parallelism: PositiveInt,
+      enablePrevalidation: Boolean,
+      synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
       executionContext: ExecutionContextExecutor,
@@ -258,18 +260,21 @@ abstract class BlockSequencerFactory(
     } yield {
       val synchronizerLoggerFactory =
         loggerFactory.append("psid", synchronizerSyncCryptoApi.psid.toString)
+
       val stateManager =
         BlockSequencerStateManager.create(
           initialHeadO,
           store,
           trafficConsumedStore,
           nodeParameters.asyncWriter,
+          blockSequencerConfig.streamInstrumentation,
           nodeParameters.enableAdditionalConsistencyChecks,
+          nodeParameters.enablePrevalidation,
+          nodeParameters.batchingConfig.parallelism,
+          metrics.block,
           nodeParameters.processingTimeouts,
           futureSupervisor,
           synchronizerLoggerFactory,
-          blockSequencerConfig.streamInstrumentation,
-          metrics.block,
         )
 
       val blockOrderer = createBlockOrderer(
@@ -292,9 +297,10 @@ abstract class BlockSequencerFactory(
         health,
         clock,
         rateLimitManager,
-        orderingTimeFixMode,
+        lsuSequencingBounds = lsuSequencingBounds,
+        parallelism = nodeParameters.batchingConfig.parallelism,
+        enablePrevalidation = nodeParameters.enablePrevalidation,
         synchronizerLoggerFactory,
-        lsuSequencingBounds,
         runtimeReady,
       )
       testingInterceptor

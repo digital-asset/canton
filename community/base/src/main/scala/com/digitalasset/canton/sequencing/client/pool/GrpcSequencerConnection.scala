@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.GrpcError.{
   GrpcClientError,
+  GrpcRequestRefusedAlreadyExists,
   GrpcRequestRefusedByServer,
   GrpcServiceUnavailable,
 }
@@ -134,10 +135,17 @@ class GrpcSequencerConnection(
     // Adapted from GrpcSequencerClientTransportCommon
     Either.cond(
       !bubbleSendErrorPolicy(error), {
-        // log that we're swallowing the error
-        logger.info(
-          s"Send [$messageId] returned an error however may still be possibly sequenced so we are ignoring the error: $error"
-        )
+        error match {
+          // TODO(#12377) Do not trust the sequencer but monitor and stop using the given sequencer if it is denying service
+          case ConnectionError.TransportError(error: GrpcRequestRefusedAlreadyExists) =>
+          // already logged as an info in GrpcConnection
+          case _ =>
+            // log that we're swallowing the error
+            logger.info(
+              s"Send [$messageId] returned an error however may still be possibly sequenced so we are ignoring the error: $error"
+            )
+        }
+
         ()
       },
       error match {
@@ -172,6 +180,8 @@ class GrpcSequencerConnection(
           case _: GrpcError.GrpcClientError => true
           // the request was rejected by the server as it wasn't in a state to accept it
           case _: GrpcError.GrpcRequestRefusedByServer => true
+          // the request was rejected by the server because it already exists, so we don't need to bubble up
+          case _: GrpcError.GrpcRequestRefusedAlreadyExists => false
           // an internal error happened at the server, this could have been when constructing or sending the response
           // after accepting the request so we cannot safely bubble the error
           case _: GrpcError.GrpcServerError => false

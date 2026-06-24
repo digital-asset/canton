@@ -31,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
@@ -331,7 +332,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
                         prePrepare.message.viewNumber,
                         prePrepare.from,
                         isBlockLastInEpoch,
-                        OrderedBlockForOutput.Mode.FromConsensus,
+                        OrderingMode.Consensus,
                       )
                   )
                 case None =>

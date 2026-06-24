@@ -271,6 +271,8 @@ class ConfirmationRequestAndResponseProcessorTest
       result.asScala.map(_.batch).toList
     }
 
+    private val clock = mock[Clock]
+
     val verdictSender: TestVerdictSender =
       new TestVerdictSender(
         syncCryptoApi,
@@ -284,7 +286,7 @@ class ConfirmationRequestAndResponseProcessorTest
     val mediatorState = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
-      mock[Clock],
+      clock,
       MediatorTestMetrics,
       testedProtocolVersion,
       timeouts,

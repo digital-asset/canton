@@ -66,7 +66,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
   private val connection: GrpcConnection =
     GrpcConnection(config, params, metrics, timeouts, loggerFactory)
 
-  private val connectionMetricsContext: MetricsContext = metricsContext.withExtraLabels(
+  private implicit val connectionMetricsContext: MetricsContext = metricsContext.withExtraLabels(
     "connection" -> connection.config.name
   )
   private val stub: SequencerConnectionStub =

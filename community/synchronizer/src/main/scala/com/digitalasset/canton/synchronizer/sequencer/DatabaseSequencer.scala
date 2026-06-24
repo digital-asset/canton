@@ -166,6 +166,7 @@ class DatabaseSequencer(
       clock,
       SignatureVerifier(cryptoApi),
       cryptoApi.psid.protocolVersion,
+      lsuSequencingBounds,
       disableSubmissionChecksForTesting,
     )
     with FlagCloseable {

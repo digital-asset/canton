@@ -358,7 +358,7 @@ class StateTransferBehaviorTest
       succeed
     }
 
-    "receiving a new epoch stored message" should {
+    "receiving an internal new epoch stored message" should {
       "set the epoch state, communicate the membership to the P2P output module, " +
         "clean up the postponed message queue, and start state-transferring the epoch" in {
           val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]

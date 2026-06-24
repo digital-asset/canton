@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SubmissionTrackerStore
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
@@ -21,6 +22,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 
 class InMemorySubmissionTrackerStore(
+    override val psid: PhysicalSynchronizerId,
     override protected val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 )(implicit

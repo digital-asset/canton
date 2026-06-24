@@ -519,7 +519,7 @@ private[validation] object Typing {
     private def checkChoice(tplId: TypeConId, choice: TemplateChoice): Unit =
       choice match {
         case TemplateChoice(
-              name @ _,
+              name,
               consuming @ _,
               controllers,
               choiceObservers,
@@ -529,16 +529,18 @@ private[validation] object Typing {
               returnType,
               update,
             ) =>
-          checkType(paramType, KStar)
-          checkType(returnType, KStar)
-          introExprVar(param, paramType).checkTopExpr(controllers, TParties)
+          val env = this.copy(ctx = Context.Reference(Reference.TemplateChoice(tplId, name)))
+          env.checkType(paramType, KStar)
+          env.checkType(returnType, KStar)
+          env.introExprVar(param, paramType).checkTopExpr(controllers, TParties)
           choiceObservers.foreach(
-            introExprVar(param, paramType).checkTopExpr(_, TParties)
+            env.introExprVar(param, paramType).checkTopExpr(_, TParties)
           )
           choiceAuthorizers.foreach(
-            introExprVar(param, paramType).checkTopExpr(_, TParties)
+            env.introExprVar(param, paramType).checkTopExpr(_, TParties)
           )
-          introExprVar(selfBinder, TContractId(TTyCon(tplId)))
+          env
+            .introExprVar(selfBinder, TContractId(TTyCon(tplId)))
             .introExprVar(param, paramType)
             .checkTopExpr(update, TUpdate(returnType))
           ()

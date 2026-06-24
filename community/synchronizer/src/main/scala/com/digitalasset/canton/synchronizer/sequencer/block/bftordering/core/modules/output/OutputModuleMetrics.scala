@@ -8,7 +8,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.CompleteBlockData
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderingMode
 
 import java.time.{Duration, Instant}
 
@@ -25,10 +25,10 @@ private[output] object OutputModuleMetrics {
     val requestsOrdered = requests.length.toLong
     val batchesOrdered = orderedBlockData.batches.length.toLong
     val blockMode =
-      orderedBlockData.orderedBlockForOutput.mode match {
-        case OrderedBlockForOutput.Mode.FromConsensus =>
+      orderedBlockData.orderedBlockForOutput.orderingMode match {
+        case OrderingMode.Consensus =>
           metrics.output.labels.mode.values.Consensus
-        case OrderedBlockForOutput.Mode.FromStateTransfer =>
+        case OrderingMode.StateTransfer =>
           metrics.output.labels.mode.values.StateTransfer
       }
     val outputMc = mc.withExtraLabels(metrics.output.labels.mode.Key -> blockMode)

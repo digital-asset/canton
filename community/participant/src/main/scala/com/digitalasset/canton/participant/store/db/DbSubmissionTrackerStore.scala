@@ -18,6 +18,7 @@ import com.digitalasset.canton.store.{
   IndexedString,
   PrunableByTimeParameters,
 }
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import slick.jdbc.SetParameter
 import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.actionBasedSQLInterpolationCanton
@@ -34,6 +35,8 @@ class DbSubmissionTrackerStore(
     extends SubmissionTrackerStore
     with DbPrunableByTimeSynchronizer[IndexedPhysicalSynchronizer]
     with DbStore {
+
+  override def psid: PhysicalSynchronizerId = indexedSynchronizer.psid
 
   override protected[this] implicit def setParameterIndexedSynchronizer
       : SetParameter[IndexedPhysicalSynchronizer] = IndexedString.setParameterIndexedString

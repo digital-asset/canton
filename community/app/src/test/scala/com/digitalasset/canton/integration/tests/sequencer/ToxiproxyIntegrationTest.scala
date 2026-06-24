@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.SequencerReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -83,7 +84,15 @@ abstract class ToxiproxyIntegrationTest
             // Use a threshold of two to ensure that the mediator connects to all sequencers.
             // TODO(#19911) Reduce to one again once this can be configured independently.
             Some(
-              testMediators.map(_ -> (testSequencers, PositiveInt.two, NonNegativeInt.zero)).toMap
+              testMediators
+                .map(
+                  _ -> MediatorSequencersConfiguration(
+                    testSequencers,
+                    trustThreshold = PositiveInt.two,
+                    livenessMargin = NonNegativeInt.zero,
+                  )
+                )
+                .toMap
             ),
         )
         NetworkBootstrapper(Seq(description))

@@ -128,6 +128,7 @@ object PartyOps {
             updatedPTP,
             serial = nextSerial,
             signingKeys = Seq.empty,
+            namespacesToSignFor = Seq.empty,
             synchronizerId.protocolVersion,
             expectFullAuthorization = true,
             waitToBecomeEffective = None,
@@ -187,7 +188,8 @@ object PartyOps {
             topologyManager
               .extendSignature(
                 signed,
-                Seq(participantId.fingerprint),
+                signingKeys = Seq.empty,
+                namespacesToSignFor = Seq(participantId.namespace),
                 ForceFlags.none,
               )
               .map(Some(_))
@@ -199,7 +201,8 @@ object PartyOps {
                 op = TopologyChangeOp.Replace,
                 mapping = unsigned.mapping,
                 serial = Some(unsigned.serial),
-                signingKeys = Seq(participantId.fingerprint),
+                signingKeys = Seq.empty,
+                namespacesToSignFor = Seq(participantId.namespace),
                 protocolVersion = synchronizerId.protocolVersion,
                 expectFullAuthorization = false,
                 waitToBecomeEffective = None,

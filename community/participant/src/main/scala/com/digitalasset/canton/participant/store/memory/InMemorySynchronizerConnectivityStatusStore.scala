@@ -44,7 +44,7 @@ class InMemorySynchronizerConnectivityStatusStore extends SynchronizerConnectivi
     FutureUnlessShutdown.unit
   }
 
-  override def isTopologyInitialized(implicit
+  override def isTopologyInitialized()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
     FutureUnlessShutdown.pure(topologyInitialized.get)

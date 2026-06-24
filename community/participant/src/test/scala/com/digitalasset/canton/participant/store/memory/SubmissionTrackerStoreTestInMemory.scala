@@ -4,11 +4,16 @@
 package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.participant.store.SubmissionTrackerStoreTest
+import com.digitalasset.canton.topology.DefaultTestIdentities
 
 final class SubmissionTrackerStoreTestInMemory extends SubmissionTrackerStoreTest {
   "InMemorySubmissionTrackerStore" should {
     behave like submissionTrackerStore(() =>
-      new InMemorySubmissionTrackerStore(loggerFactory, timeouts)
+      new InMemorySubmissionTrackerStore(
+        DefaultTestIdentities.physicalSynchronizerId,
+        loggerFactory,
+        timeouts,
+      )
     )
   }
 }

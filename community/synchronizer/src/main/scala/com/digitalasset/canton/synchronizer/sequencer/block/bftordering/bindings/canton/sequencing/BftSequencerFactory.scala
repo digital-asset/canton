@@ -5,12 +5,14 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
+import com.digitalasset.canton.synchronizer.block.update.BlockProcessingParameters
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.TestingInterceptor
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
@@ -117,9 +119,10 @@ class BftSequencerFactory(
       health: Option[SequencerHealthConfig],
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
-      orderingTimeFixMode: OrderingTimeFixMode,
-      synchronizerLoggerFactory: NamedLoggerFactory,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      parallelism: PositiveInt,
+      enablePrevalidation: Boolean,
+      synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
       ec: ExecutionContextExecutor,
@@ -142,12 +145,16 @@ class BftSequencerFactory(
       health,
       clock,
       rateLimitManager,
-      orderingTimeFixMode,
-      lsuSequencingBounds,
+      BlockProcessingParameters(
+        orderingTimeFixMode,
+        lsuSequencingBounds,
+        parallelism = parallelism,
+        enablePrevalidation = enablePrevalidation,
+      ),
+      nodeParameters,
       metrics,
       synchronizerLoggerFactory,
       runtimeReady = runtimeReady,
-      nodeParameters,
     )
 }
 

@@ -360,7 +360,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
     synchronizeWithClosing("check-for-synchronizer-topology-initialization")(
-      EitherT.right[SynchronizerRegistryError](connectivityStatusStore.isTopologyInitialized)
+      EitherT.right[SynchronizerRegistryError](connectivityStatusStore.isTopologyInitialized())
     ).flatMap {
       case true =>
         EitherT.right[SynchronizerRegistryError](FutureUnlessShutdown.unit)
@@ -521,7 +521,7 @@ object SynchronizerRegistryHelpers {
       predecessorSyncStateO
         .traverse_ { case (predecessor, predecessorSyncState) =>
           for {
-            isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized
+            isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized()
 
             shouldCopyTopology = !isTopologyInitialized && !predecessor.isLateUpgrade
             _ <-

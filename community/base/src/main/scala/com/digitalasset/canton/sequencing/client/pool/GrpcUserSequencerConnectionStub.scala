@@ -91,9 +91,8 @@ class GrpcUserSequencerConnectionStub(
             SendAsyncRequest(signedSubmissionRequest = request.toByteString)
           )
         )
-        .leftMap(
-          SequencerConnectionStubError.ConnectionError.apply
-        )
+        .leftMap(SequencerConnectionStubError.ConnectionError.apply)
+
     } yield ()
   }
 

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.block.update
 
 import cats.data.EitherT
-import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.SyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -15,6 +14,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   MemberRecipientOrBroadcast,
   SubmissionRequest,
 }
+import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGenerator.AccumulatedStateProcessingBlocks
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.topology.SequencerId
@@ -24,7 +24,7 @@ import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 
 import scala.concurrent.ExecutionContext
 
-import BlockUpdateGeneratorImpl.{PrevalidationOutcome, SequencedPreValidatedSubmissionResult, State}
+import BlockUpdateGeneratorImpl.{PrevalidationOutcome, SequencedPreValidatedSubmissionResult}
 import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 import SubmissionRequestValidator.{SubmissionRequestValidationResult, TrafficConsumption}
 
@@ -46,7 +46,7 @@ private[update] final class SequencedSubmissionsValidator(
 ) extends NamedLogging {
 
   def sequentialApplySubmissionsAndEmitOutcomes(
-      state: State,
+      state: AccumulatedStateProcessingBlocks,
       height: Long,
       sequencedValidatedSubmissions: Seq[SequencedPreValidatedSubmissionResult],
   )(implicit ec: ExecutionContext): FutureUnlessShutdown[SequencedSubmissionsValidationResult] =

@@ -18,11 +18,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ViewNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput.Mode.FromConsensus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output.{
@@ -191,7 +191,7 @@ class BlocksRecoveredFromConsensusMessagesTest extends AnyWordSpecLike with BftS
       ViewNumber.First,
       BftNodeId("node"),
       isLastInEpoch = true,
-      FromConsensus,
+      OrderingMode.Consensus,
     )
 }
 

@@ -84,6 +84,7 @@ import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDri
 import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, PublicServerConfig}
 import com.digitalasset.canton.synchronizer.mediator.{
   DeduplicationStoreConfig,
+  DelayedVerdictSenderConfig,
   MediatorConfig,
   MediatorNodeConfig,
   MediatorNodeParameterConfig,
@@ -114,6 +115,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.time.DisasterRecoverySequencingTimeUpperBound
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
+import com.digitalasset.canton.tea.TrafficEnforcementConfig
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
 import com.digitalasset.canton.version.ParticipantProtocolVersion
@@ -552,11 +554,14 @@ final case class CantonConfig(
             .map(DisasterRecoverySequencingTimeUpperBound(_)),
         delayRequestsBeforeLsuTrafficInit =
           sequencerNodeConfig.parameters.delayRequestsBeforeLsuTrafficInit,
+        enableRejectDeliveredAggregationsOnPv35 =
+          sequencerNodeConfig.parameters.enableRejectDeliveredAggregationsOnPv35,
         disableSubmissionChecksForTesting =
           sequencerNodeConfig.parameters.disableSubmissionChecksForTesting,
         disableReleaseVersionHandshakeCheck =
           sequencerNodeConfig.parameters.disableReleaseVersionHandshakeCheck,
         lsuConfig = sequencerNodeConfig.parameters.lsu,
+        enablePrevalidation = sequencerNodeConfig.parameters.enablePrevalidation,
       )
 
     }
@@ -572,6 +577,7 @@ final case class CantonConfig(
       MediatorNodeParameters(
         general = CantonNodeParameterConverter.general(this, mediatorNodeConfig),
         protocol = CantonNodeParameterConverter.protocol(this, mediatorNodeConfig.parameters),
+        delayedVerdictSender = mediatorNodeConfig.parameters.delayedVerdictSender,
       )
     }
 
@@ -1296,9 +1302,15 @@ object CantonConfig {
 
     lazy implicit final val remoteSequencerConfigReader: ConfigReader[RemoteSequencerConfig] =
       deriveReader[RemoteSequencerConfig]
+
     lazy implicit final val mediatorNodeParameterConfigReader
-        : ConfigReader[MediatorNodeParameterConfig] =
+        : ConfigReader[MediatorNodeParameterConfig] = {
+      implicit val verdictSenderReaderConfig: ConfigReader[DelayedVerdictSenderConfig] = {
+        import NonNegativeNumeric.*
+        deriveReader[DelayedVerdictSenderConfig]
+      }
       deriveReader[MediatorNodeParameterConfig]
+    }
 
     lazy implicit final val mediatorConfigReader: ConfigReader[MediatorConfig] = {
       implicit val mediatorPruningConfigReader: ConfigReader[MediatorPruningConfig] =
@@ -1650,6 +1662,13 @@ object CantonConfig {
       import DeclarativeSequencerConfig.Readers.*
       deriveReader[SequencerNodeConfig]
     }
+
+    lazy implicit val trafficEnforcementConfigInternalReader
+        : ConfigReader[TrafficEnforcementConfig.Internal] =
+      deriveReader[TrafficEnforcementConfig.Internal]
+
+    lazy implicit val trafficEnforcementConfigReader: ConfigReader[TrafficEnforcementConfig] =
+      deriveReader[TrafficEnforcementConfig]
   }
 
   private implicit def cantonConfigReader(implicit
@@ -2141,8 +2160,11 @@ object CantonConfig {
       deriveWriter[MediatorConfig]
     }
     lazy implicit final val mediatorNodeParameterConfigWriter
-        : ConfigWriter[MediatorNodeParameterConfig] =
+        : ConfigWriter[MediatorNodeParameterConfig] = {
+      implicit val verdictSenderConfigWriter: ConfigWriter[DelayedVerdictSenderConfig] =
+        deriveWriter[DelayedVerdictSenderConfig]
       deriveWriter[MediatorNodeParameterConfig]
+    }
     lazy implicit final val remoteMediatorConfigWriter: ConfigWriter[RemoteMediatorConfig] =
       deriveWriter[RemoteMediatorConfig]
 
@@ -2354,6 +2376,13 @@ object CantonConfig {
       import DeclarativeSequencerConfig.Writers.*
       deriveWriter[SequencerNodeConfig]
     }
+
+    lazy implicit val trafficEnforcementConfigInternalWriter
+        : ConfigWriter[TrafficEnforcementConfig.Internal] =
+      deriveWriter[TrafficEnforcementConfig.Internal]
+
+    lazy implicit val trafficEnforcementConfigWriter: ConfigWriter[TrafficEnforcementConfig] =
+      deriveWriter[TrafficEnforcementConfig]
   }
 
   private def makeWriter(confidential: Boolean): ConfigWriter[CantonConfig] = {

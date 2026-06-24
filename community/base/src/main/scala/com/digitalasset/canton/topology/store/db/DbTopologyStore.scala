@@ -1455,8 +1455,8 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         }
     } yield {
       logger.info(
-        if (deleted > 0) s"Deleted chunk of $deleted from topology store $storeId."
-        else s"No chunk to delete from topology store $storeId."
+        if (deleted > 0) s"Deleted chunk of $deleted from topology store"
+        else s"No chunk to delete from topology store."
       )
       deleted > 0
     }

@@ -504,6 +504,7 @@ commands:
             - execute_sbt_command:
                 cmd: publishToSonatype
                 fail_on_error_in_output: false
+                timeout: 60m
     publish_release_on_artifactory:
         parameters:
             nightly_release:

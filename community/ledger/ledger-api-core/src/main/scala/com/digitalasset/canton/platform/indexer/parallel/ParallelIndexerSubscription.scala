@@ -935,9 +935,13 @@ object ParallelIndexerSubscription {
             )
             .toVector
         lastActivationsWithInternalContractIds <-
-          dbDispatcher.executeSql(metrics.index.db.lookupLastActivationsDbMetrics)(
-            lastActivations(missingActivationsWithInternalContractIds)
-          )
+          if (missingActivationsWithInternalContractIds.isEmpty) {
+            Future.successful(Map.empty[(SynchronizerId, Long), Long])
+          } else {
+            dbDispatcher.executeSql(metrics.index.db.lookupLastActivationsDbMetrics)(
+              lastActivations(missingActivationsWithInternalContractIds)
+            )
+          }
         updatedMissingDeactivatedActivations =
           missingActivations.view
             .map(synCon =>

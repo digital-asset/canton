@@ -12,6 +12,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.UnknownContractSynchronizers
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -102,8 +103,11 @@ sealed trait ToxiproxyBftSequencerConnectionsIntegrationTest
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
-                mediator1 -> (sequencers.local,
-                /* trust threshold */ PositiveInt.two, /* liveness margin */ NonNegativeInt.zero)
+                mediator1 -> MediatorSequencersConfiguration(
+                  sequencers.local,
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               )
             ),
           )

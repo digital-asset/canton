@@ -263,6 +263,7 @@ class PackageOpsTest extends PackageOpsTestBase {
               any[TopologyMapping],
               any[Option[PositiveInt]],
               any[Seq[Fingerprint]],
+              any[Seq[Namespace]],
               any[ProtocolVersion],
               anyBoolean,
               any[ForceFlags],
@@ -320,6 +321,7 @@ class PackageOpsTest extends PackageOpsTestBase {
               any[TopologyMapping],
               any[Option[PositiveInt]],
               any[Seq[Fingerprint]],
+              any[Seq[Namespace]],
               any[ProtocolVersion],
               anyBoolean,
               any[ForceFlags],
@@ -465,6 +467,7 @@ class PackageOpsTest extends PackageOpsTestBase {
             )
           ),
           eqTo(Some(txSerial.tryAdd(1))),
+          eqTo(Seq.empty),
           eqTo(Seq.empty),
           eqTo(testedProtocolVersion),
           eqTo(true),

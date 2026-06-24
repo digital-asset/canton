@@ -260,6 +260,8 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
 
   def predecessor: Option[SynchronizerPredecessor]
 
+  def name: String = s"topology-store ($storeId)"
+
   /** fetch the effective time updates greater than or equal to a certain timestamp
     *
     * this function is used to recover the future effective timestamp such that we can reschedule
