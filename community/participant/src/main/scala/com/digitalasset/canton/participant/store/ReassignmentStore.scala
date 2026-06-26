@@ -149,6 +149,7 @@ object ReassignmentStore {
         }
         .groupBy { case (event, _) => event.reassignmentInfo.targetSynchronizer }
         .toList
+        // TODO(#24573): add and use a parallelism limit (DB write)
         .parTraverse_ { case (targetSynchronizer, eventsForSynchronizer) =>
           lazy val updates = eventsForSynchronizer
             .map { case (event, offset) =>

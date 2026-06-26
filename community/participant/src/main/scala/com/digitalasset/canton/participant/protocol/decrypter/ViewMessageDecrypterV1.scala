@@ -6,9 +6,7 @@ package com.digitalasset.canton.participant.protocol.decrypter
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{
@@ -46,7 +44,7 @@ import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -112,7 +110,9 @@ class ViewMessageDecrypterV1(
 
     EitherT.right(for {
       // Extract randomness from EncryptedViewMessages
-      _ <- messagesWithRecipients.toNEF.parTraverse { case (message, recipients) =>
+      _ <- MonadUtil.parTraverseWithLimit_(pureCrypto.encryptionParallelism)(
+        messagesWithRecipients.toSeq
+      ) { case (message, recipients) =>
         // For multi-view messages, let's put the randomness for all the hashes
         val viewHashes = message.viewHashes
         extractRandomnessFromEnvelope(message, recipients).map { randomnessO =>
@@ -125,8 +125,10 @@ class ViewMessageDecrypterV1(
       }
 
       // Decrypt LightTransactionViewTrees and keep adding randomness to randomnessMap whenever they become available.
-      decryptionResult <- messagesWithRecipients.toNEF
-        .parTraverse { case (message, recipients) =>
+      decryptionResult <- MonadUtil
+        .parTraverseWithLimit(pureCrypto.encryptionParallelism)(
+          messagesWithRecipients.toSeq
+        ) { case (message, recipients) =>
           // Transform single view to a list for a compatibility with the v35+ multi-view result
           decryptViews(randomnessMap, message, recipients).map {
             case Left(error) => Seq(Left(error))
@@ -134,7 +136,7 @@ class ViewMessageDecrypterV1(
               views.forgetNE.map(view => Right(view))
           }
         }
-        .map(_.forgetNE.flatten)
+        .map(_.flatten)
 
     } yield DecryptedViews(decryptionResult))
   }

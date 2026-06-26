@@ -41,14 +41,14 @@ import scala.jdk.CollectionConverters.*
 
 /** Performs DB migrations using Flyway.
   *
-  * @param alphaVersionSupport
+  * @param devVersionSupport
   *   Whether we want to add the schema files found in the dev folder to the migration. A user that
   *   does that, won't be able to upgrade to new Canton versions, as we reserve our right to just
   *   modify the dev version files in any way we like.
   */
 class DbMigrations(
     dbConfig: DbConfig,
-    alphaVersionSupport: Boolean,
+    devVersionSupport: Boolean,
     timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, closeContext: CloseContext)
@@ -66,7 +66,7 @@ class DbMigrations(
 
   protected def createFlywayConfig(dataSource: DataSource): FluentConfiguration =
     Flyway.configure
-      .locations(dbConfig.buildMigrationsPaths(alphaVersionSupport)*)
+      .locations(dbConfig.buildMigrationsPaths(devVersionSupport)*)
       .dataSource(dataSource)
       .cleanDisabled(!dbConfig.parameters.unsafeCleanOnValidationError)
       .baselineOnMigrate(dbConfig.parameters.unsafeBaselineOnMigrate)
@@ -385,13 +385,13 @@ object DbMigrations {
 
   def create(
       dbConfig: DbConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, closeContext: CloseContext): DbMigrations =
     new DbMigrations(
       dbConfig,
-      alphaVersionSupport,
+      devVersionSupport,
       timeouts,
       loggerFactory,
     )

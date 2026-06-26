@@ -83,6 +83,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         ProcessingTimeout()
       ),
       protocol = CantonNodeParameters.Protocol.Impl(
+        devVersionSupport = false,
         alphaVersionSupport = false,
         betaVersionSupport = true,
         dontWarnOnDeprecatedPV = false,

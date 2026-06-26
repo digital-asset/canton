@@ -316,6 +316,9 @@ object ThreadingConfig {
   *   Start up to N nodes in parallel (default is num-threads)
   * @param nonStandardConfig
   *   don't fail config validation on non-standard configuration settings
+  * @param devVersionSupport
+  *   If true, allow synchronizer nodes to use dev protocol versions and participant nodes to
+  *   connect to such synchronizers
   * @param alphaVersionSupport
   *   If true, allow synchronizer nodes to use alpha protocol versions and participant nodes to
   *   connect to such synchronizers
@@ -345,6 +348,7 @@ final case class CantonParameters(
     manualStart: Boolean = false,
     startupParallelism: Option[PositiveInt] = None,
     nonStandardConfig: Boolean = false,
+    devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,
     betaVersionSupport: Boolean = false,
     portsFile: Option[String] = None,
@@ -360,6 +364,8 @@ final case class CantonParameters(
     threading: ThreadingConfig = ThreadingConfig(),
     failOnUnknownConfigKeys: Boolean = true,
 ) {
+  def devOrAlphaVersionSupport: Boolean = devVersionSupport || alphaVersionSupport
+
   def getStartupParallelism(numThreads: PositiveInt): PositiveInt =
     startupParallelism.getOrElse(numThreads)
 }
@@ -490,6 +496,7 @@ final case class CantonConfig(
         stores = participantParameters.stores,
         protocolConfig = ParticipantProtocolConfig(
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
+          devVersionSupport = participantParameters.devVersionSupport,
           alphaVersionSupport = participantParameters.alphaVersionSupport,
           betaVersionSupport = participantParameters.betaVersionSupport,
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
@@ -724,6 +731,7 @@ private[canton] object CantonNodeParameterConverter {
 
   def protocol(parent: CantonConfig, config: ProtocolConfig): CantonNodeParameters.Protocol =
     CantonNodeParameters.Protocol.Impl(
+      devVersionSupport = parent.parameters.devVersionSupport || config.devVersionSupport,
       alphaVersionSupport = parent.parameters.alphaVersionSupport || config.alphaVersionSupport,
       betaVersionSupport = parent.parameters.betaVersionSupport || config.betaVersionSupport,
       dontWarnOnDeprecatedPV = config.dontWarnOnDeprecatedPV,

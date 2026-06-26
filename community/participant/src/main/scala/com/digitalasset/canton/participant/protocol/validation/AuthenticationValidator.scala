@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.either.*
-import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{
@@ -42,6 +41,7 @@ import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.concurrent.ExecutionContext
@@ -119,34 +119,35 @@ private[protocol] object AuthenticationValidator {
 
     // Verify participant and external party signatures on all root views
     def verifyRootViewSignatures =
-      parsedRequest.rootViewTreesWithSignatures.forgetNE.parTraverse {
-        case (rootView, signatureO) =>
-          rootView.submitterMetadataO match {
-            // RootHash -> is a blinded tree
-            case None => FutureUnlessShutdown.pure(Right(None))
-            case Some(submitterMetadata) =>
-              for {
-                participantSignatureError <- verifyParticipantSignatureForRootView(
-                  rootView,
-                  signatureO,
-                  submitterMetadata.submittingParticipant,
-                )
-                externalSignatureValidation <- verifyExternalPartySignatureForRootView(
-                  rootView,
-                  submitterMetadata,
-                )
-              } yield {
-                participantSignatureError match {
-                  case Some(error) => error.asLeft[Option[(ViewPosition, Hash)]]
-                  case None =>
-                    // Attach the corresponding view position both in case of error and external hash
-                    externalSignatureValidation.bimap(
-                      rootView.viewPosition -> _,
-                      _.map(rootView.viewPosition -> _),
-                    )
-                }
+      MonadUtil.parTraverseWithLimit(
+        parsedRequest.snapshot.pureCrypto.signatureVerificationParallelism
+      )(parsedRequest.rootViewTreesWithSignatures.toSeq) { case (rootView, signatureO) =>
+        rootView.submitterMetadataO match {
+          // RootHash -> is a blinded tree
+          case None => FutureUnlessShutdown.pure(Right(None))
+          case Some(submitterMetadata) =>
+            for {
+              participantSignatureError <- verifyParticipantSignatureForRootView(
+                rootView,
+                signatureO,
+                submitterMetadata.submittingParticipant,
+              )
+              externalSignatureValidation <- verifyExternalPartySignatureForRootView(
+                rootView,
+                submitterMetadata,
+              )
+            } yield {
+              participantSignatureError match {
+                case Some(error) => error.asLeft[Option[(ViewPosition, Hash)]]
+                case None =>
+                  // Attach the corresponding view position both in case of error and external hash
+                  externalSignatureValidation.bimap(
+                    rootView.viewPosition -> _,
+                    _.map(rootView.viewPosition -> _),
+                  )
               }
-          }
+            }
+        }
       }
 
     for {

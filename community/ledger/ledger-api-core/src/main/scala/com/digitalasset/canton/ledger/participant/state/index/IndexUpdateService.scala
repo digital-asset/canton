@@ -8,9 +8,10 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdatesPageResponse,
   GetUpdatesResponse,
 }
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.UpdateFormat
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
+import com.digitalasset.canton.ledger.participant.state.AcsChange
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
@@ -56,6 +57,7 @@ object IndexUpdateService {
   object UpdateResponse {
     final case class ProtoUpdate(response: GetUpdatesResponse) extends UpdateResponse
     final case class AcsCommitment(commitment: ReceivedAcsCommitment) extends UpdateResponse
+    final case class AcsChange(change: AcsChangeUpdate) extends UpdateResponse
   }
 
   final case class ReceivedAcsCommitment(
@@ -63,6 +65,13 @@ object IndexUpdateService {
       synchronizerId: String,
       recordTime: Timestamp,
       payload: ByteString,
+      traceContext: TraceContext,
+  )
+
+  final case class AcsChangeUpdate(
+      acsChange: AcsChange,
+      offset: Offset,
+      recordTime: CantonTimestamp,
       traceContext: TraceContext,
   )
 }

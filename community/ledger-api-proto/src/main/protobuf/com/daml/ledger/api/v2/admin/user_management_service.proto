@@ -166,6 +166,10 @@ message Right {
   // on behalf of many parties.
   message CanExecuteAsAnyParty {}
 
+  // The right of a user to authorize commands as any party on a participant.
+  // Its utility is predominantly for users that act on behalf of many parties.
+  message CanActAsAnyParty {}
+
   // Required
   oneof kind {
     // The user can administer the participant node.
@@ -182,6 +186,8 @@ message Right {
     CanExecuteAs can_execute_as = 6;
     // The user can prepare and execute submissions as any party on a participant.
     CanExecuteAsAnyParty can_execute_as_any_party = 7;
+    // The user can act as any party on a participant.
+    CanActAsAnyParty can_act_as_any_party = 8;
   }
 }
 

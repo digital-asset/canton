@@ -184,7 +184,7 @@ abstract class LsuRollForwardIntegrationTest
         _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeExclusive)
           .replace(Some(maxSequencingTime))
       ),
-    ) ++ ConfigTransforms.enableAlphaVersionSupport
+    ) ++ ConfigTransforms.enableDevVersionSupport
   }
 
   private var fixture1: Fixture = _

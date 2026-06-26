@@ -80,12 +80,10 @@ import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceInte
 }
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.UseTls
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetAfterLedgerEnd
-import com.digitalasset.canton.ledger.service.MetadataReader
 import com.digitalasset.canton.logging.NamedLogging.loggerWithoutTracing
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.tracing.{SerializableTraceContextConverter, W3CTraceContext}
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.google.protobuf
 import com.google.protobuf.ByteString
@@ -641,14 +639,9 @@ class JsonV2Tests
 
   "command service" should {
     "create commands and return proper traceContext" in httpTestFixture { fixture =>
-      val metadataDar1: MetadataReader.LfMetadata =
-        MetadataReader.readFromDar(dar1).valueOr(e => fail(s"Cannot read dar1 metadata: $e"))
-
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
-        val iouPkgId: PackageId = MetadataReader
-          .templateByName(metadataDar1)(Ref.QualifiedName.assertFromString("Iou:Iou"))
-          .head
-          ._1
+        val iouPkgId =
+          packagesContainingTemplate(dar1, Ref.QualifiedName.assertFromString("Iou:Iou")).head
         var sId = 0
 
         def jsCommands(jsCommand: JsCommand.Command) = {
@@ -1892,12 +1885,8 @@ class JsonV2Tests
       commandId: String = "someexecommandid",
       userId: String = "defaultuser1",
   ): Future[(Json, Long)] = {
-    val metadataDar1 =
-      MetadataReader.readFromDar(dar1).valueOr(e => fail(s"Cannot read dar1 metadata: $e"))
-    val iouPkgId = MetadataReader
-      .templateByName(metadataDar1)(Ref.QualifiedName.assertFromString("Iou:Iou"))
-      .head
-      ._1
+    val iouPkgId =
+      packagesContainingTemplate(dar1, Ref.QualifiedName.assertFromString("Iou:Iou")).head
 
     val exerciseCommand = JsCommand.ExerciseCommand(
       templateId = Identifier(iouPkgId, "Iou", "Iou"),
@@ -1927,12 +1916,8 @@ class JsonV2Tests
       commandId: String = "somecommandid",
       userId: String = "defaultuser1",
   ): Future[(String, Long)] = {
-    val metadataDar1 =
-      MetadataReader.readFromDar(dar1).valueOr(e => fail(s"Cannot read dar1 metadata: $e"))
-    val iouPkgId = MetadataReader
-      .templateByName(metadataDar1)(Ref.QualifiedName.assertFromString("Iou:Iou"))
-      .head
-      ._1
+    val iouPkgId =
+      packagesContainingTemplate(dar1, Ref.QualifiedName.assertFromString("Iou:Iou")).head
 
     val createCommand = JsCommand.CreateCommand(
       templateId = Identifier(iouPkgId, "Iou", "Iou"),

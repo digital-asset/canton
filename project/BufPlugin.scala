@@ -72,8 +72,10 @@ object BufPlugin extends AutoPlugin {
                 Process(Seq("ls", "-la", file)).!(pLogger)
                 log.info(s"Running 'cat $file'...")
                 Process(Seq("cat", file)).!(pLogger)
-                log.info("Running 'which sh'...")
-                Process(Seq("which", "sh")).!(pLogger)
+                log.info("Running 'ls -la /bin/sh'...")
+                Process(Seq("ls", "-la", "/bin/sh")).!(pLogger)
+                log.info("Running 'mount | grep /tmp'...")
+                (Process("mount") #| Process(Seq("grep", "/tmp"))).!(pLogger)
               case None =>
                 log.error(s"Cannot find protocbridge from args")
             }

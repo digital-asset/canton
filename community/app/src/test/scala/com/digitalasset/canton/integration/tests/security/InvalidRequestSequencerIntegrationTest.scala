@@ -24,7 +24,7 @@ import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.Lost
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.version.ProtocolVersion
-import com.google.protobuf.ByteString
+import com.google.protobuf.{ByteString, UnsafeByteOperations}
 import io.grpc.{ConnectivityState, ManagedChannel, StatusRuntimeException}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
@@ -313,14 +313,23 @@ trait InvalidRequestSequencerDefaultLimitsIntegrationTest
     ) in { implicit env =>
     import env.*
 
-    // create a message payload of size 500MB (incompressible random data)
+    // Default max request size is 10mb, set the payload size to 11mb
+    val payloadSize = 11 * 1024 * 1024
+    val maxRequestSize = sequencer1.topology.synchronizer_parameters
+      .get_dynamic_synchronizer_parameters(daId)
+      .maxRequestSize
+      .unwrap
+    assert(payloadSize > maxRequestSize)
+
+    // create a message payload of size 20MB (incompressible random data)
     // A repeating payload does not work, as it gets compressed before being sent
-    val randomBytes = new Array[Byte](500 * 1024 * 1024)
+    val randomBytes = new Array[Byte](payloadSize)
     scala.util.Random.nextBytes(randomBytes)
 
     val bigEnvelope =
       ClosedUncompressedEnvelope.create(
-        ByteString.copyFrom(randomBytes),
+        // Safe to use unsafeWrap because randomBytes is not mutated after this point
+        UnsafeByteOperations.unsafeWrap(randomBytes),
         Recipients.cc(participant2.id),
         Seq.empty,
         testedProtocolVersion,
@@ -331,16 +340,13 @@ trait InvalidRequestSequencerDefaultLimitsIntegrationTest
       .focus(_.batch.envelopes)
       .replace(List(bigEnvelope))
 
-    // the default limit applied by the application layer service is 10MB
-    val defaultAppLimit = 10485760
-
     val responseF = SequencerTestHelper.sendSubmissionRequest(sequencerServiceStub, request)
 
     inside(responseF.failed.futureValue) { case ex: io.grpc.StatusRuntimeException =>
       // assert the error response on the client side, inside the rejection message
       ex.getStatus.getCode shouldBe io.grpc.Status.Code.RESOURCE_EXHAUSTED
       // assert no response from the application layer
-      ex.getMessage shouldNot include(s"The limit is $defaultAppLimit bytes.")
+      ex.getMessage shouldNot include(s"The limit is $maxRequestSize bytes.")
       // If the rejection is by the Netty gRPC server, we should see RESOURCE_EXHAUSTED.
       ex.getMessage should include("RESOURCE_EXHAUSTED")
     }

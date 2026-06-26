@@ -139,6 +139,7 @@ class ModelConformanceChecker(
           ],
       )
     ] = views
+      // TODO(#24573): add and use a parallelism limit
       .parTraverse { case (view, effects, viewPos, submittingParticipantO) =>
         for {
           wfTxE <- checkView(
@@ -246,6 +247,7 @@ class ModelConformanceChecker(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Map[PackageName, PackageId]] =
     EitherT(for {
+      // TODO(#24573): add and use a parallelism limit
       resolvedE <- packageIds.toSeq.parTraverse(pId =>
         packageResolver
           .resolve(
@@ -452,6 +454,7 @@ class ModelConformanceChecker(
           usedPackages.actionNodePackageIds
         }
       unvetted <- informeeParticipants.toSeq
+        // TODO(#24573): add and use a parallelism limit
         .parTraverse(p =>
           snapshot.loadUnvettedPackagesOrDependencies(
             participantId = p,
@@ -605,6 +608,7 @@ object ModelConformanceChecker {
         )
 
         enrichedInputContracts <- inputContracts.toList
+          // TODO(#24573): add and use a parallelism limit
           .parTraverse { case (cid, (inst, targetPackageIds)) =>
             contractEnricher((inst, targetPackageIds))(traceContext).map(cid -> _)
           }

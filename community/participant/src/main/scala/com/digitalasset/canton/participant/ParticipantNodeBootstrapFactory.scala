@@ -41,7 +41,7 @@ trait ParticipantNodeBootstrapFactory {
     ]
 
   protected def createEngine(arguments: Arguments): Engine = DAMLe.newEngine(
-    enableLfDev = arguments.parameterConfig.alphaVersionSupport,
+    enableLfDev = arguments.parameterConfig.devVersionSupport,
     enableLfBeta = arguments.parameterConfig.betaVersionSupport,
     enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
     profileDir = arguments.config.parameters.engine.profileDir,

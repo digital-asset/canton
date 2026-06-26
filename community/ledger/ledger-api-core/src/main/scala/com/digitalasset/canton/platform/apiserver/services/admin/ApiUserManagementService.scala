@@ -570,6 +570,9 @@ private[apiserver] final class ApiUserManagementService(
       case proto.Right(_: proto.Right.Kind.CanExecuteAsAnyParty) =>
         Right(UserRight.CanExecuteAsAnyParty)
 
+      case proto.Right(_: proto.Right.Kind.CanActAsAnyParty) =>
+        Right(UserRight.CanActAsAnyParty)
+
       case proto.Right(proto.Right.Kind.Empty) =>
         Left(
           RequestValidationErrors.InvalidArgument
@@ -627,6 +630,8 @@ object ApiUserManagementService {
       proto.Right(proto.Right.Kind.CanExecuteAs(proto.Right.CanExecuteAs(party)))
     case UserRight.CanExecuteAsAnyParty =>
       proto.Right(proto.Right.Kind.CanExecuteAsAnyParty(proto.Right.CanExecuteAsAnyParty()))
+    case UserRight.CanActAsAnyParty =>
+      proto.Right(proto.Right.Kind.CanActAsAnyParty(proto.Right.CanActAsAnyParty()))
   }
 
   def encodeNextPageToken(token: Option[Ref.UserId]): String =

@@ -164,5 +164,6 @@ object UserBasedClaimResolver {
     case UserRight.ParticipantAdmin => ClaimAdmin
     case UserRight.CanReadAsAnyParty => ClaimReadAsAnyParty
     case UserRight.CanExecuteAsAnyParty => ClaimExecuteAsAnyParty
+    case UserRight.CanActAsAnyParty => ClaimActAsAnyParty
   }
 }

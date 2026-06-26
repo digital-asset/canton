@@ -35,11 +35,12 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdPageQuery,
 }
 import com.digitalasset.canton.platform.store.dao.events.AcsCommitmentsStreamReader.AcsCommitmentsStreamQueryParams
-import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.TopologyTransactionsStreamQueryParams
-import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.{
-  VectorOps,
+import com.digitalasset.canton.platform.store.dao.events.OrderingUtils.{
+  offsetOrdering,
   orderingBasedOnDescending,
 }
+import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.TopologyTransactionsStreamQueryParams
+import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.VectorOps
 import com.digitalasset.canton.platform.store.dao.{DbDispatcher, PaginatingAsyncStream}
 import com.digitalasset.canton.platform.store.utils.{
   ConcurrencyLimiter,
@@ -130,6 +131,7 @@ class UpdatesStreamReader(
           }
         // TODO(#33238) verify whether we need trace identifiers for acs commitment updates
         case (_, UpdateResponse.AcsCommitment(_)) => ()
+        case (_, UpdateResponse.AcsChange(_)) => ()
       })
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -142,9 +144,6 @@ class UpdatesStreamReader(
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, UpdateResponse), NotUsed] = {
-    val longOrdering: Ordering[Long] =
-      orderingBasedOnDescending(descendingOrder = descendingOrder)
-
     val payloadQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelPayloadQueries, executionContext)
     val deserializationQueriesLimiter =
@@ -289,7 +288,7 @@ class UpdatesStreamReader(
               )
             )
           Flow[(Offset, UpdateResponse)].mergeSorted(acsCommitments)(
-            Ordering.by[(Offset, UpdateResponse), Long](_._1.unwrap)(longOrdering)
+            offsetOrdering[UpdateResponse](descendingOrder)
           )
         case None => Flow[(Offset, UpdateResponse)]
       }
@@ -324,7 +323,7 @@ class UpdatesStreamReader(
       }
       .mapConcat(identity)
       .mergeSorted(topologyTransactions)(
-        Ordering.by[(Offset, UpdateResponse), Long](_._1.unwrap)(longOrdering)
+        offsetOrdering[UpdateResponse](descendingOrder)
       )
       .via(acsCommitmentsFlow)
   }
@@ -995,11 +994,6 @@ class UpdatesStreamReader(
 }
 
 object UpdatesStreamReader {
-  def orderingBasedOnDescending(descendingOrder: Boolean): Ordering[Long] =
-    if (descendingOrder)
-      Ordering.Long.reverse
-    else
-      Ordering.Long
 
   final implicit class VectorOps[T](vec: Vector[T]) {
     def reverseIfDescendingOrder(descendingOrder: Boolean): Vector[T] =

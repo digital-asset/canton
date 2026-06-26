@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
   NonNegativeProportion,
@@ -86,10 +87,12 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration as JDuration, Instant}
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import scala.annotation.nowarn
 import scala.collection.immutable.{Seq, Set, SortedSet}
 import scala.concurrent.duration.*
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.Try
 
 @nowarn("msg=match may not be exhaustive")
 sealed trait AcsCommitmentProcessorBaseTest
@@ -823,6 +826,67 @@ sealed trait AcsCommitmentProcessorBaseTest
 
   protected val coid: (Int, Int) => LfContractId = (txId, discriminator) =>
     ExampleTransactionFactory.suffixedId(txId, discriminator)
+
+  /** Asynchronously polls a condition until it evaluates to true or retries are exhausted.
+    *
+    * Unlike standard blocking `eventually` loops (which use `Thread.sleep`), this method safely
+    * yields the thread between attempts using a background timer. This prevents thread starvation
+    * and deadlocks on single-threaded `ExecutionContext`s (e.g., in CI environments) by allowing
+    * pending background tasks to execute between checks.
+    *
+    * Decision note: If a test suite already mixes in `HasActorSystem`, this polling behavior could
+    * alternatively be achieved using Pekko Streams (e.g., `Source.tick`). However, bootstrapping a
+    * full `ActorSystem` solely for non-blocking delays introduces unnecessary setup/teardown
+    * latency and memory overhead for fast-running (unit) tests. This helper uses a lightweight
+    * `ScheduledExecutorService` to achieve the exact same non-blocking yield with a minimal
+    * footprint.
+    *
+    * @param condition
+    *   The boolean condition to evaluate.
+    * @param retries
+    *   The maximum number of times to check the condition before giving up.
+    * @param delay
+    *   The delay between each evaluation attempt.
+    * @return
+    *   A [[FutureUnlessShutdown]] that completes when the condition is met or retries are depleted.
+    */
+  protected def waitForConditionAsync(
+      condition: => Boolean,
+      retries: Int = 100,
+      delay: FiniteDuration = 200.millis,
+  )(implicit ec: ExecutionContext): FutureUnlessShutdown[Unit] = {
+    val scheduler = Threading.singleThreadScheduledExecutor(
+      s"${this.getClass.getSimpleName}-wait-for-async",
+      noTracingLogger,
+    )
+
+    def loop(remaining: Int): FutureUnlessShutdown[Unit] =
+      FutureUnlessShutdown
+        .fromTry(Try(condition))
+        .flatMap { ok =>
+          if (ok) FutureUnlessShutdown.unit
+          else if (remaining <= 0)
+            FutureUnlessShutdown.failed(
+              new AssertionError(
+                s"Condition was not met within $retries retries (delay: $delay)."
+              )
+            )
+          else {
+            val p = Promise[Unit]()
+            scheduler.schedule(
+              (() => { p.trySuccess(()); () }): Runnable,
+              delay.toMillis.max(0L),
+              TimeUnit.MILLISECONDS,
+            )
+            FutureUnlessShutdown.outcomeF(p.future).flatMap(_ => loop(remaining - 1))
+          }
+        }
+
+    FutureUnlessShutdown(loop(retries).unwrap.transform { result =>
+      scheduler.shutdown()
+      result
+    })
+  }
 }
 
 class AcsCommitmentProcessorTest
@@ -3707,6 +3771,22 @@ class AcsCommitmentProcessorTest
         })
       }
 
+      // TEST: Verify Catch-Up mode handles delayed counter-commitments gracefully.
+      //
+      // SCENARIO:
+      // 1. A "Fast Node" (remoteId1) sends a rapid sequence of commitments (ticks 5 to 30),
+      //    forcing the Local Node into Catch-Up mode.
+      // 2. To catch up, the Local Node skips fine-grained computations for intermediate ticks
+      //    (5, 15, 25) and records empty placeholders instead.
+      // 3. A "Slow Node" (remoteId2) eventually sends commitments specifically for
+      //    the skipped periods (10-15 and 20-25).
+      //
+      // EXPECTED BEHAVIOR:
+      // The Local Node must process the Slow Node's late commitments without failing or throwing
+      // false `NO_SHARED_CONTRACTS` errors (even though it skipped those exact computations).
+      // It must correctly persist the 3 skipped placeholders, store all received commitments,
+      // and successfully dispatch its 4 boundary/reply network sends.
+      //
       "not report errors about skipped commitments due to catch-up mode" in {
         val reconciliationInterval = 5L
         val timeProofs =
@@ -3850,6 +3930,11 @@ class AcsCommitmentProcessorTest
             processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
           _ <- processor.flush()
+
+          // Yield the thread to allow the single-threaded EC to process the background `send` tasks.
+          // processor.flush() only clears internal queues, so we must wait asynchronously for the
+          // 4th commitment (triggered by the catch-up mismatch) to reach the mock sequencer client.
+          _ <- waitForConditionAsync(sequencerClient.requests.sizeIs >= 4)
 
           outstanding <- store.noOutstandingCommitments(toc(30).timestamp)
           computed <- store

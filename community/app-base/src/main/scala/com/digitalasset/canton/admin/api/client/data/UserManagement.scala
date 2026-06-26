@@ -66,6 +66,7 @@ final case class UserRights(
     executeAs: Set[PartyId],
     readAsAnyParty: Boolean,
     executeAsAnyParty: Boolean,
+    actAsAnyParty: Boolean,
     participantAdmin: Boolean,
     identityProviderAdmin: Boolean,
 )
@@ -83,6 +84,7 @@ object UserRights {
             executeAs = Set(),
             readAsAnyParty = false,
             executeAsAnyParty = false,
+            actAsAnyParty = false,
             participantAdmin = false,
             identityProviderAdmin = false,
           )
@@ -99,6 +101,7 @@ object UserRights {
             acc.copy(identityProviderAdmin = true)
           case (acc, Kind.CanReadAsAnyParty(_)) => acc.copy(readAsAnyParty = true)
           case (acc, Kind.CanExecuteAsAnyParty(_)) => acc.copy(executeAsAnyParty = true)
+          case (acc, Kind.CanActAsAnyParty(_)) => acc.copy(actAsAnyParty = true)
         }
     )
 }

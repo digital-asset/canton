@@ -72,7 +72,7 @@ private[lsu] trait LsuBase
         // Retry more frequently so that eventually blocks don't need to wait for too long
         .replace(config.NonNegativeFiniteDuration.ofSeconds(2))
     ),
-  ) ++ ConfigTransforms.enableAlphaVersionSupport
+  ) ++ ConfigTransforms.enableDevVersionSupport
     ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
       // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
       config.NonNegativeFiniteDuration.ofHours(1)

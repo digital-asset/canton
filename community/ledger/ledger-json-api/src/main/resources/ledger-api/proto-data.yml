@@ -623,6 +623,253 @@ fileComments:
         comments: |-
           Prune the ledger specifying the offset before and at which ledger transactions should be removed. Only returns when
           the potentially long-running prune request ends successfully or with an error.
+  admin/party_management_alpha_service.proto:
+    messages:
+      AcsIndexingProgress:
+        message:
+          comments: Progress metrics for indexing the replication changes into the
+            Ledger API.
+          fieldComments: {}
+      AcsReplicationProgress:
+        message:
+          comments: Progress metrics for the active contract set replication.
+          fieldComments:
+            processed_contract_count: |-
+              The total number of ACS contracts persisted by the target participant.
+
+              Required
+            fully_processed_acs: |-
+              Indicates whether the ACS replication phase has fully completed.
+
+              Required
+      AddPartyArguments:
+        message:
+          comments: null
+          fieldComments:
+            source_participant_uid: |-
+              The unique identifier of a source participant already hosting the party.
+
+              Required
+            topology_serial: |-
+              TODO(#31414): Remove: Either by inferring it internally or require record time (validFrom of the effective topology transaction)
+              TODO(#31414): Ensure that it will work with offboarding and re-onboarding
+              The serial number of the PartyToParticipant topology transaction.
+              Maps the party to this target participant.
+
+              Required
+            synchronizer_id: |-
+              The identifier of the synchronizer where the party will be replicated.
+
+              Required
+            participant_permission: |-
+              TODO(#31414): Remove: Figure it out from the topology transaction
+              The permission level of the party on the target participant.
+
+              Required
+            party_id: |-
+              The identifier of the party to be replicated.
+
+              Required
+      AddPartyWithAcsRequest:
+        message:
+          comments: null
+          fieldComments:
+            acs_snapshot: |-
+              The raw binary data of the ACS snapshot to be imported.
+              Splits data arbitrarily across chunks based on gRPC message size limits.
+
+              Optional: can be empty
+            arguments: |-
+              The arguments used for request validation and initialization.
+              Requires presence in the first stream message and absence in subsequent messages.
+
+              Optional
+      AddPartyWithAcsResponse:
+        message:
+          comments: null
+          fieldComments:
+            add_party_request_id: |-
+              TODO(#31414): Remove request ID as it can be computed from already known arguments
+              The unique identifier used to track the add party request.
+
+              Required
+      ExportPartyAcsRequest:
+        message:
+          comments: null
+          fieldComments:
+            wait_for_activation_timeout: |-
+              TODO(#31414): Removable iff we use timestamp
+              The maximum duration to wait for the party's activation topology transaction.
+              Defaults to a system timeout if left unset.
+
+              Optional
+            synchronizer_id: |-
+              The identifier of the synchronizer managing the contracts to be exported.
+              Scopes the ACS export to contracts assigned to this synchronizer.
+
+              Required
+            target_participant_uid: |-
+              The unique identifier of the target participant where the party will be replicated.
+              Scopes the ACS export to contracts missing from this participant.
+
+              Required
+            party_id: |-
+              The identifier of the party being replicated.
+              Requires the party to be active on the target participant for the export to succeed.
+
+              Required
+            begin_offset_exclusive: |-
+              TODO(#31414): Remove: Possibly replace with a timestamp (record time); that is the validFrom of the effective topology PTP mapping transaction
+              The exclusive ledger offset used as the starting point for the export.
+              Locates the party's most recent activation on the target participant.
+
+              Required
+      ExportPartyAcsResponse:
+        message:
+          comments: null
+          fieldComments:
+            chunk: |-
+              A streamed chunk of the Active Contract Set (ACS) snapshot.
+              Contains raw binary Ledger API active contract messages wrapped in `ActiveContract`.
+
+              Optional: can be empty
+      GetAddPartyStatusRequest:
+        message:
+          comments: null
+          fieldComments:
+            add_party_request_id: |-
+              TODO(#31414): Replace with underlying request ID hash arguments to compute the ID internally as needed
+              The unique identifier tracking the add party request.
+
+              Required
+      GetAddPartyStatusResponse:
+        message:
+          comments: null
+          fieldComments:
+            status: Required
+      PartyReplicationAuthorization:
+        message:
+          comments: Onboarding authorizations provided by party owners and the target
+            participant.
+          fieldComments:
+            onboarding_at: |-
+              The timestamp when onboarding authorization becomes effective and the ACS snapshot is anchored.
+
+              Required
+            is_onboarding_flag_cleared: |-
+              Indicates whether the party is fully onboarded to the target participant.
+              Clears the onboarding flag to allow active processing of transactions.
+
+              Required
+      PartyReplicationError:
+        message:
+          comments: Error details populated when a replication fails or requires operator
+            intervention.
+          fieldComments:
+            error_message: |-
+              The descriptive error message.
+
+              Required
+      PartyReplicationStatus:
+        message:
+          comments: Describes the various lifecycle states of a party replication
+            operation.
+          fieldComments:
+            authorization: |-
+              Topology authorization details; set once the party is authorized on the target participant.
+
+              Optional
+            replication: |-
+              ACS replication progress; set once the data transfer begins.
+
+              Optional
+            error_message: |-
+              Diagnostic details; populated during transient or terminal failures.
+
+              Optional
+            parameters: |-
+              Static party replication parameters.
+
+              Required
+            indexing: |-
+              Indexing progress metrics; set once background ledger indexing begins.
+
+              Optional
+            has_completed: |-
+              Indicates whether the party replication operation has completed successfully.
+
+              Required
+      ReplicationParameters:
+        message:
+          comments: Static parameters that remain constant throughout the party replication
+            operation.
+          fieldComments:
+            source_participant_uid: Required
+            topology_serial: |-
+              TODO(#31414): Remove: Avoid leaking internal implementation detail
+
+              Required
+            synchronizer_id: Required
+            target_participant_uid: Required
+            request_id: Required
+            party_id: Required
+    oneOfs:
+      AddPartyArguments: {}
+      AddPartyWithAcsRequest: {}
+      AddPartyWithAcsResponse: {}
+      ExportPartyAcsRequest: {}
+      ExportPartyAcsResponse: {}
+      GetAddPartyStatusRequest: {}
+      GetAddPartyStatusResponse: {}
+      PartyReplicationStatus: {}
+    services:
+      PartyManagementAlphaService:
+      - name: ExportPartyAcs
+        comments: |-
+          Exports the specified party's Active Contract Set (ACS) in the specified synchronizer so that the party
+          along with the ACS can be added to the specified target participant using the 'AddPartyWithAcs' endpoint.
+          This request requires that the party has been authorized for onboarding to the target participant.
+
+          Returns the party's ACS effective at the onboarding authorization timestamp.
+      - name: AddPartyWithAcs
+        comments: |-
+          Adds a party already hosted on one or more source participants to this target participant
+          in the specified synchronizer, along with the party's provided Active Contract Set (ACS).
+
+          Behavioral Flow:
+
+          1. Topology Verification (Synchronous): Expects to find an authorized PTP (PartyToParticipant)
+             topology with the `onboarding` flag set. If this is missing or invalid, the call fails immediately.
+          2. ACS Import (Synchronous): Imports the ACS snapshot into the participant-internal stores and runs
+             associated payload validations.
+          3. Indexer Processing (Asynchronous): Proceeds to perform background processing, including
+             feeding the imported changes into the indexer.
+          4. Topology Finalization (Asynchronous): The target participant authorizes a final topology
+             change to clear the `onboarding` flag.
+
+          Retries and Idempotency: Safe to retry this endpoint.
+
+          Synchronous Failure Scenarios
+          The synchronous phase can fail and return an error due to:
+          - Validation Errors: For example, a missing an effective PTP topology transaction with set onboarding flag.
+          - Connectivity Issues: Loss of participant connectivity to the party replication synchronizer
+            during the synchronous window.
+          - Data Validation: Faults or internal store issues uncovered during the ACS payload import phase.
+
+          Security and Trust Notice:
+          This operation assumes full trust in the source participant to provide a complete and
+          untampered state. Because the target participant cannot independently verify the historical
+          provenance of the imported contracts, validation is performed on a best-effort basis.
+          Use only when the source participant is a known, trusted authority!
+
+          TODO(#31414): Address remaining idempotency semantics:
+          Currently, retrying this request after it has fully and successfully completed results in an error.
+          Update this implementation to make a successful retry a clean no-op instead of throwing a
+          "party already hosted" error.
+      - name: GetAddPartyStatus
+        comments: |-
+          Status endpoint that given an 'add_party_request_id' returns status information about progress,
+          completion, or errors of a previous call to 'AddPartyWithAcs' on the target participant.
   admin/party_management_service.proto:
     messages:
       AllocateExternalPartyRequest:
@@ -1053,6 +1300,12 @@ fileComments:
               The right to authorize commands for this party.
 
               Required
+      CanActAsAnyParty:
+        message:
+          comments: |-
+            The right of a user to authorize commands as any party on a participant.
+            Its utility is predominantly for users that act on behalf of many parties.
+          fieldComments: {}
       CanExecuteAs:
         message:
           comments: null
@@ -1284,9 +1537,10 @@ fileComments:
             can_read_as_any_party: The user can read as any party on a participant
             identity_provider_admin: The user can administer users and parties assigned
               to the same identity provider as the one of the user.
-            can_read_as: The user can read ledger data visible to a specific party.
             participant_admin: The user can administer the participant node.
             can_act_as: The user can act as a specific party.
+            can_read_as: The user can read ledger data visible to a specific party.
+            can_act_as_any_party: The user can act as any party on a participant.
       UpdateUserIdentityProviderIdRequest:
         message:
           comments: 'Required authorization: ``HasRight(ParticipantAdmin)``'
@@ -1420,9 +1674,10 @@ fileComments:
               can_read_as_any_party: The user can read as any party on a participant
               identity_provider_admin: The user can administer users and parties assigned
                 to the same identity provider as the one of the user.
-              can_read_as: The user can read ledger data visible to a specific party.
               participant_admin: The user can administer the participant node.
               can_act_as: The user can act as a specific party.
+              can_read_as: The user can read ledger data visible to a specific party.
+              can_act_as_any_party: The user can act as any party on a participant.
       UpdateUserIdentityProviderIdRequest: {}
       UpdateUserIdentityProviderIdResponse: {}
       UpdateUserRequest: {}

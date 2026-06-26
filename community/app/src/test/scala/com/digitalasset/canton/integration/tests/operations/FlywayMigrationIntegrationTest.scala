@@ -290,7 +290,7 @@ class UseCustomMigrationsPath(
       // Keep the real migrations on the classpath (so that Java/Scala-based migrations are
       // discovered, which only works for classpath locations) and add an initially-empty
       // temporary filesystem location for the dummy migrations the tests add/modify/delete.
-      val classpathMigrations = dbConfig.buildMigrationsPaths(alphaVersionSupport = isDevVersion)
+      val classpathMigrations = dbConfig.buildMigrationsPaths(devVersionSupport = isDevVersion)
       dbConfig
         .modify(parameters =
           dbConfig.parameters

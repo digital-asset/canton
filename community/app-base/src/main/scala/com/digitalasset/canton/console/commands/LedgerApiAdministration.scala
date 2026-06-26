@@ -2663,6 +2663,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |  submissions.
           |- executeAsAnyParty: Flag (default false) indicating if the user is allowed to operate
           |  interactive submissions as any party.
+          |- actAsAnyParty: Flag (default false) indicating if the user is allowed to act as any
+          |  party.
           """
       )
       def create(
@@ -2678,6 +2680,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           readAsAnyParty: Boolean = false,
           executeAs: Set[PartyId] = Set(),
           executeAsAnyParty: Boolean = false,
+          actAsAnyParty: Boolean = false,
           primaryPartyAuthentication: Boolean = false,
       ): User = {
         val lapiUser = consoleEnvironment.run {
@@ -2695,6 +2698,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               readAsAnyParty = readAsAnyParty,
               executeAs = executeAs.map(_.toLf),
               executeAsAnyParty = executeAsAnyParty,
+              actAsAnyParty = actAsAnyParty,
               primaryPartyAuthentication = primaryPartyAuthentication,
             )
           )
@@ -2896,6 +2900,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |  submissions.
           |- executeAsAnyParty: Flag (default false) indicating if the user is allowed to operate
           |  interactive submissions as any party.
+          |- actAsAnyParty: Flag (default false) indicating if the user is allowed to act as any
+          |  party.
           """
         )
         def grant(
@@ -2908,6 +2914,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             readAsAnyParty: Boolean = false,
             executeAs: Set[PartyId] = Set(),
             executeAsAnyParty: Boolean = false,
+            actAsAnyParty: Boolean = false,
         ): UserRights =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2921,6 +2928,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 identityProviderId = identityProviderId,
                 readAsAnyParty = readAsAnyParty,
                 executeAsAnyParty = executeAsAnyParty,
+                actAsAnyParty = actAsAnyParty,
               )
             ).flatMap(_ =>
               ledgerApiCommand(
@@ -2950,6 +2958,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |  submissions.
             |- executeAsAnyParty: Flag (default false) indicating if the user is allowed to operate
             |  interactive submissions as any party.
+            |- actAsAnyParty: Flag (default false) indicating if the user is allowed to act as any
+            |  party.
             """
         )
         def revoke(
@@ -2962,6 +2972,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             readAsAnyParty: Boolean = false,
             executeAs: Set[PartyId] = Set(),
             executeAsAnyParty: Boolean = false,
+            actAsAnyParty: Boolean = false,
         ): UserRights =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2975,6 +2986,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 identityProviderId = identityProviderId,
                 readAsAnyParty = readAsAnyParty,
                 executeAsAnyParty = executeAsAnyParty,
+                actAsAnyParty = actAsAnyParty,
               )
             ).flatMap(_ =>
               ledgerApiCommand(

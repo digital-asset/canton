@@ -353,7 +353,46 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
-    "prevent dev protocol in sequencer configurations without non-standard-config option" in {
+    "prevent dev protocol in all nodes configurations without non-standard-config option" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(),
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            parameters = SequencerNodeParameterConfig(devVersionSupport = true)
+          )
+        ),
+        mediators = Map(
+          InstanceName.tryCreate("m1") -> MediatorNodeConfig(
+            parameters = MediatorNodeParameterConfig(devVersionSupport = true)
+          )
+        ),
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(devVersionSupport = true)
+          )
+        ),
+      )
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "dev-version-support",
+          "sequencer",
+          "s1",
+        ),
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "dev-version-support",
+          "mediator",
+          "m1",
+        ),
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "dev-version-support",
+          "participant",
+          "p1",
+        ),
+      )
+      assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
+    }
+
+    "prevent alpha protocol in sequencer configurations without non-standard-config option" in {
       val config = CantonConfig(
         parameters = CantonParameters(),
         sequencers = Map(
@@ -362,11 +401,17 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           )
         ),
       )
-      assertErrors(config)(alphaProtocolVersionRequiresNonStandardError("sequencer", "s1"))
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "alpha-version-support",
+          "sequencer",
+          "s1",
+        )
+      )
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
-    "prevent dev protocol in mediator configurations without non-standard-config option" in {
+    "prevent alpha protocol in mediator configurations without non-standard-config option" in {
       val config = CantonConfig(
         parameters = CantonParameters(),
         mediators = Map(
@@ -375,7 +420,9 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           )
         ),
       )
-      assertErrors(config)(alphaProtocolVersionRequiresNonStandardError("mediator", "m1"))
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError("alpha-version-support", "mediator", "m1")
+      )
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
@@ -388,7 +435,13 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           )
         ),
       )
-      assertErrors(config)(alphaProtocolVersionRequiresNonStandardError("participant", "p1"))
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "alpha-version-support",
+          "participant",
+          "p1",
+        )
+      )
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 

@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
 import com.digitalasset.canton.util.JarResourceUtils
+import com.digitalasset.daml.lf.archive.DarSchemaDecoder
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.http.scaladsl.model.*
 
@@ -23,12 +24,8 @@ object AbstractHttpServiceIntegrationTestFuns {
   val fooV1Dar = JarResourceUtils.resourceFile("foo-0.0.1.dar")
   val fooV2Dar = JarResourceUtils.resourceFile("foo-0.0.2.dar")
 
-  private[this] def packageIdOfDar(darFile: java.io.File): Ref.PackageId = {
-    import com.digitalasset.daml.lf.{archive, typesig}
-    val dar = archive.UniversalArchiveReader.assertReadFile(darFile)
-    val pkgId = typesig.PackageSignature.read(dar.main)._2.packageId
-    Ref.PackageId.assertFromString(pkgId)
-  }
+  private[this] def packageIdOfDar(darFile: java.io.File): Ref.PackageId =
+    DarSchemaDecoder.assertReadArchiveFromFile(darFile).main._1
 
   lazy val pkgIdCiou = packageIdOfDar(ciouDar)
   lazy val pkgIdModelTests = packageIdOfDar(dar1)
@@ -59,5 +56,17 @@ trait AbstractHttpServiceIntegrationTestFuns extends HttpJsonApiTestBase with Ht
   import AbstractHttpServiceIntegrationTestFuns.*
 
   override def packageFiles = List(dar1, dar2, userDar)
+
+  def packagesContainingTemplate(
+      dar: java.io.File,
+      tmplName: Ref.QualifiedName,
+  ): Iterable[Ref.PackageId] =
+    for {
+      (pkgId, pkg) <- DarSchemaDecoder.assertReadArchiveFromFile(dar).all.view
+      mod <- pkg.modules.values
+      if mod.name == tmplName.module
+      name <- mod.templates.keys
+      if name == tmplName.name
+    } yield pkgId
 
 }

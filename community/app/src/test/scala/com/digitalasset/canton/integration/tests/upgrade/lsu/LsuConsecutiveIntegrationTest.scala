@@ -58,7 +58,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableAlphaVersionSupport
+    ) ++ ConfigTransforms.enableDevVersionSupport
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

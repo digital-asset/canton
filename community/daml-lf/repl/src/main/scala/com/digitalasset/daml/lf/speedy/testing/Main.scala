@@ -217,8 +217,8 @@ class Repl extends NamedLogging {
 
   def prettyDefinitionType(defn: Definition, pkgId: PackageId, modId: ModuleName): String =
     defn match {
-      case DTypeSyn(_, _) => "<type synonym>" // FIXME: pp this
-      case DDataType(_, _, _) => "<data type>" // FIXME(JM): pp this
+      case DTypeSyn(_, _) => "<type synonym>"
+      case DDataType(_, _, _) => "<data type>"
       case DValue(typ, _) => prettyType(typ, pkgId, modId)
     }
 

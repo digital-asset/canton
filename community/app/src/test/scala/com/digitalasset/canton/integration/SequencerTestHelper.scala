@@ -98,6 +98,7 @@ object SequencerTestHelper {
       crypto,
       // enabled dev-support as otherwise nightly dev-pv-test fails
       ProtocolVersionCompatibility.supportedProtocols(
+        includeDevVersion = protocolVersion.isDev,
         includeAlphaVersions = protocolVersion.isAlpha,
         includeBetaVersions = protocolVersion.isBeta,
         release = ReleaseVersion.current,

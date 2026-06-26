@@ -22,6 +22,7 @@ import java.util.concurrent.Semaphore
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.{Future, blocking}
 
+// TODO(#33650) – Intentionally want to use the unbounded Cats parTraverse and similar methods in this test; switch all of them
 class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   "traverse" when {

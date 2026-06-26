@@ -47,6 +47,8 @@ final case class ParticipantNodeParameters(
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
+
+  override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def alphaVersionSupport: Boolean = protocolConfig.alphaVersionSupport
   override def betaVersionSupport: Boolean = protocolConfig.betaVersionSupport
 
@@ -89,6 +91,7 @@ object ParticipantNodeParameters {
     stores = ParticipantStoreConfig(),
     protocolConfig = ParticipantProtocolConfig(
       Some(testedProtocolVersion),
+      devVersionSupport = false,
       alphaVersionSupport = false,
       betaVersionSupport = true,
       dontWarnOnDeprecatedPV = false,

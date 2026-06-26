@@ -266,7 +266,7 @@ class ManagedNodes[
       for {
         cAndP <- configAndParams(name)
         (config, params) = cAndP
-        _ <- runMigration(name, config.storage, params.alphaVersionSupport)
+        _ <- runMigration(name, config.storage, devVersionSupport = params.devVersionSupport)
       } yield ()
     }
   )
@@ -276,7 +276,7 @@ class ManagedNodes[
       for {
         cAndP <- configAndParams(name)
         (config, params) = cAndP
-        _ <- runRepairMigration(name, config.storage, params.alphaVersionSupport)
+        _ <- runRepairMigration(name, config.storage, devVersionSupport = params.devVersionSupport)
       } yield ()
     }
   )
@@ -364,9 +364,14 @@ class ManagedNodes[
   private def createDbMigration(
       name: InstanceName,
       dbConfig: DbConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
   ): DbMigrations =
-    DbMigrations.create(dbConfig, alphaVersionSupport, timeouts, loggerFactory.append("node", name))
+    DbMigrations.create(
+      dbConfig,
+      devVersionSupport = devVersionSupport,
+      timeouts,
+      loggerFactory.append("node", name),
+    )
 
   // if database is fresh, we will migrate it. Otherwise, we will check if there is any pending migrations,
   // which need to be triggered manually.
@@ -376,7 +381,8 @@ class ManagedNodes[
       params: CantonNodeParameters,
   )(implicit traceContext: TraceContext): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig =>
-      val migrations = createDbMigration(name, dbConfig, params.alphaVersionSupport)
+      val migrations =
+        createDbMigration(name, dbConfig, devVersionSupport = params.devVersionSupport)
 
       logger.info(s"Setting up database schemas for $name")
 
@@ -407,10 +413,10 @@ class ManagedNodes[
   private def runMigration(
       name: InstanceName,
       storageConfig: StorageConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig =>
-      createDbMigration(name, dbConfig, alphaVersionSupport)
+      createDbMigration(name, dbConfig, devVersionSupport = devVersionSupport)
         .migrateDatabase()
         .leftMap(FailedDatabaseMigration(name, _))
         .value
@@ -420,10 +426,10 @@ class ManagedNodes[
   private def runRepairMigration(
       name: InstanceName,
       storageConfig: StorageConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig =>
-      createDbMigration(name, dbConfig, alphaVersionSupport)
+      createDbMigration(name, dbConfig, devVersionSupport = devVersionSupport)
         .repairFlywayMigration()
         .leftMap(FailedDatabaseRepairMigration(name, _))
         .value

@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
   UpdateStreamingQueries,
 }
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
+import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
@@ -549,6 +550,10 @@ trait EventStorageBackend {
   def writeLockInternalContractIds(whereInternalContractIdExprs: CompositeSql)(
       connection: Connection
   ): Unit
+
+  def archiveDeactivations(transactionOffsets: Iterable[Offset])(
+      connection: Connection
+  ): Map[Offset, Vector[DeactivatedContractInfo]]
 }
 
 object EventStorageBackend {

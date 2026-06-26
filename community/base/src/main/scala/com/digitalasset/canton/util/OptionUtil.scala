@@ -3,37 +3,25 @@
 
 package com.digitalasset.canton.util
 
-import cats.instances.option.*
-import cats.syntax.flatMap.*
-import cats.syntax.functor.*
-import cats.syntax.parallel.*
-import cats.{Monad, Parallel}
 import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString
 
-import scala.annotation.nowarn
-
+/** Utility methods for `Option` tailored to specific domain requirements in Canton.
+  *
+  * Serves two specialized use cases:
+  *   1. Conflict resolution and state merging (e.g., detecting contradictions via
+  *      `Option[Option[A]]`).
+  *   1. Bridging Protobuf default values (empty strings, zeros) to and from Scala `Option`s.
+  *
+  * For all other general-purpose `Option` manipulations or monadic flows, standard Scala library
+  * methods or the Cats core library (e.g., `Apply`, `Semigroup` `|+|`, `OptionT`) should be used
+  * instead.
+  */
 object OptionUtil {
 
-  /** If left is non empty, zip its content with the lazily evaluated result of right (if right
-    * returns a non empty result as well), and apply f to the pair (l, r)
+  /** Merges two options, allowing the merge function to flag an unresolvable conflict by returning
+    * `None`. Returns `None` if a conflict occurs, or `Some(Option[A])` containing the merged or
+    * single value.
     */
-  def zipWithF[F[_]: Monad: Parallel, A, B, C](left: Option[A], right: => F[Option[B]])(
-      f: (A, B) => F[C]
-  ): F[Option[C]] =
-    left.parFlatTraverse(l => right.map(r => Some(l).zip(r))).flatMap {
-      case Some(ab) => Function.tupled(f).andThen(_.map(Option(_)))(ab)
-      case None => implicitly[Monad[F]].pure(None)
-    }
-
-  /** [[zipWithF]] but returns a default value if either of left or right are empty
-    */
-  def zipWithFDefaultValue[F[_]: Monad: Parallel, A, B, C](
-      left: Option[A],
-      right: => F[Option[B]],
-      empty: => C,
-  )(f: (A, B) => F[C]): F[C] =
-    zipWithF(left, right)(f).map(_.getOrElse(empty))
-
   def mergeWithO[A](left: Option[A], right: Option[A])(f: (A, A) => Option[A]): Option[Option[A]] =
     (left, right) match {
       case (None, _) => Some(right)
@@ -41,11 +29,10 @@ object OptionUtil {
       case (Some(x), Some(y)) => f(x, y).map(Some(_))
     }
 
-  /** Return None iff both `left` and `right` are defined and not equal.
+  /** Detects conflicts between two options based on equality.
     *
-    * Otherwise, return
-    *   - Some(left), if only left is defined
-    *   - Some(right), if right is defined
+    * Return `None` iff both `left` and `right` are defined and not equal. Otherwise, returns
+    * `Some(Option[A])` containing whichever side was defined.
     */
   def mergeEqual[A](left: Option[A], right: Option[A]): Option[Option[A]] =
     if (left eq right) Some(left)
@@ -54,24 +41,31 @@ object OptionUtil {
         if (x == y) left else None
       }
 
-  def mergeWith[A](left: Option[A], right: Option[A])(f: (A, A) => A): Option[A] = {
-    @nowarn("msg=match may not be exhaustive") // mergeWithO is always defined
-    val Some(result) = mergeWithO(left, right)((l, r) => Some(f(l, r)))
-    result
-  }
+  /** Combines two options using a provided function if both are defined, or returns the defined
+    * one.
+    *
+    * Note: If type `A` has a Cats `Semigroup` instance, prefer using `left |+| right` instead.
+    */
+  def mergeWith[A](left: Option[A], right: Option[A])(f: (A, A) => A): Option[A] =
+    (left, right) match {
+      case (Some(l), Some(r)) => Some(f(l, r))
+      case (None, r) => r
+      case (l, None) => l
+    }
 
-  def zipWith[A, B, C](left: Option[A], right: Option[B])(f: (A, B) => C): Option[C] =
-    for {
-      l <- left
-      r <- right
-    } yield f(l, r)
-
+  /** Maps an empty string to `None`. Useful for handling Protobuf default values. */
   def emptyStringAsNone(str: String): Option[String] = if (str.isEmpty) None else Some(str)
+
+  /** Maps an empty [[com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString]] to
+    * `None`.
+    */
   def emptyStringAsNone[S <: LengthLimitedString](str: S): Option[S] =
     if (str.unwrap.isEmpty) None else Some(str)
 
+  /** Maps `None` to an empty string. Useful for populating Protobuf fields. */
   def noneAsEmptyString(strO: Option[String]): String = strO.getOrElse("")
 
+  /** Maps a `0` integer to `None`. Useful for handling Protobuf default integer values. */
   def zeroAsNone(n: Int): Option[Int] = if (n == 0) None else Some(n)
 
 }

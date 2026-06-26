@@ -968,8 +968,7 @@ class SBuiltinTest
 
   }
 
-  // FIXME: https://github.com/digital-asset/daml/pull/3260
-  // test output order of GENMAP_KEYS and GENMAP_VALUES
+  // TODO(https://github.com/digital-asset/daml/issues/23125): add tests for GENMAP_KEYS and GENMAP_VALUES
   "GenMap operations" - {
 
     def buildMap[X](typ: String, l: (String, X)*) =

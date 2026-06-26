@@ -6,10 +6,8 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
-import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
@@ -65,7 +63,7 @@ import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag}
+import com.digitalasset.canton.util.{ContractValidator, MonadUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 
@@ -208,10 +206,10 @@ private[reassignment] trait ReassignmentProcessingSteps[
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, DecryptedViews[DecryptedView]] = {
-    val result = batch.toNEF
-      .parTraverse(
-        decryptTree(snapshot, sessionKeyStore)(_).value
-      )
+    val result = MonadUtil
+      .parTraverseWithLimit(snapshot.pureCrypto.encryptionParallelism)(batch.toSeq) { envelope =>
+        decryptTree(snapshot, sessionKeyStore)(envelope).value
+      }
       .map(DecryptedViews(_))
     EitherT.right(result)
   }

@@ -87,6 +87,7 @@ private[index] class IndexServiceImpl(
     participantId: Ref.ParticipantId,
     ledgerDao: LedgerReadDao,
     updatesReader: LedgerDaoUpdateReader,
+    acsChangesReader: AcsChangesReader,
     commandCompletionsReader: LedgerDaoCommandCompletionsReader,
     contractStore: ContractStore,
     pruneBuffers: PruneBuffers,
@@ -150,17 +151,34 @@ private[index] class IndexServiceImpl(
                   interfaceViewPackageUpgrade,
                 )
               (startInclusive, endInclusive) =>
-                Source(memoInternalUpdateFormat().toList)
-                  .flatMapConcat { internalUpdateFormat =>
-                    updatesReader
-                      .getUpdates(
+                val baseSource =
+                  Source(memoInternalUpdateFormat().toList)
+                    .flatMapConcat { internalUpdateFormat =>
+                      updatesReader
+                        .getUpdates(
+                          startInclusive = startInclusive,
+                          endInclusive = endInclusive,
+                          internalUpdateFormat = internalUpdateFormat,
+                          descendingOrder = descendingOrder,
+                          skipPruningChecks = skipPruningChecks,
+                        )
+                    }
+
+                val source = updateFormat.includeAcsChanges match {
+                  case None => baseSource
+                  case Some(synchronizerId) =>
+                    baseSource.via(
+                      acsChangesReader.withAcsChanges(
+                        synchronizerId = synchronizerId,
                         startInclusive = startInclusive,
                         endInclusive = endInclusive,
-                        internalUpdateFormat = internalUpdateFormat,
                         descendingOrder = descendingOrder,
                         skipPruningChecks = skipPruningChecks,
                       )
-                  }
+                    )
+                }
+
+                source
                   .via(
                     rangeDecorator(
                       startInclusive,

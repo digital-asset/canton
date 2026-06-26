@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
@@ -140,7 +140,7 @@ object EncryptedViewMessageFactory {
           )
       )
       signature <- viewTrees.head1.toBeSigned
-        .parTraverse(rootHash =>
+        .traverse(rootHash =>
           cryptoSnapshot
             .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly, signingTimestampOverrides)
             .leftMap(err => FailedToSignViewMessage(err))
@@ -273,7 +273,7 @@ object EncryptedViewMessageFactory {
     for {
       sessionKeyRandomnessMapNE <- sessionKeyRandomnessMapNEResult
       signature <- viewTree.toBeSigned
-        .parTraverse(rootHash =>
+        .traverse(rootHash =>
           cryptoSnapshot
             .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly, signingTimestampOverrides)
             .leftMap(err => FailedToSignViewMessage(err))

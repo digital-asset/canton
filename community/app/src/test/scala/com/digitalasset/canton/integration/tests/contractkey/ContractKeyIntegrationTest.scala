@@ -280,9 +280,10 @@ final class ContractKeyIntegrationTest extends CommunityIntegrationTest with Sha
       run(scenario)
     }
 
-    "work with non-effectful rollback based views" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      _ =>
-        val scenario = Parser.assertParseScenario("""
+    "work with non-effectful rollback based views" onlyRunWithOrGreaterThan ProtocolVersion.v35 andWhen onlyLocalParty(
+      MultiRootNodeSubmission
+    ) in { _ =>
+      val scenario = Parser.assertParseScenario("""
           |Scenario
           |  Topology
           |    Participant 0 pkgs={0} parties={0}
@@ -294,7 +295,7 @@ final class ContractKeyIntegrationTest extends CommunityIntegrationTest with Sha
           |        Rollback
           |          ExerciseByKey NonConsuming 0 ctl={0} cobs={1}
           |""".stripMargin)
-        run(scenario)
+      run(scenario)
     }
 
   }

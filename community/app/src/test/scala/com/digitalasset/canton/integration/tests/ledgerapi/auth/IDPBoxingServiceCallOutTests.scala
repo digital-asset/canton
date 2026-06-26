@@ -153,6 +153,10 @@ trait IDPBoxingServiceCallOutTests
             uproto.Right.Kind.CanExecuteAsAnyParty(uproto.Right.CanExecuteAsAnyParty()),
           ),
           (
+            "act as any party",
+            uproto.Right.Kind.CanActAsAnyParty(uproto.Right.CanActAsAnyParty()),
+          ),
+          (
             "participant admin",
             uproto.Right.Kind.ParticipantAdmin(uproto.Right.ParticipantAdmin()),
           ),

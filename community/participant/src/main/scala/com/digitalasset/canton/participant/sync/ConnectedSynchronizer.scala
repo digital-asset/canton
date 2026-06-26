@@ -789,6 +789,7 @@ class ConnectedSynchronizer(
             override def subscriptionStartsAt(
                 start: SubscriptionStart
             )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+              // TODO(#33650) – Statically bounded to 2 elements
               Seq(
                 topologyProcessor.subscriptionStartsAt(start)(traceContext),
                 trafficProcessor.subscriptionStartsAt(start)(traceContext),

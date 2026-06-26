@@ -24,6 +24,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     includeReassignments = None,
     includeTopologyEvents = None,
     includeAcsCommitments = None,
+    includeAcsChanges = None,
   )
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 

@@ -72,12 +72,14 @@ trait SequencerConnectServiceIntegrationTest
 
       val unsupportedPV = TestProtocolVersions.UnsupportedPV
 
+      val includeDevVersions = testedProtocolVersion.isDev
       val includeAlphaVersions = testedProtocolVersion.isAlpha
       val includeBetaVersions = testedProtocolVersion.isBeta
 
       val successfulRequest =
         HandshakeRequest(
           ProtocolVersionCompatibility.supportedProtocols(
+            includeDevVersion = includeDevVersions,
             includeAlphaVersions = includeAlphaVersions,
             includeBetaVersions = includeBetaVersions,
             release = ReleaseVersion.current,
@@ -88,6 +90,7 @@ trait SequencerConnectServiceIntegrationTest
       val successfulRequestWithMinimumVersion =
         HandshakeRequest(
           ProtocolVersionCompatibility.supportedProtocols(
+            includeDevVersion = includeDevVersions,
             includeAlphaVersions = includeAlphaVersions,
             includeBetaVersions = includeBetaVersions,
             release = ReleaseVersion.current,

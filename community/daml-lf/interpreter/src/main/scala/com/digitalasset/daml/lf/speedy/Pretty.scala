@@ -507,7 +507,6 @@ private[lf] object Pretty {
 
     val (witnesses, divulgences) = ni.disclosures.toSeq
       .sortWith { case ((p1, d1), (p2, d2)) =>
-        // FIXME(MH): Does this order make any sense?
         d1.since <= d2.since && p1 < p2
       }
       .partition { case (_, d) => d.explicit }

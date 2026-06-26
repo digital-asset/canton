@@ -393,6 +393,7 @@ class IndexComponentLoadTest
               includeReassignments = Some(allPartyEventFormat),
               includeTopologyEvents = None,
               includeAcsCommitments = None,
+              includeAcsChanges = None,
             ),
           )
           .futureValue
@@ -716,6 +717,7 @@ class IndexComponentLoadTest
       )
     ),
     includeAcsCommitments = None,
+    includeAcsChanges = None,
   )
 
   private def fetchUpdatesStream(descendingOrder: Boolean): Unit = {

@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.integration.ConfigTransforms.{
   enableAlphaVersionSupport,
+  enableDevVersionSupport,
   setBetaSupport,
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
@@ -194,7 +195,7 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
         )
       val transforms =
         Seq(noAuth) ++ (if (supportDevLanguageVersions)
-                          enableAlphaVersionSupport
+                          enableAlphaVersionSupport ++ enableDevVersionSupport
                         else Nil) ++ setBetaSupport(testedProtocolVersion.isBeta)
       transforms.foldLeft(config)((cfg, transform) => transform(cfg))
     }

@@ -1682,6 +1682,7 @@ class IndexServiceImplSpec
       includeReassignments = None,
       includeTopologyEvents = None,
       includeAcsCommitments = None,
+      includeAcsChanges = None,
     )
 
   def updateFormatForReassignments(eventFormat: EventFormat): UpdateFormat =
@@ -1690,6 +1691,7 @@ class IndexServiceImplSpec
       includeReassignments = Some(eventFormat),
       includeTopologyEvents = None,
       includeAcsCommitments = None,
+      includeAcsChanges = None,
     )
 
   def internalUpdateFormatForTransactions(

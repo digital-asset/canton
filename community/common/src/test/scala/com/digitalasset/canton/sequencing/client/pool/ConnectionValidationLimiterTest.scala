@@ -47,6 +47,7 @@ class ConnectionValidationLimiterTest extends AnyWordSpec with BaseTest with Has
       promises.foreach(_.outcome_(()))
 
       // Wait for all validation requests to complete
+      // TODO(#33650) – Statically bounded to 42 elements
       fut.parSequence.futureValueUS
 
       // We should have 2 validations

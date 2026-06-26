@@ -58,6 +58,7 @@ object SplitCreateDataContinuityDumps {
 
   lazy val allSupportedStablePv =
     ProtocolVersionCompatibility.supportedProtocols(
+      includeDevVersion = false,
       includeAlphaVersions = false,
       includeBetaVersions = true,
       release = ReleaseVersion.current,
