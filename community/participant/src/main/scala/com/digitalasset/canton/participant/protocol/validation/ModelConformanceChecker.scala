@@ -276,58 +276,30 @@ class ModelConformanceChecker(
   private def externalCallReplayDataFor(
       view: TransactionView,
       viewParticipantData: ViewParticipantData,
-      topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[ExternalCallReplayData] = {
-    val externalCallResultsByView =
+  ): ExternalCallReplayData = {
+    val externalCallResults =
       if (!viewParticipantData.supportsExternalCallResults)
-        Seq.empty[(TransactionView, Seq[ViewParticipantData.ViewExternalCallResult])]
+        Seq.empty[ViewParticipantData.ViewExternalCallResult]
       else
         view.flatten.flatMap { currentView =>
           currentView.viewParticipantData.unwrap match {
-            case Right(vpd) if vpd.externalCallResults.nonEmpty =>
-              Some(currentView -> vpd.externalCallResults.toSeq)
-            case _ => None
+            case Right(vpd) => vpd.externalCallResults
+            case _ => Seq.empty
           }
         }
 
-    if (externalCallResultsByView.isEmpty) FutureUnlessShutdown.pure(ExternalCallReplayData.empty)
+    if (externalCallResults.isEmpty) ExternalCallReplayData.empty
     else {
       val storedExternalCallResults =
-        externalCallResultsByView.foldLeft(StoredExternalCallResults.empty) {
-          case (acc, (_, externalCallResults)) =>
-            acc ++ StoredExternalCallResults.fromResults(
-              externalCallResults.map(_.result)
-            )
-        }
+        StoredExternalCallResults.fromResults(externalCallResults.map(_.result))
 
       logger.debug(
-        s"reInterpret: Aggregated ${storedExternalCallResults.size} external call results"
+        s"reInterpret: Aggregated ${storedExternalCallResults.size} external call result keys"
       )
 
-      externalCallResultsByView
-        .parTraverse { case (currentView, externalCallResults) =>
-          val confirmingParties =
-            currentView.viewCommonData.tryUnwrap.viewConfirmationParameters.confirmers
-          topologySnapshot.canConfirm(participantId, confirmingParties).map {
-            hostedConfirmingParties =>
-              if (hostedConfirmingParties.isEmpty) Seq.empty
-              else
-                externalCallResults.iterator.collect {
-                  case result
-                      if result.checkingParties.intersect(hostedConfirmingParties).nonEmpty =>
-                    ExternalCallKey.fromResult(result.result)
-                }.toSeq
-          }
-        }
-        .map(validationKeyGroups =>
-          ExternalCallReplayData(
-            storedExternalCallResults = storedExternalCallResults,
-            validationKeyCounts =
-              validationKeyGroups.flatten.groupMapReduce(identity)(_ => 1)(_ + _),
-          )
-        )
+      ExternalCallReplayData(storedExternalCallResults)
     }
   }
 
@@ -355,7 +327,7 @@ class ModelConformanceChecker(
     )
 
     val externalCallReplayData = Eval.later(
-      externalCallReplayDataFor(view, viewParticipantData, topologySnapshot)
+      externalCallReplayDataFor(view, viewParticipantData)
     )
 
     for {
@@ -375,7 +347,7 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
-          () => externalCallReplayData.value,
+          () => FutureUnlessShutdown.pure(externalCallReplayData.value),
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]

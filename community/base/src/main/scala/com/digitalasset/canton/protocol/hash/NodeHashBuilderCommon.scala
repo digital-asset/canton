@@ -101,10 +101,8 @@ private[hash] abstract class NodeHashBuilderCommon(
           exerciseResult,
           keyOpt,
           byKey,
-          _, // externalCallResults - intentionally excluded from the LF/prepared node hash.
-          // Prepared signatures authorize the LF action. External call result payloads are Canton
-          // protocol data, carried through ViewParticipantData.externalCallResults and protected
-          // by the Canton view signature.
+          _, // externalCallResults - not part of the V2/V3 common exercise-node encoding.
+          // HashingSchemeVersion.V4 adds them in its override.
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)

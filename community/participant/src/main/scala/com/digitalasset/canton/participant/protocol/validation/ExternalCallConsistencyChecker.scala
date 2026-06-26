@@ -3,25 +3,26 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
+import cats.Order
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.ViewPosition
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
   byteCount,
   hexPayloadSize,
 }
+import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.daml.lf.data.Bytes
+import com.google.protobuf.ByteString
 
-import scala.collection.mutable
-
-/** Checks whether external-call results visible to hosted confirming parties agree.
+/** Checks whether visible external-call results agree.
   *
   * External-call results are replay data that participate in validation. If two visible occurrences
   * of the same external call record different outputs, a hosted confirming party must reject the
-  * transaction locally instead of approving an ambiguous result.
+  * transaction locally instead of approving an ambiguous result. Visible disagreements are also
+  * retained independently of hosted-party routing so callers can report suspicious recorded data.
   */
 object ExternalCallConsistencyChecker {
 
@@ -68,93 +69,148 @@ object ExternalCallConsistencyChecker {
       )
   }
 
-  final case class Result(inconsistencies: Map[LfPartyId, Seq[Inconsistency]])
-      extends PrettyPrinting {
+  final case class Result(
+      inconsistencies: Map[LfPartyId, Seq[Inconsistency]],
+      visibleInconsistencies: Seq[Inconsistency],
+  ) extends PrettyPrinting {
     def inconsistentParties: Set[LfPartyId] = inconsistencies.keySet
 
     override protected def pretty: Pretty[Result] = prettyOfClass(
-      param("inconsistencies", _.inconsistencies)
+      param("inconsistencies", _.inconsistencies),
+      param("visibleInconsistencies", _.visibleInconsistencies),
     )
   }
 
   object Result {
-    val empty: Result = Result(Map.empty)
+    val empty: Result = Result(Map.empty, Seq.empty)
   }
 
+  private final case class VisibleExternalCallOccurrence(
+      key: DAMLe.ExternalCallKey,
+      output: Bytes,
+      occurrence: ExternalCallOccurrence,
+      checkingParties: Set[LfPartyId],
+  )
+
+  private implicit val orderBytes: Order[Bytes] =
+    Order.by[Bytes, ByteString](_.toByteString)(ByteStringUtil.orderByteString)
+
+  private def orderedOutputs(outputs: Set[Bytes]): List[Bytes] =
+    outputs.toList.sorted(orderBytes.toOrdering)
+
+  private[validation] val orderOutputSets: Ordering[Set[Bytes]] =
+    Order.by[Set[Bytes], List[Bytes]](orderedOutputs).toOrdering
+
+  private def keyOrderTuple(inconsistency: Inconsistency): (String, String, String, String) =
+    (
+      inconsistency.key.extensionId,
+      inconsistency.key.functionId,
+      inconsistency.key.config,
+      inconsistency.key.input,
+    )
+
+  private def occurrenceOrderKey(inconsistency: Inconsistency): String =
+    inconsistency.occurrences.toSeq
+      .sorted(orderExternalCallOccurrence)
+      .map(occurrence =>
+        s"${occurrence.viewPosition}:${occurrence.exerciseIndex.unwrap}:${occurrence.callIndex.unwrap}"
+      )
+      .mkString(",")
+
+  private[validation] val orderInconsistency: Ordering[Inconsistency] =
+    Ordering
+      .by[Inconsistency, (String, String, String, String)](keyOrderTuple)
+      .orElseBy(_.outputs)(orderOutputSets)
+      .orElseBy(occurrenceOrderKey)
+
+  private def inconsistencyFor(
+      key: DAMLe.ExternalCallKey,
+      outputsAndOccurrences: Seq[(Bytes, ExternalCallOccurrence)],
+  ): Option[Inconsistency] = {
+    val occurrencesByOutput = outputsAndOccurrences.groupMap(_._1)(_._2)
+    Option.when(occurrencesByOutput.sizeCompare(1) > 0)(
+      Inconsistency(
+        key,
+        occurrencesByOutput.keySet,
+        occurrencesByOutput.valuesIterator.flatten.toSet,
+      )
+    )
+  }
+
+  private def visibleOccurrences(
+      viewValidationResults: Map[ViewPosition, ViewValidationResult]
+  ): Seq[VisibleExternalCallOccurrence] =
+    viewValidationResults.toSeq
+      .sortBy(_._1)(ViewPosition.orderViewPosition.toOrdering)
+      .flatMap { case (viewPosition, viewValidationResult) =>
+        val viewParticipantData = viewValidationResult.view.viewParticipantData
+        if (
+          viewParticipantData.supportsExternalCallResults &&
+          viewParticipantData.externalCallResults.nonEmpty
+        ) {
+          viewParticipantData.externalCallResults.map { externalCallResult =>
+            val occurrence = ExternalCallOccurrence(
+              viewPosition,
+              externalCallResult.exerciseIndex,
+              externalCallResult.callIndex,
+            )
+            VisibleExternalCallOccurrence(
+              DAMLe.ExternalCallKey.fromResult(externalCallResult.result),
+              externalCallResult.result.output,
+              occurrence,
+              externalCallResult.checkingParties,
+            )
+          }
+        } else Seq.empty
+      }
+
+  private def visibleInconsistencies(
+      occurrences: Seq[VisibleExternalCallOccurrence]
+  ): Seq[Inconsistency] =
+    occurrences
+      .groupMap(_.key)(occurrence => occurrence.output -> occurrence.occurrence)
+      .toSeq
+      .flatMap { case (key, outputsAndOccurrences) =>
+        inconsistencyFor(key, outputsAndOccurrences)
+      }
+      .sorted(orderInconsistency)
+
+  private def hostedInconsistencies(
+      occurrences: Seq[VisibleExternalCallOccurrence],
+      hostedConfirmingParties: Set[LfPartyId],
+  ): Map[LfPartyId, Seq[Inconsistency]] =
+    occurrences
+      .flatMap { occurrence =>
+        occurrence.checkingParties.intersect(hostedConfirmingParties).toSeq.map { party =>
+          (party, occurrence.key) -> (occurrence.output -> occurrence.occurrence)
+        }
+      }
+      .groupMap(_._1)(_._2)
+      .toSeq
+      .flatMap { case ((party, key), outputsAndOccurrences) =>
+        inconsistencyFor(key, outputsAndOccurrences).map(party -> _)
+      }
+      .groupMap(_._1)(_._2)
+      .view
+      .mapValues(_.sorted(orderInconsistency))
+      .toMap
+
   /** Returns per-party inconsistencies for hosted confirming parties that can see disagreeing
-    * outputs for the same external call.
+    * outputs for the same external call. Also records visible disagreements that should be alarmed
+    * even if this participant does not host an affected checking party.
     */
   def check(
       viewValidationResults: Map[ViewPosition, ViewValidationResult],
       hostedConfirmingParties: Set[LfPartyId],
-  ): Result =
-    if (hostedConfirmingParties.isEmpty) Result.empty
+  ): Result = {
+    val occurrences = visibleOccurrences(viewValidationResults)
+    if (occurrences.isEmpty) Result.empty
     else {
-      val externalCallViewResults =
-        viewValidationResults.iterator
-          .flatMap { case (viewPosition, viewValidationResult) =>
-            val viewParticipantData = viewValidationResult.view.viewParticipantData
-            if (
-              viewParticipantData.supportsExternalCallResults &&
-              viewParticipantData.externalCallResults.nonEmpty
-            )
-              Iterator.single(viewPosition -> viewParticipantData.externalCallResults)
-            else Iterator.empty
-          }
-          .toSeq
-          .sortBy(_._1)(ViewPosition.orderViewPosition.toOrdering)
-
-      if (externalCallViewResults.isEmpty) Result.empty
-      else {
-        val outputsByPartyAndKey =
-          mutable.LinkedHashMap.empty[
-            LfPartyId,
-            mutable.Map[
-              DAMLe.ExternalCallKey,
-              mutable.Map[Bytes, mutable.Set[ExternalCallOccurrence]],
-            ],
-          ]
-
-        externalCallViewResults.foreach { case (viewPosition, externalCallResults) =>
-          externalCallResults.foreach { externalCallResult =>
-            val affectedHostedParties =
-              externalCallResult.checkingParties.intersect(hostedConfirmingParties)
-            if (affectedHostedParties.nonEmpty) {
-              val key = DAMLe.ExternalCallKey.fromResult(externalCallResult.result)
-              val output = externalCallResult.result.output
-              val occurrence = ExternalCallOccurrence(
-                viewPosition,
-                externalCallResult.exerciseIndex,
-                externalCallResult.callIndex,
-              )
-
-              affectedHostedParties.foreach { party =>
-                val outputsByKey =
-                  outputsByPartyAndKey.getOrElseUpdate(party, mutable.LinkedHashMap.empty)
-                val occurrencesByOutput =
-                  outputsByKey.getOrElseUpdate(key, mutable.LinkedHashMap.empty)
-                val occurrences =
-                  occurrencesByOutput.getOrElseUpdate(output, mutable.Set.empty)
-                occurrences.add(occurrence).discard
-              }
-            }
-          }
-        }
-
-        val inconsistencies = outputsByPartyAndKey.iterator.flatMap { case (party, outputsByKey) =>
-          val partyInconsistencies = outputsByKey.iterator.collect {
-            case (key, occurrencesByOutput) if occurrencesByOutput.sizeCompare(1) > 0 =>
-              Inconsistency(
-                key,
-                occurrencesByOutput.keySet.toSet,
-                occurrencesByOutput.valuesIterator.flatMap(_.iterator).toSet,
-              )
-          }.toSeq
-
-          Option.when(partyInconsistencies.nonEmpty)(party -> partyInconsistencies)
-        }.toMap
-
-        Result(inconsistencies)
-      }
+      val visible = visibleInconsistencies(occurrences)
+      Result(
+        inconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
+        visibleInconsistencies = visible,
+      )
     }
+  }
 }

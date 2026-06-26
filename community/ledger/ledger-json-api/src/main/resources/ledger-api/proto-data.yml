@@ -2940,7 +2940,9 @@ fileComments:
 
               Required
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
             deduplication_duration: |-
@@ -3001,7 +3003,9 @@ fileComments:
 
               Required
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
             deduplication_duration: |-
@@ -3058,7 +3062,9 @@ fileComments:
 
               Required
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
             deduplication_duration: |-
@@ -3347,6 +3353,8 @@ fileComments:
             hashing_scheme_version: |-
               The hashing scheme version to be used when building the hash.
               Defaults to HASHING_SCHEME_VERSION_V2.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Optional
             read_as: |-
@@ -3413,7 +3421,9 @@ fileComments:
 
               Optional
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
       PreparedTransaction:
@@ -3609,10 +3619,6 @@ fileComments:
           comments: Exercise node
           fieldComments:
             children: 'Optional: can be empty'
-            interface_id: |-
-              The identifier uses the package-id reference format.
-
-              Optional
             signatories: 'Required: must be non-empty'
             consuming: Required
             key: |-
@@ -3625,6 +3631,19 @@ fileComments:
             chosen_value: Required
             choice_id: Required
             choice_observers: 'Optional: can be empty'
+            external_call_results: |-
+              Can only be populated from lf_version dev.
+
+              Results of external calls made during this exercise.
+              These results are carried for external-call replay and validation.
+              They are encoded into the prepared transaction hash starting with
+              HASHING_SCHEME_VERSION_V4.
+
+              Optional: can be empty
+            interface_id: |-
+              The identifier uses the package-id reference format.
+
+              Optional
             stakeholders: 'Required: must be non-empty'
             by_key: |-
               Can only be true from lf_version >= 2
@@ -3639,6 +3658,33 @@ fileComments:
 
               Required
             contract_id: Required
+      ExternalCallResult:
+        message:
+          comments: |-
+            Result of an external call made during transaction execution.
+            External calls are deterministic calls to participant extension services.
+            Results are stored in the transaction and replayed during validation.
+          fieldComments:
+            config: |-
+              Extension configuration hash bytes.
+
+              Required
+            function_id: |-
+              Function identifier within the extension.
+
+              Required
+            extension_id: |-
+              Extension service identifier.
+
+              Required
+            output: |-
+              Output data returned by the extension.
+
+              Required
+            input: |-
+              Input data sent to the extension.
+
+              Required
       Fetch:
         message:
           comments: Fetch node
@@ -3704,6 +3750,7 @@ fileComments:
     oneOfs:
       Create: {}
       Exercise: {}
+      ExternalCallResult: {}
       Fetch: {}
       Node:
         node_type:

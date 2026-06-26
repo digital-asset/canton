@@ -44,7 +44,6 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
 }
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.*
@@ -178,7 +177,6 @@ class ModelConformanceCheckerTest
         interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
         participantId = participantId,
         loggerFactory = loggerFactory,
-        externalCallHandler = ExternalCallHandler.Unsupported,
       ),
       transactionTreeFactory = transactionTreeFactory,
       contractValidator = contractValidator,

@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.protocol.validation.ExternalCallValid
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -59,7 +59,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
     val example = factory.MultipleRoots
     val left = withExternalCallResults(
       example.rootViews(4),
-      ImmArray(
+      Seq(
         externalCallViewResult(
           exerciseIndex = 0,
           result = externalCallResult,
@@ -69,7 +69,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
     )
     val right = withExternalCallResults(
       example.rootViews(5),
-      ImmArray(
+      Seq(
         externalCallViewResult(
           exerciseIndex = 0,
           result = rightResult,
@@ -109,9 +109,10 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       )
 
       result.inconsistentParties shouldBe Set.empty
+      result.visibleInconsistencies should have size 1
     }
 
-    "not report non-hosted checking parties" in {
+    "record visible disagreements without reporting non-hosted checking parties" in {
       val result = check(
         leftCheckingParties = Set(partyC),
         rightCheckingParties = Set(partyC),
@@ -119,6 +120,12 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       )
 
       result.inconsistentParties shouldBe Set.empty
+      result.visibleInconsistencies should have size 1
+      val visibleInconsistency = result.visibleInconsistencies.loneElement
+      visibleInconsistency.outputs shouldBe Set(
+        externalCallResult.output,
+        otherExternalCallOutput.output,
+      )
     }
 
     "not report identical outputs" in {
@@ -147,7 +154,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       val example = factory.MultipleRoots
       val view = withExternalCallResults(
         example.rootViews(4),
-        ImmArray(
+        Seq(
           externalCallViewResult(
             exerciseIndex = 0,
             result = externalCallResult,
@@ -185,7 +192,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       val secondCall = externalCallResult.copy(functionId = "function-b")
       val left = withExternalCallResults(
         example.rootViews(4),
-        ImmArray(
+        Seq(
           externalCallViewResult(
             exerciseIndex = 0,
             result = firstCall,
@@ -200,7 +207,7 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
       )
       val right = withExternalCallResults(
         example.rootViews(5),
-        ImmArray(
+        Seq(
           externalCallViewResult(
             exerciseIndex = 0,
             result = firstCall.copy(output = Bytes.fromStringUtf8("other-output-a")),

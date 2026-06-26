@@ -15,7 +15,6 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
   GetEngineAbortStatus,
 }
 import com.digitalasset.canton.participant.store.ReplayContractLookup
-import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -77,7 +76,6 @@ class DAMLeTest
       ),
       interpretationConfig = LfInterpretationConfig.Default,
       loggerFactory = loggerFactory,
-      externalCallHandler = ExternalCallHandler.Unsupported,
     )
 
     val alice = LfPartyId.assertFromString("Alice")

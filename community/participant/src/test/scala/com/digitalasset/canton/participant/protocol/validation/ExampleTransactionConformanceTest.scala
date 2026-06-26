@@ -390,7 +390,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "reject external call records with tampered checking parties" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reject views with tampered external-call metadata during reconstruction" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
         val externalCallResult = ExternalCallResult(
           extensionId = "extension",
           functionId = "function",
@@ -440,9 +440,7 @@ class ExampleTransactionConformanceTest
             .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
             .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
             .andThen(ViewParticipantData.Optics.externalCallResultsUnsafe)
-            .modify(results =>
-              ImmArray.from(results.toSeq.map(_.copy(checkingParties = Set.empty)))
-            )(fullTree)
+            .modify(_.map(_.copy(checkingParties = Set.empty)))(fullTree)
           _ = tamperedTree.validated shouldBe Right(tamperedTree)
           result <- check(
             buildUnderTest(reinterpretTransaction(example, transaction)),
@@ -452,9 +450,9 @@ class ExampleTransactionConformanceTest
         } yield inside(result) { case Left(ErrorWithSubTransaction(errors, _, _)) =>
           inside(errors.head) { case ViewReconstructionError(received, reconstructed) =>
             val receivedRecord =
-              received.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+              received.viewParticipantData.tryUnwrap.externalCallResults.loneElement
             val reconstructedRecord =
-              reconstructed.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+              reconstructed.viewParticipantData.tryUnwrap.externalCallResults.loneElement
 
             receivedRecord.checkingParties shouldBe Set.empty
             reconstructedRecord.checkingParties shouldBe Set(submitter)
@@ -462,7 +460,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "derive external-call validation keys from hosted checking parties" in {
+      "aggregate visible external-call results for replay" in {
         val devFactory = new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))(
           psid = factory.psid.copy(protocolVersion = ProtocolVersion.dev),
           cantonContractIdVersion = contractIdVersion,
@@ -482,7 +480,6 @@ class ExampleTransactionConformanceTest
           input = Bytes.fromStringUtf8("input"),
           output = Bytes.fromStringUtf8("output"),
         )
-        val externalCallKey = DAMLe.ExternalCallKey.fromResult(externalCallResult)
         val expectedStoredResults =
           DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult))
         val example = devFactory.SingleExercise(devFactory.deriveNodeSeed(0))
@@ -528,16 +525,14 @@ class ExampleTransactionConformanceTest
             .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
             .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
             .andThen(ViewParticipantData.Optics.externalCallResultsUnsafe)
-            .modify(results =>
-              ImmArray.from(results.toSeq.map(_.copy(checkingParties = checkingParties)))
-            )(fullTree)
+            .modify(_.map(_.copy(checkingParties = checkingParties)))(fullTree)
 
         def observedExternalCallArguments(
             fullTree: FullTransactionViewTree,
             checkingParties: Set[LfPartyId],
-        ): Future[(DAMLe.StoredExternalCallResults, Set[DAMLe.ExternalCallKey])] = {
+        ): Future[DAMLe.StoredExternalCallResults] = {
           val observed = new AtomicReference[
-            Option[(DAMLe.StoredExternalCallResults, Set[DAMLe.ExternalCallKey])]
+            Option[DAMLe.StoredExternalCallResults]
           ](None)
           val recordingReinterpreter = new HasReinterpret {
             override def reinterpret(
@@ -560,11 +555,7 @@ class ExampleTransactionConformanceTest
             ] =
               EitherT.right[DAMLe.ReinterpretationError](externalCallReplayData()).flatMap {
                 replayData =>
-                  observed.set(
-                    Some(
-                      replayData.storedExternalCallResults -> replayData.validationKeyCounts.keySet
-                    )
-                  )
+                  observed.set(Some(replayData.storedExternalCallResults))
                   reinterpretTransaction(example, transaction).reinterpret(
                     contracts,
                     contractAuthenticator,
@@ -611,8 +602,8 @@ class ExampleTransactionConformanceTest
             Set(ExampleTransactionFactory.signatory),
           )
         } yield {
-          hostedPartyArguments shouldBe (expectedStoredResults -> Set(externalCallKey))
-          unhostedPartyArguments shouldBe (expectedStoredResults -> Set.empty)
+          hostedPartyArguments shouldBe expectedStoredResults
+          unhostedPartyArguments shouldBe expectedStoredResults
         }
       }
 

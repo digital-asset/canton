@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.validation
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{TransactionView, ViewParticipantData}
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 
 private[validation] object ExternalCallValidationTestUtil {
@@ -26,7 +25,7 @@ private[validation] object ExternalCallValidationTestUtil {
 
   def withExternalCallResults(
       view: TransactionView,
-      results: ImmArray[ViewParticipantData.ViewExternalCallResult],
+      results: Seq[ViewParticipantData.ViewExternalCallResult],
   ): TransactionView =
     TransactionView.Optics.viewParticipantDataUnsafe
       .modify(vpd => vpd.tryUnwrap.copy(externalCallResults = results))(view)

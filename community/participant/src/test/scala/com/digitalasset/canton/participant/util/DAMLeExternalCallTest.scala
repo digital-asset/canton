@@ -7,7 +7,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.store.ReplayContractLookup
-import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
 import com.digitalasset.canton.protocol.ExampleContractFactory
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -19,7 +18,7 @@ import com.digitalasset.daml.lf.command.ReplayCommand
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, PackageName, QualifiedName}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
-import com.digitalasset.daml.lf.engine.{Engine, ResultNeedExternalCall}
+import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -35,8 +34,6 @@ import com.digitalasset.daml.lf.value.Value
 import org.mockito.MockitoSugar
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-
-import java.util.concurrent.atomic.AtomicReference
 
 final class DAMLeExternalCallTest
     extends AnyWordSpec
@@ -117,10 +114,8 @@ final class DAMLeExternalCallTest
   private val contracts = new ReplayContractLookup(Map(contract.contractId -> contract), Map.empty)
 
   private def runReinterpret(
-      externalCallValidationKeys: Set[DAMLe.ExternalCallKey],
-      externalCallHandler: ExternalCallHandler,
       storedExternalCallResultsForReplay: DAMLe.StoredExternalCallResults =
-        storedExternalCallResults,
+        storedExternalCallResults
   ): Either[DAMLe.ReinterpretationError, DAMLe.ReInterpretationResult] = {
     val damle = new DAMLe(
       participantId = DefaultTestIdentities.participant1,
@@ -128,7 +123,6 @@ final class DAMLeExternalCallTest
       engine = new Engine(Engine.DevConfig, loggerFactory),
       interpretationConfig = InterpretationConfig.Dev,
       loggerFactory = loggerFactory,
-      externalCallHandler = externalCallHandler,
     )
 
     val result = damle
@@ -147,8 +141,7 @@ final class DAMLeExternalCallTest
         externalCallReplayData = () =>
           FutureUnlessShutdown.pure(
             DAMLe.ExternalCallReplayData(
-              storedExternalCallResults = storedExternalCallResultsForReplay,
-              validationKeyCounts = externalCallValidationKeys.view.map(_ -> 1).toMap,
+              storedExternalCallResults = storedExternalCallResultsForReplay
             )
           ),
       )
@@ -157,162 +150,19 @@ final class DAMLeExternalCallTest
     timeouts.default.awaitUS("reinterpret external call")(result).failOnShutdown
   }
 
-  "DAMLe external-call validation" should {
-    "fail closed for locally checked calls without an external-call handler" in {
+  "DAMLe external-call replay" should {
+    "reject external calls without recorded output" in {
       inside(
         runReinterpret(
-          externalCallValidationKeys = Set(externalCallKey),
-          externalCallHandler = ExternalCallHandler.Unsupported,
-        )
-      ) { case Left(error: DAMLe.ExternalCallValidationFailed) =>
-        error.key shouldBe externalCallKey
-        error.reason should include("External calls not supported")
-      }
-    }
-
-    "not leak external-call payloads when a confirming handler fails" in {
-      inside(
-        runReinterpret(
-          externalCallValidationKeys = Set(externalCallKey),
-          externalCallHandler = ExternalCallHandler.Unsupported,
-        )
-      ) { case Left(error: DAMLe.ExternalCallValidationFailed) =>
-        error.toString should not include externalCallResult.config.toHexString
-        error.toString should not include externalCallResult.input.toHexString
-      }
-    }
-
-    "accept matching output from locally checked calls" in {
-      val observedCall =
-        new AtomicReference[Option[(String, String, String, String, ExternalCallMode)]](None)
-      val handler = new ExternalCallHandler {
-        override def handleExternalCall(
-            extensionId: String,
-            functionId: String,
-            configHash: String,
-            input: String,
-            mode: ExternalCallMode,
-        )(implicit
-            tc: TraceContext
-        ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] = {
-          observedCall.set(Some((extensionId, functionId, configHash, input, mode)))
-          FutureUnlessShutdown.pure(Right(externalCallResult.output.toHexString))
-        }
-      }
-
-      inside(
-        runReinterpret(
-          externalCallValidationKeys = Set(externalCallKey),
-          externalCallHandler = handler,
-        )
-      ) { case Right(result) =>
-        observedCall.get() shouldBe Some(
-          ("ext", "fun", "0a0b", "c0ff", ExternalCallMode.Validation)
-        )
-
-        val exerciseNodes = result.transaction.nodes.collect { case (_, exercise: Node.Exercise) =>
-          exercise
-        }
-        exerciseNodes should have size 1
-        exerciseNodes.head.externalCallResults shouldBe ImmArray(externalCallResult)
-      }
-    }
-
-    "reject mismatching output from locally checked calls" in {
-      val computedOutput = Bytes.assertFromString("cafe")
-      val handler = new ExternalCallHandler {
-        override def handleExternalCall(
-            extensionId: String,
-            functionId: String,
-            configHash: String,
-            input: String,
-            mode: ExternalCallMode,
-        )(implicit
-            tc: TraceContext
-        ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] =
-          FutureUnlessShutdown.pure(Right(computedOutput.toHexString))
-      }
-
-      inside(
-        runReinterpret(
-          externalCallValidationKeys = Set(externalCallKey),
-          externalCallHandler = handler,
-        )
-      ) { case Left(mismatch: DAMLe.ExternalCallResultMismatch) =>
-        mismatch.extensionId shouldBe externalCallResult.extensionId
-        mismatch.functionId shouldBe externalCallResult.functionId
-        mismatch.computedOutput shouldBe computedOutput
-        mismatch.recordedOutput shouldBe externalCallResult.output
-
-        mismatch.toString should not include externalCallResult.config.toHexString
-        mismatch.toString should not include externalCallResult.input.toHexString
-        mismatch.toString should not include computedOutput.toHexString
-        mismatch.toString should not include externalCallResult.output.toHexString
-      }
-    }
-
-    "reject invalid hex output from locally checked calls" in {
-      val handler = new ExternalCallHandler {
-        override def handleExternalCall(
-            extensionId: String,
-            functionId: String,
-            configHash: String,
-            input: String,
-            mode: ExternalCallMode,
-        )(implicit
-            tc: TraceContext
-        ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] =
-          FutureUnlessShutdown.pure(Right("not-hex"))
-      }
-
-      inside(
-        runReinterpret(
-          externalCallValidationKeys = Set(externalCallKey),
-          externalCallHandler = handler,
-        )
-      ) { case Left(error: DAMLe.ExternalCallValidationFailed) =>
-        error.key shouldBe externalCallKey
-        error.reason should include("Invalid external-call validation output")
-        error.toString should not include "not-hex"
-      }
-    }
-
-    "reject locally checked calls without recorded output" in {
-      val handlerCalled = new AtomicReference(false)
-      val handler = new ExternalCallHandler {
-        override def handleExternalCall(
-            extensionId: String,
-            functionId: String,
-            configHash: String,
-            input: String,
-            mode: ExternalCallMode,
-        )(implicit
-            tc: TraceContext
-        ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] = {
-          handlerCalled.set(true)
-          FutureUnlessShutdown.pure(Right(externalCallResult.output.toHexString))
-        }
-      }
-
-      inside(
-        runReinterpret(
-          externalCallValidationKeys = Set(externalCallKey),
-          externalCallHandler = handler,
-          storedExternalCallResultsForReplay = DAMLe.StoredExternalCallResults.empty,
+          storedExternalCallResultsForReplay = DAMLe.StoredExternalCallResults.empty
         )
       ) { case Left(error: DAMLe.ExternalCallReplayMissing) =>
         error.key shouldBe externalCallKey
-        handlerCalled.get() shouldBe false
       }
     }
 
-    "replay stored external-call results for calls outside local checking responsibility" in {
-      inside(
-        runReinterpret(
-          externalCallValidationKeys = Set.empty,
-          externalCallHandler = ExternalCallHandler.Unsupported,
-        )
-      ) { case Right(result) =>
+    "replay stored external-call results" in {
+      inside(runReinterpret()) { case Right(result) =>
         val exerciseNodes = result.transaction.nodes.collect { case (_, exercise: Node.Exercise) =>
           exercise
         }
@@ -321,16 +171,14 @@ final class DAMLeExternalCallTest
       }
     }
 
-    "reject ambiguous stored external-call results without choosing an output" in {
+    "reject duplicate semantic outputs without choosing one" in {
       val conflictingOutput = externalCallResult.copy(output = Bytes.assertFromString("cafe"))
       val storedResults =
         DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult, conflictingOutput))
 
       inside(
         runReinterpret(
-          externalCallValidationKeys = Set.empty,
-          externalCallHandler = ExternalCallHandler.Unsupported,
-          storedExternalCallResultsForReplay = storedResults,
+          storedExternalCallResultsForReplay = storedResults
         )
       ) { case Left(disagreement: DAMLe.ExternalCallRecordedResultDisagreement) =>
         disagreement.toString should not include externalCallResult.output.toHexString
@@ -340,12 +188,10 @@ final class DAMLeExternalCallTest
       }
     }
 
-    "not leak external-call payloads when replay data is missing" in {
+    "not leak external-call payloads for replay errors" in {
       inside(
         runReinterpret(
-          externalCallValidationKeys = Set.empty,
-          externalCallHandler = ExternalCallHandler.Unsupported,
-          storedExternalCallResultsForReplay = DAMLe.StoredExternalCallResults.empty,
+          storedExternalCallResultsForReplay = DAMLe.StoredExternalCallResults.empty
         )
       ) { case Left(error: DAMLe.ExternalCallReplayMissing) =>
         error.key shouldBe externalCallKey

@@ -74,6 +74,8 @@ class PreparedTransactionCodecV1Spec
     input = externalCallResult.input.toByteString,
     output = externalCallResult.output.toByteString,
   )
+  private val preparedHashTestTransactionUuid =
+    UUID.fromString("4c6471d3-4e09-49dd-addf-6cd90e19c583")
 
   private lazy val generatorsTopology = new GeneratorsTopology(testedProtocolVersion)
   private lazy val generatorsLf = new GeneratorsLf(generatorsTopology)
@@ -116,7 +118,7 @@ class PreparedTransactionCodecV1Spec
       inputContracts = inputContracts,
       synchronizer = synchronizer,
       mediatorGroup = 0,
-      transactionUUID = UUID.randomUUID(),
+      transactionUUID = preparedHashTestTransactionUuid,
       maxRecordTime = None,
     )
 
@@ -322,12 +324,59 @@ class PreparedTransactionCodecV1Spec
       )
 
       prepareTransactionData
+        .computeHash(HashingSchemeVersion.V4, ProtocolVersion.v35)
+        .left
+        .value
+        .message should include("Hashing scheme version V4 is not supported on protocol version")
+
+      val vdevNodeStableV3Error = prepareTransactionData
         .computeHash(HashingSchemeVersion.V3, ProtocolVersion.v35)
         .left
         .value
-        .message should include("LF serialization version VDev")
+        .message
+      vdevNodeStableV3Error should (include("LF serialization version VDev") and include(
+        "Please use hashing scheme V4 or higher"
+      ))
 
-      prepareTransactionData.computeHash(HashingSchemeVersion.V3, ProtocolVersion.dev).value
+      val vdevNodeV3Error = prepareTransactionData
+        .computeHash(HashingSchemeVersion.V3, ProtocolVersion.dev)
+        .left
+        .value
+        .message
+      vdevNodeV3Error should include("LF serialization version VDev")
+      vdevNodeV3Error should include("Please use hashing scheme V4 or higher")
+
+      val v2NodeId = NodeId(1)
+      val v2ExerciseNode = normalizeNode(
+        ValueGenerators
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V2)
+          .sample
+          .value
+      ).copy(
+        children = ImmArray.Empty,
+        choiceAuthorizers = None,
+        externalCallResults = ImmArray.Empty,
+        version = LfSerializationVersion.V2,
+      )
+      val topLevelVDevPrepareTransactionData = mkPrepareTransactionData(
+        transaction = VersionedTransaction(
+          LfSerializationVersion.VDev,
+          Map(v2NodeId -> v2ExerciseNode),
+          ImmArray(v2NodeId),
+        ),
+        submissionSeed = Hash.hashPrivateKey("prepared-vdev-wrapper-test"),
+        nodeSeeds = ImmArray(v2NodeId -> Hash.hashPrivateKey("prepared-vdev-wrapper-node")),
+      )
+
+      val topLevelVDevV3Error = topLevelVDevPrepareTransactionData
+        .computeHash(HashingSchemeVersion.V3, ProtocolVersion.dev)
+        .left
+        .value
+        .message
+      topLevelVDevV3Error should include("LF serialization version VDev")
+      topLevelVDevV3Error should include("Please use hashing scheme V4 or higher")
+
+      prepareTransactionData.computeHash(HashingSchemeVersion.V4, ProtocolVersion.dev).value
     }
 
     "reject transactions whose top-level LF version is older than a contained node" in {
@@ -366,10 +415,69 @@ class PreparedTransactionCodecV1Spec
       timeouts.default.await_("Reject malformed prepared transaction")(result)
     }
 
+    "change the prepared hash when external-call output changes" in {
+      val physicalSynchronizerId =
+        DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = ProtocolVersion.dev)
+      val hashVersion = HashingSchemeVersion.V4
+      val nodeId = NodeId(0)
+      val exerciseNode = normalizeNode(
+        ValueGenerators
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.VDev)
+          .sample
+          .value
+      ).copy(
+        children = ImmArray.Empty,
+        choiceAuthorizers = None,
+        externalCallResults = ImmArray(externalCallResult),
+        version = LfSerializationVersion.VDev,
+      )
+      val changedExerciseNode = exerciseNode.copy(
+        externalCallResults = ImmArray(
+          externalCallResult.copy(output = Bytes.assertFromString("ffff"))
+        )
+      )
+      val inputContract = FatContractInstance.fromCreateNode(
+        normalizeNode(
+          ValueGenerators
+            .malformedCreateNodeGenWithVersion(LfSerializationVersion.VDev)
+            .sample
+            .value
+        ).copy(coid = exerciseNode.targetCoid, keyOpt = None),
+        CreationTime.CreatedAt(LfTimestamp.Epoch),
+        Bytes.Empty,
+      )
+
+      def prepareData(node: Node.Exercise): PrepareTransactionData =
+        mkPrepareTransactionData(
+          transaction = VersionedTransaction(
+            LfSerializationVersion.VDev,
+            Map(nodeId -> node),
+            ImmArray(nodeId),
+          ),
+          submissionSeed = Hash.hashPrivateKey("prepared-external-call-hash-output-test"),
+          nodeSeeds =
+            ImmArray(nodeId -> Hash.hashPrivateKey("prepared-external-call-hash-output-node")),
+          inputContracts =
+            Map(inputContract.contractId -> ExternalInputContract(inputContract, inputContract)),
+          synchronizer = physicalSynchronizerId.forExternalTransactionHashing,
+        )
+
+      val originalHash =
+        prepareData(exerciseNode)
+          .computeHash(hashVersion, physicalSynchronizerId.protocolVersion)
+          .value
+      val changedHash =
+        prepareData(changedExerciseNode)
+          .computeHash(hashVersion, physicalSynchronizerId.protocolVersion)
+          .value
+
+      changedHash should not be originalHash
+    }
+
     "compute matching prepare and execute hashes for external-call transactions" in {
       val physicalSynchronizerId =
         DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = ProtocolVersion.dev)
-      val hashVersion = HashingSchemeVersion.V3
+      val hashVersion = HashingSchemeVersion.V4
       val nodeId = NodeId(0)
       val exerciseNode = normalizeNode(
         ValueGenerators

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.version
 
-import com.digitalasset.canton.version.HashingSchemeVersion.{V2, V3}
+import com.digitalasset.canton.protocol.v32.ExternalAuthorization.HashingSchemeVersion as ProtoHashingSchemeVersion
+import com.digitalasset.canton.version.HashingSchemeVersion.{V2, V3, V4}
 import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -19,6 +20,9 @@ class HashingSchemeVersionSpec extends AnyWordSpec with Matchers with OptionValu
     HashingSchemeVersion.minProtocolVersionForHSV(HashingSchemeVersion.V3) shouldBe Some(
       ProtocolVersion.v35
     )
+    HashingSchemeVersion.minProtocolVersionForHSV(HashingSchemeVersion.V4) shouldBe Some(
+      ProtocolVersion.dev
+    )
   }
   "return the protocol hashing version" in {
 
@@ -32,7 +36,14 @@ class HashingSchemeVersionSpec extends AnyWordSpec with Matchers with OptionValu
       .getHashingSchemeVersionsForProtocolVersion(
         ProtocolVersion.dev
       )
-      .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2, V3)
+      .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2, V3, V4)
+  }
+
+  "convert V4 to and from proto v32" in {
+    V4.toProtoV32 shouldBe ProtoHashingSchemeVersion.HASHING_SCHEME_VERSION_V4
+    HashingSchemeVersion.fromProtoV32(
+      ProtoHashingSchemeVersion.HASHING_SCHEME_VERSION_V4
+    ) shouldBe Right(V4)
   }
 
 }

@@ -99,8 +99,10 @@ private[hash] object NodeHashBuilder {
       : SortedMap[HashingSchemeVersion, SerializationVersion] =
     SortedMap(
       HashingSchemeVersion.V2 -> SerializationVersion.V1,
-      HashingSchemeVersion.V3 -> SerializationVersion.VDev,
+      HashingSchemeVersion.V3 -> SerializationVersion.V2,
+      HashingSchemeVersion.V4 -> SerializationVersion.VDev,
     )
+
   private[hash] def minimumHashingSchemeVersionForLfSerializationVersion(
       serializationVersion: SerializationVersion
   ): Option[HashingSchemeVersion] =
@@ -158,5 +160,7 @@ private[hash] object NodeHashBuilder {
       new v2.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
     case HashingSchemeVersion.V3 =>
       new v3.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+    case HashingSchemeVersion.V4 =>
+      new v4.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
   }
 }

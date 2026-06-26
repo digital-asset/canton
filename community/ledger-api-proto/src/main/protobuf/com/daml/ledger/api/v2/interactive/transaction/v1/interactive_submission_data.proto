@@ -125,8 +125,9 @@ message Exercise {
   // Can only be populated from lf_version dev.
   //
   // Results of external calls made during this exercise.
-  // These results are carried for external-call replay and validation, but are
-  // not encoded into the external-signing prepared transaction hash.
+  // These results are carried for external-call replay and validation.
+  // They are encoded into the prepared transaction hash starting with
+  // HASHING_SCHEME_VERSION_V4.
   //
   // Optional: can be empty
   repeated ExternalCallResult external_call_results = 17;

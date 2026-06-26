@@ -19,7 +19,6 @@ import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
   byteSize,
   hexPayloadSize,
 }
-import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -131,30 +130,6 @@ object DAMLe {
     override protected def pretty: Pretty[EnrichmentError] = adHocPrettyInstance
   }
 
-  final case class ExternalCallResultMismatch(
-      extensionId: String,
-      functionId: String,
-      config: LfBytes,
-      input: LfBytes,
-      computedOutput: LfBytes,
-      recordedOutput: LfBytes,
-  ) extends ReinterpretationError {
-    override protected def pretty: Pretty[ExternalCallResultMismatch] = prettyOfClass(
-      param("extension id", _.extensionId.doubleQuoted),
-      param("function id", _.functionId.doubleQuoted),
-      param("config bytes", mismatch => byteSize(mismatch.config).doubleQuoted),
-      param("input bytes", mismatch => byteSize(mismatch.input).doubleQuoted),
-      param(
-        "computed output bytes",
-        mismatch => byteSize(mismatch.computedOutput).doubleQuoted,
-      ),
-      param(
-        "recorded output bytes",
-        mismatch => byteSize(mismatch.recordedOutput).doubleQuoted,
-      ),
-    )
-  }
-
   final case class ExternalCallRecordedResultDisagreement(
       key: ExternalCallKey,
       outputs: Set[LfBytes],
@@ -180,27 +155,6 @@ object DAMLe {
             .mkString("[", ", ", "]")
             .doubleQuoted,
       ),
-    )
-  }
-
-  final case class ExternalCallValidationFailed(
-      key: ExternalCallKey,
-      callIndex: Int,
-      reason: String,
-  ) extends ReinterpretationError {
-    override protected def pretty: Pretty[ExternalCallValidationFailed] = prettyOfClass(
-      param("extension id", _.key.extensionId.doubleQuoted),
-      param("function id", _.key.functionId.doubleQuoted),
-      param("call index", _.callIndex),
-      param(
-        "config bytes",
-        failure => hexPayloadSize(failure.key.config).doubleQuoted,
-      ),
-      param(
-        "input bytes",
-        failure => hexPayloadSize(failure.key.input).doubleQuoted,
-      ),
-      param("reason", _.reason.doubleQuoted),
     )
   }
 
@@ -243,8 +197,8 @@ object DAMLe {
       )
   }
 
-  /** Stored external call results for replay during validation. Multiple outputs for one semantic
-    * key are preserved so validation can reject them as an external-call disagreement.
+  /** Stored external call results for replay during reinterpretation. Multiple outputs for one
+    * semantic key are preserved so replay can report a recorded-result disagreement.
     */
   final case class StoredExternalCallResults private (
       outputsByKey: Map[ExternalCallKey, Set[LfBytes]]
@@ -278,13 +232,12 @@ object DAMLe {
   }
 
   final case class ExternalCallReplayData(
-      storedExternalCallResults: StoredExternalCallResults,
-      validationKeyCounts: Map[ExternalCallKey, Int],
+      storedExternalCallResults: StoredExternalCallResults
   )
 
   object ExternalCallReplayData {
     val empty: ExternalCallReplayData =
-      ExternalCallReplayData(StoredExternalCallResults.empty, Map.empty)
+      ExternalCallReplayData(StoredExternalCallResults.empty)
   }
 
   trait HasReinterpret {
@@ -314,30 +267,16 @@ object DAMLe {
   private final case class ExternalCallLoopState(
       nextCallIndex: Int,
       replayDataO: Option[ExternalCallReplayData],
-      validationKeyCounts: Map[ExternalCallKey, Int],
   ) {
     def takeCallIndex: (Int, ExternalCallLoopState) =
       nextCallIndex -> copy(nextCallIndex = nextCallIndex + 1)
 
     def withReplayData(replayData: ExternalCallReplayData): ExternalCallLoopState =
-      copy(
-        replayDataO = Some(replayData),
-        validationKeyCounts = replayData.validationKeyCounts,
-      )
-
-    def consumeValidation(key: ExternalCallKey): (Boolean, ExternalCallLoopState) =
-      validationKeyCounts.get(key) match {
-        case Some(remaining) if remaining > 0 =>
-          val nextValidationKeyCounts =
-            if (remaining == 1) validationKeyCounts - key
-            else validationKeyCounts.updated(key, remaining - 1)
-          true -> copy(validationKeyCounts = nextValidationKeyCounts)
-        case _ => false -> this
-      }
+      copy(replayDataO = Some(replayData))
   }
 
   private object ExternalCallLoopState {
-    val empty: ExternalCallLoopState = ExternalCallLoopState(0, None, Map.empty)
+    val empty: ExternalCallLoopState = ExternalCallLoopState(0, None)
   }
 
 }
@@ -357,7 +296,6 @@ class DAMLe(
     engine: Engine,
     interpretationConfig: InterpretationConfig,
     protected val loggerFactory: NamedLoggerFactory,
-    externalCallHandler: ExternalCallHandler,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with HasReinterpret {
@@ -540,104 +478,23 @@ class DAMLe(
       handleResultInternal(resume(Right(output)), externalCallState)
 
     def replayStoredExternalCallOutput(
-        extensionId: String,
-        functionId: String,
+        externalCallKey: ExternalCallKey,
         storedOutput: LfBytes,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
         externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
       logger.debug(
-        s"Replaying recorded external call result for extension=$extensionId, function=$functionId"
+        s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
       )
       resumeWithExternalCallOutput(storedOutput.toHexString, resume, externalCallState)
     }
 
-    def validateExternalCallOutput(
-        extensionId: String,
-        functionId: String,
-        configHash: String,
-        input: String,
-        expectedOutput: LfBytes,
-        externalCallKey: ExternalCallKey,
-        currentCallIndex: Int,
-        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
-        externalCallState: ExternalCallLoopState,
-    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-      logger.debug(
-        s"Re-executing external call for validation: extension=$extensionId, function=$functionId, callIndex=$currentCallIndex"
-      )
-      externalCallHandler
-        .handleExternalCall(
-          extensionId,
-          functionId,
-          configHash,
-          input,
-          ExternalCallMode.Validation,
-        )
-        .flatMap {
-          case Right(output) =>
-            LfBytes.fromString(output) match {
-              case Left(_) =>
-                failExternalCall(
-                  ExternalCallValidationFailed(
-                    externalCallKey,
-                    currentCallIndex,
-                    "Invalid external-call validation output: expected canonical lowercase hex",
-                  )
-                )
-
-              case Right(computedOutput) if computedOutput != expectedOutput =>
-                (LfBytes.fromString(configHash), LfBytes.fromString(input)) match {
-                  case (Right(configBytes), Right(inputBytesParsed)) =>
-                    logger.warn(
-                      s"External call result mismatch for extension=$extensionId, function=$functionId, callIndex=$currentCallIndex: " +
-                        s"computed ${byteSize(computedOutput)} but recorded ${byteSize(expectedOutput)}"
-                    )
-                    failExternalCall(
-                      ExternalCallResultMismatch(
-                        extensionId = extensionId,
-                        functionId = functionId,
-                        config = configBytes,
-                        input = inputBytesParsed,
-                        computedOutput = computedOutput,
-                        recordedOutput = expectedOutput,
-                      )
-                    )
-
-                  case _ =>
-                    failExternalCall(
-                      ExternalCallValidationFailed(
-                        externalCallKey,
-                        currentCallIndex,
-                        "Invalid external-call validation request: expected canonical lowercase hex",
-                      )
-                    )
-                }
-
-              case Right(_) =>
-                resumeWithExternalCallOutput(output, resume, externalCallState)
-            }
-          case Left(error) =>
-            failExternalCall(
-              ExternalCallValidationFailed(
-                externalCallKey,
-                currentCallIndex,
-                error.message,
-              )
-            )
-        }
-    }
-
     def handleExternalCall(
-        extensionId: String,
-        functionId: String,
-        configHash: String,
-        input: String,
+        externalCallKey: ExternalCallKey,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
         externalCallState: ExternalCallLoopState,
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
       val (currentCallIndex, stateAfterCallIndex) = externalCallState.takeCallIndex
-      val externalCallKey = ExternalCallKey(extensionId, functionId, configHash, input)
 
       val replayDataWithStateF = stateAfterCallIndex.replayDataO match {
         case Some(replayData) => FutureUnlessShutdown.pure(replayData -> stateAfterCallIndex)
@@ -653,32 +510,16 @@ class DAMLe(
             failExternalCall(disagreement)
 
           case Right(outputO) =>
-            val (shouldValidate, stateAfterValidationDecision) =
-              stateWithReplayData.consumeValidation(externalCallKey)
             outputO match {
               case None =>
                 failExternalCall(ExternalCallReplayMissing(externalCallKey, currentCallIndex))
 
-              case Some(expectedOutput) if shouldValidate =>
-                validateExternalCallOutput(
-                  extensionId,
-                  functionId,
-                  configHash,
-                  input,
-                  expectedOutput,
-                  externalCallKey,
-                  currentCallIndex,
-                  resume,
-                  stateAfterValidationDecision,
-                )
-
               case Some(storedOutput) =>
                 replayStoredExternalCallOutput(
-                  extensionId,
-                  functionId,
+                  externalCallKey,
                   storedOutput,
                   resume,
-                  stateAfterValidationDecision,
+                  stateWithReplayData,
                 )
             }
         }
@@ -785,11 +626,14 @@ class DAMLe(
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
           handleResultInternal(resume(), externalCallState)
         case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-          handleExternalCall(
+          val externalCallKey = ExternalCallKey(
             extensionId,
             functionId,
             configHash,
             input,
+          )
+          handleExternalCall(
+            externalCallKey,
             resume,
             externalCallState,
           )

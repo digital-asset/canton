@@ -204,5 +204,77 @@ class ExternalTransactionProcessorSpec
 
       result.left.value.reason should include("Cannot hash node with LF serialization version VDev")
     }
+
+    "honor the requested hashing scheme for dev prepared transactions" in {
+      val nodeId = NodeId(0)
+      val signatory = Ref.Party.assertFromString("Alice")
+      val createNode = Node.Create(
+        coid = Value.ContractId.V1(LfHash.hashPrivateKey("prepared-vdev-requested-v4-contract")),
+        packageName = Ref.PackageName.assertFromString("pkg"),
+        templateId = Ref.Identifier.assertFromString("pkgid:Mod:Template"),
+        arg = Value.ValueUnit,
+        signatories = Set(signatory),
+        stakeholders = Set(signatory),
+        keyOpt = None,
+        version = LfSerializationVersion.VDev,
+      )
+      val transaction = VersionedTransaction(
+        LfSerializationVersion.VDev,
+        Map(nodeId -> createNode),
+        ImmArray(nodeId),
+      )
+      val (commandExecutionResult, commands) = commandExecutionResultFor(
+        transaction,
+        ProtocolVersion.dev,
+        "prepared-vdev-requested-v4-test",
+        ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v4-node")),
+      )
+      val processor = processorFor(transaction)
+
+      val result = processor
+        .processPrepare(
+          commandExecutionResult,
+          commands,
+          PositiveInt.one,
+          HashTracer.NoOp,
+          maxRecordTime = None,
+          hashingSchemeVersion = HashingSchemeVersion.V4,
+        )
+        .valueOrFailShutdown("prepare transaction")
+        .futureValue
+
+      result.hashVersion shouldBe HashingSchemeVersion.V4
+    }
+
+    "reject stable prepared transactions when the requested hashing scheme is V4" in {
+      val transaction = VersionedTransaction(
+        LfSerializationVersion.V2,
+        Map.empty,
+        ImmArray.Empty,
+      )
+      val (commandExecutionResult, commands) = commandExecutionResultFor(
+        transaction,
+        ProtocolVersion.v35,
+        "prepared-pv35-requested-v4-test",
+      )
+      val processor = processorFor(transaction)
+
+      val result = processor
+        .processPrepare(
+          commandExecutionResult,
+          commands,
+          PositiveInt.one,
+          HashTracer.NoOp,
+          maxRecordTime = None,
+          hashingSchemeVersion = HashingSchemeVersion.V4,
+        )
+        .value
+        .failOnShutdown("prepare transaction")
+        .futureValue
+
+      result.left.value.reason should include(
+        "Hashing scheme version V4 is not supported on protocol version"
+      )
+    }
   }
 }

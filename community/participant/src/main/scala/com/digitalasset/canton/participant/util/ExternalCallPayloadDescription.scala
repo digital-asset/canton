@@ -20,5 +20,5 @@ private[canton] object ExternalCallPayloadDescription {
   def hexPayloadSize(hex: String): String =
     Bytes
       .fromString(hex)
-      .fold(_ => s"${hex.length} hex chars", byteSize)
+      .fold(_ => s"${hex.length} input characters", byteSize)
 }
