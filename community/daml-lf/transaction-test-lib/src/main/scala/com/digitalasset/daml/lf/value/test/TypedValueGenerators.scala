@@ -16,18 +16,8 @@ import scalaz.{@@, Order, Ordering, Tag}
 import data.{FrontStack, ImmArray, ImmArrayCons, Numeric, Ref, SortedLookupList, Time}
 import ImmArray.ImmArraySeq
 import data.DataArbitrary.*
-import typesig.{
-  DefDataType,
-  Enum,
-  Record,
-  Type,
-  TypeCon,
-  TypeConId,
-  TypeNumeric,
-  TypePrim,
-  Variant,
-  PrimType as PT,
-}
+import language.Ast.*
+import language.Util.*
 import Arbitrary.arbitrary
 
 /** [[ValueGenerators]] produce untyped values; for example, if you use the list gen, you get a
@@ -75,10 +65,10 @@ object TypedValueGenerators {
       override final def injshrink = shr
     }
 
-    private def leaf[Inj0: Order: Arbitrary: Shrink](pt: PT, inj0: Inj0 => Value)(
+    private def leaf[Inj0: Order: Arbitrary: Shrink](typ: Type, inj0: Inj0 => Value)(
         prj0: Value PartialFunction Inj0
     ): Aux[Inj0] = new Leaf0[Inj0] {
-      override val t = TypePrim(pt, ImmArraySeq.empty)
+      override val t = typ
       override def inj(v: Inj0) = inj0(v)
       override def prj = prj0.lift
     }
@@ -86,18 +76,18 @@ object TypedValueGenerators {
     import Value.*, ValueGenerators.Implicits.*, data.Utf8.ImplicitOrder.*
     import scalaz.std.anyVal.*
 
-    val text = leaf(PT.Text, ValueText.apply) { case ValueText(t) => t }
-    val int64 = leaf(PT.Int64, ValueInt64.apply) { case ValueInt64(i) => i }
-    val unit = leaf(PT.Unit, (_: Unit) => ValueUnit) { case ValueUnit => () }
-    val date = leaf(PT.Date, ValueDate.apply) { case ValueDate(d) => d }
-    val timestamp = leaf(PT.Timestamp, ValueTimestamp.apply) { case ValueTimestamp(t) => t }
-    val bool = leaf(PT.Bool, ValueBool(_)) { case ValueBool(b) => b }
-    val party = leaf(PT.Party, ValueParty.apply) { case ValueParty(p) => p }
+    val text = leaf(TText, ValueText.apply) { case ValueText(t) => t }
+    val int64 = leaf(TInt64, ValueInt64.apply) { case ValueInt64(i) => i }
+    val unit = leaf(TUnit, (_: Unit) => ValueUnit) { case ValueUnit => () }
+    val date = leaf(TDate, ValueDate.apply) { case ValueDate(d) => d }
+    val timestamp = leaf(TTimestamp, ValueTimestamp.apply) { case ValueTimestamp(t) => t }
+    val bool = leaf(TBool, ValueBool(_)) { case ValueBool(b) => b }
+    val party = leaf(TParty, ValueParty.apply) { case ValueParty(p) => p }
 
     def numeric(scale: Numeric.Scale): Aux[Numeric] = {
       implicit val arb: Arbitrary[Numeric] = Arbitrary(ValueGenerators.numGen(scale))
       new Leaf0[Numeric] {
-        override def t: Type = TypeNumeric(scale)
+        override def t: Type = TNumeric(TNat(scale))
 
         override def inj(x: Numeric): Value =
           ValueNumeric(Numeric.assertFromBigDecimal(scale, x))
@@ -114,7 +104,7 @@ object TypedValueGenerators {
       new Leaf0[ContractId] {
         // TODO SC it probably doesn't make much difference for our initial use case,
         // but the proper arg should probably end up here, not Unit
-        override val t = TypePrim(PT.ContractId, ImmArraySeq(TypePrim(PT.Unit, ImmArraySeq.empty)))
+        override val t = TContractId(TUnit)
         override def inj(v: ContractId) = ValueContractId(v)
         override def prj = {
           case ValueContractId(cid) => Some(cid)
@@ -124,7 +114,7 @@ object TypedValueGenerators {
 
     def list(elt: ValueAddend): Aux[Vector[elt.Inj]] = new ValueAddend {
       type Inj = Vector[elt.Inj]
-      override val t = TypePrim(PT.List, ImmArraySeq(elt.t))
+      override val t = TList(elt.t)
       override def inj(elts: Inj) =
         ValueList(elts.map(elt.inj(_)).to(FrontStack))
       override def prj = {
@@ -147,7 +137,7 @@ object TypedValueGenerators {
 
     def optional(elt: ValueAddend): Aux[Option[elt.Inj]] = new ValueAddend {
       type Inj = Option[elt.Inj]
-      override val t = TypePrim(PT.Optional, ImmArraySeq(elt.t))
+      override val t = TOptional(elt.t)
       override def inj(oe: Inj) = ValueOptional(oe map (elt.inj(_)))
       override def prj = {
         case ValueOptional(v) => v traverse elt.prj
@@ -166,7 +156,7 @@ object TypedValueGenerators {
 
     def map(elt: ValueAddend): Aux[SortedLookupList[elt.Inj]] = new ValueAddend {
       type Inj = SortedLookupList[elt.Inj]
-      override val t = TypePrim(PT.TextMap, ImmArraySeq(elt.t))
+      override val t = TTextMap(elt.t)
       override def inj(sll: SortedLookupList[elt.Inj]) =
         ValueTextMap(sll map (elt.inj(_)))
       override def prj = {
@@ -189,7 +179,7 @@ object TypedValueGenerators {
       type Inj = key.Inj Map elt.Inj
     } = new ValueAddend {
       type Inj = key.Inj Map elt.Inj
-      override val t = TypePrim(PT.GenMap, ImmArraySeq(key.t, elt.t))
+      override val t = TGenMap(key.t, elt.t)
       override def inj(m: key.Inj Map elt.Inj) =
         ValueGenMap {
           import key.injord as keyorder
@@ -227,84 +217,75 @@ object TypedValueGenerators {
     /** See RecVarExample for usage examples. */
     def record[Spec <: HList](name: Ref.Identifier, fields: Spec)(implicit
         rvs: RecVarSpec[Spec]
-    ): (DefDataType.FWT, Aux[rvs.HRec]) = {
+    ): Aux[rvs.HRec] = {
       val spec = rvs configure fields
-      (
-        DefDataType(ImmArraySeq.empty, Record(spec.t.to(ImmArraySeq))),
-        new ValueAddend {
-          private[this] val lfvFieldNames = spec.t map { case (n, _) => Some(n) }
-          type Inj = rvs.HRec
-          override val t = TypeCon(TypeConId(name), ImmArraySeq.empty)
-          override def inj(hl: Inj) =
-            ValueRecord(
-              Some(name),
-              (lfvFieldNames zip spec.injRec(hl)).to(ImmArray),
-            )
-          override def prj = {
-            case ValueRecord(_, fields) if fields.length == spec.t.length =>
-              spec.prjRec(fields)
-            case _ => None
-          }
-          override def injord = spec.record
-          override def injarb = spec.recarb
-          override def injshrink = spec.recshrink
-        },
-      )
+      new ValueAddend {
+        private[this] val lfvFieldNames = spec.t map { case (n, _) => Some(n) }
+        type Inj = rvs.HRec
+        override val t = TTyCon(name)
+        override def inj(hl: Inj) =
+          ValueRecord(
+            Some(name),
+            (lfvFieldNames zip spec.injRec(hl)).to(ImmArray),
+          )
+        override def prj = {
+          case ValueRecord(_, fields) if fields.length == spec.t.length =>
+            spec.prjRec(fields)
+          case _ => None
+        }
+        override def injord = spec.record
+        override def injarb = spec.recarb
+        override def injshrink = spec.recshrink
+      }
     }
 
     /** See RecVarExample companion for usage examples. */
     def variant[Spec <: HList](name: Ref.Identifier, constructors: Spec)(implicit
         rvs: RecVarSpec[Spec]
-    ): (DefDataType.FWT, Aux[rvs.HVar]) = {
+    ): Aux[rvs.HVar] = {
       val spec = rvs configure constructors
-      (
-        DefDataType(ImmArraySeq.empty, Variant(spec.t.to(ImmArraySeq))),
-        new ValueAddend {
-          type Inj = rvs.HVar
-          override val t = TypeCon(TypeConId(name), ImmArraySeq.empty)
-          override def inj(cp: Inj) = {
-            val (ctor, v) = spec.injVar(cp)
-            ValueVariant(Some(name), ctor, v)
-          }
-          override def prj = {
-            case ValueVariant(_, name, vv) =>
-              spec.prjVar get name flatMap (_(vv))
-            case _ => None
-          }
-          override def injord = spec.varord
-          override def injarb =
-            Arbitrary(Gen.oneOf(spec.vararb.toSeq).flatMap(_._2))
-          override def injshrink = spec.varshrink
-        },
-      )
+      new ValueAddend {
+        type Inj = rvs.HVar
+        override val t = TTyCon(name)
+        override def inj(cp: Inj) = {
+          val (ctor, v) = spec.injVar(cp)
+          ValueVariant(Some(name), ctor, v)
+        }
+        override def prj = {
+          case ValueVariant(_, name, vv) =>
+            spec.prjVar get name flatMap (_(vv))
+          case _ => None
+        }
+        override def injord = spec.varord
+        override def injarb =
+          Arbitrary(Gen.oneOf(spec.vararb.toSeq).flatMap(_._2))
+        override def injshrink = spec.varshrink
+      }
     }
 
     def enumeration(
         name: Ref.Identifier,
         members: Seq[Ref.Name],
-    ): (DefDataType.FWT, EnumAddend[members.type]) =
-      (
-        DefDataType(ImmArraySeq.empty, Enum(members.to(ImmArraySeq))),
-        new EnumAddend[members.type] {
-          type Member = Ref.Name
-          override val values = members
-          override val t = TypeCon(TypeConId(name), ImmArraySeq.empty)
-          override def inj(v: Inj) = ValueEnum(Some(name), v)
-          override def prj = {
-            case ValueEnum(_, dc) => get(dc)
-            case _ => None
+    ): EnumAddend[members.type] =
+      new EnumAddend[members.type] {
+        type Member = Ref.Name
+        override val values = members
+        override val t = TTyCon(name)
+        override def inj(v: Inj) = ValueEnum(Some(name), v)
+        override def prj = {
+          case ValueEnum(_, dc) => get(dc)
+          case _ => None
+        }
+        override def injord = Order.orderBy(values.indexOf)
+        override def injarb = Arbitrary(
+          Gen.oneOf(values)
+        )
+        override def injshrink =
+          Shrink { ev =>
+            if (!(values.headOption contains ev)) values.headOption.toStream
+            else Stream.empty: @annotation.nowarn("cat=deprecation")
           }
-          override def injord = Order.orderBy(values.indexOf)
-          override def injarb = Arbitrary(
-            Gen.oneOf(values)
-          )
-          override def injshrink =
-            Shrink { ev =>
-              if (!(values.headOption contains ev)) values.headOption.toStream
-              else Stream.empty: @annotation.nowarn("cat=deprecation")
-            }
-        },
-      )
+      }
 
     sealed abstract class EnumAddend[+Values <: Seq[Ref.Name]] extends ValueAddend {
       type Inj = Member
@@ -494,7 +475,7 @@ object TypedValueGenerators {
     }
 
     // a RecVarSpec can be turned into a ValueAddend for records
-    val (sampleRecordDDT, sampleAsRecord) =
+    val sampleAsRecord =
       ValueAddend.record(
         Ref.Identifier(
           Ref.PackageId assertFromString "hash",
@@ -521,7 +502,7 @@ object TypedValueGenerators {
       Record(bar = "bye", foo = 84L).align[sampleAsRecord.Inj]
 
     // a RecVarSpec can be turned into a ValueAddend for variants
-    val (sampleVariantDDT, sampleAsVariant) =
+    val sampleAsVariant =
       ValueAddend.variant(
         Ref.Identifier(
           Ref.PackageId assertFromString "hash",

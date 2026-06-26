@@ -88,6 +88,7 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
       // for each namespace separately
       .values
       .toSeq
+      // TODO(#33650) - Safe because the number of owner namespaces (map values) is structurally capped to a very small number by the decentralized namespace governance rules.
       .parFlatTraverse { delegations =>
         delegations
           .collect {
@@ -158,6 +159,7 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
       )
 
       knownNsKeys = referencedAuth.namespaces.toSeq
+        // TODO(#33650) – Safe because the number of required namespaces for a single topology transaction is strictly bounded to a tiny number by protocol definitions (requiredAuth).
         .parFlatTraverse(namespace =>
           filterKnownKeysForNamespace(namespace, toSign.mapping.code, returnAllValidKeys)
             .map { keys =>

@@ -48,6 +48,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         ProcessingTimeout()
       ),
       protocol = CantonNodeParameters.Protocol.Impl(
+        devVersionSupport = false,
         alphaVersionSupport = false,
         betaVersionSupport = true,
         dontWarnOnDeprecatedPV = false,

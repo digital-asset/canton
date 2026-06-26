@@ -59,6 +59,12 @@ rejected response, once the concurrency limit is filled.
   upgraded to a Canton version that supports this change. The new capability can be enabled using `canton.sequencers.seq.parameters.enable-reject-delivered-aggregations-on-pv-35 = MED`
   for mediators. This can be combined with the new configuration option of the mediator `canton.mediators.mymediator.parameters.delayed-verdict-sender.enabled = true`.
   Generally, the sequencer will send out the verdict after reaching the threshold. All subsequent sent verdicts are thrown away. The new option now allows threshold + extra verdicts to be sent immediately, while the rest of the mediators will wait a short amount of time. This allows to reduce the load on the sequencer by 30%, creating more capacity for other transactions.
+- The `ActAsAnyParty` access right has been added to the Ledger API. This allows a user to submit transactions on behalf
+  of any party. This feature is intended for use cases where a user needs to act on behalf of multiple parties, such as
+  in a multi-tenant environment. The new access right can be granted to the users only by a participant administrator
+  either at user creation time or through the `GrantAccessRight` command.
+- *BREAKING*: Unknown config keys are now making config parsing failing. This mechanism was already in place, but it didn't include all the config keys, which is now fixed.
+- *BREAKING*: Separated the config for support of dev and alpha protocol versions. In order to use pv=dev, you now have to specify `dev-version-support = true` instead of `alpha-version-support = true` (`canton.parameters.non-standard-config = true` is still needed).
 
 ### Preview Features
 - preview feature

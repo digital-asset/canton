@@ -255,6 +255,12 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.admin.user_management_service.Right.Kind.CanActAs, openapi.CanActAs](
           openapi.CanActAs.fromJson
         ),
+        Mapping[
+          v2.admin.user_management_service.Right.Kind.CanActAsAnyParty,
+          openapi.CanActAsAnyParty,
+        ](
+          openapi.CanActAsAnyParty.fromJson
+        ),
         Mapping[v2.admin.user_management_service.Right.CanExecuteAs, openapi.CanExecuteAs1](
           openapi.CanExecuteAs1.fromJson
         ),

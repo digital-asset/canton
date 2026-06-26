@@ -31,10 +31,17 @@ object ProtocolVersionCompatibility {
       release: ReleaseVersion = ReleaseVersion.current,
   ): NonEmpty[List[ProtocolVersion]] = {
     val unstableAndBeta =
-      if (cantonNodeParameters.alphaVersionSupport && cantonNodeParameters.nonStandardConfig)
-        ProtocolVersion.alpha.forgetNE ++ ReleaseVersionToProtocolVersions
-          .getBetaProtocolVersions(release)
-      else if (cantonNodeParameters.betaVersionSupport)
+      if (cantonNodeParameters.nonStandardConfig) {
+        val devVersions =
+          if (cantonNodeParameters.devVersionSupport) List(ProtocolVersion.dev) else List.empty
+        val alphaVersions =
+          if (cantonNodeParameters.alphaVersionSupport) ProtocolVersion.alpha.forgetNE
+          else List.empty
+
+        devVersions ++ alphaVersions ++ ReleaseVersionToProtocolVersions.getBetaProtocolVersions(
+          release
+        )
+      } else if (cantonNodeParameters.betaVersionSupport)
         ReleaseVersionToProtocolVersions.getBetaProtocolVersions(release)
       else List.empty
 
@@ -52,6 +59,7 @@ object ProtocolVersionCompatibility {
   /** Returns the protocol versions supported by the release.
     */
   def supportedProtocols(
+      includeDevVersion: Boolean,
       includeAlphaVersions: Boolean,
       includeBetaVersions: Boolean,
       release: ReleaseVersion,
@@ -66,12 +74,17 @@ object ProtocolVersionCompatibility {
         ProtocolVersion.alpha.forgetNE
       else List.empty
 
+    val dev =
+      if (includeDevVersion)
+        List(ProtocolVersion.dev)
+      else List.empty
+
     val supportedPVs = ReleaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
         s"Please review the supported protocol versions of release version $release in `ReleaseVersionToProtocolVersions.scala`."
       ),
-    ) ++ beta ++ alpha
+    ) ++ beta ++ alpha ++ dev
 
     // If the release contains an unstable, alpha or beta protocol version, it is mentioned twice in the result
     supportedPVs.distinct
@@ -232,6 +245,7 @@ object SynchronizerProtocolVersion {
           // the safety flag during config validation
           ProtocolVersionCompatibility
             .supportedProtocols(
+              includeDevVersion = true,
               includeAlphaVersions = true,
               includeBetaVersions = true,
               release = ReleaseVersion.current,
@@ -241,6 +255,7 @@ object SynchronizerProtocolVersion {
           UnsupportedVersion(
             version,
             ProtocolVersionCompatibility.supportedProtocols(
+              includeDevVersion = true,
               includeAlphaVersions = true,
               includeBetaVersions = true,
               release = ReleaseVersion.current,
@@ -274,6 +289,7 @@ object ParticipantProtocolVersion {
           // same as synchronizer: support parsing of dev
           ProtocolVersionCompatibility
             .supportedProtocols(
+              includeDevVersion = true,
               includeAlphaVersions = true,
               includeBetaVersions = true,
               release = ReleaseVersion.current,
@@ -283,6 +299,7 @@ object ParticipantProtocolVersion {
           UnsupportedVersion(
             version,
             ProtocolVersionCompatibility.supportedProtocols(
+              includeDevVersion = true,
               includeAlphaVersions = true,
               includeBetaVersions = true,
               release = ReleaseVersion.current,

@@ -49,6 +49,7 @@ trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
 
 final case class ParticipantProtocolConfig(
     minimumProtocolVersion: Option[ProtocolVersion],
+    override val devVersionSupport: Boolean,
     override val alphaVersionSupport: Boolean,
     override val betaVersionSupport: Boolean,
     override val dontWarnOnDeprecatedPV: Boolean,
@@ -402,6 +403,7 @@ final case class ParticipantNodeParameterConfig(
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(ProtocolVersion.v34)
     ),
+    devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,
     betaVersionSupport: Boolean = false,
     dontWarnOnDeprecatedPV: Boolean = false,

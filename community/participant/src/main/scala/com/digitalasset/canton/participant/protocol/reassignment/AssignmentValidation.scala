@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
   ContractDataMismatch,
   InconsistentReassignmentCounters,
   NonInitiatorSubmitsBeforeExclusivityTimeout,
+  TargetTimestampAfterAssignmentRequest,
   UnassignmentDataNotFound,
   UnassignmentTimestampMismatch,
 }
@@ -306,41 +307,51 @@ object AssignmentValidation {
     ReassignmentValidationError
   ]] = {
     val targetTimestamp = unassignmentData.targetTimestamp
-    for {
-      // TODO(i26479): Check that reassignmentData.unassignmentRequest.targetTimestamp is in the past
-      cryptoSnapshotTargetTs <- reassignmentCoordination
-        .cryptoSnapshot(
-          /*
+    if (targetTimestamp.unwrap >= requestTimestamp)
+      EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](
+        Some(
+          TargetTimestampAfterAssignmentRequest(
+            reassignmentId,
+            targetTimestamp.unwrap,
+            requestTimestamp,
+          )
+        ): Option[ReassignmentValidationError]
+      )
+    else
+      for {
+        cryptoSnapshotTargetTs <- reassignmentCoordination
+          .cryptoSnapshot(
+            /*
           `targetPsid` can differ from `unassignmentData.targetPsid` if the target synchronizer is upgraded
           between unassignment and assignment.
-           */
-          targetPsid,
-          staticSynchronizerParameters,
-          targetTimestamp,
-        )
-        .map(_.map(_.ipsSnapshot))
+             */
+            targetPsid,
+            staticSynchronizerParameters,
+            targetTimestamp,
+          )
+          .map(_.map(_.ipsSnapshot))
 
-      exclusivityLimit <- ProcessingSteps
-        .getAssignmentExclusivity(
-          cryptoSnapshotTargetTs,
-          targetTimestamp,
-        )
-        .leftMap[ReassignmentProcessorError](
-          ReassignmentParametersError(targetPsid.unwrap, _)
-        )
+        exclusivityLimit <- ProcessingSteps
+          .getAssignmentExclusivity(
+            cryptoSnapshotTargetTs,
+            targetTimestamp,
+          )
+          .leftMap[ReassignmentProcessorError](
+            ReassignmentParametersError(targetPsid.unwrap, _)
+          )
 
-      validationError = Option.when(
-        requestTimestamp < exclusivityLimit.unwrap && unassignmentData.submitterMetadata.submitter != submitter
-      )(
-        NonInitiatorSubmitsBeforeExclusivityTimeout(
-          reassignmentId,
-          unassignmentData.submitterMetadata.submitter,
-          currentTimestamp = requestTimestamp,
-          timeout = exclusivityLimit,
-        )
-      )
+        validationError = Option.when(
+          requestTimestamp < exclusivityLimit.unwrap && unassignmentData.submitterMetadata.submitter != submitter
+        )(
+          NonInitiatorSubmitsBeforeExclusivityTimeout(
+            reassignmentId,
+            unassignmentData.submitterMetadata.submitter,
+            currentTimestamp = requestTimestamp,
+            timeout = exclusivityLimit,
+          )
+        ): Option[ReassignmentValidationError]
 
-    } yield validationError
+      } yield validationError
   }
 
   final case class NoReassignmentData(

@@ -136,6 +136,7 @@ object DelayedVerdictSenderConfig {
   *   deprecated protocol version.
   */
 final case class MediatorNodeParameterConfig(
+    override val devVersionSupport: Boolean = false,
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,

@@ -399,6 +399,7 @@ protected object ConnectionPoolTestHelpers {
 
   private lazy val clientProtocolVersions: NonEmpty[List[ProtocolVersion]] =
     ProtocolVersionCompatibility.supportedProtocols(
+      includeDevVersion = true,
       includeAlphaVersions = true,
       includeBetaVersions = true,
       release = ReleaseVersion.current,

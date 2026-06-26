@@ -53,6 +53,7 @@ final case class SynchronizerParametersConfig(
     requiredCryptoKeyFormats: Option[NonEmpty[Set[CryptoKeyFormat]]] = None,
     requiredSignatureFormats: Option[NonEmpty[Set[SignatureFormat]]] = None,
     topologyChangeDelay: Option[NonNegativeFiniteDuration] = None,
+    override val devVersionSupport: Boolean = false,
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,

@@ -370,10 +370,10 @@ object StorageConfig {
 sealed trait DbConfig extends StorageConfig with PrettyPrinting {
 
   /** Function to combine the defined migration path together with dev version changes */
-  final def buildMigrationsPaths(alphaVersionSupport: Boolean): Seq[String] =
+  final def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] =
     if (parameters.migrationsPaths.nonEmpty)
       parameters.migrationsPaths
-    else if (alphaVersionSupport)
+    else if (devVersionSupport)
       Seq(stableMigrationPath, devMigrationPath, defaultTableSettingsPath) ++
         parameters.repeatableMigrationsPaths
     else

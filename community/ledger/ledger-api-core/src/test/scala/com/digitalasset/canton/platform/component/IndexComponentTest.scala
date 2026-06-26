@@ -598,6 +598,27 @@ trait IndexComponentTest
     createTxs.zip(contracts) ++ archivingTxs.map(_ -> Vector.empty)
   }
 
+  protected def createAndArchiveTx(
+      recordTime: CantonTimestamp,
+      contractsToCreate: Seq[ContractInstance],
+      createsToArchive: Seq[Node.Create],
+  ): Update.SequencedTransactionAccepted = {
+    val txBuilder = TxBuilder()
+    contractsToCreate.map(_.inst.toCreateNode).foreach(txBuilder.add)
+    createsToArchive
+      .map(
+        archive(
+          _,
+          actingParties = Set(dsoParty),
+          argumentPayload = randomString(8),
+          resultPayload = randomString(8),
+        )
+      )
+      .foreach(txBuilder.add)
+    val tx = txBuilder.buildCommitted()
+    transaction(synchronizerId = synchronizer1, recordTime = recordTime)(tx, contractsToCreate)
+  }
+
   protected def creates(recordTime: () => CantonTimestamp, payloadLength: Int)(
       size: Int
   ): (Update.SequencedTransactionAccepted, Vector[ContractInstance]) = {
@@ -861,6 +882,93 @@ trait IndexComponentTest
         synchronizerId = synchronizer2,
       )
   }
+
+  protected def sequencedReassignmentAccepted(
+      batch: Reassignment.Batch,
+      recordTime: CantonTimestamp,
+      synchronizerId: SynchronizerId,
+      sourceSynchronizerId: SynchronizerId,
+      targetSynchronizerId: SynchronizerId,
+      submitter: Option[Ref.Party] = Some(dsoParty.value),
+      updateId: UpdateId = randomUpdateId,
+      reassignmentId: String = "00",
+      isReassigningParticipant: Boolean = true,
+      workflowId: Option[platform.WorkflowId] = None,
+  ): Update.SequencedReassignmentAccepted =
+    Update.SequencedReassignmentAccepted(
+      optCompletionInfo = None,
+      workflowId = workflowId,
+      updateId = updateId,
+      reassignmentInfo = ReassignmentInfo(
+        sourceSynchronizer = Source(sourceSynchronizerId),
+        targetSynchronizer = Target(targetSynchronizerId),
+        submitter = submitter,
+        reassignmentId = ReassignmentId.tryCreate(reassignmentId),
+        isReassigningParticipant = isReassigningParticipant,
+      ),
+      reassignment = batch,
+      recordTime = recordTime,
+      synchronizerId = synchronizerId,
+      acsChangeFactory = testAcsChangeFactory,
+    )
+
+  protected def sequencedAssign(
+      recordTime: CantonTimestamp,
+      stakeholders: Set[ValueParty],
+      reassignmentCounter: Long,
+      sourceSynchronizerId: SynchronizerId = synchronizer2,
+      targetSynchronizerId: SynchronizerId = synchronizer1,
+  ): (Update.SequencedReassignmentAccepted, ContractInstance) = {
+    val contract = genContract(
+      argumentPayload = randomString(16),
+      template = templates.head,
+      signatories = stakeholders,
+      ledgerEffectiveTime = recordTime.underlying,
+    )
+    val update = sequencedReassignmentAccepted(
+      batch = Reassignment.Batch(
+        Reassignment.Assign(
+          reassignmentCounter = reassignmentCounter,
+          nodeId = 0,
+          persistedContractInstance = PersistedContractInstance(
+            internalContractId = -1, // filled when stored in the participant contract store
+            inst = contract.inst,
+          ),
+        )
+      ),
+      recordTime = recordTime,
+      synchronizerId = targetSynchronizerId,
+      sourceSynchronizerId = sourceSynchronizerId,
+      targetSynchronizerId = targetSynchronizerId,
+    )
+    update -> contract
+  }
+
+  protected def sequencedUnassign(
+      recordTime: CantonTimestamp,
+      contract: ContractInstance,
+      reassignmentCounter: Long,
+      sourceSynchronizerId: SynchronizerId = synchronizer1,
+      targetSynchronizerId: SynchronizerId = synchronizer2,
+  ): Update.SequencedReassignmentAccepted =
+    sequencedReassignmentAccepted(
+      batch = Reassignment.Batch(
+        Reassignment.Unassign(
+          contractId = contract.contractId,
+          templateId = contract.templateId,
+          packageName = contract.inst.packageName,
+          stakeholders = contract.stakeholders,
+          assignmentExclusivity = None,
+          reassignmentCounter = reassignmentCounter,
+          nodeId = 0,
+          keyOpt = contract.contractKeyWithMaintainers,
+        )
+      ),
+      recordTime = recordTime,
+      synchronizerId = sourceSynchronizerId,
+      sourceSynchronizerId = sourceSynchronizerId,
+      targetSynchronizerId = targetSynchronizerId,
+    )
 
   protected def repairTransaction(
       sequenced: Update.SequencedTransactionAccepted

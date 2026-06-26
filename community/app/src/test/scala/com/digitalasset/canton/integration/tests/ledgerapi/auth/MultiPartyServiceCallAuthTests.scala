@@ -222,6 +222,21 @@ trait MultiPartyServiceCallAuthTests extends SecuredServiceCallAuthTests {
       )
     }
 
+    "allow multi-party calls for a user that can act as any party" taggedAs securityAsset
+      .setHappyCase(
+        "Ledger API client with the can-act-as-any-party right can make multi-party calls"
+      ) in { implicit env =>
+      import env.*
+      val actAsIds = actAs.map(getPartyId)
+      val readAsIds = readAs.map(getPartyId)
+      expectSuccess(
+        serviceCallFor(
+          standardToken(actAsAnyPartyUser),
+          RequestSubmitters(actAsIds, readAsIds),
+        )
+      )
+    }
+
     "allow multi-party calls with actAs parties duplicated in the readAs field" taggedAs securityAsset
       .setHappyCase(
         "Ledger API client can make a multi-party call with actAs parties duplicated in the readAs field"

@@ -2842,6 +2842,23 @@ components:
 
             Required
           type: string
+    CanActAsAnyParty:
+      title: CanActAsAnyParty
+      description: |-
+        The right of a user to authorize commands as any party on a participant.
+        Its utility is predominantly for users that act on behalf of many parties.
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          $ref: '#/components/schemas/CanActAsAnyParty1'
+    CanActAsAnyParty1:
+      title: CanActAsAnyParty
+      description: |-
+        The right of a user to authorize commands as any party on a participant.
+        Its utility is predominantly for users that act on behalf of many parties.
+      type: object
     CanExecuteAs:
       title: CanExecuteAs
       type: object
@@ -6613,6 +6630,12 @@ components:
         properties:
           CanActAs:
             $ref: '#/components/schemas/CanActAs'
+      - type: object
+        required:
+        - CanActAsAnyParty
+        properties:
+          CanActAsAnyParty:
+            $ref: '#/components/schemas/CanActAsAnyParty'
       - type: object
         required:
         - CanExecuteAs

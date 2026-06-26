@@ -243,12 +243,40 @@ class OutputModule[E <: Env[E]](
             .fold(error => abort(error), _ => ())
         }
 
+        startupState.previousBftTimeForOnboarding.foreach { previousBftTime =>
+          val boundaryBlockNumber = startupState.initialHeightToProvide - 1
+          if (boundaryBlockNumber >= BlockNumber.First) {
+            logger.info(
+              s"Onboarding: persisting boundary block $boundaryBlockNumber with BFT time $previousBftTime " +
+                "to seed BFT-time computation if we crash and restart within the onboarding start epoch"
+            )
+            context.blockingAwait(
+              store.insertBlockIfMissing(
+                OutputBlockMetadata(
+                  epochNumber =
+                    EpochNumber(startupState.initialEpochWeHaveLeaderSelectionStateFor - 1),
+                  blockNumber = BlockNumber(boundaryBlockNumber),
+                  blockBftTime = previousBftTime,
+                )
+              ),
+              config.blockingDbReadTimeout,
+            )
+          }
+        }
+
         val lastStoredOutputBlockMetadata =
           context.blockingAwait(
             store.getLastNonSequentialBlockMetadataStored,
             config.blockingDbReadTimeout,
           )
         val lastStoredBlockNumber = lastStoredOutputBlockMetadata.map(_.blockNumber)
+
+        // The durable lower bound is the first block (inclusive) this node ever supports serving, set either by
+        //  pruning or, for an onboarded node, when it was onboarded (see `saveOnboardedNodeLowerBound`). We must
+        //  never try to recover from a block below it: such blocks were either pruned or, in the onboarding case,
+        //  never stored by this node at all (it only ever had blocks from its onboarding height onwards).
+        val lowerBound =
+          context.blockingAwait(store.getLowerBound(), config.blockingDbReadTimeout)
 
         // The logic to compute `recoverFromBlockNumber` takes into account the following scenarios:
         //
@@ -312,7 +340,19 @@ class OutputModule[E <: Env[E]](
             (startBlockNumber, Some(startEpochNumber))
           }
 
-          firstBlockO.getOrElse(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch -> None)
+          firstBlockO.getOrElse {
+            lowerBound
+              .filter(_.blockNumber > recoverFromBlockNumberThatCouldBeInMiddleOfEpoch)
+              .map { lb =>
+                logger.info(
+                  s"Output module bootstrap wanted to recover from block $recoverFromBlockNumberThatCouldBeInMiddleOfEpoch " +
+                    s"= min(ack: $lastAcknowledgedBlockNumber, stored: $lastStoredBlockNumber, leader: ${leaderSelectionPolicy.firstBlockWeNeedToAdd}) " +
+                    s"which is not stored; recovering instead from the lower bound block ${lb.blockNumber} in epoch ${lb.epochNumber}"
+                )
+                lb.blockNumber -> Some(lb.epochNumber)
+              }
+              .getOrElse(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch -> None)
+          }
         }
 
         logger.info(

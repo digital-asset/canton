@@ -1129,7 +1129,6 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .dependsOn(
         DamlProjects.`bindings-java`,
-        DamlProjects.`daml-lf-api-type-signature`,
         DamlProjects.`daml-lf-engine`,
         DamlProjects.`daml-lf-transaction-test-lib` % Test,
         DamlProjects.`testing-utils` % Test,
@@ -2043,7 +2042,6 @@ object BuildCommon {
       project
         .in(file("community/ledger/ledger-json-api"))
         .dependsOn(
-          DamlProjects.`daml-lf-api-type-signature`,
           DamlProjects.`scalatest-utils` % Test,
           DamlProjects.`timer-utils`,
           `ledger-api-core` % "compile->compile;test->test",
@@ -3460,7 +3458,6 @@ object BuildCommon {
       )
       .dependsOn(
         `crypto`,
-        `daml-lf-api-type-signature` % Test,
         `daml-lf-archive` % Test,
         `daml-lf-data`,
         `daml-lf-language`,
@@ -3495,7 +3492,6 @@ object BuildCommon {
       )
       .dependsOn(
         `crypto`,
-        `daml-lf-api-type-signature`,
         `daml-lf-archive`,
         `daml-lf-data` % "compile->test;compile->compile",
         `daml-lf-data-scalacheck`,
@@ -3511,7 +3507,6 @@ object BuildCommon {
       .disablePlugins(
         WartRemover
       )
-      .enablePlugins(DamlPlugin)
       .settings(
         sharedCommunitySettings,
         scalacOptions := lf_scalaopts_stricter,
@@ -3533,11 +3528,8 @@ object BuildCommon {
           "-Wconf:msg=match may not be exhaustive:s",
           "-Wconf:msg=dubious usage of method asInstanceOf with unit value:s",
         ),
-        Test / resourceGenerators += DamlPlugin
-          .testingDarsFromS3("InterfaceTestPackage-v1", "b4414a4478f70a57007caac3d65d0187b68db1e9"),
       )
       .dependsOn(
-        `daml-lf-api-type-signature` % Test,
         `daml-lf-archive` % Test,
         `daml-lf-data` % Test,
         `daml-lf-language`,
@@ -3779,7 +3771,6 @@ object BuildCommon {
         ),
       )
       .dependsOn(
-        `daml-lf-api-type-signature`,
         `daml-lf-data`,
         `daml-lf-language`,
         `daml-lf-stable-packages`,
@@ -3920,6 +3911,7 @@ object BuildCommon {
       .disablePlugins(
         WartRemover
       )
+      .enablePlugins(DamlPlugin)
       .settings(
         sharedCommunitySettings,
         scalacOptions := lf_scalaopts_stricter,
@@ -3934,11 +3926,15 @@ object BuildCommon {
           scala_logging,
           scalaz_core,
           scalaz_scalacheck_binding,
+          scalatest % Test,
         ),
+        Test / resourceGenerators += DamlPlugin
+          .testingDarsFromS3("InterfaceTestPackage-v1", "b4414a4478f70a57007caac3d65d0187b68db1e9"),
       )
       .dependsOn(
         `daml-lf-archive`,
         `daml-lf-data` % "compile->compile;test->test",
+        `daml-lf-parser` % Test,
         `nonempty`,
       )
 

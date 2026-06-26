@@ -73,6 +73,7 @@ object ConfigValidations extends NamedLogging {
     */
   protected def validations(ensurePortsSet: Boolean): List[Validation] =
     List[Validation](
+      devProtocolVersionRequiresNonStandard,
       alphaProtocolVersionRequiresNonStandard,
       dbSequencerRequiresNonStandard,
       bftBlockOrderingStandaloneModeRequiresNonStandard,
@@ -256,15 +257,17 @@ object ConfigValidations extends NamedLogging {
     else base
   }
 
-  private def alphaProtocolVersionRequiresNonStandard(
-      config: CantonConfig
+  private def devOrAlphaProtocolVersionRequiresNonStandard(
+      config: CantonConfig,
+      configValueFn: LocalNodeParametersConfig => Boolean,
+      configName: String,
   ): Validated[NonEmpty[Seq[String]], Unit] = {
 
     val errors = config.allLocalNodes.toSeq.mapFilter { case (name, nodeConfig) =>
       val nonStandardConfig = config.parameters.nonStandardConfig
-      val alphaVersionSupport = nodeConfig.parameters.alphaVersionSupport
-      Option.when(!nonStandardConfig && alphaVersionSupport)(
-        alphaProtocolVersionRequiresNonStandardError(
+      Option.when(!nonStandardConfig && configValueFn(nodeConfig.parameters))(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          configName = configName,
           nodeType = nodeConfig.nodeTypeName,
           nodeName = name.unwrap,
         )
@@ -274,8 +277,28 @@ object ConfigValidations extends NamedLogging {
     toValidated(errors)
   }
 
-  def alphaProtocolVersionRequiresNonStandardError(nodeType: String, nodeName: String) =
-    s"Enabling alpha-version-support for $nodeType $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
+  private def devProtocolVersionRequiresNonStandard(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = devOrAlphaProtocolVersionRequiresNonStandard(
+    config,
+    _.devVersionSupport,
+    "dev-version-support",
+  )
+
+  private def alphaProtocolVersionRequiresNonStandard(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = devOrAlphaProtocolVersionRequiresNonStandard(
+    config,
+    _.alphaVersionSupport,
+    "alpha-version-support",
+  )
+
+  def devOrAlphaProtocolVersionRequiresNonStandardError(
+      configName: String,
+      nodeType: String,
+      nodeName: String,
+  ) =
+    s"Enabling $configName for $nodeType $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
 
   private def snapshotDirRequiresNonStandard(
       config: CantonConfig

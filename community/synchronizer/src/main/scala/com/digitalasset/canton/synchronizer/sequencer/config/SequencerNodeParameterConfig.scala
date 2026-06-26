@@ -71,6 +71,7 @@ final case class AsyncWriterConfig(
   *   separate parallel stage instead of the sequential step.
   */
 final case class SequencerNodeParameterConfig(
+    override val devVersionSupport: Boolean = false,
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,

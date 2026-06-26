@@ -89,7 +89,7 @@ class Environment(
       case Some(Left(error)) =>
         logger.error(s"Failed to load new dynamic configuration: $error")
         pokeDeclarativeApis(Left(()))
-      case Some(Right(newConfig)) if currentConfig.get().parameters.alphaVersionSupport =>
+      case Some(Right(newConfig)) if currentConfig.get().parameters.devOrAlphaVersionSupport =>
         logger.info(
           s"Loaded new configuration. Static node changes will only be applied after a node restart."
         )

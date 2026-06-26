@@ -76,10 +76,11 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
         new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
-      // all nodes but P2 support alpha pv
+      // all nodes but P2 support alpha and dev pv
       .addConfigTransform(
         ConfigTransforms.updateParticipantConfig("participant2")(
-          _.focus(_.parameters.alphaVersionSupport).replace(false)
+          _.focus(_.parameters.devVersionSupport)
+            .replace(false)
         )
       )
       .addConfigTransforms(

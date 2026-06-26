@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -88,29 +89,36 @@ private[routing] class SynchronizerRankComputation(
 
     val reassignmentsET
         : EitherT[FutureUnlessShutdown, TransactionRoutingError, Chain[SingleReassignment]] =
-      Chain.fromSeq(contracts).parFlatTraverse { c =>
-        val contractAssignation = c.synchronizerId
+      MonadUtil
+        .sequentialTraverse(contracts) { c =>
+          val contractAssignation = c.synchronizerId
 
-        if (contractAssignation == targetSynchronizer.unwrap) EitherT.pure(Chain.empty)
-        else {
-          for {
-            sourceSnapshot <- EitherT
-              .fromEither[FutureUnlessShutdown](
-                synchronizerState.getTopologySnapshotFor(contractAssignation)
-              )
-              .map(Source(_))
-            targetSnapshot <- targetSnapshotET
-            submitter <- findReaderThatCanReassignContract(
-              sourceSnapshot = sourceSnapshot,
-              sourceSynchronizerId = Source(contractAssignation),
-              targetSnapshot = targetSnapshot,
-              targetSynchronizerId = targetSynchronizer,
-              contract = c,
-              readers = readers,
-            ).mapK(FutureUnlessShutdown.outcomeK)
-          } yield Chain(c.id -> (submitter, contractAssignation))
+          if (contractAssignation == targetSynchronizer.unwrap) {
+            EitherT.pure(Chain.empty[SingleReassignment]): EitherT[
+              FutureUnlessShutdown,
+              TransactionRoutingError,
+              Chain[SingleReassignment],
+            ]
+          } else {
+            for {
+              sourceSnapshot <- EitherT
+                .fromEither[FutureUnlessShutdown](
+                  synchronizerState.getTopologySnapshotFor(contractAssignation)
+                )
+                .map(Source(_))
+              targetSnapshot <- targetSnapshotET
+              submitter <- findReaderThatCanReassignContract(
+                sourceSnapshot = sourceSnapshot,
+                sourceSynchronizerId = Source(contractAssignation),
+                targetSnapshot = targetSnapshot,
+                targetSynchronizerId = targetSynchronizer,
+                contract = c,
+                readers = readers,
+              ).mapK(FutureUnlessShutdown.outcomeK)
+            } yield Chain(c.id -> (submitter, contractAssignation))
+          }
         }
-      }
+        .map(chains => chains.foldLeft(Chain.empty[SingleReassignment])(_ ++ _))
 
     reassignmentsET.map(reassignments =>
       SynchronizerRank(

@@ -476,6 +476,10 @@ class MainIndexDBMetrics(
     "lookup_last_activations"
   )
 
+  val archiveDeactivations: DatabaseMetrics = createDbMetrics(
+    "archive_deactivations"
+  )
+
   val lookupPointwiseUpdateFetchEventIds: DatabaseMetrics = createDbMetrics(
     "fetch_event_ids"
   )

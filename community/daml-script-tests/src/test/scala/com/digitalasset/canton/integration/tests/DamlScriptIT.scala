@@ -249,7 +249,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
 
   private lazy val maybeEnableLfDev: Seq[ConfigTransform] =
     if (enableLfDev)
-      ConfigTransforms.enableAlphaVersionSupport
+      ConfigTransforms.enableDevVersionSupport
     else Nil
 
   override def environmentDefinition: EnvironmentDefinition =

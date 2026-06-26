@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend.common
 import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
 import cats.syntax.all.*
+import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
@@ -34,6 +35,7 @@ import com.digitalasset.canton.platform.store.backend.{
   RowDef,
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
+import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ContractId, Party}
@@ -421,6 +423,15 @@ object EventStorageBackendTemplate {
       ).mapN(
         RawAcsCommitment.apply
       )
+
+    def deactivatedContractInfoParser(
+        stringInterning: StringInterning
+    ): RowDef[DeactivatedContractInfo] =
+      (
+        contractIdDef,
+        column("stakeholders", parties(stringInterning)(_).map(_.toSet)),
+        reassignmentCounter.map(ReassignmentCounter(_)),
+      ).mapN(DeactivatedContractInfo.apply)
   }
 
   val EventSequentialIdFirstLast: RowParser[(Long, Long)] =
@@ -489,6 +500,31 @@ abstract class EventStorageBackendTemplate(
 
   override def eventReaderQueries: EventReaderQueries =
     new EventReaderQueries(stringInterning)
+
+  override def archiveDeactivations(transactionOffsets: Iterable[Offset])(
+      connection: Connection
+  ): Map[Offset, Vector[DeactivatedContractInfo]] =
+    if (transactionOffsets.isEmpty) Map.empty
+    else
+      // TODO(#33578) revisit this query when the handling of duplicates / invalid cases is finalized
+      SQL"""
+       SELECT
+         deactivate.event_offset AS event_offset,
+         deactivate.contract_id AS contract_id,
+         deactivate.stakeholders AS stakeholders,
+         activate.reassignment_counter AS reassignment_counter
+       FROM lapi_events_deactivate_contract deactivate
+       JOIN lapi_events_activate_contract activate
+         ON activate.event_sequential_id = deactivate.deactivated_event_sequential_id
+       WHERE
+         deactivate.event_offset ${queryStrategy.anyOf(transactionOffsets.map(_.unwrap))}"""
+        .asVectorOf(
+          (
+            RowDefs.eventOffset,
+            RowDefs.deactivatedContractInfoParser(stringInterning),
+          ).tupled.rowParser
+        )(connection)
+        .groupMap(_._1)(_._2)
 
   override def pruneEvents(
       previousPruneUpToInclusiveOffset: Option[Offset],

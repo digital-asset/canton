@@ -101,7 +101,7 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
           .replace(Some(upgradeTime2))
       ),
       ConfigTransforms.updateSequencerConfig("sequencer3")(setLsuSequencingBoundsOverride),
-    ) ++ ConfigTransforms.enableAlphaVersionSupport
+    ) ++ ConfigTransforms.enableDevVersionSupport
   }
 
   private var fixture1: Fixture = _

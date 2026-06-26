@@ -14,9 +14,7 @@ import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceInte
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive
-import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.typesig.reader.DamlLfArchiveReader
 import com.google.protobuf
 import com.google.protobuf.ByteString
 import io.circe.parser.{decode, parse}
@@ -200,13 +198,8 @@ class JsonDamlDefinitionsServiceTest
           getRequestBinaryData(fixture.uri withPath Uri.Path(s"/v2/packages/$pkgId"), headers)
             .map(_._2)
             .map { content =>
-              val byteString = ByteString.copyFrom(content.toByteBuffer)
-              val payload: DamlLf.ArchivePayload =
-                archive.ArchivePayloadParser.assertFromByteString(byteString)
-              val (packageId, astPackage) = DamlLfArchiveReader
-                .readPackage(PackageId.assertFromString(pkgId), payload)
-                .toEither
-                .value
+              val (packageId, astPackage) =
+                read(PackageId.assertFromString(pkgId), content.toArray).value
               val keys = astPackage.modules.keys.toSeq.map(_.toString)
               if (keys.exists(TestedModules.contains)) {
                 seq :+ packageId
@@ -216,6 +209,12 @@ class JsonDamlDefinitionsServiceTest
             }
         )
     }
+  } yield result
+
+  private def read(pkgId: PackageId, bytes: Array[Byte]) = for {
+    lf <- archive.ArchivePayloadParser.fromByteArray(bytes)
+    payload <- archive.Reader.readArchivePayload(pkgId, lf, schemaMode = true)
+    result <- archive.Decode.decodeArchivePayloadSchema(payload)
   } yield result
 
   private def windowsSafeTemplateId(templateId: String): String =

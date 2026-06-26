@@ -19,6 +19,8 @@ import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
+import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
@@ -48,6 +50,14 @@ private[platform] trait LedgerDaoUpdateReader {
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]
+}
+
+object LedgerDaoUpdateReader {
+  final case class DeactivatedContractInfo(
+      contractId: LfContractId,
+      stakeholders: Set[LfPartyId],
+      reassignmentCounter: ReassignmentCounter,
+  )
 }
 
 private[platform] trait LedgerDaoCommandCompletionsReader {

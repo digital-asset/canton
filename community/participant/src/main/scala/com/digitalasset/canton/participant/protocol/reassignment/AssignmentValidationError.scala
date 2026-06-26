@@ -61,4 +61,13 @@ object AssignmentValidationError extends LocalRejectionGroup {
     override def message: String =
       s"Cannot assign $reassignmentId: id is inconsistent with the reassignment data"
   }
+
+  final case class TargetTimestampAfterAssignmentRequest(
+      reassignmentId: ReassignmentId,
+      targetTimestamp: CantonTimestamp,
+      requestTimestamp: CantonTimestamp,
+  ) extends AssignmentValidationError {
+    override def message: String =
+      s"Cannot assign $reassignmentId: target timestamp $targetTimestamp from the unassignment is not before the assignment request timestamp $requestTimestamp"
+  }
 }

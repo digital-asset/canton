@@ -149,7 +149,7 @@ private[topology] class LsuChaos(
       enableMetrics,
     ) ++
       // pv=dev is used
-      ConfigTransforms.enableAlphaVersionSupport
+      ConfigTransforms.enableDevVersionSupport
 
   // Decide what to do next
   private def nextAction()(implicit env: TestConsoleEnvironment): Action = {

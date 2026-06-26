@@ -25,6 +25,7 @@ trait CreatesUsers {
       executeAsParties: List[String] = List.empty,
       readAsAnyParty: Boolean = false,
       executeAsAnyParty: Boolean = false,
+      actAsAnyParty: Boolean = false,
   )
 
   private def wrapStub[Stub <: io.grpc.stub.AbstractStub[Stub]](
@@ -89,7 +90,16 @@ trait CreatesUsers {
                                           .CanExecuteAsAnyParty(proto.Right.CanExecuteAsAnyParty())
                                       )
                                     )
-                                  else Seq.empty)
+                                  else Seq.empty) ++ (if (prerequisiteUser.actAsAnyParty)
+                                                        Seq(
+                                                          proto.Right(
+                                                            proto.Right.Kind
+                                                              .CanActAsAnyParty(
+                                                                proto.Right.CanActAsAnyParty()
+                                                              )
+                                                          )
+                                                        )
+                                                      else Seq.empty)
       req = proto.CreateUserRequest(Some(user), rights)
       user <- userStub.createUser(req).map(_.getUser)
     } yield user

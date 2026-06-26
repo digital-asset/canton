@@ -148,6 +148,7 @@ final case class DeclarativeUserRightsConfig(
     executeAs: Set[String] = Set(),
     readAsAnyParty: Boolean = false,
     executeAsAnyParty: Boolean = false,
+    actAsAnyParty: Boolean = false,
     participantAdmin: Boolean = false,
     identityProviderAdmin: Boolean = false,
 )

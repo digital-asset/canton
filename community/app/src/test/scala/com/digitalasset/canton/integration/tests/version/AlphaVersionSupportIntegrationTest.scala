@@ -61,27 +61,38 @@ sealed trait AlphaVersionSupportIntegrationTest
        alias: acme
    */
   override lazy val environmentDefinition: EnvironmentDefinition = {
-    val minimumStableProtocolVersion =
+    val minimumProtocolVersion = {
+      if (testedProtocolVersion.isDev)
+        ProtocolVersion.dev
       if (testedProtocolVersion.isAlpha)
         ProtocolVersion.latest
       else testedProtocolVersion
+    }
 
     EnvironmentDefinition.P2S2M2_Manual
       .addConfigTransform(ConfigTransforms.enableNonStandardConfig)
       .addConfigTransform(ConfigTransforms.updateParticipantConfig("participant1") {
         // set on `participant1` a minimum-pv and enable alpha version support
         _.focus(_.parameters.minimumProtocolVersion)
-          .replace(Some(ParticipantProtocolVersion(minimumStableProtocolVersion)))
+          .replace(Some(ParticipantProtocolVersion(minimumProtocolVersion)))
+          .focus(_.parameters.devVersionSupport)
+          .replace(true)
           .focus(_.parameters.alphaVersionSupport)
           .replace(true)
           .focus(_.sequencerClient.warnDisconnectDelay)
           .replace(config.NonNegativeFiniteDuration(Duration.ofSeconds(30)))
       })
       .addConfigTransform(ConfigTransforms.updateSequencerConfig("sequencer1") {
-        _.focus(_.parameters.alphaVersionSupport).replace(true)
+        _.focus(_.parameters.devVersionSupport)
+          .replace(true)
+          .focus(_.parameters.alphaVersionSupport)
+          .replace(true)
       })
       .addConfigTransform(ConfigTransforms.updateMediatorConfig("mediator1") {
-        _.focus(_.parameters.alphaVersionSupport).replace(true)
+        _.focus(_.parameters.devVersionSupport)
+          .replace(true)
+          .focus(_.parameters.alphaVersionSupport)
+          .replace(true)
       })
       .withSetup { implicit env =>
         import env.*

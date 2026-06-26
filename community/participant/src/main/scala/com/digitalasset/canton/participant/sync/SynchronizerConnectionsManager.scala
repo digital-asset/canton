@@ -9,6 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
@@ -1355,32 +1356,34 @@ private[sync] class SynchronizerConnectionsManager(
       synchronizerAlias: SynchronizerAlias
   )(implicit traceContext: TraceContext): Either[SyncServiceError, Unit] = {
     logger.info(show"Disconnecting from $synchronizerAlias")
-    (for {
-      synchronizerId <- aliasManager.synchronizerIdForAlias(synchronizerAlias)
-    } yield {
-      val removedO = connectedSynchronizers.psidFor(synchronizerId).flatMap { psid =>
-        syncCrypto.remove(psid)
-        connectedSynchronizers.remove(psid)
+
+    aliasManager
+      .synchronizerIdForAlias(synchronizerAlias)
+      .map { synchronizerId =>
+        val removedO = connectedSynchronizers.psidFor(synchronizerId).flatMap { psid =>
+          syncCrypto.remove(psid)
+          connectedSynchronizers.remove(psid)
+        }
+        removedO match {
+          case Some(connectedSynchronizer) =>
+            logger.info(s"Disconnecting connected synchronizer ${connectedSynchronizer.psid}")
+            Try(LifeCycle.close(connectedSynchronizer)(logger)) match {
+              case Success(_) =>
+                logger.info(show"Disconnected from $synchronizerAlias")
+              case Failure(ex) =>
+                if (parameters.exitOnFatalFailures)
+                  FatalError.exitOnFatalError(
+                    show"Failed to disconnect from $synchronizerAlias due to an exception",
+                    ex,
+                    logger,
+                  )
+                else throw ex
+            }
+          case None =>
+            logger.info(show"Nothing to do, as we are not connected to $synchronizerAlias")
+        }
       }
-      removedO match {
-        case Some(connectedSynchronizer) =>
-          logger.info(s"Disconnecting connected synchronizer ${connectedSynchronizer.psid}")
-          Try(LifeCycle.close(connectedSynchronizer)(logger)) match {
-            case Success(_) =>
-              logger.info(show"Disconnected from $synchronizerAlias")
-            case Failure(ex) =>
-              if (parameters.exitOnFatalFailures)
-                FatalError.exitOnFatalError(
-                  show"Failed to disconnect from $synchronizerAlias due to an exception",
-                  ex,
-                  logger,
-                )
-              else throw ex
-          }
-        case None =>
-          logger.info(show"Nothing to do, as we are not connected to $synchronizerAlias")
-      }
-    }).toRight(SyncServiceError.SyncServiceUnknownSynchronizer.Error(synchronizerAlias))
+      .toRight(SyncServiceError.SyncServiceUnknownSynchronizer.Error(synchronizerAlias))
   }
 
   /** Disconnect from all connected synchronizers. */
@@ -1390,6 +1393,7 @@ private[sync] class SynchronizerConnectionsManager(
     connectedSynchronizers.lsids.toList
       .mapFilter(aliasManager.aliasForSynchronizerId)
       .distinct
+      // TODO(#33650) – Safe because there is one to a few synchronizers ever
       .parTraverse_(disconnectSynchronizer)
 
   /** Start the upgrade of the participant to the successor (automatic workflow).
@@ -1594,7 +1598,7 @@ private[sync] class SynchronizerConnectionsManager(
           for {
             topology <- getSnapshot(synchronizerAlias, synchronizerId)
             // Find the attributes for the party if one is passed in, and if we can find it in topology
-            attributesO <- request.party.parFlatTraverse(party =>
+            attributesO <- request.party.flatTraverse(party =>
               topology
                 .hostedOn(
                   Set(party),

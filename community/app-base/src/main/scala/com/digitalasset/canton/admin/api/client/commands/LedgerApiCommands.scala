@@ -766,6 +766,7 @@ object LedgerApiCommands {
       def identityProviderAdmin: Boolean
       def readAsAnyParty: Boolean
       def executeAsAnyParty: Boolean
+      def actAsAnyParty: Boolean
 
       protected def getRights: Seq[UserRight] =
         actAs.toSeq.map(x => UserRight.defaultInstance.withCanActAs(UserRight.CanActAs(x))) ++
@@ -789,6 +790,11 @@ object LedgerApiCommands {
              Seq(
                UserRight.defaultInstance.withCanExecuteAsAnyParty(UserRight.CanExecuteAsAnyParty())
              )
+           else Seq()) ++
+          (if (actAsAnyParty)
+             Seq(
+               UserRight.defaultInstance.withCanActAsAnyParty(UserRight.CanActAsAnyParty())
+             )
            else Seq())
     }
 
@@ -806,6 +812,7 @@ object LedgerApiCommands {
         readAsAnyParty: Boolean,
         executeAs: Set[LfPartyId],
         executeAsAnyParty: Boolean,
+        actAsAnyParty: Boolean,
     ) extends BaseCommand[CreateUserRequest, CreateUserResponse, LedgerApiUser]
         with HasRights {
 
@@ -1013,6 +1020,7 @@ object LedgerApiCommands {
           identityProviderId: String,
           readAsAnyParty: Boolean,
           executeAsAnyParty: Boolean,
+          actAsAnyParty: Boolean,
       ) extends BaseCommand[GrantUserRightsRequest, GrantUserRightsResponse, UserRights]
           with HasRights {
 
@@ -1047,6 +1055,7 @@ object LedgerApiCommands {
           identityProviderId: String,
           readAsAnyParty: Boolean,
           executeAsAnyParty: Boolean,
+          actAsAnyParty: Boolean,
       ) extends BaseCommand[RevokeUserRightsRequest, RevokeUserRightsResponse, UserRights]
           with HasRights {
 

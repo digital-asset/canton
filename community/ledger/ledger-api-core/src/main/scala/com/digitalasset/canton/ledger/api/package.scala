@@ -203,6 +203,8 @@ package api {
     final case class CanExecuteAs(party: Ref.Party) extends UserRightForParty(party)
 
     final case object CanExecuteAsAnyParty extends UserRight
+
+    final case object CanActAsAnyParty extends UserRight
   }
 
   sealed abstract class Feature extends Product with Serializable
@@ -215,6 +217,7 @@ package api {
       includeReassignments: Option[EventFormat],
       includeTopologyEvents: Option[TopologyFormat],
       includeAcsCommitments: Option[SynchronizerId],
+      includeAcsChanges: Option[SynchronizerId],
   )
 
   final case class TopologyFormat(

@@ -104,6 +104,7 @@ object ReleaseUtils {
       .filter { releaseVersion =>
         val protocolVersions =
           ProtocolVersionCompatibility.supportedProtocols(
+            includeDevVersion = false,
             includeAlphaVersions = false,
             includeBetaVersions = true,
             release = releaseVersion,

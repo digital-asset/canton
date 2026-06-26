@@ -86,7 +86,8 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
       // all nodes but P2 support alpha pv
       .addConfigTransform(
         ConfigTransforms.updateParticipantConfig("participant1")(
-          _.focus(_.parameters.alphaVersionSupport).replace(false)
+          _.focus(_.parameters.devVersionSupport)
+            .replace(false)
         )
       )
       .withSetup { implicit env =>

@@ -4,13 +4,12 @@
 package com.digitalasset.daml.lf.speedy
 package svalue
 
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, Ref, Time}
 import com.digitalasset.daml.lf.interpretation.Error.ContractIdComparability
-import com.digitalasset.daml.lf.language.{Ast, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.test.ValueGenerators.comparableCoidsGen
-import com.digitalasset.daml.lf.{crypto, typesig}
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
@@ -34,34 +33,6 @@ class OrderingSpec
     with Checkers
     with ScalaCheckDrivenPropertyChecks
     with ScalaCheckPropertyChecks {
-
-  private[lf] def toAstType(typ: typesig.Type): Ast.Type = typ match {
-    case typesig.TypeCon(name, typArgs) =>
-      typArgs.foldLeft[Ast.Type](Ast.TTyCon(name.identifier))((acc, typ) =>
-        Ast.TApp(acc, toAstType(typ))
-      )
-    case typesig.TypeNumeric(scale) =>
-      AstUtil.TNumeric(Ast.TNat(scale))
-    case typesig.TypePrim(prim, typArgs) =>
-      import typesig.PrimType as P
-      val init = prim match {
-        case P.Bool => AstUtil.TBool
-        case P.Int64 => AstUtil.TInt64
-        case P.Text => AstUtil.TText
-        case P.Date => AstUtil.TDate
-        case P.Timestamp => AstUtil.TTimestamp
-        case P.Party => AstUtil.TParty
-        case P.ContractId => AstUtil.TContractId.cons
-        case P.List => AstUtil.TList.cons
-        case P.Unit => AstUtil.TUnit
-        case P.Optional => AstUtil.TOptional.cons
-        case P.TextMap => AstUtil.TTextMap.cons
-        case P.GenMap => AstUtil.TGenMap.cons
-      }
-      typArgs.foldLeft[Ast.Type](init)((acc, typ) => Ast.TApp(acc, toAstType(typ)))
-    case typesig.TypeVar(name) =>
-      Ast.TVar(name)
-  }
 
   private val pkgId = Ref.PackageId.assertFromString("pkgId")
 

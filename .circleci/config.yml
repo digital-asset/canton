@@ -755,7 +755,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-21a091f28a16 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-89dc7fac0e6c \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -3917,6 +3917,19 @@ workflows:
                     - gcp_kms_testing
                 name: postgres_conformance_test_16
                 postgres_version: 16
+                requires:
+                    - compile
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_18
+                postgres_version: 18
                 requires:
                     - compile
         when:

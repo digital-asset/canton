@@ -305,6 +305,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         ProcessingTimeout()
       ),
       protocol = CantonNodeParameters.Protocol.Impl(
+        devVersionSupport = false,
         alphaVersionSupport = false,
         betaVersionSupport = false,
         dontWarnOnDeprecatedPV = false,

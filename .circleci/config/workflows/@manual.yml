@@ -1214,6 +1214,10 @@ manual_postgres_conformance_tests:
         <<: *postgres_conformance
         name: postgres_conformance_test_16
         postgres_version: 16
+    - postgres_conformance_test:
+        <<: *postgres_conformance
+        name: postgres_conformance_test_18
+        postgres_version: 18
 
 manual_test_scala3:
   when:

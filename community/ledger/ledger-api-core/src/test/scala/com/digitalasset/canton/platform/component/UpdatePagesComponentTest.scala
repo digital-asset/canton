@@ -28,6 +28,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
     includeReassignments = None,
     includeTopologyEvents = None,
     includeAcsCommitments = None,
+    includeAcsChanges = None,
   )
 
   "update pages ascending with dynamic bounds" should {

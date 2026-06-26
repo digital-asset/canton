@@ -205,6 +205,7 @@ final class BlockSequencerTest
             ProcessingTimeout()
           ),
           protocol = CantonNodeParameters.Protocol.Impl(
+            devVersionSupport = false,
             alphaVersionSupport = false,
             betaVersionSupport = true,
             dontWarnOnDeprecatedPV = false,

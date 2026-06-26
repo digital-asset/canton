@@ -8,7 +8,7 @@ import cats.syntax.alternative.*
 import cats.syntax.contravariantSemigroupal.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
-import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import cats.syntax.validated.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
@@ -1391,7 +1391,13 @@ class AcsCommitmentProcessor private (
         Seq(psid.logical),
         Seq.empty,
       )
-      _ <- batch.parTraverse_ { envelope =>
+
+      // Using sequentialTraverse_ here instead of parallel traversal for two reasons:
+      // 1. The batch size is validated to be exactly 1 at the start of this method, meaning
+      // parallelism provides zero actual concurrency benefit. See MultipleCommitmentsInBatch invariant above.
+      // 2. Downstream DB persistence (via `checkCommitment`) is already explicitly serialized
+      // using the `dbQueue`.
+      _ <- MonadUtil.sequentialTraverse_(batch) { envelope =>
         getReconciliationIntervals(
           envelope.protocolMessage.message.period.toInclusive.forgetRefinement
         )
@@ -2072,7 +2078,7 @@ class AcsCommitmentProcessor private (
       completedPeriodTimestamp: CantonTimestamp,
       config: Option[AcsCommitmentsCatchUpParameters],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[CantonTimestamp]] =
-    config.parFlatTraverse(cfg =>
+    config.flatTraverse(cfg =>
       for {
         // compute what timestamp we would need to catch-up to
         sortedReconciliationIntervals <- sortedReconciliationIntervalsProvider
@@ -2234,8 +2240,8 @@ class AcsCommitmentProcessor private (
       val sendCallback = SendCallback.future
 
       for {
-        signedCmtMsgs <- EitherT.right(
-          msgsFiltered.parTraverse { case (participant, commitment) =>
+        signedCmtMsgs <- EitherT.right(MonadUtil.parTraverseWithLimit(threadCount)(msgsFiltered) {
+          case (participant, commitment) =>
             for {
               snapshotForSigning <-
                 if (protocolVersion >= ProtocolVersion.v35) {
@@ -2270,8 +2276,7 @@ class AcsCommitmentProcessor private (
                 )
                 .map(_ -> Recipients.cc(participant))
             } yield signedCommitment
-          }
-        )
+        })
 
         sendRes <-
           if (signedCmtMsgs.nonEmpty) {

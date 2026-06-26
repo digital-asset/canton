@@ -22,6 +22,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
   ContractDataMismatch,
   InconsistentReassignmentCounters,
   NonInitiatorSubmitsBeforeExclusivityTimeout,
+  TargetTimestampAfterAssignmentRequest,
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ParsedReassignmentRequest
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
@@ -151,7 +152,7 @@ final class AssignmentValidationTest
 
     ParsedReassignmentRequest(
       RequestCounter(1),
-      CantonTimestamp.Epoch,
+      CantonTimestamp.Epoch.immediateSuccessor,
       SequencerCounter(1),
       view,
       recipients,
@@ -223,6 +224,37 @@ final class AssignmentValidationTest
       validate(submittingParticipant).isSuccessful.futureValueUS shouldBe true
 
       validate(otherParticipant).isSuccessful.futureValueUS shouldBe true
+    }
+
+    "detect a submitter target timestamp that is after the assignment request timestamp" in {
+      val futureTargetTimestamp = Target(CantonTimestamp.Epoch.plusSeconds(1))
+      val helpers = reassignmentDataHelpers.copy(targetTimestamp = futureTargetTimestamp)
+      val unassignmentDataFuture = helpers.unassignmentData(
+        helpers.unassignmentRequest(signatory, submittingParticipant, sourceMediator)(
+          reassigningParticipants = reassigningParticipants
+        )
+      )
+
+      val assignmentTree =
+        makeFullAssignmentTree(unassignmentDataFuture.reassignmentId, contract)
+
+      val result = assignmentValidation()
+        .perform(
+          unassignmentDataE = Right(unassignmentDataFuture),
+          activenessF = activenessF,
+        )(mkParsedRequest(assignmentTree))
+        .value
+        .futureValueUS
+        .value
+
+      result.isSuccessful.futureValueUS shouldBe false
+      result.reassigningParticipantValidationResult.errors should contain(
+        TargetTimestampAfterAssignmentRequest(
+          unassignmentDataFuture.reassignmentId,
+          futureTargetTimestamp.unwrap,
+          CantonTimestamp.Epoch.immediateSuccessor,
+        )
+      )
     }
 
     "complain about inconsistent reassignment counters" in {

@@ -377,7 +377,14 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         previousTopology,
       )
 
-    val maybeOnboardingTopologyAndCryptoProvider = maybeOnboardingTopologyQueryTimestamp
+    val effectiveOnboardingTopologyQueryTimestamp =
+      maybeOnboardingTopologyQueryTimestamp.orElse {
+        Option
+          .when(!initialTopology.contains(node))(reconstructOwnActivationTime(moduleSystem))
+          .flatten
+      }
+
+    val maybeOnboardingTopologyAndCryptoProvider = effectiveOnboardingTopologyQueryTimestamp
       .map(onboardingTopologyQueryTimestamp =>
         getOrderingTopologyAt(moduleSystem, Some(onboardingTopologyQueryTimestamp), "onboarding")
       )
@@ -478,6 +485,17 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       ),
       s"Fetch $topologyDesignation ordering topology for bootstrap",
     ).getOrElse(failBootstrap(s"Failed to fetch $topologyDesignation ordering topology"))
+
+  private def reconstructOwnActivationTime(
+      moduleSystem: ModuleSystem[E]
+  )(implicit traceContext: TraceContext): Option[TopologyActivationTime] = {
+    val (headTopology, _) = getOrderingTopologyAt(moduleSystem, None, "head")
+    awaitFuture(
+      moduleSystem,
+      orderingTopologyProvider.getFirstKnownAt(headTopology.activationTime),
+      "Fetch this node's activation time for onboarding crash recovery",
+    ).flatMap(_.get(node))
+  }
 
   private def fetchLatestEpoch(
       moduleSystem: ModuleSystem[E],

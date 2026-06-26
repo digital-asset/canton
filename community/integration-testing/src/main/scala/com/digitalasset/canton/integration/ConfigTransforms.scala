@@ -77,6 +77,7 @@ object ConfigTransforms {
     def configTransformsWhen(predicate: Boolean)(transforms: => Seq[ConfigTransform]) =
       if (predicate) transforms else Seq()
 
+    val enableDev = configTransformsWhen(pv.isDev)(enableDevVersionSupport)
     val enableAlpha = configTransformsWhen(pv.isAlpha)(enableAlphaVersionSupport)
     val enableBeta = configTransformsWhen(pv.isBeta)(setBetaSupport(true))
 
@@ -89,7 +90,7 @@ object ConfigTransforms {
       )
     )
 
-    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning
+    updateParticipants ++ enableDev ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning
   }
 
   val protocolVersionTransforms: Seq[ConfigTransform] = setProtocolVersion(
@@ -194,6 +195,9 @@ object ConfigTransforms {
   def setNonStandardConfig(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.nonStandardConfig).replace(enable)
 
+  def setGlobalDevVersionSupport(enable: Boolean): ConfigTransform =
+    _.focus(_.parameters.devVersionSupport).replace(enable)
+
   def setGlobalAlphaVersionSupport(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.alphaVersionSupport).replace(enable)
 
@@ -202,6 +206,15 @@ object ConfigTransforms {
 
   def setExitOnFatalFailures(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.exitOnFatalFailures).replace(enable)
+
+  def setDevVersionSupport(enable: Boolean): Seq[ConfigTransform] = Seq(
+    setNonStandardConfig(enable),
+    setGlobalDevVersionSupport(enable),
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.devVersionSupport)
+        .replace(enable)
+    ),
+  )
 
   def setAlphaVersionSupport(enable: Boolean): Seq[ConfigTransform] = Seq(
     setNonStandardConfig(enable),
@@ -224,6 +237,7 @@ object ConfigTransforms {
   def setStartupMemoryReportLevel(level: ReportingLevel): ConfigTransform =
     _.focus(_.parameters.startupMemoryCheckConfig).replace(StartupMemoryCheckConfig(level))
 
+  lazy val enableDevVersionSupport: Seq[ConfigTransform] = setDevVersionSupport(true)
   lazy val enableAlphaVersionSupport: Seq[ConfigTransform] = setAlphaVersionSupport(true)
 
   /** Default transforms to apply to tests using a [[EnvironmentDefinition]]. Covers the primary

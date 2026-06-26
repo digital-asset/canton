@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 REPO = "DACH-NY/canton"
-STALE_DAYS = 60
+STALE_DAYS = 30
 SKIP_LABELS = frozenset({"ignored", "disabled"})
 _TRANSIENT_HTTP_CODES = frozenset({"502", "503", "504"})
 _RETRY_ATTEMPTS = 3

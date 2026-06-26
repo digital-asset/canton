@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.util
 
+import cats.syntax.apply.*
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.util.OptionUtil
 import slick.jdbc.GetResult
 
 /** The time when a request has made a change of state.
@@ -36,9 +36,9 @@ object TimeOfRequest {
   }
 
   implicit val getResultOptionTimeOfRequest: GetResult[Option[TimeOfRequest]] = GetResult(r =>
-    OptionUtil.zipWith(
+    (
       GetResult[Option[RequestCounter]].apply(r),
       GetResult[Option[CantonTimestamp]].apply(r),
-    )(TimeOfRequest.apply)
+    ).mapN(TimeOfRequest.apply)
   )
 }

@@ -363,6 +363,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
       ProcessingTimeout(),
       ClientChannelParams.ForTesting,
       clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(
+        includeDevVersion = true,
         includeAlphaVersions = true,
         includeBetaVersions = true,
         release = ReleaseVersion.current,

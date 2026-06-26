@@ -64,17 +64,15 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
           .variant(
             defRef(name = "Variant"),
             HRecord(Variant = VA.int64),
-          )
-          ._2,
+          ),
         fRecord = VA
           .record(
             defRef(name = "Record"),
             HRecord(field1 = VA.text, field2 = VA.text),
-          )
-          ._2,
+          ),
         fTextMap = VA.map(VA.text),
       ),
-    )._2
+    )
 
   private val complexRecordV: complexRecordT.Inj =
     HRecord(
@@ -182,15 +180,15 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         )
       val value1 = ValueList(
         FrontStack(
-          recordT._2.inj(HRecord(_1 = "A", _2 = "B")),
-          recordT._2.inj(HRecord(_1 = "", _2 = "")),
+          recordT.inj(HRecord(_1 = "A", _2 = "B")),
+          recordT.inj(HRecord(_1 = "", _2 = "")),
         )
       )
 
       val value2 = ValueList(
         FrontStack(
-          recordT._2.inj(HRecord(_1 = "A", _2 = "")),
-          recordT._2.inj(HRecord(_1 = "", _2 = "B")),
+          recordT.inj(HRecord(_1 = "A", _2 = "")),
+          recordT.inj(HRecord(_1 = "", _2 = "B")),
         )
       )
 
@@ -218,7 +216,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         VA.variant(
           defRef(name = "Variant"),
           HRecord(A = VA.unit, B = VA.unit),
-        )._2
+        )
       val value1 = variantT.inj(HSum[variantT.Inj](Symbol("A") ->> (())))
       val value2 = variantT.inj(HSum[variantT.Inj](Symbol("B") ->> (())))
 
@@ -231,7 +229,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
     }
 
     "not produce collision in Variant value" in {
-      val variantT = VA.variant(defRef(name = "Variant"), HRecord(A = VA.int64))._2
+      val variantT = VA.variant(defRef(name = "Variant"), HRecord(A = VA.int64))
       val value1 = variantT.inj(HSum(Symbol("A") ->> 0L))
       val value2 = variantT.inj(HSum(Symbol("A") ->> 1L))
 
@@ -417,7 +415,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         VA.record(
           defRef(name = "Tuple2"),
           HRecord(_1 = VA.text, _2 = VA.text),
-        )._2
+        )
       val value1 = recordT.inj(HRecord(_1 = "A", _2 = "B"))
       val value2 = recordT.inj(HRecord(_1 = "A", _2 = "C"))
 
@@ -474,8 +472,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         import org.scalacheck.{Arbitrary, Gen}
         VA.contractId(Arbitrary(Gen.fail)).inj(ContractId.V1 assertFromString str)
       }
-    val enumT1 = VA.enumeration("Color", List("Red", "Green"))._2
-    val enumT2 = VA.enumeration("ColorBis", List("Red", "Green"))._2
+    val enumT1 = VA.enumeration("Color", List("Red", "Green"))
+    val enumT2 = VA.enumeration("ColorBis", List("Red", "Green"))
 
     val enums = List(
       enumT1.inj(enumT1.get("Red").get),
@@ -483,8 +481,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       enumT2.inj(enumT2.get("Green").get),
     )
 
-    val record0T1 = VA.record("Unit", HNil)._2
-    val record0T2 = VA.record("UnitBis", HNil)._2
+    val record0T1 = VA.record("Unit", HNil)
+    val record0T2 = VA.record("UnitBis", HNil)
 
     val records0 =
       List(
@@ -493,9 +491,9 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       )
 
     val record2T1 =
-      VA.record("Tuple", HRecord(_1 = VA.bool, _2 = VA.bool))._2
+      VA.record("Tuple", HRecord(_1 = VA.bool, _2 = VA.bool))
     val record2T2 =
-      VA.record("TupleBis", HRecord(_1 = VA.bool, _2 = VA.bool))._2
+      VA.record("TupleBis", HRecord(_1 = VA.bool, _2 = VA.bool))
 
     val records2 =
       List(
@@ -506,10 +504,9 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       )
 
     val variantT1 =
-      VA.variant("Either", HRecord(Left = VA.bool, Right = VA.bool))._2
+      VA.variant("Either", HRecord(Left = VA.bool, Right = VA.bool))
     val variantT2 = VA
       .variant("EitherBis", HRecord(Left = VA.bool, Right = VA.bool))
-      ._2
 
     val variants = List(
       variantT1.inj(HSum[variantT1.Inj](Symbol("Left") ->> false)),

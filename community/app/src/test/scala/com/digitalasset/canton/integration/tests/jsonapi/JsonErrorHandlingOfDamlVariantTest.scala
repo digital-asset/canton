@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceInte
   HttpServiceTestFixtureData,
   dar1,
 }
-import com.digitalasset.canton.ledger.service.MetadataReader
 import com.digitalasset.daml.lf.data.Ref
 import io.circe.Json
 import io.circe.syntax.*
@@ -84,12 +83,8 @@ class JsonErrorHandlingOfDamlVariantTest
       headers: List[HttpHeader],
       tagFieldEncoding: String,
   ): Future[(StatusCode, Json)] = {
-    val metadataDar1 =
-      MetadataReader.readFromDar(dar1).valueOr(e => fail(s"Cannot read dar1 metadata: $e"))
-    val iouPkgId = MetadataReader
-      .templateByName(metadataDar1)(Ref.QualifiedName.assertFromString("Iou:Iou"))
-      .head
-      ._1
+    val iouPkgId =
+      packagesContainingTemplate(dar1, Ref.QualifiedName.assertFromString("Iou:Iou")).head
 
     val createCommand = JsCommand.CreateCommand(
       templateId = Identifier(iouPkgId, "Test", "VariantTest"),

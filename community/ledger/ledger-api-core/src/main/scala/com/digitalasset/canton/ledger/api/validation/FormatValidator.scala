@@ -129,6 +129,7 @@ object FormatValidator {
       includeReassignments = includeReassignments,
       includeTopologyEvents = includeTopologyEvents,
       includeAcsCommitments = None,
+      includeAcsChanges = None,
     )
 
   // Allow using deprecated Protobuf fields for backwards compatibility

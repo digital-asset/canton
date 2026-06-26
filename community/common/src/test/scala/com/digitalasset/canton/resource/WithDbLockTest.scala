@@ -140,6 +140,7 @@ trait WithDbLockTest extends FixtureAsyncWordSpec with BaseTest with HasExecutio
     }
 
     for {
+      // TODO(#33650) – Statically bounded to 2 elements
       _ <- List(l1F, l2F).parSequence.value
     } yield succeed
   }

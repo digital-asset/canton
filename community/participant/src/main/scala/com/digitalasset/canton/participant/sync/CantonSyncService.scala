@@ -11,7 +11,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
@@ -44,10 +43,7 @@ import com.digitalasset.canton.ledger.api.{
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
-import com.digitalasset.canton.ledger.participant.state.SyncService.{
-  ConnectedSynchronizerResponse,
-  SubmissionCostEstimation,
-}
+import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
@@ -115,7 +111,6 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.archive.DamlLf
@@ -811,7 +806,9 @@ class CantonSyncService(
       case None =>
         // all packages should be vetted, but no synchronizer was specified, therefore automatically
         // detect a single connected synchronizer
-        readySynchronizers.view.mapValues(_._1).values.toSeq match {
+        readySynchronizers.valuesIterator.map { case (psid, _submissionReady) =>
+          psid
+        }.toSeq match {
           case Seq(singleSynchronizer) => Right(singleSynchronizer)
           case synchronizers =>
             Left(
@@ -1656,59 +1653,8 @@ class CantonSyncService(
       request: SyncService.ConnectedSynchronizerRequest
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[SyncService.ConnectedSynchronizerResponse] = {
-    def getSnapshot(
-        synchronizerAlias: SynchronizerAlias,
-        synchronizerId: PhysicalSynchronizerId,
-    ): FutureUnlessShutdown[TopologySnapshot] =
-      syncCrypto.ips
-        .forSynchronizer(synchronizerId)
-        .toFutureUS(
-          new Exception(
-            s"Failed retrieving SynchronizerTopologyClient for synchronizer `$synchronizerId` with alias $synchronizerAlias"
-          )
-        )
-        .flatMap(_.currentSnapshotApproximation)
-
-    val result = readySynchronizers
-      // keep only healthy synchronizers
-      .collect {
-        case (synchronizerAlias, (synchronizerId, submissionReady)) if submissionReady.unwrap =>
-          for {
-            topology <- getSnapshot(synchronizerAlias, synchronizerId)
-            // Find the attributes for the party if one is passed in, and if we can find it in topology
-            attributesO <- request.party.parFlatTraverse(party =>
-              topology
-                .hostedOn(
-                  Set(party),
-                  participantId = request.participantId.getOrElse(participantId),
-                )
-                .map(
-                  _.get(party)
-                )
-            )
-          } yield attributesO
-            .map(attributes =>
-              ConnectedSynchronizerResponse.ConnectedSynchronizer(
-                synchronizerAlias,
-                synchronizerId,
-                Some(attributes.permission),
-              )
-            )
-            .orElse(
-              // Return the connected synchronizer without party information only when no party was requested
-              Option.when(request.party.isEmpty) {
-                ConnectedSynchronizerResponse.ConnectedSynchronizer(
-                  synchronizerAlias,
-                  synchronizerId,
-                  None,
-                )
-              }
-            )
-      }.toSeq
-
-    FutureUnlessShutdown.sequence(result).map(_.flatten).map(ConnectedSynchronizerResponse.apply)
-  }
+  ): FutureUnlessShutdown[SyncService.ConnectedSynchronizerResponse] =
+    connectionsManager.getConnectedSynchronizers(request)
 
   override def incompleteReassignmentOffsets(
       validAt: Offset,

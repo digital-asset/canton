@@ -578,6 +578,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         ) and include(
           ProtocolVersionCompatibility
             .supportedProtocols(
+              includeDevVersion = false,
               includeAlphaVersions = false,
               includeBetaVersions = false,
               release = ReleaseVersion.current,

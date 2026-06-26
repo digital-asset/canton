@@ -262,7 +262,7 @@ final class AssignmentProcessingStepsTest
 
     ParsedReassignmentRequest(
       RequestCounter(1),
-      CantonTimestamp.Epoch,
+      CantonTimestamp.Epoch.immediateSuccessor,
       SequencerCounter(1),
       view,
       recipients,
@@ -576,7 +576,7 @@ final class AssignmentProcessingStepsTest
             ),
             _.shouldBeCantonError(
               SyncServiceAlarm,
-              _ shouldBe s"Received 2 instead of 1 views in Request ${CantonTimestamp.Epoch}. Discarding all but the first view.",
+              _ shouldBe s"Received 2 instead of 1 views in Request ${parsedRequest.requestTimestamp}. Discarding all but the first view.",
             ),
           )
       } yield {

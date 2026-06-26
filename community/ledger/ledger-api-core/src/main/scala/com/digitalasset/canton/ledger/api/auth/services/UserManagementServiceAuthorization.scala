@@ -30,12 +30,14 @@ final class UserManagementServiceAuthorization(
   // - ParticipantAdmin
   // - CanReadAsAnyParty
   // - CanExecuteAsAnyParty
+  // - CanActAsAnyParty
   private def needsParticipantAdmin(rights: Seq[Right]): Boolean =
     // Exhaustive match so we get an error here when we add new items to Kind.
     rights.map(_.kind).exists {
       case Right.Kind.ParticipantAdmin(_) => true
       case Right.Kind.CanReadAsAnyParty(_) => true
       case Right.Kind.CanExecuteAsAnyParty(_) => true
+      case Right.Kind.CanActAsAnyParty(_) => true
       case Right.Kind.CanActAs(_) => false
       case Right.Kind.CanReadAs(_) => false
       case Right.Kind.CanExecuteAs(_) => false
