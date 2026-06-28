@@ -24,14 +24,8 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{LfPartyId, checked}
-import com.digitalasset.daml.lf.data.Bytes
 
 import scala.concurrent.ExecutionContext
-
-private final case class ExternalCallInconsistencyDetails(
-    key: DAMLe.ExternalCallKey,
-    outputs: Set[Bytes],
-)
 
 private final case class ViewWithHostedParties(
     viewPosition: ViewPosition,
@@ -119,59 +113,6 @@ class TransactionConfirmationResponsesFactory(
       )
       .orElseBy(_.reason)
 
-  private def routeExternalCallInconsistencies[A](
-      orderedFindings: Seq[A],
-      viewsWithHostedParties: Seq[ViewWithHostedParties],
-  )(
-      inconsistencyDetails: (
-          A,
-          ViewParticipantData.ViewExternalCallResult,
-      ) => Option[ExternalCallInconsistencyDetails]
-  ): Map[LfPartyId, Seq[(A, Inconsistency)]] =
-    if (orderedFindings.isEmpty) Map.empty
-    else {
-      val orderedViews =
-        viewsWithHostedParties.sortBy(_.viewPosition)(ViewPosition.orderViewPosition.toOrdering)
-
-      val routed = orderedFindings.flatMap { finding =>
-        val occurrencesByPartyAndDetails = orderedViews
-          .flatMap { viewWithHostedParties =>
-            val viewParticipantData =
-              viewWithHostedParties.validationResult.view.viewParticipantData
-            if (!viewParticipantData.supportsExternalCallResults)
-              Seq.empty
-            else {
-              viewParticipantData.externalCallResults.flatMap { result =>
-                inconsistencyDetails(finding, result).toList.flatMap { details =>
-                  val occurrence = ExternalCallOccurrence(
-                    viewWithHostedParties.viewPosition,
-                    result.exerciseIndex,
-                    result.callIndex,
-                  )
-                  result.checkingParties
-                    .intersect(viewWithHostedParties.hostedConfirmingParties)
-                    .toSeq
-                    .map(party => (party, details, occurrence))
-                }
-              }
-            }
-          }
-          .groupMap { case (party, details, _) => party -> details } { case (_, _, occurrence) =>
-            occurrence
-          }
-
-        occurrencesByPartyAndDetails.toSeq.map { case ((party, details), occurrences) =>
-          party -> (finding -> Inconsistency(
-            details.key,
-            details.outputs,
-            occurrences.toSet,
-          ))
-        }
-      }
-
-      routed.groupMap(_._1)(_._2)
-    }
-
   private def recordedExternalCallDisagreementInconsistencies(
       disagreements: Seq[DAMLe.ExternalCallRecordedResultDisagreement],
       viewsWithHostedParties: Seq[ViewWithHostedParties],
@@ -187,21 +128,57 @@ class TransactionConfirmationResponsesFactory(
     val orderedDisagreements =
       disagreements.distinct.sorted(orderRecordedResultDisagreement)
 
-    routeExternalCallInconsistencies(orderedDisagreements, viewsWithHostedParties) {
-      case (resultDisagreement, result) =>
-        val call = result.result
-        Option.when(
-          call.extensionId == resultDisagreement.key.extensionId &&
-            call.functionId == resultDisagreement.key.functionId &&
-            call.config.toHexString == resultDisagreement.key.config &&
-            call.input.toHexString == resultDisagreement.key.input &&
-            resultDisagreement.outputs(call.output)
-        )(
-          ExternalCallInconsistencyDetails(
+    if (orderedDisagreements.isEmpty) Map.empty
+    else {
+      val orderedViews =
+        viewsWithHostedParties.sortBy(_.viewPosition)(ViewPosition.orderViewPosition.toOrdering)
+
+      val routed = orderedDisagreements.flatMap { resultDisagreement =>
+        val occurrencesByParty = orderedViews
+          .flatMap { viewWithHostedParties =>
+            val viewParticipantData =
+              viewWithHostedParties.validationResult.view.viewParticipantData
+            if (!viewParticipantData.supportsExternalCallResults)
+              Seq.empty
+            else {
+              viewParticipantData.externalCallResults.flatMap { result =>
+                val call = result.result
+                Option
+                  .when(
+                    call.extensionId == resultDisagreement.key.extensionId &&
+                      call.functionId == resultDisagreement.key.functionId &&
+                      call.config.toHexString == resultDisagreement.key.config &&
+                      call.input.toHexString == resultDisagreement.key.input &&
+                      resultDisagreement.outputs(call.output)
+                  )(
+                    ExternalCallOccurrence(
+                      viewWithHostedParties.viewPosition,
+                      result.exerciseIndex,
+                      result.callIndex,
+                    )
+                  )
+                  .toList
+                  .flatMap { occurrence =>
+                    result.checkingParties
+                      .intersect(viewWithHostedParties.hostedConfirmingParties)
+                      .toSeq
+                      .map(party => party -> occurrence)
+                  }
+              }
+            }
+          }
+          .groupMap(_._1)(_._2)
+
+        occurrencesByParty.toSeq.map { case (party, occurrences) =>
+          party -> (resultDisagreement -> Inconsistency(
             resultDisagreement.key,
             resultDisagreement.outputs,
-          )
-        )
+            occurrences.toSet,
+          ))
+        }
+      }
+
+      routed.groupMap(_._1)(_._2)
     }
   }
 
