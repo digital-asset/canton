@@ -896,6 +896,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       extensionId = "test-extension",
       config = config,
       httpClient = ExtensionServiceManager.createHttpClient(config),
+      timeoutScheduler = scheduledExecutor(),
       performUnlessClosing = FlagCloseable(logger, timeouts),
       loggerFactory = loggerFactory,
     )(ec)

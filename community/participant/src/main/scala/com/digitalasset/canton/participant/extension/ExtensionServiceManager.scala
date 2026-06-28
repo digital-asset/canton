@@ -3,18 +3,21 @@
 
 package com.digitalasset.canton.participant.extension
 
+import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.{PemFileOrString, ProcessingTimeout}
 import com.digitalasset.canton.http.HttpService
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ExtensionServiceConfig
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.net.http.HttpClient
-import java.security.cert.CertificateFactory
 import java.security.KeyStore
+import java.security.cert.CertificateFactory
+import java.util.concurrent.{ScheduledExecutorService, ScheduledThreadPoolExecutor}
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
+import scala.util.control.NonFatal
 
 /** Manages extension service connections with per-extension pooled HTTP clients.
   *
@@ -39,16 +42,39 @@ class ExtensionServiceManager(
     extends NamedLogging
     with FlagCloseable {
 
+  private val timeoutScheduler: Option[ScheduledExecutorService] =
+    Option.when(extensionConfigs.nonEmpty) {
+      val scheduler = Threading.singleThreadScheduledExecutor(
+        loggerFactory.threadName + "-extension-service-http-timeout",
+        noTracingLogger,
+      )
+      scheduler match {
+        case executor: ScheduledThreadPoolExecutor =>
+          executor.setRemoveOnCancelPolicy(true)
+        case _ => ()
+      }
+      scheduler
+    }
+
   // Extension clients by ID
   private val clients: Map[String, HttpExtensionServiceClient] =
-    extensionConfigs.map { case (id, config) =>
-      id -> new HttpExtensionServiceClient(
-        id,
-        config,
-        ExtensionServiceManager.createHttpClient(config),
-        this,
-        loggerFactory,
-      )
+    timeoutScheduler.fold(Map.empty[String, HttpExtensionServiceClient]) { scheduler =>
+      try {
+        extensionConfigs.map { case (id, config) =>
+          id -> new HttpExtensionServiceClient(
+            id,
+            config,
+            ExtensionServiceManager.createHttpClient(config),
+            scheduler,
+            this,
+            loggerFactory,
+          )
+        }
+      } catch {
+        case NonFatal(exception) =>
+          closeTimeoutScheduler(scheduler)
+          throw exception
+      }
     }
 
   /** Get a client for the specified extension.
@@ -156,6 +182,12 @@ class ExtensionServiceManager(
 
   /** Get the list of configured extension IDs. */
   def extensionIds: Set[String] = clients.keySet
+
+  override protected def onClosed(): Unit =
+    timeoutScheduler.foreach(closeTimeoutScheduler)
+
+  private def closeTimeoutScheduler(scheduler: ScheduledExecutorService): Unit =
+    LifeCycle.close(ExecutorServiceExtensions(scheduler)(logger, timeouts))(logger)
 }
 
 object ExtensionServiceManager {

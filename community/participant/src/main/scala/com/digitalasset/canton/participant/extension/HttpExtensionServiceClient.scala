@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.config.{
   ExtensionServiceConfig,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{DelayUtil, FutureUtil}
+import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.util.retry.{Backoff, NoExceptionRetryPolicy, Success}
 
 import java.io.ByteArrayOutputStream
@@ -27,13 +27,18 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.time.Duration
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
-import java.util.concurrent.{CompletableFuture, CompletionStage, Flow}
+import java.util.concurrent.{
+  CompletableFuture,
+  CompletionStage,
+  Flow,
+  ScheduledExecutorService,
+  TimeUnit,
+}
 import java.util.{List as JList, UUID}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
-import scala.jdk.javaapi.FutureConverters
-import scala.util.control.NonFatal
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /** HTTP client implementation for extension services with retry logic, bearer token authentication,
   * and TLS support.
@@ -44,6 +49,8 @@ import scala.util.Try
   *   Configuration for this extension service
   * @param httpClient
   *   HTTP client for this extension service, with connection pooling
+  * @param timeoutScheduler
+  *   Scheduler for hard per-request timeout tasks
   * @param performUnlessClosing
   *   Close context used to stop retry delays and avoid scheduling requests during shutdown
   * @param loggerFactory
@@ -53,6 +60,7 @@ class HttpExtensionServiceClient(
     override val extensionId: String,
     config: ExtensionServiceConfig,
     httpClient: HttpClient,
+    timeoutScheduler: ScheduledExecutorService,
     performUnlessClosing: PerformUnlessClosing,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -175,19 +183,26 @@ class HttpExtensionServiceClient(
         maxResponseBodyBytes
       ),
     )
-    FutureUtil
-      .unwrapCompletionException(FutureConverters.asScala(response))
-      .onComplete(result.tryComplete)
-    DelayUtil
-      .delay(scala.concurrent.duration.Duration.fromNanos(requestTimeout.toNanos))
-      .foreach { _ =>
-        result
-          .tryFailure(
+    val timeoutTask =
+      timeoutScheduler.schedule(
+        (() => {
+          val timeout =
             new java.net.http.HttpTimeoutException(s"Request timed out after $requestTimeout")
-          )
-          .discard
-        response.cancel(true).discard
-      }
+          if (result.tryFailure(timeout))
+            response.cancel(true).discard
+        }): Runnable,
+        requestTimeout.toNanos,
+        TimeUnit.NANOSECONDS,
+      )
+
+    response.whenComplete { (httpResponse: HttpResponse[String], error: Throwable) =>
+      val completion: Try[HttpResponse[String]] =
+        Option(error).fold[Try[HttpResponse[String]]](scala.util.Success(httpResponse))(error =>
+          TryUtil.unwrapCompletionException(scala.util.Failure(error))
+        )
+      result.tryComplete(completion).discard
+      timeoutTask.cancel(false).discard
+    }.discard
 
     result.future
   }
