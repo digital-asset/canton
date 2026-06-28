@@ -119,8 +119,7 @@ object LocalRejectError extends LocalRejectionGroup {
 
     @Explanation(
       """This rejection is made by a participant if external call results visible to a confirming
-        |party disagree on the output for the same external call.
-        |"""
+        |party disagree on the output for the same external call."""
     )
     @Resolution(
       "Inspect the submitting participant and the external-call service deployments. The same external call was recorded with different outputs, which can indicate a faulty or malicious submitter, inconsistent external-call service configuration, or a service that does not return a stable output for the same external-call identity."
