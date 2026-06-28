@@ -353,15 +353,7 @@ private[validation] object ExternalCallResponseRouter {
   def recordedExternalCallDisagreementInconsistencies(
       disagreements: Seq[DAMLe.ExternalCallRecordedResultDisagreement],
       viewsWithHostedParties: Seq[ViewWithHostedParties],
-  ): Map[
-    LfPartyId,
-    Seq[
-      (
-          DAMLe.ExternalCallRecordedResultDisagreement,
-          Inconsistency,
-      )
-    ],
-  ] = {
+  ): Map[LfPartyId, Seq[(DAMLe.ExternalCallRecordedResultDisagreement, Inconsistency)]] = {
     val orderedDisagreements =
       disagreements.distinct.sorted(orderRecordedResultDisagreement)
 
@@ -370,49 +362,60 @@ private[validation] object ExternalCallResponseRouter {
       val orderedViews =
         viewsWithHostedParties.sortBy(_.viewPosition)(ViewPosition.orderViewPosition.toOrdering)
 
-      val routed = orderedDisagreements.flatMap { resultDisagreement =>
-        val occurrencesByParty = orderedViews
-          .flatMap { viewWithHostedParties =>
-            val viewParticipantData =
-              viewWithHostedParties.validationResult.view.viewParticipantData
-            if (!viewParticipantData.supportsExternalCallResults)
-              Seq.empty
-            else {
-              viewParticipantData.externalCallResults.flatMap { result =>
-                val call = result.result
-                Option
-                  .when(
-                    DAMLe.ExternalCallKey.fromResult(call) == resultDisagreement.key &&
-                      resultDisagreement.outputs(call.output)
-                  )(
-                    ExternalCallOccurrence(
-                      viewWithHostedParties.viewPosition,
-                      result.exerciseIndex,
-                      result.callIndex,
-                    )
-                  )
-                  .toList
-                  .flatMap { occurrence =>
-                    result.checkingParties
-                      .intersect(viewWithHostedParties.hostedConfirmingParties)
-                      .toSeq
-                      .map(party => party -> occurrence)
-                  }
-              }
-            }
+      val routed =
+        orderedDisagreements.flatMap { disagreement =>
+          occurrencesByParty(disagreement, orderedViews).toSeq.map { case (party, occurrences) =>
+            party -> (disagreement -> Inconsistency(
+              disagreement.key,
+              disagreement.outputs,
+              occurrences,
+            ))
           }
-          .groupMap(_._1)(_._2)
-
-        occurrencesByParty.toSeq.map { case (party, occurrences) =>
-          party -> (resultDisagreement -> Inconsistency(
-            resultDisagreement.key,
-            resultDisagreement.outputs,
-            occurrences.toSet,
-          ))
         }
-      }
 
       routed.groupMap(_._1)(_._2)
     }
   }
+
+  /** For a single recorded disagreement, the occurrences of its external call that each hosted
+    * confirming party can see across all views. A party sees an occurrence when it is a checking
+    * party of a matching external-call result in a view it confirms.
+    */
+  private def occurrencesByParty(
+      disagreement: DAMLe.ExternalCallRecordedResultDisagreement,
+      orderedViews: Seq[ViewWithHostedParties],
+  ): Map[LfPartyId, Set[ExternalCallOccurrence]] =
+    orderedViews
+      .flatMap { view =>
+        val viewParticipantData = view.validationResult.view.viewParticipantData
+        if (!viewParticipantData.supportsExternalCallResults) Seq.empty
+        else
+          viewParticipantData.externalCallResults
+            .filter(result => matchesDisagreement(disagreement, result))
+            .flatMap { result =>
+              val occurrence = ExternalCallOccurrence(
+                view.viewPosition,
+                result.exerciseIndex,
+                result.callIndex,
+              )
+              result.checkingParties
+                .intersect(view.hostedConfirmingParties)
+                .toSeq
+                .map(_ -> occurrence)
+            }
+      }
+      .groupMap(_._1)(_._2)
+      .view
+      .mapValues(_.toSet)
+      .toMap
+
+  /** Whether `result` records the same external call (and one of the disagreeing outputs) as
+    * `disagreement`.
+    */
+  private def matchesDisagreement(
+      disagreement: DAMLe.ExternalCallRecordedResultDisagreement,
+      result: ViewParticipantData.ViewExternalCallResult,
+  ): Boolean =
+    DAMLe.ExternalCallKey.fromResult(result.result) == disagreement.key &&
+      disagreement.outputs(result.result.output)
 }
