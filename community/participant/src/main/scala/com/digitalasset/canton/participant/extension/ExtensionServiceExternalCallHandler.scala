@@ -29,18 +29,18 @@ class ExtensionServiceExternalCallHandler(
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] =
     extensionServiceManager
       .handleExternalCall(
-        extensionId,
-        functionId,
-        configHash,
-        input,
-        mode,
+        extensionId = extensionId,
+        functionId = functionId,
+        configHash = configHash,
+        input = input,
+        mode = mode,
       )
       .map(_.left.map { extensionError =>
         ResultNeedExternalCall.Error(sanitizedEngineError(extensionError))
       })
 
   private def sanitizedEngineError(extensionError: ExtensionCallError): String = {
-    val requestId = extensionError.requestId.fold("")(requestId => s", requestId=$requestId")
+    val requestId = extensionError.requestId.fold("")(id => s", requestId=$id")
     s"External call failed with status ${extensionError.statusCode}$requestId"
   }
 }

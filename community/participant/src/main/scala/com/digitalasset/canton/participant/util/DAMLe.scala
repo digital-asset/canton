@@ -26,7 +26,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.{LfCommand, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{Bytes as LfBytes, ImmArray, Ref}
@@ -208,9 +207,6 @@ object DAMLe {
   final case class StoredExternalCallResults private (
       outputsByKey: Map[ExternalCallKey, Set[LfBytes]]
   ) {
-    def ++(other: StoredExternalCallResults): StoredExternalCallResults =
-      StoredExternalCallResults(MapsUtil.mergeMapsOfSets(outputsByKey, other.outputsByKey))
-
     def size: Int = outputsByKey.size
 
     def outputFor(

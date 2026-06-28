@@ -34,9 +34,9 @@ private[hash] class NodeHashBuilder(
     addContext("External Call Result")
       .withContext("Extension Id")(_.addString(result.extensionId))
       .withContext("Function Id")(_.addString(result.functionId))
-      .withContext("Config")(_.addByteString(result.config.toByteString, "config"))
-      .withContext("Input")(_.addByteString(result.input.toByteString, "input"))
-      .withContext("Output")(_.addByteString(result.output.toByteString, "output"))
+      .withContext("Config")(_.addByteString(result.config.toByteString))
+      .withContext("Input")(_.addByteString(result.input.toByteString))
+      .withContext("Output")(_.addByteString(result.output.toByteString))
 
   override protected def addExerciseNodeNoChildren(
       nodeSeed: LfHash
