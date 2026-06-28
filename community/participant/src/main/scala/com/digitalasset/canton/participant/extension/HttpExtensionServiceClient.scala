@@ -463,13 +463,21 @@ object HttpExtensionServiceClient {
   ): URI = {
     val host = renderHost(address)
     val uri = URI.create(s"$scheme://$host:${port.unwrap}$path")
-    require(uri.getHost == host, s"Invalid extension service address '$address'")
+    require(
+      uri.getHost == host || uri.getHost == comparisonHost(address),
+      s"Invalid extension service address '$address'",
+    )
     uri
   }
 
   private def renderHost(address: String): String =
     if (address.startsWith("[") && address.endsWith("]")) address
     else if (address.contains(":")) s"[$address]"
+    else address
+
+  private def comparisonHost(address: String): String =
+    if (address.startsWith("[") && address.endsWith("]"))
+      address.substring(1, address.length - 1)
     else address
 
   private[extension] def stripTrailingLineTerminators(value: String): String =

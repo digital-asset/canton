@@ -119,6 +119,18 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       }
     }
 
+    "build service URIs for IPv6 literals" in {
+      val uri = HttpExtensionServiceClient.serviceUri(
+        scheme = "http",
+        address = "::1",
+        port = Port.tryCreate(8080),
+        path = "/api/v0/external-call",
+      )
+
+      uri.toString shouldBe "http://[::1]:8080/api/v0/external-call"
+      Set("::1", "[::1]") should contain(uri.getHost)
+    }
+
     "reject malformed outbound header values without sending a request" in {
       val requests = new AtomicInteger(0)
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
