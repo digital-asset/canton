@@ -326,9 +326,8 @@ class ModelConformanceChecker(
       view.viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.contracts),
     )
 
-    val externalCallReplayData = Eval.later(
+    lazy val externalCallReplayData: ExternalCallReplayData =
       externalCallReplayDataFor(view, viewParticipantData)
-    )
 
     for {
 
@@ -347,7 +346,7 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
-          () => FutureUnlessShutdown.pure(externalCallReplayData.value),
+          () => FutureUnlessShutdown.pure(externalCallReplayData),
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]

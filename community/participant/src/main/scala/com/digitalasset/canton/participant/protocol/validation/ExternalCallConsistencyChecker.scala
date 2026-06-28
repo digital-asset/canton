@@ -109,19 +109,14 @@ object ExternalCallConsistencyChecker {
       inconsistency.key.input,
     )
 
-  private def occurrenceOrderKey(inconsistency: Inconsistency): String =
-    inconsistency.occurrences.toSeq
-      .sorted(orderExternalCallOccurrence)
-      .map(occurrence =>
-        s"${occurrence.viewPosition}:${occurrence.exerciseIndex.unwrap}:${occurrence.callIndex.unwrap}"
-      )
-      .mkString(",")
-
-  private[validation] val orderInconsistency: Ordering[Inconsistency] =
+  private[validation] val orderInconsistency: Ordering[Inconsistency] = {
+    import scala.math.Ordering.Implicits.seqOrdering
+    implicit val occurrenceOrdering: Ordering[ExternalCallOccurrence] = orderExternalCallOccurrence
     Ordering
       .by[Inconsistency, (String, String, String, String)](keyOrderTuple)
       .orElseBy(_.outputs)(orderOutputSets)
-      .orElseBy(occurrenceOrderKey)
+      .orElseBy(_.occurrences.toSeq.sorted)
+  }
 
   private def inconsistencyFor(
       key: DAMLe.ExternalCallKey,

@@ -22,6 +22,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Bytes
 
@@ -57,7 +58,7 @@ private final case class ExternalCallValidationRoutes(
       viewPosition: ViewPosition,
       hostedConfirmingParties: Set[LfPartyId],
   ): Seq[(LfPartyId, Inconsistency)] =
-    rejects.toSeq.sortBy { case (party, _) => party.toString }.flatMap {
+    rejects.toSeq.sortBy { case (party, _) => party }.flatMap {
       case (party, inconsistencies) if hostedConfirmingParties(party) =>
         inconsistencies
           .filter(_.occurrences.exists(_.viewPosition == viewPosition))
@@ -71,7 +72,7 @@ private final case class ExternalCallValidationRoutes(
       hostedConfirmingParties: Set[LfPartyId],
       rejectedParties: Set[LfPartyId],
   ): Seq[(LfPartyId, String)] =
-    abstains.toSeq.sortBy { case (party, _) => party.toString }.flatMap {
+    abstains.toSeq.sortBy { case (party, _) => party }.flatMap {
       case (party, abstains) if hostedConfirmingParties(party) && !rejectedParties(party) =>
         abstains
           .filter(_.viewPosition == viewPosition)
@@ -118,6 +119,13 @@ class TransactionConfirmationResponsesFactory(
           )
       }
       .orElseBy(_.outputs)(ExternalCallConsistencyChecker.orderOutputSets)
+
+  private val orderExternalCallValidationAbstain: Ordering[ExternalCallValidationAbstain] =
+    Ordering
+      .by[ExternalCallValidationAbstain, ViewPosition](_.viewPosition)(
+        ViewPosition.orderViewPosition.toOrdering
+      )
+      .orElseBy(_.reason)
 
   private def routeExternalCallInconsistencies[A](
       orderedFindings: Seq[A],
@@ -346,8 +354,6 @@ class TransactionConfirmationResponsesFactory(
           (key.extensionId, key.functionId, key.config, key.input)
         }
 
-    import com.digitalasset.canton.util.MonadUtil
-
     MonadUtil
       .parTraverseWithLimit(externalCallValidationParallelism)(keysWithSingleOutput) {
         case (key, recordedOutput) =>
@@ -366,8 +372,7 @@ class TransactionConfirmationResponsesFactory(
                 occurrence.result.exerciseIndex,
                 occurrence.result.callIndex,
               )
-              occurrence.hostedCheckingParties.toSeq
-                .sortBy(_.toString)
+              occurrence.hostedCheckingParties.toSeq.sorted
                 .map(party => (party, key, outputs, externalCallOccurrence))
 
             case _ =>
@@ -397,8 +402,7 @@ class TransactionConfirmationResponsesFactory(
                 occurrence.viewPosition,
                 reason,
               )
-              occurrence.hostedCheckingParties.toSeq
-                .sortBy(_.toString)
+              occurrence.hostedCheckingParties.toSeq.sorted
                 .map(party => party -> abstain)
 
             case _ =>
@@ -408,12 +412,9 @@ class TransactionConfirmationResponsesFactory(
 
         val abstains =
           abstainRows.distinct
-            .sortBy { case (party, abstain) =>
-              (party.toString, abstain.viewPosition.toString, abstain.reason)
-            }
             .groupMap(_._1)(_._2)
             .view
-            .mapValues(_.sortBy(abstain => (abstain.viewPosition.toString, abstain.reason)))
+            .mapValues(_.sorted(orderExternalCallValidationAbstain))
             .toMap
 
         ExternalCallValidationRoutes(rejects, abstains)
