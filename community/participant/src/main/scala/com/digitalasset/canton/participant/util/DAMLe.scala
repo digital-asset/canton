@@ -188,6 +188,11 @@ object DAMLe {
   )
 
   object ExternalCallKey {
+
+    /** Orders by the semantic identity fields, lexicographically. */
+    implicit val externalCallKeyOrdering: Ordering[ExternalCallKey] =
+      Ordering.by(key => (key.extensionId, key.functionId, key.config, key.input))
+
     def fromResult(result: ExternalCallResult): ExternalCallKey =
       ExternalCallKey(
         result.extensionId,

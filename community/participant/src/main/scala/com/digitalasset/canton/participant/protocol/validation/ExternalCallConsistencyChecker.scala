@@ -101,19 +101,11 @@ object ExternalCallConsistencyChecker {
   private[validation] val orderOutputSets: Ordering[Set[Bytes]] =
     Order.by[Set[Bytes], List[Bytes]](orderedOutputs).toOrdering
 
-  private def keyOrderTuple(inconsistency: Inconsistency): (String, String, String, String) =
-    (
-      inconsistency.key.extensionId,
-      inconsistency.key.functionId,
-      inconsistency.key.config,
-      inconsistency.key.input,
-    )
-
   private[validation] val orderInconsistency: Ordering[Inconsistency] = {
     import scala.math.Ordering.Implicits.seqOrdering
     implicit val occurrenceOrdering: Ordering[ExternalCallOccurrence] = orderExternalCallOccurrence
     Ordering
-      .by[Inconsistency, (String, String, String, String)](keyOrderTuple)
+      .by[Inconsistency, DAMLe.ExternalCallKey](_.key)
       .orElseBy(_.outputs)(orderOutputSets)
       .orElseBy(_.occurrences.toSeq.sorted)
   }

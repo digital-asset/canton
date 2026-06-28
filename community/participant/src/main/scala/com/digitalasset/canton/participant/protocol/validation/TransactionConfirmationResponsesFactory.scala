@@ -109,15 +109,7 @@ class TransactionConfirmationResponsesFactory(
   private val orderRecordedResultDisagreement
       : Ordering[DAMLe.ExternalCallRecordedResultDisagreement] =
     Ordering
-      .by[DAMLe.ExternalCallRecordedResultDisagreement, (String, String, String, String)] {
-        disagreement =>
-          (
-            disagreement.key.extensionId,
-            disagreement.key.functionId,
-            disagreement.key.config,
-            disagreement.key.input,
-          )
-      }
+      .by[DAMLe.ExternalCallRecordedResultDisagreement, DAMLe.ExternalCallKey](_.key)
       .orElseBy(_.outputs)(ExternalCallConsistencyChecker.orderOutputSets)
 
   private val orderExternalCallValidationAbstain: Ordering[ExternalCallValidationAbstain] =
@@ -350,9 +342,7 @@ class TransactionConfirmationResponsesFactory(
             case _ => None
           }
         }
-        .sortBy { case (key, _) =>
-          (key.extensionId, key.functionId, key.config, key.input)
-        }
+        .sortBy { case (key, _) => key }
 
     MonadUtil
       .parTraverseWithLimit(externalCallValidationParallelism)(keysWithSingleOutput) {
