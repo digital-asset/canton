@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.DamlTransaction.Node.VersionedNode
 import com.daml.ledger.api.v2.interactive.transaction.v1.interactive_submission_data as isdv1
 import com.daml.ledger.api.v2.interactive.transaction.v1.interactive_submission_data.Node.NodeType
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationOffset
@@ -531,6 +532,41 @@ class PreparedTransactionCodecV1Spec
             tentativeLedgerEffectiveTime = LfTimestamp.now(),
           )
         )
+        tampered = encoded.copy(transaction =
+          encoded.transaction.map(transaction =>
+            transaction.copy(nodes = transaction.nodes.map { node =>
+              val tamperedVersionedNode = node.versionedNode match {
+                case VersionedNode.V1(v1Node) =>
+                  val tamperedNodeType = v1Node.nodeType match {
+                    case NodeType.Exercise(exercise) =>
+                      NodeType.Exercise(
+                        exercise.copy(externalCallResults =
+                          exercise.externalCallResults.map(
+                            _.copy(output = Bytes.assertFromString("ff").toByteString)
+                          )
+                        )
+                      )
+                    case other => other
+                  }
+                  VersionedNode.V1(v1Node.copy(nodeType = tamperedNodeType))
+                case VersionedNode.Empty => VersionedNode.Empty
+              }
+
+              node.copy(versionedNode = tamperedVersionedNode)
+            })
+          )
+        )
+        tamperedExecuteTransactionData <- decoder.decode(
+          ExecuteRequest(
+            LedgerUserId.assertFromString("app"),
+            LedgerSubmissionId.assertFromString(UUID.randomUUID().toString),
+            DeduplicationOffset(None),
+            Map.empty,
+            tampered,
+            hashVersion,
+            tentativeLedgerEffectiveTime = LfTimestamp.now(),
+          )
+        )
       } yield {
         encoded.metadata.value.synchronizerId shouldBe physicalSynchronizerId.toProtoPrimitive
         val encodedExerciseNodes = encoded.transaction.value.nodes.flatMap {
@@ -544,6 +580,9 @@ class PreparedTransactionCodecV1Spec
         executeTransactionData
           .computeHash(hashVersion, physicalSynchronizerId.protocolVersion)
           .value shouldBe prepareHash
+        tamperedExecuteTransactionData
+          .computeHash(hashVersion, physicalSynchronizerId.protocolVersion)
+          .value should not be prepareHash
       }
 
       timeouts.default.await_("Compute matching prepare and execute hashes")(result)
