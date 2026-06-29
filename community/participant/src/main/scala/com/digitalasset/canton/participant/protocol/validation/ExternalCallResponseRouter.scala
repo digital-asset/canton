@@ -198,29 +198,6 @@ private[validation] class ExternalCallResponseRouter(
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): FutureUnlessShutdown[ExternalCallValidationRoutes] = {
-    final case class KeyedValidationOccurrence(
-        key: DAMLe.ExternalCallKey,
-        occurrence: ExternalCallValidationOccurrence,
-    ) {
-      def output: Bytes = occurrence.result.result.output
-      def hostedCheckingParties: Set[LfPartyId] = occurrence.hostedCheckingParties
-      def externalCallOccurrence: ExternalCallOccurrence = ExternalCallOccurrence(
-        occurrence.viewPosition,
-        occurrence.result.exerciseIndex,
-        occurrence.result.callIndex,
-      )
-    }
-    final case class RejectRow(
-        party: LfPartyId,
-        key: DAMLe.ExternalCallKey,
-        outputs: Set[Bytes],
-        occurrence: ExternalCallOccurrence,
-    )
-    final case class AbstainRow(
-        party: LfPartyId,
-        abstain: ExternalCallValidationAbstain,
-    )
-
     val keyedOccurrences =
       occurrences.map(occurrence =>
         KeyedValidationOccurrence(
@@ -253,60 +230,10 @@ private[validation] class ExternalCallResponseRouter(
       }
       .map { validationResults =>
         val resultsByKey = validationResults.toMap
-
-        val rejectRows = keyedOccurrences.flatMap { keyedOccurrence =>
-          resultsByKey.get(keyedOccurrence.key).toList.flatMap {
-            case ExternalCallValidator.Mismatched(computedOutput, recordedOutput) =>
-              val outputs = Set(computedOutput, recordedOutput)
-              keyedOccurrence.hostedCheckingParties.toSeq.sorted.map(party =>
-                RejectRow(
-                  party,
-                  keyedOccurrence.key,
-                  outputs,
-                  keyedOccurrence.externalCallOccurrence,
-                )
-              )
-
-            case _ =>
-              Seq.empty
-          }
-        }
-
-        val rejects =
-          rejectRows
-            .groupMap(row => (row.party, row.key, row.outputs))(_.occurrence)
-            .toSeq
-            .groupMap { case ((party, _, _), _) => party } {
-              case ((_, key, outputs), occurrences) =>
-                Inconsistency(key, outputs, occurrences.toSet)
-            }
-            .view
-            .mapValues(_.sorted(ExternalCallConsistencyChecker.orderInconsistency))
-            .toMap
-
-        val abstainRows = keyedOccurrences.flatMap { keyedOccurrence =>
-          resultsByKey.get(keyedOccurrence.key).toList.flatMap {
-            case ExternalCallValidator.UnableToValidate(reason) =>
-              val abstain = ExternalCallValidationAbstain(
-                keyedOccurrence.occurrence.viewPosition,
-                reason,
-              )
-              keyedOccurrence.hostedCheckingParties.toSeq.sorted
-                .map(party => AbstainRow(party, abstain))
-
-            case _ =>
-              Seq.empty
-          }
-        }
-
-        val abstains =
-          abstainRows.distinct
-            .groupMap(_.party)(_.abstain)
-            .view
-            .mapValues(_.sorted(orderExternalCallValidationAbstain))
-            .toMap
-
-        ExternalCallValidationRoutes(rejects, abstains)
+        ExternalCallValidationRoutes(
+          rejects = rejectsFrom(keyedOccurrences, resultsByKey),
+          abstains = abstainsFrom(keyedOccurrences, resultsByKey),
+        )
       }
   }
 
@@ -418,4 +345,91 @@ private[validation] object ExternalCallResponseRouter {
   ): Boolean =
     DAMLe.ExternalCallKey.fromResult(result.result) == disagreement.key &&
       disagreement.outputs(result.result.output)
+
+  /** An external-call occurrence paired with the key it re-validates under. */
+  private final case class KeyedValidationOccurrence(
+      key: DAMLe.ExternalCallKey,
+      occurrence: ExternalCallValidationOccurrence,
+  ) {
+    def output: Bytes = occurrence.result.result.output
+    def hostedCheckingParties: Set[LfPartyId] = occurrence.hostedCheckingParties
+    def externalCallOccurrence: ExternalCallOccurrence = ExternalCallOccurrence(
+      occurrence.viewPosition,
+      occurrence.result.exerciseIndex,
+      occurrence.result.callIndex,
+    )
+  }
+
+  private final case class RejectRow(
+      party: LfPartyId,
+      key: DAMLe.ExternalCallKey,
+      outputs: Set[Bytes],
+      occurrence: ExternalCallOccurrence,
+  )
+
+  private final case class AbstainRow(
+      party: LfPartyId,
+      abstain: ExternalCallValidationAbstain,
+  )
+
+  /** Per-party rejections for occurrences whose re-validation produced a mismatching output. */
+  private def rejectsFrom(
+      keyedOccurrences: Seq[KeyedValidationOccurrence],
+      resultsByKey: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result],
+  ): Map[LfPartyId, Seq[Inconsistency]] = {
+    val rejectRows = keyedOccurrences.flatMap { keyedOccurrence =>
+      resultsByKey.get(keyedOccurrence.key).toList.flatMap {
+        case ExternalCallValidator.Mismatched(computedOutput, recordedOutput) =>
+          val outputs = Set(computedOutput, recordedOutput)
+          keyedOccurrence.hostedCheckingParties.toSeq.sorted.map(party =>
+            RejectRow(
+              party,
+              keyedOccurrence.key,
+              outputs,
+              keyedOccurrence.externalCallOccurrence,
+            )
+          )
+
+        case _ =>
+          Seq.empty
+      }
+    }
+
+    rejectRows
+      .groupMap(row => (row.party, row.key, row.outputs))(_.occurrence)
+      .toSeq
+      .groupMap { case ((party, _, _), _) => party } { case ((_, key, outputs), occurrences) =>
+        Inconsistency(key, outputs, occurrences.toSet)
+      }
+      .view
+      .mapValues(_.sorted(ExternalCallConsistencyChecker.orderInconsistency))
+      .toMap
+  }
+
+  /** Per-party abstentions for occurrences whose re-validation could not be performed. */
+  private def abstainsFrom(
+      keyedOccurrences: Seq[KeyedValidationOccurrence],
+      resultsByKey: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result],
+  ): Map[LfPartyId, Seq[ExternalCallValidationAbstain]] = {
+    val abstainRows = keyedOccurrences.flatMap { keyedOccurrence =>
+      resultsByKey.get(keyedOccurrence.key).toList.flatMap {
+        case ExternalCallValidator.UnableToValidate(reason) =>
+          val abstain = ExternalCallValidationAbstain(
+            keyedOccurrence.occurrence.viewPosition,
+            reason,
+          )
+          keyedOccurrence.hostedCheckingParties.toSeq.sorted
+            .map(party => AbstainRow(party, abstain))
+
+        case _ =>
+          Seq.empty
+      }
+    }
+
+    abstainRows.distinct
+      .groupMap(_.party)(_.abstain)
+      .view
+      .mapValues(_.sorted(orderExternalCallValidationAbstain))
+      .toMap
+  }
 }
