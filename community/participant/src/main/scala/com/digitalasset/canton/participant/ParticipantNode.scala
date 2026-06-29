@@ -35,7 +35,10 @@ import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.party.{PartyReplicationEndpoints, PartyReplicator}
 import com.digitalasset.canton.participant.config.*
-import com.digitalasset.canton.participant.extension.ExtensionServiceManager
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallValidator,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.ledger.api.{
   AcsCommitmentPublicationPostProcessor,
@@ -49,6 +52,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   CommandDeduplicatorImpl,
   InFlightSubmissionTracker,
 }
+import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
 import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.scheduler.{
@@ -731,6 +735,9 @@ class ParticipantNodeBootstrap(
             )
         )
 
+        externalCallValidator: ExternalCallValidator =
+          ExtensionServiceExternalCallValidator.create(extensionServiceManagerO)
+
         // Sync Service
         sync = CantonSyncService.create(
           participantId,
@@ -760,6 +767,7 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer,
           connectedSynchronizersLookupContainer,
           () => triggerDeclarativeChange(),
+          externalCallValidator,
         )
 
         _ <-
