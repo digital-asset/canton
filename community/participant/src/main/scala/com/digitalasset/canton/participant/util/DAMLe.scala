@@ -14,6 +14,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
+import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
+  byteCount,
+  byteSize,
+  hexPayloadSize,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -23,12 +28,16 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{LfCommand, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.data.{Bytes as LfBytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, NeedKeyProgression}
+import com.digitalasset.daml.lf.transaction.{
+  ExternalCallResult,
+  FatContractInstance,
+  NeedKeyProgression,
+}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
 import java.nio.file.Path
@@ -120,6 +129,116 @@ object DAMLe {
     override protected def pretty: Pretty[EnrichmentError] = adHocPrettyInstance
   }
 
+  final case class ExternalCallRecordedResultDisagreement(
+      key: ExternalCallKey,
+      outputs: Set[LfBytes],
+  ) extends ReinterpretationError {
+    override protected def pretty: Pretty[ExternalCallRecordedResultDisagreement] = prettyOfClass(
+      param("extension id", _.key.extensionId.doubleQuoted),
+      param("function id", _.key.functionId.doubleQuoted),
+      param(
+        "config bytes",
+        disagreement => hexPayloadSize(disagreement.key.config).doubleQuoted,
+      ),
+      param(
+        "input bytes",
+        disagreement => hexPayloadSize(disagreement.key.input).doubleQuoted,
+      ),
+      param("recorded output count", _.outputs.size),
+      param(
+        "recorded output bytes",
+        disagreement =>
+          disagreement.outputs.toSeq
+            .sortBy(byteCount)
+            .map(byteSize)
+            .mkString("[", ", ", "]")
+            .doubleQuoted,
+      ),
+    )
+  }
+
+  final case class ExternalCallReplayMissing(
+      key: ExternalCallKey
+  ) extends ReinterpretationError {
+    override protected def pretty: Pretty[ExternalCallReplayMissing] = prettyOfClass(
+      param("extension id", _.key.extensionId.doubleQuoted),
+      param("function id", _.key.functionId.doubleQuoted),
+      param(
+        "config bytes",
+        missing => hexPayloadSize(missing.key.config).doubleQuoted,
+      ),
+      param(
+        "input bytes",
+        missing => hexPayloadSize(missing.key.input).doubleQuoted,
+      ),
+    )
+  }
+
+  /** Deterministic external-call identity. Config and input are engine-emitted canonical hex
+    * strings.
+    */
+  final case class ExternalCallKey(
+      extensionId: String,
+      functionId: String,
+      config: String,
+      input: String,
+  )
+
+  object ExternalCallKey {
+
+    /** Orders by the semantic identity fields, lexicographically. */
+    implicit val externalCallKeyOrdering: Ordering[ExternalCallKey] =
+      Ordering.by(key => (key.extensionId, key.functionId, key.config, key.input))
+
+    def fromResult(result: ExternalCallResult): ExternalCallKey =
+      ExternalCallKey(
+        result.extensionId,
+        result.functionId,
+        result.config.toHexString,
+        result.input.toHexString,
+      )
+  }
+
+  /** Stored external call results for replay during reinterpretation. Multiple outputs for one
+    * semantic key are preserved so replay can report a recorded-result disagreement.
+    */
+  final case class StoredExternalCallResults private (
+      outputsByKey: Map[ExternalCallKey, Set[LfBytes]]
+  ) {
+    def size: Int = outputsByKey.size
+
+    def outputFor(
+        key: ExternalCallKey
+    ): Either[ExternalCallRecordedResultDisagreement, Option[LfBytes]] =
+      outputsByKey.get(key) match {
+        case None => Right(None)
+        case Some(outputs) if outputs.sizeCompare(1) == 0 => Right(outputs.headOption)
+        case Some(outputs) => Left(ExternalCallRecordedResultDisagreement(key, outputs))
+      }
+  }
+
+  object StoredExternalCallResults {
+    val empty: StoredExternalCallResults = StoredExternalCallResults(Map.empty)
+
+    def fromResults(results: Iterable[ExternalCallResult]): StoredExternalCallResults =
+      StoredExternalCallResults(
+        results
+          .groupMap(ExternalCallKey.fromResult)(_.output)
+          .view
+          .mapValues(_.toSet)
+          .toMap
+      )
+  }
+
+  final case class ExternalCallReplayData(
+      storedExternalCallResults: StoredExternalCallResults
+  )
+
+  object ExternalCallReplayData {
+    val empty: ExternalCallReplayData =
+      ExternalCallReplayData(StoredExternalCallResults.empty)
+  }
+
   trait HasReinterpret {
     def reinterpret(
         contracts: ReplayContractLookup,
@@ -133,6 +252,7 @@ object DAMLe {
         packageResolution: Map[Ref.PackageName, Ref.PackageId],
         expectFailure: Boolean,
         getEngineAbortStatus: GetEngineAbortStatus,
+        externalCallReplayData: () => FutureUnlessShutdown[ExternalCallReplayData],
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       ReinterpretationError,
@@ -221,6 +341,7 @@ class DAMLe(
       packageResolution: Map[PackageName, PackageId],
       expectFailure: Boolean,
       getEngineAbortStatus: GetEngineAbortStatus,
+      externalCallReplayData: () => FutureUnlessShutdown[ExternalCallReplayData],
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     ReinterpretationError,
@@ -291,6 +412,7 @@ class DAMLe(
           contractAuthenticator,
           result,
           getEngineAbortStatus,
+          externalCallReplayData,
         )
       )
       (tx, metadata) = txWithMetadata
@@ -323,12 +445,66 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
+      externalCallReplayData: () => FutureUnlessShutdown[ExternalCallReplayData],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+    def failExternalCall(
+        error: ReinterpretationError
+    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
+      FutureUnlessShutdown.pure(Left(error))
+
+    def resumeWithExternalCallOutput(
+        output: String,
+        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        replayDataO: Option[ExternalCallReplayData],
+    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
+      handleResultInternal(resume(Right(output)), replayDataO)
+
+    def replayStoredExternalCallOutput(
+        externalCallKey: ExternalCallKey,
+        storedOutput: LfBytes,
+        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        replayDataO: Option[ExternalCallReplayData],
+    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+      logger.debug(
+        s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
+      )
+      resumeWithExternalCallOutput(storedOutput.toHexString, resume, replayDataO)
+    }
+
+    def handleExternalCall(
+        externalCallKey: ExternalCallKey,
+        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        replayDataO: Option[ExternalCallReplayData],
+    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+      val replayDataF = replayDataO match {
+        case Some(replayData) => FutureUnlessShutdown.pure(replayData)
+        case None => externalCallReplayData()
+      }
+
+      replayDataF.flatMap { replayData =>
+        replayData.storedExternalCallResults.outputFor(externalCallKey) match {
+          case Left(disagreement) =>
+            failExternalCall(disagreement)
+
+          case Right(None) =>
+            failExternalCall(ExternalCallReplayMissing(externalCallKey))
+
+          case Right(Some(storedOutput)) =>
+            replayStoredExternalCallOutput(
+              externalCallKey,
+              storedOutput,
+              resume,
+              Some(replayData),
+            )
+        }
+      }
+    }
 
     def handleResultInternal(
-        result: Result[A]
+        result: Result[A],
+        replayDataO: Option[ExternalCallReplayData],
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
 
       @tailrec
@@ -356,7 +532,7 @@ class DAMLe(
             )
             .transformWithHandledAborted {
               case Success(pkg) =>
-                handleResultInternal(resume(pkg))
+                handleResultInternal(resume(pkg), replayDataO)
               case Failure(ex) =>
                 logger.error(s"Package resolution failed for [$packageId]", ex)
                 FutureUnlessShutdown.failed(ex)
@@ -388,7 +564,10 @@ class DAMLe(
                     ResultNeedKey.Response.UnsupportedContractIdVersion(contract.contractId)
                 }
               }
-              handleResultInternal(resume(ResultNeedKey.Response(entries, hasStarted)))
+              handleResultInternal(
+                resume(ResultNeedKey.Response(entries, hasStarted)),
+                replayDataO,
+              )
             }
 
         case ResultNeedContract(acoid, resume) =>
@@ -407,7 +586,9 @@ class DAMLe(
               case Left(_) =>
                 Response.UnsupportedContractIdVersion
             }
-          FutureUnlessShutdown.pure(response).flatMap(r => handleResultInternal(resume(r)))
+          FutureUnlessShutdown
+            .pure(response)
+            .flatMap(r => handleResultInternal(resume(r), replayDataO))
 
         case ResultError(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
         case ResultInterruption(continue, _) =>
@@ -415,31 +596,27 @@ class DAMLe(
           // Using a `Future` as a trampoline also makes the recursive call to `handleResult` stack safe.
           FutureUnlessShutdown.pure(iterateOverInterrupts(continue)).flatMap {
             case Left(abort) => FutureUnlessShutdown.pure(Left(abort))
-            case Right(result) => handleResultInternal(result)
+            case Right(result) => handleResultInternal(result, replayDataO)
           }
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
-          handleResultInternal(resume())
-        // TODO(https://github.com/digital-asset/canton/issues/513): Replay or validate recorded external-call results during reinterpretation.
-        case ResultNeedExternalCall(_, _, _, _, _) =>
-          FutureUnlessShutdown.pure(
-            Left(
-              EngineError(
-                Error.Interpretation(
-                  Error.Interpretation.Internal(
-                    "reinterpretation",
-                    "External calls are not supported during reinterpretation",
-                    None,
-                  ),
-                  None,
-                )
-              )
-            )
+          handleResultInternal(resume(), replayDataO)
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          val externalCallKey = ExternalCallKey(
+            extensionId,
+            functionId,
+            configHash,
+            input,
+          )
+          handleExternalCall(
+            externalCallKey,
+            resume,
+            replayDataO,
           )
       }
     }
 
-    handleResultInternal(result)
+    handleResultInternal(result, None)
   }
 
 }

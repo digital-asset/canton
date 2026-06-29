@@ -5609,7 +5609,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -5617,6 +5619,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5692,7 +5695,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -5700,6 +5705,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5752,7 +5758,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -5760,6 +5768,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -6136,6 +6145,8 @@ components:
           description: |-
             The hashing scheme version to be used when building the hash.
             Defaults to HASHING_SCHEME_VERSION_V2.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Optional
           type: string
@@ -6143,6 +6154,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'
@@ -6169,7 +6181,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -6177,6 +6191,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         hashingDetails:
           description: |-
             Optional additional details on how the transaction was encoded and hashed. Only set if verbose_hashing = true in the request

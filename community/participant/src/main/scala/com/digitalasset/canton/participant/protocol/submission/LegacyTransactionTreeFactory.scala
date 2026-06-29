@@ -39,7 +39,6 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.KeyInactive
 import com.digitalasset.daml.lf.transaction.Transaction.{
@@ -807,7 +806,7 @@ class LegacyTransactionTreeFactory(
             rollbackContext = rbContextCore,
             salt = salt,
             protocolVersion = protocolVersion,
-            externalCallResults = ImmArray.Empty,
+            externalCallResults = Seq.empty,
           )
         )
         .leftMap[TransactionTreeConversionError](ViewParticipantDataError.apply)

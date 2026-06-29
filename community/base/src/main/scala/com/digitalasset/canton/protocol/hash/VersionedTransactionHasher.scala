@@ -20,6 +20,11 @@ object VersionedTransactionHasher {
       nodeSeeds: Map[NodeId, LfHash],
       hashTracer: HashTracer = HashTracer.NoOp,
   ): Hash = {
+    NodeHashBuilder.assertHashingVersionSupportsLfSerializationVersion(
+      versionedTransaction.version,
+      hashVersion,
+    )
+
     val txNodes = versionedTransaction.nodes
 
     // A versioned transaction is a forest of trees. Hash the root count prefix, then hash each

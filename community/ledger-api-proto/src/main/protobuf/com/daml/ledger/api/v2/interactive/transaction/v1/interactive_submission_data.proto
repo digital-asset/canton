@@ -13,6 +13,36 @@ option java_outer_classname = "InteractiveSubmissionDataOuterClass";
 option java_package = "com.daml.ledger.api.v2.interactive.transaction.v1";
 
 /*
+ * External Call Results
+ */
+
+// Result of an external call made during transaction execution.
+// External calls are deterministic calls to participant extension services.
+// Results are stored in the transaction and replayed during validation.
+message ExternalCallResult {
+  // Extension service identifier.
+  //
+  // Required
+  string extension_id = 1;
+  // Function identifier within the extension.
+  //
+  // Required
+  string function_id = 2;
+  // Extension configuration hash bytes.
+  //
+  // Required
+  bytes config = 3;
+  // Input data sent to the extension.
+  //
+  // Required
+  bytes input = 4;
+  // Output data returned by the extension.
+  //
+  // Required
+  bytes output = 5;
+}
+
+/*
  * Transaction Nodes
  */
 
@@ -92,6 +122,15 @@ message Exercise {
   //
   // Required
   bool by_key = 16;
+  // Can only be populated from lf_version dev.
+  //
+  // Results of external calls made during this exercise.
+  // These results are carried for external-call replay and validation.
+  // They are encoded into the prepared transaction hash starting with
+  // HASHING_SCHEME_VERSION_V4.
+  //
+  // Optional: can be empty
+  repeated ExternalCallResult external_call_results = 17;
 }
 
 // Create Node

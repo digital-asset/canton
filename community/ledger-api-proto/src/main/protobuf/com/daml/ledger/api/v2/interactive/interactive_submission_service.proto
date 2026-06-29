@@ -220,6 +220,8 @@ message PrepareSubmissionRequest {
 
   // The hashing scheme version to be used when building the hash.
   // Defaults to HASHING_SCHEME_VERSION_V2.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Optional
   optional HashingSchemeVersion hashing_scheme_version = 17;
@@ -240,6 +242,9 @@ enum HashingSchemeVersion {
   reserved 1; // Hashing Scheme V1 - unsupported
   HASHING_SCHEME_VERSION_V2 = 2;
   HASHING_SCHEME_VERSION_V3 = 3;
+  // Development-protocol-only hashing scheme for LF development-version prepared transactions.
+  // V4 includes exercise external_call_results in the prepared transaction hash.
+  HASHING_SCHEME_VERSION_V4 = 4;
 }
 // [docs-entry-end: HashingSchemeVersion]
 
@@ -256,7 +261,9 @@ message PrepareSubmissionResponse {
   // Required: must be non-empty
   bytes prepared_transaction_hash = 2;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 3;
@@ -338,7 +345,9 @@ message ExecuteSubmissionRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -396,7 +405,9 @@ message ExecuteSubmissionAndWaitRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -465,7 +476,9 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;

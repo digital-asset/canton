@@ -86,6 +86,18 @@ final case class SubmitterMetadata private (
     externalAuthorization = externalAuthorization.map(_.toProtoV31),
   )
 
+  protected def toProtoV32: v32.SubmitterMetadata = v32.SubmitterMetadata(
+    actAs = actAs.toSeq,
+    userId = userId.toProtoPrimitive,
+    commandId = commandId.toProtoPrimitive,
+    submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
+    salt = Some(salt.toProtoV30),
+    submissionId = submissionId.getOrElse(""),
+    dedupPeriod = Some(SerializableDeduplicationPeriod(dedupPeriod).toProtoV30),
+    maxSequencingTime = maxSequencingTime.toProtoPrimitive,
+    externalAuthorization = externalAuthorization.map(_.toProtoV32),
+  )
+
 }
 
 object SubmitterMetadata
@@ -103,6 +115,10 @@ object SubmitterMetadata
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SubmitterMetadata)(
       supportedProtoVersionMemoized(_)(fromProtoV31),
       _.toProtoV31,
+    ),
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(v32.SubmitterMetadata)(
+      supportedProtoVersionMemoized(_)(fromProtoV32),
+      _.toProtoV32,
     ),
   )
 
@@ -216,6 +232,41 @@ object SubmitterMetadata
         ExternalAuthorization.fromProtoV31
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+      result <- fromProto(hashOps, bytes)(
+        saltOP,
+        actAsP,
+        userIdP,
+        commandIdP,
+        submittingParticipantUidP,
+        submissionIdP,
+        dedupPeriodOP,
+        maxSequencingTimeOP,
+        externalAuthorizationO,
+        rpv,
+      )
+    } yield result
+  }
+
+  private def fromProtoV32(hashOps: HashOps, metaDataP: v32.SubmitterMetadata)(
+      bytes: ByteString
+  ): ParsingResult[SubmitterMetadata] = {
+    val v32.SubmitterMetadata(
+      saltOP,
+      actAsP,
+      userIdP,
+      commandIdP,
+      submittingParticipantUidP,
+      submissionIdP,
+      dedupPeriodOP,
+      maxSequencingTimeOP,
+      externalAuthorizationOP,
+    ) = metaDataP
+
+    for {
+      externalAuthorizationO <- externalAuthorizationOP.traverse(
+        ExternalAuthorization.fromProtoV32
+      )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
       result <- fromProto(hashOps, bytes)(
         saltOP,
         actAsP,

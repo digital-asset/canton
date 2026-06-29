@@ -41,6 +41,10 @@ import com.digitalasset.canton.participant.config.{
   ParticipantStoreConfig,
   TestingTimeServiceConfig,
 }
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallHandler,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.store.ParticipantNodePersistentState
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.{
@@ -119,6 +123,7 @@ class LedgerApiServer(
     updateServiceConfig: UpdateServiceConfig,
     warnOnJwtScopeUsage: Boolean,
     val loggerFactory: NamedLoggerFactory,
+    extensionServiceManagerO: Option[ExtensionServiceManager],
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -311,6 +316,7 @@ class LedgerApiServer(
         lfValueTranslation = lfValueTranslation,
         loggerFactory = loggerFactory,
       )
+      externalCallHandler = ExtensionServiceExternalCallHandler.create(extensionServiceManagerO)
       (_, authInterceptor) <- ApiServiceOwner(
         indexService = indexService,
         transactionSubmissionTracker = inMemoryState.transactionSubmissionTracker,
@@ -371,6 +377,7 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
+        externalCallHandler = externalCallHandler,
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
@@ -538,6 +545,7 @@ object LedgerApiServer {
       tracerProvider: TracerProvider,
       updateServiceConfig: UpdateServiceConfig,
       warnOnJwtScopeUsage: Boolean,
+      extensionServiceManagerO: Option[ExtensionServiceManager],
   )(implicit
       actorSystem: ActorSystem,
       executionContext: ExecutionContextIdlenessExecutorService,
@@ -593,6 +601,7 @@ object LedgerApiServer {
       pruningConfig = pruningConfig,
       updateServiceConfig = updateServiceConfig,
       warnOnJwtScopeUsage = warnOnJwtScopeUsage,
+      extensionServiceManagerO = extensionServiceManagerO,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)
       .acquireFlagCloseable("Ledger API Server")

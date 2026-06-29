@@ -56,6 +56,7 @@ import io.scalaland.chimney.partial.Result
 import io.scalaland.chimney.syntax.*
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordering.Implicits.infixOrderingOps
 
 /** Class to decode a PreparedTransaction to an LF Transaction and its metadata. Uses chimney to
   * define Transformers and PartialTransformer for all conversions.
@@ -222,6 +223,21 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       case _ => Result.fromValue(byKey(value))
     }
 
+  private def validateTransactionVersions(
+      transaction: lf.transaction.VersionedTransaction
+  ): Result[lf.transaction.VersionedTransaction] =
+    // The LF transaction proto decoder enforces the same invariant, but interactive submission
+    // decodes from Ledger API protos and therefore needs the check here as well.
+    transaction.nodes.values.iterator
+      .flatMap(_.optVersion)
+      .find(_ > transaction.version) match {
+      case Some(nodeVersion) =>
+        Result.fromErrorString(
+          s"A transaction of version ${transaction.version} cannot contain node of newer version (version $nodeVersion)"
+        )
+      case None => Result.fromValue(transaction)
+    }
+
   /*
    * Node Transformers
    * These transformers decode proto nodes to LF nodes. Each proto version can map to several LF version, which is why
@@ -290,6 +306,41 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         }
       }
 
+    private def decodeExternalCallTextField(fieldName: String, value: String): Result[String] =
+      lf.data.Text
+        .fromString(value)
+        .leftMap(err => s"Invalid external call $fieldName: $err")
+        .toResult
+
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : PartialTransformer[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult] =
+      PartialTransformer { value =>
+        for {
+          extensionId <- decodeExternalCallTextField("extension_id", value.extensionId)
+          functionId <- decodeExternalCallTextField("function_id", value.functionId)
+        } yield lf.transaction.ExternalCallResult(
+          extensionId = extensionId,
+          functionId = functionId,
+          config = lf.data.Bytes.fromByteString(value.config),
+          input = lf.data.Bytes.fromByteString(value.input),
+          output = lf.data.Bytes.fromByteString(value.output),
+        )
+      }
+
+    private def externalCallResultsDecoder(value: isdv1.Exercise)(implicit
+        serializationVersion: LfSerializationVersion
+    ): Result[ImmArray[lf.transaction.ExternalCallResult]] =
+      if (
+        value.externalCallResults.nonEmpty &&
+        serializationVersion < LfSerializationVersion.VDev
+      )
+        Result.fromErrorString(
+          s"External call results are not supported in nodes with LF Serialization version ${serializationVersion.pretty}"
+        )
+      else
+        value.externalCallResults.transformIntoPartial[ImmArray[lf.transaction.ExternalCallResult]]
+
     private[interactive] implicit def exerciseTransformer(implicit
         errorLoggingContext: ErrorLoggingContext
     ): PartialTransformer[isdv1.Exercise, lf.transaction.Node.Exercise] =
@@ -304,10 +355,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
               _.choiceObservers,
               _.choiceObservers.traverse(_.transformIntoPartial[lf.data.Ref.Party]).map(_.toSet),
             )
-            .withFieldComputedPartial(
-              _.version,
-              _.lfVersion.transformIntoPartial[LfSerializationVersion],
-            )
+            .withFieldConst(_.version, version)
             .withFieldComputedPartial(
               _.keyOpt,
               _.key.traverse(_.transformIntoPartial[GlobalKeyWithMaintainers]),
@@ -315,7 +363,10 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
             .withFieldComputedPartial(_.byKey, byKeyDecoder(_.byKey))
             // Only supported in LF-dev
             .withFieldConst(_.choiceAuthorizers, None)
-            .withFieldConst(_.externalCallResults, lf.transaction.ExternalCallResult.Empty)
+            .withFieldComputedPartial(
+              _.externalCallResults,
+              externalCallResultsDecoder,
+            )
             .transform
         }
       }
@@ -386,6 +437,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         )
         .withConstructor(lfVersionedConstructor _)
         .transform
+        .flatMap(validateTransactionVersions)
     }
 
   // Input contract decoder

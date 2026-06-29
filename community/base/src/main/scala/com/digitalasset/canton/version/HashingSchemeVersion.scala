@@ -14,6 +14,7 @@ import scala.collection.immutable.{SortedMap, SortedSet}
 sealed abstract class HashingSchemeVersion(val index: Int) extends Product with Serializable {
   def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion
   def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion
+  def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion
   def toLedgerApiProto: ApiHashingSchemeVersion
 }
 
@@ -24,6 +25,8 @@ object HashingSchemeVersion {
       v30.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
+    override def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion =
+      v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
     def toLedgerApiProto: ApiHashingSchemeVersion =
       ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V2
   }
@@ -32,8 +35,20 @@ object HashingSchemeVersion {
       throw new IllegalStateException(s"Hashing scheme V3 is not supported in proto v30")
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3
+    override def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion =
+      v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3
     def toLedgerApiProto: ApiHashingSchemeVersion =
       ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V3
+  }
+  case object V4 extends HashingSchemeVersion(4) {
+    override def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion =
+      throw new IllegalStateException("Hashing scheme V4 is not supported in proto v30")
+    override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
+      throw new IllegalStateException("Hashing scheme V4 is not supported in proto v31")
+    override def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion =
+      v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V4
+    def toLedgerApiProto: ApiHashingSchemeVersion =
+      ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V4
   }
 
   implicit val hashingSchemeVersionOrdering: Ordering[HashingSchemeVersion] =
@@ -43,11 +58,13 @@ object HashingSchemeVersion {
     Entries (pv=34 -> V2), (pv=35 -> V2, V3) means
       - pv=34 support V2
       - pv=35 and onwards support V2 and V3
+      - dev supports V2, V3, and V4
    */
   private[canton] val MinimumProtocolVersionToHashingVersion =
     SortedMap[ProtocolVersion, NonEmpty[SortedSet[HashingSchemeVersion]]](
       ProtocolVersion.v34 -> NonEmpty.mk(SortedSet, V2),
       ProtocolVersion.v35 -> NonEmpty.mk(SortedSet, V2, V3),
+      ProtocolVersion.dev -> NonEmpty.mk(SortedSet, V2, V3, V4),
     )
 
   def minProtocolVersionForHSV(version: HashingSchemeVersion): Option[ProtocolVersion] =
@@ -86,6 +103,18 @@ object HashingSchemeVersion {
     case v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_UNSPECIFIED =>
       Left(FieldNotSet("hashing_scheme_version"))
     case v31.ExternalAuthorization.HashingSchemeVersion.Unrecognized(unrecognizedValue) =>
+      Left(UnrecognizedEnum("hashing_scheme_version", unrecognizedValue))
+  }
+
+  def fromProtoV32(
+      version: v32.ExternalAuthorization.HashingSchemeVersion
+  ): ParsingResult[HashingSchemeVersion] = version match {
+    case v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2 => Right(V2)
+    case v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3 => Right(V3)
+    case v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V4 => Right(V4)
+    case v32.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_UNSPECIFIED =>
+      Left(FieldNotSet("hashing_scheme_version"))
+    case v32.ExternalAuthorization.HashingSchemeVersion.Unrecognized(unrecognizedValue) =>
       Left(UnrecognizedEnum("hashing_scheme_version", unrecognizedValue))
   }
 

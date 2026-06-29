@@ -101,6 +101,8 @@ class DAMLeTest
           packageResolution = Map.empty,
           expectFailure = false,
           getEngineAbortStatus = getEngineAbortStatus,
+          externalCallReplayData =
+            () => FutureUnlessShutdown.pure(DAMLe.ExternalCallReplayData.empty),
         )
 
     def createCycleContract(): (LfNodeCreate, LfHash, GenContractInstance) = {

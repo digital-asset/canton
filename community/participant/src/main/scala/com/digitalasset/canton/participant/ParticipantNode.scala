@@ -35,6 +35,10 @@ import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.party.{PartyReplicationEndpoints, PartyReplicator}
 import com.digitalasset.canton.participant.config.*
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallValidator,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.ledger.api.{
   AcsCommitmentPublicationPostProcessor,
@@ -48,6 +52,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   CommandDeduplicatorImpl,
   InFlightSubmissionTracker,
 }
+import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
 import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.scheduler.{
@@ -704,6 +709,36 @@ class ParticipantNodeBootstrap(
             )
             .mapK(FutureUnlessShutdown.outcomeK)
 
+        // Create extension service manager early so it can be shared with both CantonSyncService and LedgerApiServer
+        extensionServiceManagerO: Option[ExtensionServiceManager] =
+          Option.when(parameters.engine.extensions.nonEmpty) {
+            val manager = new ExtensionServiceManager(
+              extensionConfigs = parameters.engine.extensions,
+              loggerFactory = loggerFactory,
+              timeouts = timeouts,
+            )
+            logger.info(
+              s"Extension service manager initialized with ${parameters.engine.extensions.size} extension(s): " +
+                s"${parameters.engine.extensions.keys.mkString(", ")}"
+            )
+            manager
+          }
+
+        // Register before startup validation so failures close the manager's lifecycle context.
+        // The manager is shared by sync and the Ledger API; registering it before consumers keeps
+        // reverse close order closing consumers first.
+        _ = extensionServiceManagerO.foreach(addCloseable)
+
+        _ <- EitherT(
+          extensionServiceManagerO
+            .fold(FutureUnlessShutdown.pure[Either[String, Unit]](Right(())))(
+              _.initializeOnStartup()
+            )
+        )
+
+        externalCallValidator: ExternalCallValidator =
+          ExtensionServiceExternalCallValidator.create(extensionServiceManagerO)
+
         // Sync Service
         sync = CantonSyncService.create(
           participantId,
@@ -733,6 +768,7 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer,
           connectedSynchronizersLookupContainer,
           () => triggerDeclarativeChange(),
+          externalCallValidator,
         )
 
         _ <-
@@ -814,6 +850,7 @@ class ParticipantNodeBootstrap(
                 tracerProvider = tracerProvider,
                 updateServiceConfig = arguments.config.ledgerApi.updateService,
                 warnOnJwtScopeUsage = arguments.testingConfig.warnOnJwtScopeUsage,
+                extensionServiceManagerO = extensionServiceManagerO,
               )
             ),
           loggerFactory = loggerFactory,

@@ -52,6 +52,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
   TransactionConfirmationRequestFactory,
 }
+import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
 import com.digitalasset.canton.participant.pruning.{
   AcsCommitmentProcessor,
   JournalGarbageCollector,
@@ -175,6 +176,7 @@ class ConnectedSynchronizer(
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
     testingConfig: TestingConfigInternal,
+    externalCallValidator: ExternalCallValidator,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
     with FlagCloseableAsync
@@ -291,6 +293,7 @@ class ConnectedSynchronizer(
     testingConfig = testingConfig,
     promiseUSFactory,
     parameters,
+    externalCallValidator,
   )
 
   private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(
@@ -1247,6 +1250,7 @@ object ConnectedSynchronizer {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         testingConfig: TestingConfigInternal,
+        externalCallValidator: ExternalCallValidator,
     )(implicit ec: ExecutionContext, mat: Materializer, tracer: Tracer): FutureUnlessShutdown[T]
   }
 
@@ -1274,6 +1278,7 @@ object ConnectedSynchronizer {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         testingConfig: TestingConfigInternal,
+        externalCallValidator: ExternalCallValidator,
     )(implicit
         ec: ExecutionContext,
         mat: Materializer,
@@ -1385,6 +1390,7 @@ object ConnectedSynchronizer {
           futureSupervisor,
           loggerFactory,
           testingConfig,
+          externalCallValidator,
         )
       }
     }
