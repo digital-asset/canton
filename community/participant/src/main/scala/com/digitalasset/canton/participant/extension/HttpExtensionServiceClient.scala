@@ -427,7 +427,7 @@ class HttpExtensionServiceClient(
       requestId: String,
       defaultMessage: String,
   )(implicit tc: TraceContext): ExtensionCallError = {
-    debugLogErrorBody(resp, requestId)
+    logErrorBody(resp, requestId)
     ExtensionCallError(
       resp.statusCode(),
       defaultMessage,
@@ -436,13 +436,13 @@ class HttpExtensionServiceClient(
     )
   }
 
-  private def debugLogErrorBody(resp: HttpResponse[String], requestId: String)(implicit
+  private def logErrorBody(resp: HttpResponse[String], requestId: String)(implicit
       tc: TraceContext
   ): Unit =
-    if (logger.underlying.isDebugEnabled) {
+    if (logger.underlying.isInfoEnabled) {
       val statusCode = resp.statusCode()
       HttpExtensionServiceClient.diagnosticResponseBody(resp.body()).foreach { body =>
-        logger.debug(
+        logger.info(
           s"External call to extension '$extensionId' returned HTTP $statusCode with response body '$body': requestId=$requestId"
         )
       }
@@ -453,7 +453,7 @@ class HttpExtensionServiceClient(
 }
 
 object HttpExtensionServiceClient {
-  private val MaxDiagnosticResponseBodyChars: Int = 1024
+  private val MaxDiagnosticResponseBodyChars: Int = 8192
 
   private[extension] def isRetryableHttpStatus(statusCode: Int): Boolean =
     statusCode match {
