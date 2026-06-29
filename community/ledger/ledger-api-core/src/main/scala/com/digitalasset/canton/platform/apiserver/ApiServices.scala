@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.{
 }
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.config.*
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
@@ -121,6 +122,7 @@ object ApiServices {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      externalCallHandler: ExternalCallHandler,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -282,6 +284,7 @@ object ApiServices {
           loggerFactory = loggerFactory,
           dynParamGetter = dynParamGetter,
           timeProvider = timeProvider,
+          externalCallHandler = externalCallHandler,
         )
 
       val commandExecutor =
