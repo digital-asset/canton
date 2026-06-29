@@ -40,6 +40,7 @@ import com.digitalasset.canton.platform.config.{
   UpdateServiceConfig,
   UserManagementServiceConfig,
 }
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.user.IdentityProviderConfig
@@ -116,6 +117,7 @@ object ApiServiceOwner {
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      externalCallHandler: ExternalCallHandler,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -213,6 +215,7 @@ object ApiServiceOwner {
         apiContractService = apiContractService,
         partyReplicationEndpointsO = partyReplicationEndpointsO,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
+        externalCallHandler = externalCallHandler,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(
