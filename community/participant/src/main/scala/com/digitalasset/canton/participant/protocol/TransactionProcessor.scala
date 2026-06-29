@@ -16,6 +16,7 @@ import com.digitalasset.base.error.{
 }
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -41,6 +42,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.protocol.validation.{
   AuthorizationValidator,
+  ExternalCallValidator,
   InternalConsistencyChecker,
   ModelConformanceChecker,
   TransactionConfirmationResponsesFactory,
@@ -87,6 +89,7 @@ class TransactionProcessor(
     promiseFactory: PromiseUnlessShutdownFactory,
     participantNodeParameters: ParticipantNodeParameters,
     trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+    externalCallValidator: ExternalCallValidator,
 )(implicit val ec: ExecutionContext)
     extends ProtocolProcessor[
       TransactionProcessingSteps.SubmissionParam,
@@ -101,6 +104,8 @@ class TransactionProcessor(
         new TransactionConfirmationResponsesFactory(
           participantId,
           synchronizerId,
+          externalCallValidator,
+          TransactionProcessor.externalCallValidationParallelism(participantNodeParameters),
           loggerFactory,
         ),
         ModelConformanceChecker(
@@ -212,6 +217,11 @@ class TransactionProcessor(
 }
 
 object TransactionProcessor {
+
+  private def externalCallValidationParallelism(
+      participantNodeParameters: ParticipantNodeParameters
+  ): PositiveInt =
+    participantNodeParameters.general.batchingConfig.parallelism
 
   sealed trait TransactionProcessorError
       extends WrapsProcessorError

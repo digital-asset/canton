@@ -77,6 +77,7 @@ import com.digitalasset.canton.participant.protocol.submission.routing.{
   RoutingSynchronizerStateFactory,
   TransactionRoutingProcessor,
 }
+import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.store.*
@@ -180,6 +181,7 @@ class CantonSyncService(
     val ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
     trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
+    externalCallValidator: ExternalCallValidator,
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
     extends state.SyncService
     with ParticipantPruningSyncService
@@ -234,6 +236,7 @@ class CantonSyncService(
     testingConfig,
     ledgerApiIndexer,
     connectedSynchronizersLookupContainer,
+    externalCallValidator,
   )
 
   private def connectedSynchronizersLookup: ConnectedSynchronizersLookup =
@@ -1850,6 +1853,7 @@ object CantonSyncService {
       connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
       triggerDeclarativeChange: () => Unit,
       trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
+      externalCallValidator: ExternalCallValidator,
   )(implicit ec: ExecutionContextExecutor, mat: Materializer, tracer: Tracer): CantonSyncService = {
 
     // Set initial replica state
@@ -1887,6 +1891,7 @@ object CantonSyncService {
         ledgerApiIndexer,
         trafficEnforcementBackendO,
         connectedSynchronizersLookupContainer,
+        externalCallValidator,
       )
     syncService
   }
