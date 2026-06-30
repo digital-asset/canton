@@ -168,16 +168,19 @@ class ModelConformanceCheckerTest
 
   private def buildUnderTest(
       contractValidator: ContractValidator = ContractValidator.AllowAll
-  ): ModelConformanceChecker =
+  ): ModelConformanceChecker = {
+
+    val damlE: DAMLe = new DAMLe(
+      resolvePackage = testEngine.packageResolver,
+      engine = testEngine.engine,
+      interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+      participantId = participantId,
+      loggerFactory = loggerFactory,
+    )
+
     new ModelConformanceChecker(
       participantId = participantId,
-      reinterpreter = new DAMLe(
-        resolvePackage = testEngine.packageResolver,
-        engine = testEngine.engine,
-        interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
-        participantId = participantId,
-        loggerFactory = loggerFactory,
-      ),
+      reinterpreter = damlE,
       transactionTreeFactory = transactionTreeFactory,
       contractValidator = contractValidator,
       packageResolver = testEngine.packageResolver,
@@ -187,6 +190,7 @@ class ModelConformanceCheckerTest
       hashOps = symbolicCrypto.pureCrypto,
       loggerFactory = loggerFactory,
     )
+  }
 
   "When provided with valid input" should {
 
@@ -221,11 +225,13 @@ class ModelConformanceCheckerTest
     val underTest: ModelConformanceChecker = buildUnderTest()
 
     "exceptionTesterFail" in {
-      verifyExample(underTest, exampleFactory.exceptionTesterFail())
+      val example = exampleFactory.exceptionTesterFail()
+      verifyExample(underTest, example)
     }
 
     "exceptionTesterNonConsumingExec" in {
-      verifyExample(underTest, exampleFactory.exceptionTesterNonConsumingExec())
+      val example = exampleFactory.exceptionTesterNonConsumingExec()
+      verifyExample(underTest, example)
     }
 
     "exceptionTesterCreateFail" in {
@@ -921,7 +927,6 @@ object ModelConformanceCheckerTest extends OptionValues {
         // Vetting checks in PV 35 only apply to packages of action nodes
         tx.nodes.values.collect { case action: LfActionNode => action.packageIds }.flatten.toSet
       } else metadata.usedPackages
-
   }
 
   class ExampleFactory(testEngine: TestEngine) extends EitherValues with AsJavaExtensions {
