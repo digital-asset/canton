@@ -119,7 +119,7 @@ Changes from V1
 
     V3 introduces support for contract keys. Usage of contract keys in externally signed transactions
     requires usage of V3. Contract keys will not work on V2.
-    Also note that V3 is the stable hashing scheme introduced at protocol version 35, and V4 is :ref:`supported <hashing_scheme_version>` only on the development protocol.
+    Also note that V3 is :ref:`supported <hashing_scheme_version>` from protocol version 35 onwards.
 
 
 Notation and Utility Functions
