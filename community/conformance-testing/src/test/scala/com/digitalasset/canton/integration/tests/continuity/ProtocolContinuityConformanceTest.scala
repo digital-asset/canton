@@ -451,6 +451,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.sequencer-client.keep-alive-client.idle-timeout",
         s"$base.sequencer-client.keep-alive-client.keep-alive-without-calls",
         s"$base.parameters.connect-to-synchronizers-on-startup",
+        s"$base.traffic-enforcement",
       )
     }
     val perMediator = {

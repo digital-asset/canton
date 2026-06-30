@@ -22,6 +22,7 @@ import com.digitalasset.canton.crypto.HmacError.{
 import com.digitalasset.canton.crypto.deterministic.encryption.DeterministicRandom
 import com.digitalasset.canton.crypto.{SignatureCheckError, *}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{CryptoMetrics, DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
   DeserializationError,
@@ -90,6 +91,8 @@ class JcePureCrypto(
     publicKeyConversionCacheConfig: CacheConfig,
     privateKeyConversionCacheTtl: Option[FiniteDuration],
     override val signatureVerificationParallelism: PositiveInt,
+    override val signingMetrics: SigningMetrics,
+    override val decryptionMetrics: DecryptionMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CryptoPureApi
@@ -318,7 +321,7 @@ class JcePureCrypto(
         SymmetricKey.create(CryptoKeyFormat.Raw, bytes.unwrap, scheme)
     }
 
-  override protected[crypto] def signBytes(
+  override private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -850,6 +853,7 @@ object JcePureCrypto {
       sessionEncryptionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
       publicKeyConversionCacheConfig: CacheConfig,
       cryptoSchemes: CryptoSchemes,
+      cryptoMetrics: CryptoMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): Either[String, JcePureCrypto] = {
 
@@ -889,6 +893,8 @@ object JcePureCrypto {
       publicKeyConversionCacheConfig = publicKeyConversionCacheConfig,
       privateKeyConversionCacheTtl = minimumPrivateKeyCacheDuration,
       signatureVerificationParallelism = config.parallelism.signatureVerificationParallelism,
+      signingMetrics = cryptoMetrics.signingMetrics,
+      decryptionMetrics = cryptoMetrics.decryptionMetrics,
       loggerFactory = loggerFactory,
     )
   }

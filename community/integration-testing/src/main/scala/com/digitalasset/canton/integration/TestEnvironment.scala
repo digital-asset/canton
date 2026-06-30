@@ -15,7 +15,6 @@ import com.digitalasset.canton.concurrent.{
 import com.digitalasset.canton.config.{
   BatchingConfig,
   CachingConfigs,
-  CantonConfig,
   CryptoConfig,
   SessionEncryptionKeyCacheConfig,
 }
@@ -30,6 +29,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
@@ -40,13 +40,13 @@ import scala.collection.mutable
 import scala.concurrent.Await
 
 /** Type including all environment macros and utilities to appear as you're using canton console */
-trait TestEnvironment
+trait TestEnvironment[+C]
     extends ConsoleEnvironmentTestHelpers
     with ConsoleMacros
     with ConsoleEnvironment.Implicits
     with EnvironmentTestHelpers
     with CommonTestAliases {
-  this: ConsoleEnvironment =>
+  this: ConsoleEnvironment { type Config <: C } =>
 
   implicit val executionContext: ExecutionContextIdlenessExecutorService =
     environment.executionContext
@@ -54,7 +54,7 @@ trait TestEnvironment
   implicit val executionSequencerFactory: ExecutionSequencerFactory =
     environment.executionSequencerFactory
 
-  def actualConfig: CantonConfig = environment.config
+  def actualConfig: C = environment.config
 
   private lazy val storage =
     new MemoryStorage(loggerFactory, environmentTimeouts)
@@ -70,6 +70,7 @@ trait TestEnvironment
       testedReleaseProtocolVersion,
       FutureSupervisor.Noop,
       environment.clock,
+      CommonMockMetrics.cryptoMetrics,
       executionContext,
       environmentTimeouts,
       BatchingConfig(),

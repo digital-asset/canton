@@ -19,6 +19,7 @@ import com.digitalasset.canton.crypto.CryptoKeyFormat.Raw
 import com.digitalasset.canton.crypto.CryptoTestHelper.TestMessage
 import com.digitalasset.canton.crypto.SigningKeySpec.EcSecp256k1
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
@@ -61,6 +62,7 @@ class JceCryptoTest
           testedReleaseProtocolVersion,
           futureSupervisor,
           wallClock,
+          CommonMockMetrics.cryptoMetrics,
           executionContext,
           timeouts,
           BatchingConfig(),

@@ -292,7 +292,7 @@ trait CompletionStorageBackend {
   def commandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse]

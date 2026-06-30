@@ -123,7 +123,7 @@ trait CommunityEnvironmentFixture extends BaseTest with HasExecutionContext { th
 
     def mockParticipant: ParticipantNodeBootstrap = mockParticipantAndNode._1
 
-    val environment = new Environment(
+    val environment = new CantonEnvironment(
       config,
       TestingConfigInternal(initializeGlobalOpenTelemetry = false, warnOnJwtScopeUsage = false),
       new ParticipantNodeBootstrapFactory {

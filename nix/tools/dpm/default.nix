@@ -1,17 +1,16 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  dpmPath = "europe-docker.pkg.dev/da-images/public/components/dpm";
-  dpmVersion = "1.0.13";
+  dpmPath = "ghcr.io/digital-asset/temp/components/dpm";
+  dpmVersion = "1.0.20";
   dpmRef = "${dpmPath}:${dpmVersion}";
 
-  # These are Nix recursive output hashes for the directory produced by
-  # `oras pull -o $out` for each platform-specific artifact.
+  # These are OCI layer digests for each platform-specific artifact.
   dpmHashes = {
-    "x86_64-linux" = "sha256-8w3bGxFXoAy6d2YykgBtsMX4ZhuO/HlGf7jWc9pTJ6I=";
-    "aarch64-linux" = "sha256-djrUlN693+uV7PeeLxrtkNI2bxAsvLYmtJEkGRlwd5I=";
-    "x86_64-darwin" = "sha256-lNfLYRZnIWBu1V164PADety6ERD4g9U3fG1uT9lqNyo=";
-    "aarch64-darwin" = "sha256-ELr+LGE8i1Z7QRylqtFc7W/b8qj7jFBATneIyqlxvhs=";
+    "x86_64-linux" = "sha256-Nzg47tUPIgqRCAQgBVRgXDo+Kiz16kHL3bhMH6uT374=";
+    "aarch64-linux" = "sha256-Dd7v8/8nst5tTL8bGoxAcIMWL2EIxBlrv9zESKqeXXU=";
+    "x86_64-darwin" = "sha256-FHLLSsQroWH8PhE/kMN5fch+OfmPDy5jxpt8PG4pvs0=";
+    "aarch64-darwin" = "sha256-izl9SStIMyI0cjrx8Qv2VYkSLvdjPUjRvfNayhsqM9s=";
   };
   dpmHash = dpmHashes.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: $pkgs.stdenv.hostPlatform.system}");
 
@@ -29,7 +28,6 @@ pkgs.stdenv.mkDerivation {
 
   src = pkgs.stdenv.mkDerivation {
     name = "dpm-pull-${dpmRef}.${ociPlatform}";
-
     nativeBuildInputs = [ pkgs.oras pkgs.cacert ];
 
     buildCommand = ''

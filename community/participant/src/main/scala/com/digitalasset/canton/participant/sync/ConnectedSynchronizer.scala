@@ -76,6 +76,7 @@ import com.digitalasset.canton.participant.traffic.{
 }
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -170,6 +171,7 @@ class ConnectedSynchronizer(
     journalGarbageCollector: JournalGarbageCollector,
     val acsCommitmentProcessor: AcsCommitmentProcessor,
     clock: Clock,
+    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
     metrics: ConnectedSynchronizerMetrics,
     futureSupervisor: FutureSupervisor,
@@ -293,6 +295,7 @@ class ConnectedSynchronizer(
     testingConfig = testingConfig,
     promiseUSFactory,
     parameters,
+    trafficEnforcementBackendO.map(_.value),
   )
 
   private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(
@@ -1247,6 +1250,7 @@ object ConnectedSynchronizer {
         reassignmentCoordination: ReassignmentCoordination,
         commandProgressTracker: CommandProgressTracker,
         clock: Clock,
+        trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
         promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
         connectedSynchronizerMetrics: ConnectedSynchronizerMetrics,
         futureSupervisor: FutureSupervisor,
@@ -1274,6 +1278,7 @@ object ConnectedSynchronizer {
         reassignmentCoordination: ReassignmentCoordination,
         commandProgressTracker: CommandProgressTracker,
         clock: Clock,
+        trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
         promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
         connectedSynchronizerMetrics: ConnectedSynchronizerMetrics,
         futureSupervisor: FutureSupervisor,
@@ -1385,6 +1390,7 @@ object ConnectedSynchronizer {
           journalGarbageCollector,
           acsCommitmentProcessor,
           clock,
+          trafficEnforcementBackendO,
           promiseUSFactory,
           connectedSynchronizerMetrics,
           futureSupervisor,

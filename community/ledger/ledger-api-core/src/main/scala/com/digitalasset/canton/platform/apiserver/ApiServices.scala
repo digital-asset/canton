@@ -32,8 +32,10 @@ import com.digitalasset.canton.platform.apiserver.services.command.{
   CommandInspectionServiceImpl,
   CommandServiceImpl,
   CommandSubmissionServiceImpl,
+  TrafficEnforcementBackend,
 }
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
+import com.digitalasset.canton.platform.apiserver.services.traffic.ApiTrafficService
 import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
@@ -124,6 +126,7 @@ object ApiServices {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -384,6 +387,14 @@ object ApiServices {
         loggerFactory = loggerFactory,
       )
 
+      val trafficServiceO = trafficEnforcementBackendO
+        .map(trafficClient =>
+          new TrafficServiceAuthorization(
+            new ApiTrafficService(trafficClient.trafficServiceClient, loggerFactory),
+            authorizer,
+          )
+        )
+
       val apiInteractiveSubmissionService = {
         val interactiveSubmissionService =
           InteractiveSubmissionServiceImpl.createApiService(
@@ -399,6 +410,7 @@ object ApiServices {
             packagePreferenceBackend,
             transactionSubmissionTracker,
             commandConfig.defaultTrackingTimeout,
+            trafficEnforcementBackendO,
             loggerFactory,
           )
 
@@ -422,7 +434,7 @@ object ApiServices {
         new PackageManagementServiceAuthorization(apiPackageManagementService, authorizer),
         new ParticipantPruningServiceAuthorization(participantPruningService, authorizer),
         new InteractiveSubmissionServiceAuthorization(apiInteractiveSubmissionService, authorizer),
-      )
+      ) ++ trafficServiceO.toList
     }
 
     logger.info(engine.info.toString)

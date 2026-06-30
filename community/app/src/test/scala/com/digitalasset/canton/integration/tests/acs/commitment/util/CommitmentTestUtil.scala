@@ -379,32 +379,74 @@ trait CommitmentTestUtil
 
   protected def awaitNextTick(
       participant: LocalParticipantReference,
-      counterparticipant: ParticipantReference,
-  )(implicit env: TestConsoleEnvironment, intervalDuration: IntervalDuration): CommitmentPeriod = {
+      counterParticipant: LocalParticipantReference,
+  )(implicit
+      env: TestConsoleEnvironment,
+      intervalDuration: IntervalDuration,
+  ): CommitmentPeriod = {
     import env.*
     val simClock = environment.simClock.value
 
     val tick1 = tickAfter(simClock.uniqueTime())
     simClock.advanceTo(tick1.forgetRefinement.immediateSuccessor)
+
     // Await the synchronizer time. Internally this will trigger a fetch of the synchronizer time.
     participant.testing.await_synchronizer_time(daId, tick1.forgetRefinement.immediateSuccessor)
+    counterParticipant.testing.await_synchronizer_time(
+      daId,
+      tick1.forgetRefinement.immediateSuccessor,
+    )
 
-    val p1Computed = eventually() {
-      val p1Computed = participant.commitments.computed(
+    val participantComputed = eventually() {
+      val participantComputed = participant.commitments.computed(
         daName,
         tick1.toInstant.minusMillis(1),
         tick1.toInstant,
-        Some(counterparticipant.id),
+        Some(counterParticipant.id),
       )
-      p1Computed should have size 1L
-      p1Computed
+      participantComputed should have size 1L
+
+      val counterParticipantComputed = counterParticipant.commitments.computed(
+        daName,
+        tick1.toInstant.minusMillis(1),
+        tick1.toInstant,
+        Some(participant.id),
+      )
+      counterParticipantComputed should have size 1L
+
+      participantComputed
     }
 
-    val (period, _participant, commitment) = p1Computed.loneElement
+    // the values are the same for the participant and counter participant, but it is better to wait for both in wallClock time
+    val (period, _participantId, commitment) = participantComputed.loneElement
     period
   }
 
-  protected def checkReceivedCommitment(
+  protected def checkSentCommitmentTo(
+      recipients: Seq[ParticipantReference]
+  )(
+      period: CommitmentPeriod,
+      participant: ParticipantReference,
+      synchronizer: SynchronizerId,
+      expected: Int = 1,
+  ): Unit = eventually() {
+    val timeRange =
+      TimeRange(period.fromExclusive.forgetRefinement, period.toInclusive.forgetRefinement)
+    val sentCommitments = participant.commitments.lookup_sent_acs_commitments(
+      synchronizerTimeRanges = Seq(SynchronizerTimeRange(synchronizer, Some(timeRange))),
+      counterParticipants = Seq.empty,
+      commitmentState = Seq.empty,
+      verboseMode = false,
+    )
+
+    val sentCommitmentsOnSynchronizer = sentCommitments.get(synchronizer).value
+    sentCommitmentsOnSynchronizer.size should be >= expected
+    sentCommitmentsOnSynchronizer.map(
+      _.destCounterParticipant.uid
+    ) should contain theSameElementsAs (recipients.map(_.uid))
+  }
+
+  protected def checkReceivedCommitments(
       period: CommitmentPeriod,
       participant: ParticipantReference,
       synchronizer: SynchronizerId,

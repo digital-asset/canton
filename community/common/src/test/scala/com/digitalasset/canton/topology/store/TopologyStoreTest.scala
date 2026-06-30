@@ -30,7 +30,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.transaction.{TopologyMapping, *}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
+import com.digitalasset.canton.{FailOnShutdown, HasActorSystem, HasExecutionContext}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -40,12 +40,13 @@ trait TopologyStoreTest
     extends AsyncWordSpec
     with TopologyStoreTestBase
     with FailOnShutdown
-    with HasActorSystem {
+    with HasActorSystem
+    with HasExecutionContext {
 
   implicit def closeContext: CloseContext
 
   private[store] val testData =
-    new TopologyStoreTestData(testedProtocolVersion, loggerFactory, executionContext)
+    new TopologyStoreTestData(testedProtocolVersion, loggerFactory)
   import testData.*
 
   private[store] lazy val largeTestSnapshot = {

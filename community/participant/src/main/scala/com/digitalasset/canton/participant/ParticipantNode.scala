@@ -62,6 +62,7 @@ import com.digitalasset.canton.participant.synchronizer.grpc.GrpcSynchronizerReg
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.store.LedgerApiContractStoreImpl
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -401,7 +402,7 @@ class ParticipantNodeBootstrap(
           ips,
           crypto,
           cryptoConfig,
-          Some(arguments.metrics.kmsMetrics),
+          arguments.metrics.cryptoMetrics,
           parameters.cachingConfigs.publicKeyConversionCache,
           timeouts,
           futureSupervisor,
@@ -596,6 +597,34 @@ class ParticipantNodeBootstrap(
           loggerFactory,
         )
 
+        trafficEnforcementBackendContainerO = Option.when(config.trafficEnforcement.enabled)(
+          new LifeCycleContainer(
+            stateName = "traffic-enforcement-backend",
+            create = () =>
+              FutureUnlessShutdown.pure(
+                TrafficEnforcementBackend(
+                  trafficEnforcementServerConfig =
+                    config.trafficEnforcement.trafficEnforcementServer,
+                  processingTimeout = timeouts,
+                  loggerFactory = loggerFactory,
+                )
+              ),
+            loggerFactory = loggerFactory,
+          )
+        )
+
+        _ <- trafficEnforcementBackendContainerO.traverseTap { trafficEnforcementBackendContainer =>
+          // only initialize traffic enforcement backend if participant is becoming active
+          if (isActive) {
+            EitherT.right[String](trafficEnforcementBackendContainer.initializeNext())
+          } else {
+            logger.info("Traffic enforcement backend is not initialized due to inactive state")
+            EitherT.rightT[FutureUnlessShutdown, String](())
+          }
+        }
+
+        trafficEnforcementBackendO = trafficEnforcementBackendContainerO.map(_.asEval)
+
         synchronizerRegistry = new GrpcSynchronizerRegistry(
           participantId,
           syncPersistentStateManager,
@@ -727,6 +756,7 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer,
           connectedSynchronizersLookupContainer,
           () => triggerDeclarativeChange(),
+          trafficEnforcementBackendO,
         )
 
         _ <-
@@ -767,6 +797,7 @@ class ParticipantNodeBootstrap(
                 participantId = participantId.toLf,
                 participantNodePersistentState = persistentState,
                 sync = sync,
+                trafficEnforcementBackendO = trafficEnforcementBackendO,
                 pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
                 updateServiceConfig = arguments.config.ledgerApi.updateService,
@@ -888,6 +919,9 @@ class ParticipantNodeBootstrap(
         addCloseable(ledgerApiServerContainer.currentAutoCloseable())
         addCloseable(ledgerApiDependentServices)
         addCloseable(mutablePackageMetadataView)
+        trafficEnforcementBackendContainerO.foreach(trafficEnforcementBackendContainer =>
+          addCloseable(trafficEnforcementBackendContainer.currentAutoCloseable())
+        )
 
         // return values
         ParticipantServices(
@@ -899,6 +933,7 @@ class ParticipantNodeBootstrap(
           ledgerApiServerContainer = ledgerApiServerContainer,
           startableStoppableLedgerApiDependentServices = ledgerApiDependentServices,
           participantTopologyDispatcher = topologyDispatcher,
+          trafficEnforcementBackendContainerO = trafficEnforcementBackendContainerO,
         )
       }
     }
@@ -985,6 +1020,8 @@ object ParticipantNodeBootstrap {
       persistentStateContainer: LifeCycleContainer[ParticipantNodePersistentState],
       mutablePackageMetadataView: MutablePackageMetadataViewImpl,
       ledgerApiIndexerContainer: LifeCycleContainer[LedgerApiIndexer],
+      // None if traffic enforcement is disabled
+      trafficEnforcementBackendContainerO: Option[LifeCycleContainer[TrafficEnforcementBackend]],
       cantonSyncService: CantonSyncService,
       schedulers: Schedulers,
       ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer],

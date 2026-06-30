@@ -2557,7 +2557,7 @@ object BuildCommon {
         "traffic-enforcement-api",
         file("community/traffic-enforcement/api"),
       )
-        .dependsOn(`util-observability`)
+        .dependsOn(`util-observability`, `community-base`)
         .settings(
           sharedCantonCommunitySettings,
           enablePublishLibrary,
@@ -2590,6 +2590,7 @@ object BuildCommon {
           DamlProjects.`ledger-api-proto`,
           `util-observability`,
           CommunityProjects.`community-testing` % Test,
+          CommunityProjects.`community-common` % "compile->compile;test->test",
         )
         .enablePlugins(DamlPlugin)
         .settings(
@@ -2607,6 +2608,14 @@ object BuildCommon {
             commons_io,
             pekko_actor_typed,
             pekko_stream,
+            pekko_projection_core,
+            pekko_projection_jdbc,
+            pekko_projection_slick,
+            pekko_persistence,
+            pekko_persistence_query,
+            // Scope not only to test on purpose as we use the in-memory implementation
+            // in prod code as well
+            pekko_projection_testkit,
             pekko_slf4j % "compile->compile;test->test",
             pureconfig_core,
             pureconfig_generic,

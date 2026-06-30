@@ -33,6 +33,9 @@ object Dependencies {
   lazy val scala_version_short = "2.13"
 
   lazy val pekko_version = resolveDependency("org.apache.pekko", "pekko-actor").revision
+  lazy val pekko_projection_jdbc_version = "1.1.1"
+  lazy val pekko_projection_version = "1.1.0"
+  lazy val pekko_persistence_version = "1.2.1"
   lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
 
   lazy val ammonite_version = "3.0.1"
@@ -196,6 +199,19 @@ object Dependencies {
     "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
   lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
   lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
+
+  lazy val pekko_projection_core =
+    "org.apache.pekko" %% "pekko-projection-core" % pekko_projection_version
+  lazy val pekko_projection_jdbc =
+    "org.apache.pekko" %% "pekko-projection-jdbc" % pekko_projection_version
+  lazy val pekko_projection_slick =
+    "org.apache.pekko" %% "pekko-projection-slick" % pekko_projection_version
+  lazy val pekko_projection_testkit =
+    "org.apache.pekko" %% "pekko-projection-testkit" % pekko_projection_version
+  lazy val pekko_persistence =
+    "org.apache.pekko" %% "pekko-persistence" % pekko_persistence_version
+  lazy val pekko_persistence_query =
+    "org.apache.pekko" %% "pekko-persistence-query" % pekko_persistence_version
 
   lazy val scala_logging =
     "com.typesafe.scala-logging" %% "scala-logging" % scala_logging_version excludeAll (incompatibleLogging: _*)

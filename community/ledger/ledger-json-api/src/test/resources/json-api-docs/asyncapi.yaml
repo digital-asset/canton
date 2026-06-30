@@ -1,15 +1,17 @@
 asyncapi: 2.6.0
 info:
   title: JSON Ledger API WebSocket endpoints
-  version: 3.5.6-SNAPSHOT
+  version: 3.5.7-SNAPSHOT
   description: |-
     This specification version fixes the API inconsistencies where certain fields marked as required in the spec are in fact optional.
     If you use code generation tool based on this file, you might need to adjust the existing application code to handle those fields as optional.
     If you do not want to change your client code, continue using the OpenAPI specification for the latest Canton 3.4 patch release.
-    MINIMUM_CANTON_VERSION=3.5.6
+    MINIMUM_CANTON_VERSION=3.5.7
 channels:
   /v2/commands/completions:
-    description: Subscribe to command completion events.
+    description: |-
+      Deprecated: please use ``GetCompletions`` instead.
+      Subscribe to command completion events.
     subscribe:
       operationId: onV2CommandsCompletions
       message:
@@ -18,6 +20,21 @@ channels:
       operationId: sendV2CommandsCompletions
       message:
         $ref: '#/components/messages/CompletionStreamRequest'
+    bindings:
+      ws:
+        method: GET
+  /v2/commands/command-completions:
+    description: |-
+      Subscribe to command completion events.
+      This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
+    subscribe:
+      operationId: onV2CommandsCommand-completions
+      message:
+        $ref: '#/components/messages/Either_JsCantonError_CompletionStreamResponse'
+    publish:
+      operationId: sendV2CommandsCommand-completions
+      message:
+        $ref: '#/components/messages/GetCompletionsRequest'
     bindings:
       ws:
         method: GET
@@ -540,6 +557,32 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SynchronizerTime'
+    GetCompletionsRequest:
+      title: GetCompletionsRequest
+      type: object
+      properties:
+        parties:
+          description: |-
+            If specified, only completions of commands are included, which have at least one of the ``act_as`` parties
+            in the given set of parties.
+            Only Ledger API users with CanReadAsAnyParty permission allowed to provide no ``parties``.
+            Must be a valid PartyIdString (as described in ``value.proto``).
+
+            Optional: can be empty
+          type: array
+          items:
+            type: string
+        beginExclusive:
+          description: |-
+            This optional field indicates the minimum offset for completions. This can be used to resume an earlier completion stream.
+            If not set the ledger uses the ledger begin offset instead.
+            If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset).
+            If the ledger has been pruned, this parameter must be specified and greater than the pruning offset. (the pruning
+            offset is accessible on the StateService.GetLatestPrunedOffsets endpoint)
+
+            Optional
+          type: integer
+          format: int64
     GetActiveContractsRequest:
       title: GetActiveContractsRequest
       description: |-
@@ -2465,6 +2508,10 @@ components:
     Either_JsCantonError_CompletionStreamResponse:
       payload:
         $ref: '#/components/schemas/Either_JsCantonError_CompletionStreamResponse'
+      contentType: application/json
+    GetCompletionsRequest:
+      payload:
+        $ref: '#/components/schemas/GetCompletionsRequest'
       contentType: application/json
     GetActiveContractsRequest:
       payload:

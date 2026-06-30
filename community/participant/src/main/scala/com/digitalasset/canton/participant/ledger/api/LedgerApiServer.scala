@@ -62,6 +62,7 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTrack
 import com.digitalasset.canton.platform.apiserver.ratelimiting.RateLimitingInterceptorFactory
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.Utils
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.{
   ApiServiceOwner,
   InProcessGrpcName,
@@ -129,6 +130,7 @@ class LedgerApiServer(
     ledgerApiIndexer: Eval[LedgerApiIndexer],
     pruningConfig: ParticipantStoreConfig,
     updateServiceConfig: UpdateServiceConfig,
+    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     warnOnJwtScopeUsage: Boolean,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -422,6 +424,7 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
+        trafficEnforcementBackendO = trafficEnforcementBackendO.map(_.value),
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
@@ -584,6 +587,7 @@ object LedgerApiServer {
       participantId: LedgerParticipantId,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       sync: CantonSyncService,
+      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
       pruningConfig: ParticipantStoreConfig,
       tracerProvider: TracerProvider,
       updateServiceConfig: UpdateServiceConfig,
@@ -641,6 +645,7 @@ object LedgerApiServer {
       loggerFactory = loggerFactory,
       pruningConfig = pruningConfig,
       updateServiceConfig = updateServiceConfig,
+      trafficEnforcementBackendO = trafficEnforcementBackendO,
       warnOnJwtScopeUsage = warnOnJwtScopeUsage,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)

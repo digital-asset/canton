@@ -32,6 +32,7 @@ import com.digitalasset.canton.platform.apiserver.execution.{
 }
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
@@ -116,6 +117,7 @@ object ApiServiceOwner {
       apiLoggingConfig: ApiLoggingConfig,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -211,6 +213,7 @@ object ApiServiceOwner {
         safeToPruneCommitmentState = safeToPruneCommitmentState,
         logger = loggerFactory.getTracedLogger(this.getClass),
         apiContractService = apiContractService,
+        trafficEnforcementBackendO = trafficEnforcementBackendO,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(

@@ -1,3 +1,4 @@
+
 # Release of Canton CANTON_VERSION
 
 Canton CANTON_VERSION has been released on RELEASE_DATE.
@@ -14,24 +15,25 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### New `GetCompletions` endpoint on the command completion service
+#### Background
+The command completion service only offered `CompletionStream`, which always filters by a single user and a non-empty set of parties. There was no way to stream completions across all parties.
+
+#### Specific Changes
+A new completion streaming endpoint is introduced: `GetCompletions` (gRPC) or `/commands/command-completions` (JSON API). This endpoint offers more flexible filtering semantics compared to the existing `CompletionStream`, `/commands/completions` endpoint. It filters by `parties` only; there is no user filtering:
+- A non-empty `parties` filters to those parties and requires `ReadAs` (or `ActAs`) for each.
+- An empty `parties` returns completions for all parties and requires `ReadAsAnyParty` (or `ActAsAnyParty`).
+
+In all other respects it behaves like `CompletionStream`, which becomes deprecated.
+
+#### Impact and Migration
+This is an additive change. `CompletionStream` is unchanged, so no migration is required.
+
 ### Minor Improvements
-- Connection pool metrics:
-  - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
-  - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
-- Updated com.google.protobuf libs from 3.25.5 --> 3.25.9
-- A call to `AcknowledgeSigned` with a timestamp before the upgrade time returns immediately, without any acknowledgement being done.
-- Fix JDBC query for computing last activations: Under adverse conditions (data corruption) this query might called with empty inputs where it would have failed execution with PostgreSQL server version 14.
-- (Potentially) *BREAKING*: Aggregatable submissions are now rejected eagerly to preserve bandwidth.
-  This means that the submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also
-  be returned during the synchronous submission of the sequencer, as the state of the aggregation is also
-  checked before ordering. In addition, the GRPC error code has been modified from `FAILED_PRECONDITION` to
-  `ALREADY_EXISTS` to better reflect the nature of the error. Clients should be updated to handle this error
-  code accordingly. Due to backwards compatibility, the old GRPC error code will be returned for PV35 and
-  before on the async path, and the new capability must only be turned on when all nodes have been
-  upgraded to a Canton version that supports this change. The new capability can be enabled using `canton.sequencers.seq.parameters.enable-reject-delivered-aggregations-on-pv-35 = MED`
-  for mediators. This can be combined with the new configuration option of the mediator `canton.mediators.mymediator.parameters.delayed-verdict-sender.enabled = true`.
-  Generally, the sequencer will send out the verdict after reaching the threshold. All subsequent sent verdicts are thrown away. The new option now allows threshold + extra verdicts to be sent immediately, while the rest of the mediators will wait a short amount of time. This allows to reduce the load on the sequencer by 30%, creating more capacity for other transactions.
-- Fixed an issue that prevent external parties from being allocated on a participant with an offline root key via the Ledger API's `PartyManagementService.AllocateExternalParty` endpoint.
+- Added latency metrics for signing and decryption operations.
+- Updated nix package to source from GHCR and bump dpm version to 1.0.20 for remote dar support
+- Fixed a BFT ordering sequencer crash-recovery issue affecting freshly onboarded nodes. If such a node crashed and restarted while still within its onboarding start epoch, on restart it could attempt to recover the output module from a block below its durable lower bound (a block that was never stored by this node), which could leave the node stuck. The onboarding boundary block is now persisted with its BFT time to seed BFT-time computation across a restart, the node's own activation time is reconstructed when needed for crash recovery, and output-module recovery is clamped to the durable lower bound.
+- LSU: improved handshake between a sequencer and its successor: the physical synchronizer id and sequencer id are now validated.
 
 ### Preview Features
 - preview feature
@@ -55,36 +57,6 @@ Template for a bigger topic
 #### Likeliness
 
 #### Recommendation
-
-### (26-004, High): LSU: Missing synchronization between topology local copy and purging
-
-#### Issue Description
-Because of the lack of synchronization, it can happen that topology purging kicks in before the local copy of the topology state is finished, which result in incorrect topology state for the successor.
-
-The issue can occur only when topology purging is enabled, which is not the case by default.
-
-#### Affected Deployments
-Participant nodes
-
-#### Affected Versions
-All versions before 3.5.6
-
-#### Impact
-Topology fork
-
-#### Symptom
-
-- Participant nodes issues warning/errors about missing topology transactions that were valid before the LSU.
-- Submission of a transaction is rejected because of missing topology transactions that were valid before the LSU.
-
-#### Workaround
-Restore from backup and ensure topology purging is disabled
-
-#### Likeliness
-Exceptional
-
-#### Recommendation
-Upgrade to 3.5.6
 
 ## Compatibility
 

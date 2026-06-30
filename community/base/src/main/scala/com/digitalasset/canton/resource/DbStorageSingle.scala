@@ -38,7 +38,7 @@ import scala.concurrent.{ExecutionContext, Future, blocking}
 final class DbStorageSingle private (
     override val profile: DbStorage.Profile,
     override val dbConfig: DbConfig,
-    db: Database,
+    private[canton] val db: Database,
     clock: Clock,
     override protected val logOperations: Boolean,
     override val metrics: DbStorageMetrics,

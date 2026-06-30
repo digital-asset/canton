@@ -95,6 +95,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
 import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -175,6 +176,7 @@ class CantonSyncService(
     protected val loggerFactory: NamedLoggerFactory,
     testingConfig: TestingConfigInternal,
     val ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
+    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
     extends state.SyncService
@@ -208,6 +210,7 @@ class CantonSyncService(
     engine,
     commandProgressTracker,
     syncEphemeralStateFactory,
+    trafficEnforcementBackendO,
     clock,
     resourceManagementService,
     parameters,
@@ -1878,6 +1881,7 @@ object CantonSyncService {
       ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
       connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
       triggerDeclarativeChange: () => Unit,
+      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
   )(implicit ec: ExecutionContextExecutor, mat: Materializer, tracer: Tracer): CantonSyncService = {
 
     // Set initial replica state
@@ -1913,6 +1917,7 @@ object CantonSyncService {
         loggerFactory,
         testingConfig,
         ledgerApiIndexer,
+        trafficEnforcementBackendO,
         connectedSynchronizersLookupContainer,
       )
     syncService

@@ -8,6 +8,12 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoParallelismConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.metrics.{
+  CommonMockMetrics,
+  CryptoMetrics,
+  DecryptionMetrics,
+  SigningMetrics,
+}
 import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteStringUtil, EitherUtil}
@@ -53,7 +59,7 @@ class SymbolicPureCrypto extends CryptoPureApi {
   override def signatureVerificationParallelism: PositiveInt =
     CryptoParallelismConfig.defaultSignatureVerificationParallelism
 
-  override protected[crypto] def signBytes(
+  override private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -344,6 +350,10 @@ class SymbolicPureCrypto extends CryptoPureApi {
       .map(key => PasswordBasedEncryptionKey(key, salt))
   }
 
+  val cryptoMetrics: CryptoMetrics = CommonMockMetrics.cryptoMetrics
+
+  override def signingMetrics: SigningMetrics = cryptoMetrics.signingMetrics
+  override def decryptionMetrics: DecryptionMetrics = cryptoMetrics.decryptionMetrics
 }
 
 object SymbolicPureCrypto {

@@ -60,6 +60,7 @@ import com.digitalasset.canton.sequencing.client.SendTracker.{LatestAttempt, Lat
 import com.digitalasset.canton.sequencing.client.SequencerClient.{
   ConnectionContainer,
   SequencerTransports,
+  TrafficCostValidator,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientImpl.SequencerClientTimeSourcesPool
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
@@ -121,7 +122,7 @@ import org.apache.pekko.{Done, NotUsed}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, unused}
 import scala.compat.java8.DurationConverters.FiniteDurationops
 import scala.concurrent.*
 import scala.concurrent.duration.*
@@ -300,6 +301,7 @@ abstract class SequencerClientImpl(
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
+      trafficCostValidator: TrafficCostValidator,
       amplify: Boolean,
       useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit
@@ -312,6 +314,7 @@ abstract class SequencerClientImpl(
       messageId,
       aggregationRule,
       callback,
+      trafficCostValidator,
       amplify,
       useConfirmationResponseAmplificationParameters,
       metricsContext,
@@ -339,6 +342,7 @@ abstract class SequencerClientImpl(
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
+      trafficCostValidator: TrafficCostValidator,
       amplify: Boolean,
       useConfirmationResponseAmplificationParameters: Boolean,
       metricsContext: MetricsContext,
@@ -477,6 +481,9 @@ abstract class SequencerClientImpl(
             .checkSenderAndRecipientsAreRegistered(request, snapshot)
             .leftMap(_.toSendAsyncClientError)
           acceptableSequencersO <- EitherT.right(getAcceptableSequencers(snapshot))
+          _ <- EitherT.liftF(
+            cost.parTraverse_(c => trafficCostValidator.validate(c.cost.unwrap, traceContext))
+          )
           latestAttemptRef <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
           _ = recorderO.foreach(_.recordSubmission(request))
           res <- performSend(
@@ -2340,4 +2347,25 @@ object SequencerClient {
       sequencerId: SequencerId,
   ): NamedLoggerFactory =
     loggerFactory.append("sequencerId", sequencerId.uid.toString)
+
+  trait TrafficCostValidator {
+
+    /** Validates that the traffic cost is valid in the context of the submitting member and the
+      * current submission request.
+      *
+      * Practically, this is relevant for requests from submitting participants that perform traffic
+      * enforcement against local user traffic accounts.
+      */
+    def validate(trafficCost: Long, traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  }
+
+  object TrafficCostValidator {
+    val NoTrafficCostValidation: TrafficCostValidator = new TrafficCostValidator {
+      override def validate(
+          @unused trafficCost: Long,
+          @unused traceContext: TraceContext,
+      ): FutureUnlessShutdown[Unit] =
+        FutureUnlessShutdown.unit
+    }
+  }
 }

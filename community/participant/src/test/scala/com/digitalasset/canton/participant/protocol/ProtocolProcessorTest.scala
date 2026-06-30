@@ -64,6 +64,7 @@ import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordO
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.client.SendResult.Success
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -160,6 +161,7 @@ class ProtocolProcessorTest
       any[MessageId],
       any[Option[AggregationRule]],
       any[SendCallback],
+      any[TrafficCostValidator],
       amplify = any[Boolean],
       useConfirmationResponseAmplificationParameters = any[Boolean],
     )(anyTraceContext, any[MetricsContext])
@@ -492,6 +494,7 @@ class ProtocolProcessorTest
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
+          any[TrafficCostValidator],
           amplify = any[Boolean],
           useConfirmationResponseAmplificationParameters = any[Boolean],
         )(anyTraceContext, any[MetricsContext])

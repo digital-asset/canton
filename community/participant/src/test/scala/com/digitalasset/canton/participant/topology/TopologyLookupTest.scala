@@ -37,7 +37,7 @@ final class TopologyLookupTest
       val persistentState = mock[SyncPersistentState]
 
       val topologyStoreTestData =
-        new TopologyStoreTestData(testedProtocolVersion, loggerFactory, parallelExecutionContext)
+        new TopologyStoreTestData(testedProtocolVersion, loggerFactory)(parallelExecutionContext)
 
       val topologyStore = new InMemoryTopologyStore[SynchronizerStore](
         SynchronizerStore(psid),

@@ -16,7 +16,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
   NodeStatus,
 }
-import com.digitalasset.canton.config.LocalNodeConfig
+import com.digitalasset.canton.config.{LocalNodeConfig, SharedCantonConfig}
 import com.digitalasset.canton.console.CommandErrors.CommandError
 import com.digitalasset.canton.console.HealthDumpGenerator.ParametersWithValidity
 import com.digitalasset.canton.environment.Environment
@@ -38,7 +38,7 @@ import java.time.Instant
   * the core of the implementation of the HealthDump gRPC endpoint.
   */
 class HealthDumpGenerator(
-    val environment: Environment,
+    val environment: Environment[? <: SharedCantonConfig[?]],
     val grpcAdminCommandRunner: GrpcAdminCommandRunner,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {

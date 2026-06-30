@@ -63,7 +63,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
-import com.digitalasset.canton.metrics.{DbStorageMetrics, DeclarativeApiMetrics}
+import com.digitalasset.canton.metrics.{CryptoMetrics, DbStorageMetrics, DeclarativeApiMetrics}
 import com.digitalasset.canton.networking.grpc.{
   CantonGrpcUtil,
   CantonMutableHandlerRegistry,
@@ -181,6 +181,7 @@ trait BaseMetrics {
     new CacheMetrics("topology", openTelemetryMetricsFactory)
   def healthMetrics: HealthMetrics
   def storageMetrics: DbStorageMetrics
+  def cryptoMetrics: CryptoMetrics
   val declarativeApiMetrics: DeclarativeApiMetrics
 
 }
@@ -492,6 +493,7 @@ abstract class CantonNodeBootstrapImpl[
             ReleaseProtocolVersion.latest,
             arguments.futureSupervisor,
             arguments.clock,
+            arguments.metrics.cryptoMetrics,
             executionContext,
             bootstrapStageCallback.timeouts,
             arguments.config.parameters.batching,

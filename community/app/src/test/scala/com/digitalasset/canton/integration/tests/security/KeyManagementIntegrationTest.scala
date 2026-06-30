@@ -22,7 +22,7 @@ import com.digitalasset.canton.util.OptionUtil
 import org.scalatest.Assertion
 
 trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
-  self: BaseIntegrationTest =>
+  self: CantonBaseIntegrationTest =>
 
   protected def waitForKeyTopologyUpdate(
       nodes: Seq[InstanceReference],

@@ -4,6 +4,8 @@
 package com.digitalasset.canton.crypto.kms.mock.v1
 
 import cats.syntax.either.*
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
@@ -24,6 +26,14 @@ import com.digitalasset.canton.crypto.store.memory.{
 }
 import com.digitalasset.canton.crypto.{CryptoSchemes, KeyName}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.{
+  CryptoMetrics,
+  DecryptionHistograms,
+  DecryptionMetrics,
+  KmsMetrics,
+  SigningHistograms,
+  SigningMetrics,
+}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import org.slf4j.Logger
 import pureconfig.configurable.{genericMapReader, genericMapWriter}
@@ -103,6 +113,22 @@ class MockKmsDriverFactory extends KmsDriverFactory {
           CachingConfigs.defaultPublicKeyConversionCache,
           cryptoPrivateStore,
           cryptoPublicStore,
+          new CryptoMetrics(
+            new SigningMetrics(
+              new SigningHistograms(MetricName("signing-test"))(new HistogramInventory()),
+              NoOpMetricsFactory,
+            )(MetricsContext.Empty),
+            new DecryptionMetrics(
+              new DecryptionHistograms(MetricName("decryption-test"))(new HistogramInventory()),
+              NoOpMetricsFactory,
+            )(MetricsContext.Empty),
+            Some(
+              new KmsMetrics(
+                MetricName("test"),
+                NoOpMetricsFactory,
+              )(MetricsContext.Empty)
+            ),
+          ),
           timeouts,
           namedLoggerFactory,
         )

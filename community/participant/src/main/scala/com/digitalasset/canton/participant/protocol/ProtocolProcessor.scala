@@ -80,6 +80,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
@@ -451,6 +452,16 @@ abstract class ProtocolProcessor[
 
   protected def metricsContextForSubmissionParam(submissionParam: SubmissionParam): MetricsContext
 
+  @unused("default implementation")
+  protected def validateLocalTrafficCost(
+      submissionParam: SubmissionParam
+  )(
+      trafficCost: Long,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[Unit] =
+    // TODO(#33681): Remove default implementation
+    FutureUnlessShutdown.unit
+
   /** Submit the batch to the sequencer. Also registers `submissionParam` as pending submission.
     */
   private def submitInternal(
@@ -500,6 +511,8 @@ abstract class ProtocolProcessor[
             maxSequencingTime = maxSequencingTime,
           ),
           messageId = messageId,
+          trafficCostValidator = (trafficCost: Long, traceContext: TraceContext) =>
+            validateLocalTrafficCost(submissionParam)(trafficCost, traceContext),
           amplify = true,
           callback = res => sendResultP.trySuccess(res).discard,
         )

@@ -195,7 +195,7 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
       sinceOffset: Long,
       party: PartyId,
       assertErrorMessage: String => Unit,
-  )(implicit env: TestEnvironment): Unit = {
+  )(implicit env: TestEnvironment[?]): Unit = {
     val status = env.participant1.ledger_api.completions
       .list(
         party,

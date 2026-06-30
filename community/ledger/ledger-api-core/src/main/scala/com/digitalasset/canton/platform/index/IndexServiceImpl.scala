@@ -230,7 +230,7 @@ private[index] class IndexServiceImpl(
 
   override def getCompletions(
       startExclusive: Option[Offset],
-      userId: Ref.UserId,
+      userId: Option[Ref.UserId],
       parties: Set[Ref.Party],
   )(implicit loggingContext: LoggingContextWithTrace): Source[CompletionStreamResponse, NotUsed] =
     Source

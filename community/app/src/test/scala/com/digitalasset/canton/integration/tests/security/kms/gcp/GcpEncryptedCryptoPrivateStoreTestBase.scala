@@ -6,13 +6,13 @@ package com.digitalasset.canton.integration.tests.security.kms.gcp
 import com.digitalasset.canton.config.KmsConfig
 import com.digitalasset.canton.integration.plugins.UseGcpKms
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
 }
 
 trait GcpEncryptedCryptoPrivateStoreTestBase {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected def setupPlugins(
       protectedNodes: Set[String],

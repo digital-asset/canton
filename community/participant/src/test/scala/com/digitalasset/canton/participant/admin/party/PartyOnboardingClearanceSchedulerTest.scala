@@ -101,7 +101,6 @@ class PartyOnboardingClearanceSchedulerTest
   private lazy val testData = new TopologyStoreTestData(
     testedProtocolVersion,
     loggerFactory,
-    this.directExecutionContext,
   )
   private lazy val partyId = testData.party1
   private lazy val participantId = testData.p1Id

@@ -3,10 +3,14 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRequest as GrpcCompletionStreamRequest
+import com.daml.ledger.api.v2.command_completion_service.{
+  CompletionStreamRequest as GrpcCompletionStreamRequest,
+  GetCompletionsRequest,
+}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.command.completion.CompletionStreamRequest
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.daml.lf.data.Ref
 import io.grpc.StatusRuntimeException
 
 object CompletionServiceRequestValidator {
@@ -45,5 +49,25 @@ object CompletionServiceRequestValidator {
       )
       _ <- requireNonEmpty(request.parties, "parties")
     } yield request
+
+  final case class GetCompletionsStreamRequest(
+      parties: Set[Ref.Party],
+      offset: Option[Offset],
+  )
+
+  def validateGetCompletionsRequest(
+      request: GetCompletionsRequest,
+      ledgerEnd: Option[Offset],
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, GetCompletionsStreamRequest] =
+    for {
+      parties <- requireParties(request.parties.toSet)
+      offsetO <- ParticipantOffsetValidator.validateNonNegative(
+        request.beginExclusive,
+        "begin_exclusive",
+      )
+      _ <- ParticipantOffsetValidator.offsetIsBeforeEnd("Begin", offsetO, ledgerEnd)
+    } yield GetCompletionsStreamRequest(parties, offsetO)
 
 }

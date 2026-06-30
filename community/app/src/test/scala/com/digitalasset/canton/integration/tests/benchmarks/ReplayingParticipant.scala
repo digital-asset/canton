@@ -267,6 +267,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
         testedReleaseProtocolVersion,
         futureSupervisor,
         clock,
+        CommonMockMetrics.cryptoMetrics,
         executionContext,
         timeouts,
         BatchingConfig(),

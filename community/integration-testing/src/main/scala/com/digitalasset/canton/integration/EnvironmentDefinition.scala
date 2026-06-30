@@ -22,11 +22,11 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.console.{
   BaseInspection,
-  ConsoleEnvironment,
+  CantonConsoleEnvironment,
   InstanceReference,
   TestConsoleOutput,
 }
-import com.digitalasset.canton.environment.{CantonNode, Environment}
+import com.digitalasset.canton.environment.{CantonEnvironment, CantonNode}
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -57,21 +57,20 @@ import monocle.macros.syntax.lens.*
   *   making ports unique or some other specialization for the particular tests you're running)
   */
 final case class EnvironmentDefinition(
-    baseConfig: CantonConfig,
-    testingConfig: TestingConfigInternal =
+    override val baseConfig: CantonConfig,
+    override val testingConfig: TestingConfigInternal =
       TestingConfigInternal(warnOnAcsCommitmentDegradation = false, warnOnJwtScopeUsage = false),
-    setups: List[TestConsoleEnvironment => Unit] = Nil,
-    teardown: Unit => Unit = _ => (),
-    configTransforms: Seq[ConfigTransform] = ConfigTransforms.defaults,
+    override val setups: List[TestConsoleEnvironment => Unit] = Nil,
+    override val teardown: Unit => Unit = _ => (),
+    override val configTransforms: Seq[ConfigTransform] = ConfigTransforms.defaults,
     staticSynchronizerParametersMap: Map[String, StaticSynchronizerParameters] = Map.empty,
-) {
-
-  /** Create a canton configuration by applying the configTransforms to the base config. Some
-    * transforms may have side-effects (such as incrementing the next available port number) so only
-    * do before constructing an environment.
-    */
-  def generateConfig: CantonConfig =
-    configTransforms.foldLeft(baseConfig)((config, transform) => transform(config))
+) extends BaseEnvironmentDefinition[CantonConfig, CantonEnvironment](
+      baseConfig,
+      testingConfig,
+      setups,
+      teardown,
+      configTransforms,
+    ) {
 
   def withManualStart: EnvironmentDefinition =
     copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(true))
@@ -148,13 +147,13 @@ final case class EnvironmentDefinition(
     copy(staticSynchronizerParametersMap = map)
 
   def createTestConsole(
-      environment: Environment,
+      environment: CantonEnvironment,
       loggerFactory: NamedLoggerFactory,
   ): TestConsoleEnvironment =
-    new ConsoleEnvironment(
+    new CantonConsoleEnvironment(
       environment,
       new TestConsoleOutput(loggerFactory),
-    ) with TestEnvironment
+    ) with CantonTestEnvironment
 }
 
 /** Default testing environments for integration tests

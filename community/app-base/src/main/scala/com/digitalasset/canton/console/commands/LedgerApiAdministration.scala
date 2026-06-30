@@ -102,6 +102,7 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.tea.v1.{GetAccountResponse, UpdateAccountResponse}
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
   ExternalParty,
@@ -836,6 +837,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           minLedgerTimeAbs: Option[Instant] = None,
+          optTimeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
       ): ExecuteAndWaitResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -847,6 +849,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               deduplicationPeriod = deduplicationPeriod,
               minLedgerTimeAbs = minLedgerTimeAbs,
               hashingSchemeVersion = hashingSchemeVersion,
+              optTimeout = optTimeout,
             )
           )
         }
@@ -873,6 +876,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           minLedgerTimeAbs: Option[Instant] = None,
           includeCreatedEventBlob: Boolean = false,
           customEventFormat: Option[EventFormat] = None,
+          optTimeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
       ): ApiTransaction =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -887,6 +891,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               transactionShape = transactionShape,
               includeCreatedEventBlob = includeCreatedEventBlob,
               customEventFormat = customEventFormat,
+              optTimeout = optTimeout,
             )
           )
         }.getTransaction
@@ -3571,6 +3576,33 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           ledger_api.event_query
             .by_contract_id(contractId, requestingParties, includeCreatedEventBlob)
             .pipe(GetEventsByContractIdResponse.toJavaProto)
+      }
+    }
+
+    @Help.Summary("Participant user traffic service")
+    @Help.Group("Traffic")
+    object traffic extends Helpful {
+      @Help.Summary("Get account details", FeatureFlag.Testing)
+      @Help.Description("Get the details for the specified account-id")
+      def get_account(accountId: String): GetAccountResponse =
+        consoleEnvironment.run {
+          ledgerApiCommand(LedgerApiCommands.Traffic.GetAccount(accountId))
+        }
+
+      @Help.Summary("Update details for the account-id", FeatureFlag.Testing)
+      @Help.Description(
+        """Update the account details (the balance) for the specified account-id.
+          |If unset, the balance will not be updated
+          |subsequent balance updates with the same deduplicationId will be ignored"""
+      )
+      def update_account(
+          accountId: String,
+          balance: Option[Long],
+          deduplicationId: String = UUID.randomUUID().toString,
+      ): UpdateAccountResponse = consoleEnvironment.run {
+        ledgerApiCommand(
+          LedgerApiCommands.Traffic.UpdateAccount(accountId, balance, deduplicationId)
+        )
       }
     }
   }

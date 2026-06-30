@@ -7,7 +7,10 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   PartyDetails,
   UpdatePartyDetailsRequest,
 }
-import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRequest
+import com.daml.ledger.api.v2.command_completion_service.{
+  CompletionStreamRequest,
+  GetCompletionsRequest,
+}
 import com.daml.ledger.api.v2.command_service.SubmitAndWaitForTransactionRequest
 import com.daml.ledger.api.v2.commands.Commands
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
@@ -84,6 +87,32 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
       .collectFirst(matchUserId)
       .value
       .skipUserIdValidationForAnyPartyReaders shouldBe true
+  }
+
+  behavior of "CommandCompletionServiceAuthorization.getCompletionsClaims"
+
+  it should "map specific parties to ReadAs claims with no user claim" in {
+    val result = CommandCompletionServiceAuthorization.getCompletionsClaims(
+      GetCompletionsRequest(
+        parties = Seq("a", "b", "c"),
+        beginExclusive = 1234L,
+      )
+    )
+    result should contain theSameElementsAs List(
+      RequiredClaim.ReadAs[GetCompletionsRequest]("a"),
+      RequiredClaim.ReadAs[GetCompletionsRequest]("b"),
+      RequiredClaim.ReadAs[GetCompletionsRequest]("c"),
+    )
+  }
+
+  it should "map empty parties to a single ReadAsAnyParty claim" in {
+    val result = CommandCompletionServiceAuthorization.getCompletionsClaims(
+      GetCompletionsRequest(
+        parties = Nil,
+        beginExclusive = 1234L,
+      )
+    )
+    result shouldBe List(RequiredClaim.ReadAsAnyParty[GetCompletionsRequest]())
   }
 
   behavior of "PartyManagementServiceAuthorization.updatePartyDetailsClaims"

@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.benchtool
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.integration.EnvironmentSetup
+import com.digitalasset.canton.integration.CantonEnvironmentSetup
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{
   CantonFixture,
   CantonFixtureAbstract,
@@ -21,7 +21,7 @@ import org.scalatest.time.{Minutes, Span}
 import scala.concurrent.{ExecutionContext, Future}
 
 trait AbstractBenchtoolSandboxFixture extends CantonFixtureAbstract {
-  self: Suite & BaseTest & EnvironmentSetup =>
+  self: Suite & BaseTest & CantonEnvironmentSetup =>
 
   override implicit lazy val patienceConfig: PatienceConfig = PatienceConfig(Span(2, Minutes))
 

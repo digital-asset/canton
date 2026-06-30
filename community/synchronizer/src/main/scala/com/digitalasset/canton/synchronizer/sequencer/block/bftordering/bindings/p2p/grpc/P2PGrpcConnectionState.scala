@@ -151,9 +151,12 @@ final class P2PGrpcConnectionState(
       networkRef.close()
     }
     if (result.getOrElse(false)) { // Changes made
+      val trimmedPrevState = prevState.only(p2pEndpointId, bftNodeId)
+      val trimmedNewState = newState.only(p2pEndpointId, bftNodeId)
       logger.info(
-        "P2P connection state before and after `associateP2PEndpointIdToBftNodeId`: " +
-          s"${BeforeAndAfter(prevState, newState)}"
+        "Relevant P2P connection state before and after " +
+          s"`associateP2PEndpointIdToBftNodeId($p2pEndpointId, $bftNodeId)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
       )
     } else {
       logger.debug(
@@ -170,23 +173,28 @@ final class P2PGrpcConnectionState(
       bftNodeId: BftNodeId,
       peerSender: PeerSender,
   )(implicit traceContext: TraceContext): Boolean = {
-    val (prevState, newState, added) =
+    val (prevState, newState, existingPeerSenderO) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.addSenderIfMissing(bftNodeId, peerSender))
         .logAndExtract(
           logger,
           prefix = s"Adding peer sender $peerSender for BFT node ID $bftNodeId: ",
         )
-    if (added) {
+    existingPeerSenderO.fold {
+      val trimmedPrevState = prevState.only(bftNodeId, peerSender)
+      val trimmedNewState = newState.only(bftNodeId, peerSender)
       logger.info(
-        s"P2P connection state before and after `addSenderIfMissing`: ${BeforeAndAfter(prevState, newState)}"
+        s"Added peer sender $peerSender for BFT node ID $bftNodeId, " +
+          s"relevant P2P connection state before and after `addSenderIfMissing($bftNodeId, $peerSender)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
       )
-    } else {
+      true
+    } { existingPeerSender =>
       logger.debug(
-        s"No association added for BFT node ID $bftNodeId and peer sender $peerSender because one already exists"
+        s"No association added for BFT node ID $bftNodeId and peer sender $peerSender because one already exists: $existingPeerSender"
       )
+      false
     }
-    added
   }
 
   override def addNetworkRefIfMissing(
@@ -218,8 +226,11 @@ final class P2PGrpcConnectionState(
             logger.debug(s"Created network ref ${objId(networkRef)} for BFT node ID $bftNodeId")
           }
       }
+      val trimmedPrevState = prevState.only(p2pAddressId)
+      val trimmedNewState = newState.only(p2pAddressId)
       logger.info(
-        s"P2P connection state before and after `addNetworkRefIfMissing`: ${BeforeAndAfter(prevState, newState)}"
+        s"Relevant P2P connection state before and after `addNetworkRefIfMissing($p2pAddressId)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
       )
     }
   }
@@ -258,9 +269,12 @@ final class P2PGrpcConnectionState(
       }
     }
 
+    val trimmedPrevState = prevState.only(p2pAddressId)
+    val trimmedNewState = newState.only(p2pAddressId)
     logger.info(
-      "P2P connection state before and after `shutdownConnectionAndReturnPeerSender`: " +
-        s"${BeforeAndAfter(prevState, newState)}"
+      "Relevant P2P connection state before and after " +
+        s"`shutdownConnectionAndReturnPeerSender($p2pAddressId, $clearNetworkRefAssociations, $closeNetworkRef)`: " +
+        s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
     )
 
     peerSenderO
@@ -274,9 +288,11 @@ final class P2PGrpcConnectionState(
         .updateAndGetComputed(stateRef)(_.unassociateSenderAndReturnEndpointIds(peerSender))
         .logAndExtract(logger, prefix = s"Unassociating sender $peerSender: ")
     if (result.nonEmpty) {
+      val trimmedPrevState = prevState.only(peerSender)
+      val trimmedNewState = newState.only(peerSender)
       logger.info(
-        "P2P connection state before and after `unassociateSenderAndReturnEndpointIds`: " +
-          s"${BeforeAndAfter(prevState, newState)}"
+        s"Relevant P2P connection state before and after `unassociateSenderAndReturnEndpointIds($peerSender)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
       )
     } else {
       logger.debug(s"No association change for sender $peerSender: $result")
@@ -434,19 +450,21 @@ object P2PGrpcConnectionState {
     def addSenderIfMissing(
         bftNodeId: BftNodeId,
         peerSender: PeerSender,
-    ): (State, ResultWithLogs[(State, State, Boolean)]) = {
+    ): (State, ResultWithLogs[(State, State, Option[PeerSender])]) = {
       var updatedState = this
       var annotation = ""
       val result =
-        if (!bftNodeIdToPeerSender.contains(bftNodeId)) {
-          annotation = s"Associating peer sender $bftNodeId <-> $peerSender"
-          updatedState = biAssociateBftNodeIdWithPeerSender(bftNodeId, peerSender)
-          true
-        } else {
-          annotation =
-            s"Not associating peer sender $bftNodeId <-> $peerSender because one for this node already exists"
-          false
-        }
+        bftNodeIdToPeerSender
+          .get(bftNodeId)
+          .fold[Option[PeerSender]] {
+            annotation = s"Associating $bftNodeId <-> $peerSender"
+            updatedState = biAssociateBftNodeIdWithPeerSender(bftNodeId, peerSender)
+            None
+          } { existingPeerSender =>
+            annotation =
+              s"Not associating $bftNodeId <-> $peerSender because one for this node already exists"
+            Some(existingPeerSender)
+          }
       updatedState -> ResultWithLogs(
         (this, updatedState, result),
         Level.DEBUG -> (() => annotation),
@@ -789,5 +807,104 @@ object P2PGrpcConnectionState {
           Level.DEBUG -> (() => s"Not removing network ref for $bftNodeId (as requested)"),
         )
       }
+
+    def only(p2pEndpointId: P2PEndpoint.Id, bftNodeId: BftNodeId): State =
+      copy(
+        bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, _) =>
+          nodeId == bftNodeId
+        },
+        peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (_, nodeId) =>
+          nodeId == bftNodeId
+        },
+        p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (endpointId, nodeId) =>
+          endpointId == p2pEndpointId || nodeId == bftNodeId
+        },
+        bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+          nodeId == bftNodeId
+        },
+        p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+          endpointId == p2pEndpointId
+        },
+      )
+
+    def only(bftNodeId: BftNodeId, peerSender: PeerSender): State =
+      copy(
+        bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, sender) =>
+          nodeId == bftNodeId || sender == peerSender
+        },
+        peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (sender, nodeId) =>
+          nodeId == bftNodeId || sender == peerSender
+        },
+        p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (_, nodeId) =>
+          nodeId == bftNodeId
+        },
+        bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+          nodeId == bftNodeId
+        },
+        p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+          p2pEndpointIdToBftNodeId.get(endpointId).contains(bftNodeId)
+        },
+      )
+
+    def only(p2pAddressId: P2PAddress.Id): State =
+      p2pAddressId match {
+        case Left(p2pEndpointId) =>
+          copy(
+            bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, _) =>
+              p2pEndpointIdToBftNodeId.get(p2pEndpointId).contains(nodeId)
+            },
+            peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (_, nodeId) =>
+              p2pEndpointIdToBftNodeId.get(p2pEndpointId).contains(nodeId)
+            },
+            p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (endpointId, _) =>
+              endpointId == p2pEndpointId
+            },
+            bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+              p2pEndpointIdToBftNodeId.get(p2pEndpointId).contains(nodeId)
+            },
+            p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+              endpointId == p2pEndpointId
+            },
+          )
+        case Right(bftNodeId) =>
+          copy(
+            bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, _) =>
+              nodeId == bftNodeId
+            },
+            peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (_, nodeId) =>
+              nodeId == bftNodeId
+            },
+            p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (_, nodeId) =>
+              nodeId == bftNodeId
+            },
+            bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+              nodeId == bftNodeId
+            },
+            p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+              p2pEndpointIdToBftNodeId.get(endpointId).contains(bftNodeId)
+            },
+          )
+      }
+
+    def only(peerSender: PeerSender): State =
+      copy(
+        bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (_, sender) =>
+          sender == peerSender
+        },
+        peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (sender, _) =>
+          sender == peerSender
+        },
+        p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (_, nodeId) =>
+          peerSenderToBftNodeId.get(peerSender).contains(nodeId)
+        },
+        bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+          peerSenderToBftNodeId.get(peerSender).contains(nodeId)
+        },
+        p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+          peerSenderToBftNodeId.get(peerSender).exists { nodeId =>
+            p2pEndpointIdToBftNodeId.get(endpointId).contains(nodeId)
+          }
+        },
+      )
   }
 }

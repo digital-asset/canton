@@ -71,7 +71,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
   )
 
   private abstract class TestEnvironment(val config: CantonConfig = DefaultConfig) {
-    val environment: Environment = mock[Environment]
+    val environment: CantonEnvironment = mock[CantonEnvironment]
     val participants: ParticipantNodes[ParticipantNodeBootstrap, ParticipantNode] =
       mock[ParticipantNodes[ParticipantNodeBootstrap, ParticipantNode]]
     val sequencers: SequencerNodes = mock[SequencerNodes]
@@ -82,7 +82,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
     val adminToken: String = "0" * 64
 
     when(environment.tracerProvider).thenReturn(mock[TracerProvider])
-    when(environment.config).thenReturn(config)
+    doReturn(config).when(environment).config
     when(environment.testingConfig).thenReturn(
       TestingConfigInternal(initializeGlobalOpenTelemetry = false)
     )
@@ -126,7 +126,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       .thenReturn(GenericCommandError("Mocked error"))
 
     private val consoleEnvironment =
-      new ConsoleEnvironment(
+      new CantonConsoleEnvironment(
         environment,
         consoleOutput = testConsoleOutput,
       ) {

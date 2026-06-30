@@ -39,6 +39,7 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTr
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
 import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.*
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
+import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.{
   AchsStateCache,
@@ -1193,9 +1194,6 @@ object InMemoryStateUpdaterSpec {
 
   private val anotherMetadataChangedUpdate =
     rawMetadataChangedUpdate(offset(15L), Timestamp.assertFromLong(1337L))
-
-  private def offset(idx: Long): Offset =
-    Offset.tryFromLong(1000000000L + idx)
 
   // traverse the list from left to right and if a None is found add the exact previous checkpoint in the result
   private def findCheckpointOffsets(

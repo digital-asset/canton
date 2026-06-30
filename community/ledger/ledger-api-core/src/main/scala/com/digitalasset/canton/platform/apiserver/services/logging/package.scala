@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.api.{
   UpdateFormat,
 }
 import com.digitalasset.canton.protocol.UpdateId
-import com.digitalasset.daml.lf.data.Ref.{Identifier, Party}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, Party, UserId}
 import com.digitalasset.daml.lf.data.logging.*
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -49,6 +49,9 @@ package object logging {
 
   private[services] def submitter(id: String): LoggingEntry =
     "submitter" -> id
+
+  private[services] def userId(id: UserId): LoggingEntry =
+    "userId" -> id
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[services] def readAsStrings(partyNames: Iterable[String]): LoggingEntry =

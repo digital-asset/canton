@@ -20,5 +20,22 @@ object CommonMockMetrics {
         new DbStorageHistograms(prefix)(new HistogramInventory()),
         NoOpMetricsFactory,
       )(MetricsContext.Empty)
+  object cryptoMetrics
+      extends CryptoMetrics(
+        new SigningMetrics(
+          new SigningHistograms(prefix)(new HistogramInventory()),
+          NoOpMetricsFactory,
+        )(MetricsContext.Empty),
+        new DecryptionMetrics(
+          new DecryptionHistograms(prefix)(new HistogramInventory()),
+          NoOpMetricsFactory,
+        )(MetricsContext.Empty),
+        Some(
+          new KmsMetrics(
+            prefix,
+            NoOpMetricsFactory,
+          )(MetricsContext.Empty)
+        ),
+      )
 
 }

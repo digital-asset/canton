@@ -152,6 +152,11 @@ class AcsCommitmentCrashIntegrationTest
     IouSyntax.createIou(participant1)(participant1.adminParty, participant2.adminParty)
 
     val period = awaitNextTick(participant1, participant2)
-    checkReceivedCommitment(period, participant2, daId, Match)
+
+    // Check that we sent out the commitments (even if the send delay is zero)
+    checkSentCommitmentTo(Seq(participant2))(period, participant1, daId)
+    checkSentCommitmentTo(Seq(participant1))(period, participant2, daId)
+
+    checkReceivedCommitments(period, participant2, daId, Match)
   }
 }

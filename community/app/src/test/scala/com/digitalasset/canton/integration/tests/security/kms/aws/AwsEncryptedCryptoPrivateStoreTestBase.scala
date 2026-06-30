@@ -5,13 +5,13 @@ package com.digitalasset.canton.integration.tests.security.kms.aws
 
 import com.digitalasset.canton.integration.plugins.UseAwsKms
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
 }
 
 trait AwsEncryptedCryptoPrivateStoreTestBase {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected def setupPlugins(
       protectedNodes: Set[String],

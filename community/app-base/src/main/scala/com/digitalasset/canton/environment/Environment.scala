@@ -12,6 +12,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricsContext, MetricsInfoFilt
 import com.digitalasset.canton.concurrent.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.{
+  CantonConsoleEnvironment,
   ConsoleEnvironment,
   ConsoleOutput,
   GrpcAdminCommandRunner,
@@ -60,8 +61,8 @@ import scala.util.control.NonFatal
 
 /** Holds all significant resources held by this process.
   */
-class Environment(
-    initialConfig: CantonConfig,
+abstract class Environment[Config <: SharedCantonConfig[Config]](
+    initialConfig: Config,
     val testingConfig: TestingConfigInternal,
     participantNodeFactory: ParticipantNodeBootstrapFactory,
     sequencerNodeFactory: SequencerNodeBootstrapFactory,
@@ -71,15 +72,21 @@ class Environment(
     with AutoCloseable
     with NoTracing {
 
+  type Console <: ConsoleEnvironment
+
+  protected def _createConsole(
+      consoleOutput: ConsoleOutput = StandardConsoleOutput
+  ): Console
+
   implicit val scheduler: ScheduledExecutorService =
     Threading.singleThreadScheduledExecutor(
       loggerFactory.threadName + "-env-sched",
       noTracingLogger,
     )
 
-  def config: CantonConfig = currentConfig.get()
+  def config: Config = currentConfig.get()
   def pokeOrUpdateConfig(
-      newConfig: Option[Either[String, CantonConfig]]
+      newConfig: Option[Either[String, Config]]
   )(implicit traceContext: TraceContext): Unit = {
     def pokeDeclarativeApis(configState: Either[Unit, Boolean]): Unit =
       Seq(sequencers, mediators, participants).foreach { group =>
@@ -107,7 +114,7 @@ class Environment(
     }
   }
 
-  private val currentConfig = new AtomicReference[CantonConfig](initialConfig)
+  private val currentConfig = new AtomicReference[Config](initialConfig)
   private val histogramInventory = new HistogramInventory()
   private val histograms = new CantonHistograms()(histogramInventory)
   private val baseFilter = new MetricsInfoFilter(
@@ -151,8 +158,7 @@ class Environment(
   def createConsole(
       consoleOutput: ConsoleOutput = StandardConsoleOutput
   ): ConsoleEnvironment = {
-    val console =
-      new ConsoleEnvironment(this, consoleOutput)
+    val console = _createConsole(consoleOutput)
     healthDumpGenerator
       .putIfAbsent(createHealthDumpGenerator(console.grpcAdminCommandRunner))
       .discard
@@ -633,10 +639,31 @@ object Environment {
 
 }
 
-trait EnvironmentFactory {
+trait EnvironmentFactory[C <: SharedCantonConfig[C], E <: Environment[C]] {
   def create(
-      config: CantonConfig,
+      config: C,
       loggerFactory: NamedLoggerFactory,
       testingConfigInternal: TestingConfigInternal = TestingConfigInternal(),
-  ): Environment
+  ): E
+}
+
+class CantonEnvironment(
+    initialConfig: CantonConfig,
+    override val testingConfig: TestingConfigInternal,
+    participantNodeFactory: ParticipantNodeBootstrapFactory,
+    sequencerNodeFactory: SequencerNodeBootstrapFactory,
+    mediatorNodeFactory: MediatorNodeBootstrapFactory,
+    override val loggerFactory: NamedLoggerFactory,
+) extends Environment[CantonConfig](
+      initialConfig,
+      testingConfig,
+      participantNodeFactory,
+      sequencerNodeFactory,
+      mediatorNodeFactory,
+      loggerFactory,
+    ) {
+
+  override type Console = CantonConsoleEnvironment
+  override def _createConsole(output: ConsoleOutput) =
+    new CantonConsoleEnvironment(this, output)
 }
