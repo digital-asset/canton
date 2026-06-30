@@ -28,8 +28,6 @@ import com.digitalasset.canton.console.declarative.DeclarativeApi.{
   UpdateResult,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.api
-import com.digitalasset.canton.ledger.api.IdentityProviderId
 import com.digitalasset.canton.lifecycle.{CloseContext, LifeCycle, RunOnClosing}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.DeclarativeApiMetrics
@@ -51,8 +49,9 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.{BinaryFileUtil, MonadUtil}
-import com.digitalasset.canton.{SynchronizerAlias, config}
+import com.digitalasset.canton.{SynchronizerAlias, config, user}
 import com.digitalasset.daml.lf.archive.DarParser
 import com.google.protobuf.field_mask.FieldMask
 
@@ -841,7 +840,7 @@ class DeclarativeParticipantApi(
     def update(config: DeclarativeIdpConfig): Either[String, Unit] =
       queryLedgerApi(
         LedgerApiCommands.IdentityProviderConfigs.Update(
-          identityProviderConfig = api.IdentityProviderConfig(
+          identityProviderConfig = user.IdentityProviderConfig(
             identityProviderId = config.apiIdentityProviderId,
             isDeactivated = config.isDeactivated,
             jwksUrl = config.apiJwksUrl,

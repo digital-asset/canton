@@ -83,7 +83,7 @@ sealed abstract class TransactionVersionIntegrationTest
       )
 
       val changeTxVersion: GenTransactionTree => GenTransactionTree =
-        GenTransactionTree.rootViewsUnsafe
+        GenTransactionTree.Optics.rootViewsUnsafe
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)

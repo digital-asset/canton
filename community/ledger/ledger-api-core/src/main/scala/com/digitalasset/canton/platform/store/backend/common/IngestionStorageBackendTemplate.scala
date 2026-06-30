@@ -5,11 +5,7 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-import com.digitalasset.canton.platform.store.backend.{
-  DbDto,
-  IngestionStorageBackend,
-  ParameterStorageBackend,
-}
+import com.digitalasset.canton.platform.store.backend.{DbDto, IngestionStorageBackend, LedgerEnd}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.sql.Connection
@@ -19,7 +15,7 @@ private[backend] class IngestionStorageBackendTemplate(
 ) extends IngestionStorageBackend[AppendOnlySchema.Batch] {
 
   override def deletePartiallyIngestedData(
-      ledgerEnd: Option[ParameterStorageBackend.LedgerEnd]
+      ledgerEnd: Option[LedgerEnd]
   )(connection: Connection): Unit = {
     val ledgerOffset = ledgerEnd.map(_.lastOffset)
     val lastStringInterningIdO = ledgerEnd.map(_.lastStringInterningId)

@@ -167,9 +167,9 @@ class EpochState[E <: Env[E]](
       )
     }
 
-  def startSegmentModules(): Unit =
+  def startSegmentModules()(implicit traceContext: TraceContext): Unit =
     segmentModules.foreach { case (_, module) =>
-      module.asyncSendNoTrace(ConsensusSegment.Start)
+      module.asyncSend(ConsensusSegment.Start)
     }
 
   def confirmBlockCompleted(

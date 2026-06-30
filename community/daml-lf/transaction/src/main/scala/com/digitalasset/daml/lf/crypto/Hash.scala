@@ -20,7 +20,6 @@ import com.digitalasset.daml.lf.data.{
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import scalaz.Order
 
 import java.nio.ByteBuffer
 import java.util.UUID
@@ -132,8 +131,6 @@ object Hash {
 
   implicit val ordering: Ordering[Hash] =
     Ordering.by(_.bytes)
-
-  implicit val order: Order[Hash] = Order.fromScalaOrdering
 
   private[lf] val aCid2Bytes: Value.ContractId => Bytes =
     cid => cid.toBytes

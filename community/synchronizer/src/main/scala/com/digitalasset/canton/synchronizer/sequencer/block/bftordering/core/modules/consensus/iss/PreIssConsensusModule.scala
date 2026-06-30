@@ -53,8 +53,10 @@ final class PreIssConsensusModule[E <: Env[E]](
 ) extends Consensus[E]
     with HasDelayedInit[Consensus.Message[E]] {
 
-  override def ready(self: ModuleRef[Consensus.Message[E]]): Unit =
-    self.asyncSendNoTrace(Consensus.Init.KickOff)
+  override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
+      traceContext: TraceContext
+  ): Unit =
+    self.asyncSend(Consensus.Init.KickOff)
 
   override protected def receiveInternal(message: Consensus.Message[E])(implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -115,7 +117,7 @@ final class PreIssConsensusModule[E <: Env[E]](
                 // Drop newest to ensure continuity of messages (and fall back to retransmissions or state transfer later if needed)
                 DropStrategy.DropNewest,
               ),
-          )()()
+          )(initTraceContext = traceContext)()
         context.become(consensus)
 
         // This will send all queued messages to the proper Consensus module.
@@ -182,7 +184,11 @@ final class PreIssConsensusModule[E <: Env[E]](
       latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
       latestEpochFromStore: EpochStore.Epoch,
       epochInProgress: EpochStore.EpochInProgress,
-  )(implicit mc: MetricsContext, context: E#ActorContextT[Consensus.Message[E]]): EpochState[E] = {
+  )(implicit
+      mc: MetricsContext,
+      context: E#ActorContextT[Consensus.Message[E]],
+      traceContext: TraceContext,
+  ): EpochState[E] = {
     val epoch = Epoch(
       latestEpochFromStore.info,
       bootstrapTopologyInfo.currentMembership,
@@ -192,7 +198,7 @@ final class PreIssConsensusModule[E <: Env[E]](
     new EpochState(
       epoch,
       clock,
-      abort(_)(context, TraceContext.empty),
+      abort(_)(context, traceContext),
       metrics,
       segmentModuleRefFactory(
         context,
@@ -200,6 +206,7 @@ final class PreIssConsensusModule[E <: Env[E]](
         bootstrapTopologyInfo.currentCryptoProvider,
         latestCompletedEpochLastCommits,
         epochInProgress,
+        traceContext,
       ),
       epochInProgress.completedBlocks,
       loggerFactory = loggerFactory,

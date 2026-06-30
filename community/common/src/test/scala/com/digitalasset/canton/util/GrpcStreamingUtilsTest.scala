@@ -509,5 +509,142 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
       // With the fix, the InterruptedException is handled internally and never propagates.
       Option(thrown.get()) shouldBe None
     }
+
+    "handle producer failure gracefully without concurrent stream violations" in {
+      /*
+       * * 1. START: Both the producer track and consumer track spin up concurrently.
+       * 2. The producer writes an initial data array, flushes it into the
+       * pipe, and halts at `consumerReady.await()`.
+       * 3. The consumer (`slowFromByteString`) catches the chunk, fires
+       * `consumerReady.countDown()` to wake up the producer, and immediately freezes at `onErrorFired.await()`.
+       * 4. The unblocked producer throws a RuntimeException mid-flight.
+       * 5. `GrpcStreamingUtils.streamToClient` catches the producer's exception
+       * and naturally executes the observer's `onError()` method to tear down the stream.
+       * 6. Inside `onError()`, the observer registers the terminal state and fires
+       * `onErrorFired.countDown()`, lifting the gate for the consumer.
+       * 7. The consumer wakes up and finally returns its trailing chunk back to
+       * `streamToClient` at the absolute worst possible moment—after `onError` has already run.
+       * 8. VERIFICATION: If the production utility is fixed, it safely drops the late chunk.
+       * If it is buggy, it forces an out-of-order `onNext` delivery, tripping our test assertion.
+       */
+
+      // State trackers to monitor lifecycle phases across parallel execution tracks
+      val isClosed = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val concurrentViolation = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val errorRef = new java.util.concurrent.atomic.AtomicReference[Throwable](null)
+
+      // Primitives used to coordinate a precise execution sequence across parallel thread tracks.
+      // Force progress to halt until explicitly signaled, eliminating time-based flakiness.
+      val consumerReady = new java.util.concurrent.CountDownLatch(1)
+      val onErrorFired = new java.util.concurrent.CountDownLatch(1)
+
+      // Test double configured to validate gRPC streaming invariants
+      val responseObserver = new TestServerCallStreamObserver[ByteString] {
+        override def onNext(value: ByteString): Unit =
+          // Detect race conditions where data is delivered post-closure
+          if (isClosed.get()) {
+            concurrentViolation.set(true) // Instantly alert the test suite of the failure
+            throw new IllegalStateException("call already closed")
+          }
+
+        override def onError(t: Throwable): Unit = {
+          // Captures the exception in a thread-safe atomic reference so the main test thread
+          // can verify that the error successfully propagated through the framework.
+          errorRef.set(t)
+          if (!isClosed.compareAndSet(false, true)) {
+            concurrentViolation.set(true)
+            throw new IllegalStateException("onError called twice, or after onCompleted")
+          }
+          // Signal the consumer to return its chunk to the framework.
+          // GrpcStreamingUtils.streamToClient catches the producer's
+          // runtime failure and naturally invokes this method to signal stream termination.
+          onErrorFired.countDown()
+        }
+
+        override def onCompleted(): Unit =
+          if (!isClosed.compareAndSet(false, true)) {
+            concurrentViolation.set(true)
+            throw new IllegalStateException("onCompleted called twice, or after onError")
+          }
+      }
+
+      def producer(os: OutputStream): Future[Unit] = Future {
+
+        // Notifies the thread pool of a blocked state to preserve parallel execution capacity.
+        blocking {
+          // Create an initial payload for the downstream processing pipeline.
+          os.write(new Array[Byte](1024))
+
+          // Explicitly drain the application buffer to force the payload into the underlying
+          // pipe, guaranteeing that the consumer thread detects the data and begins ingestion.
+          os.flush()
+
+          // Safety timeout: Wait until the consumer explicitly signals that it has caught the chunk.
+          // This is an absolute ceiling to prevent infinite test hangs.
+          val ready = consumerReady.await(5, java.util.concurrent.TimeUnit.SECONDS)
+          if (!ready)
+            throw new java.util.concurrent.TimeoutException(
+              "Producer timed out waiting for consumer to catch the chunk."
+            )
+
+          // Then throw the producer failed exception
+          throw new RuntimeException("producer failed mid-flight")
+        }
+      }
+
+      // Simulates a lagging data consumer step to expose race conditions during stream cancellation.
+      // The chunk is returned to the framework only when `onError` has been executed
+      // on a separate thread (invoked by GrpcStreamingUtils.streamToClient),
+      // thereby forcing an out-of-order delivery attempt.
+      val slowFromByteString: FromByteString[ByteString] = (chunk: ByteString) => {
+
+        blocking {
+          // Signal the producer that it is now safe to trigger the mid-flight crash.
+          consumerReady.countDown()
+
+          // Prevents framework cancellation signals from aborting the thread prematurely,
+          // ensuring it survives to execute the trailing onNext call.
+          @scala.annotation.tailrec
+          def unkillableAwait(): Unit = {
+            var interrupted = false
+            // Capture whether OnError has fired (true) or timed out (false)
+            val open =
+              try {
+                onErrorFired.await(5, java.util.concurrent.TimeUnit.SECONDS)
+              } catch {
+                case _: InterruptedException =>
+                  interrupted = true
+                  false
+              }
+            if (interrupted) {
+              unkillableAwait() // only loop if we were actively interrupted by gRPC
+            } else if (!open) {
+              // crash the test cleanly if the 5 seconds expire without the framework firing onError
+              throw new java.util.concurrent.TimeoutException("Consumer timed out...")
+            }
+          }
+          unkillableAwait()
+        }
+        chunk
+      }
+
+      val streamingF = Future {
+        blocking {
+          GrpcStreamingUtils.streamToClient(
+            responseF = producer,
+            responseObserver = responseObserver,
+            fromByteString = slowFromByteString,
+            chunkSizeO = Some(1024),
+          )
+        }
+      }
+
+      streamingF.futureValue
+
+      // Verify that `onError` actually fired and delivered the exception to our observer.
+      Option(errorRef.get()) shouldNot be(None)
+
+      concurrentViolation.get() shouldBe false
+    }
   }
 }

@@ -288,7 +288,7 @@ class IndexComponentLoadTest
   }
 
   private def fetchAcs()(implicit traceContext: TraceContext): Unit = {
-    val ledgerEndOffset = index.currentLedgerEnd().futureValue
+    val ledgerEndOffset = index.currentLedgerEnd().map(_.lastOffset)
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
     logger.warn("start fetching acs...")
@@ -316,7 +316,7 @@ class IndexComponentLoadTest
   private def fetchAcsPaginated(pageSize: Int)(implicit traceContext: TraceContext): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
-    val ledgerEndOffset = index.currentLedgerEnd().futureValue
+    val ledgerEndOffset = index.currentLedgerEnd().map(_.lastOffset)
     logger.warn(s"start fetching acs by pages with page size of $pageSize...")
     val startTime = System.currentTimeMillis()
 
@@ -375,7 +375,7 @@ class IndexComponentLoadTest
 
   private def nextRecordTimeFactory(): () => CantonTimestamp = {
     logger.warn(s"looking up base record time")
-    val ledgerEnd = index.currentLedgerEnd().futureValue
+    val ledgerEnd = index.currentLedgerEnd().map(_.lastOffset)
     val baseRecordTime: CantonTimestamp = ledgerEnd match {
       case Some(offset) =>
         // try to get the last one
@@ -525,7 +525,8 @@ class IndexComponentLoadTest
   ): Unit = {
     val startTime = System.currentTimeMillis
     val updatesWithIds = fillUpdatesWithInternalContractIds(updates)
-    val ledgerEndLongBefore = index.currentLedgerEnd().futureValue.map(_.positive).getOrElse(0L)
+    val ledgerEndLongBefore =
+      index.currentLedgerEnd().map(_.lastOffset.unwrap).getOrElse(0L)
     withReporter(
       updates = updatesWithIds,
       parallelism = 1,
@@ -536,8 +537,7 @@ class IndexComponentLoadTest
       endCheck = () =>
         (index
           .currentLedgerEnd()
-          .futureValue
-          .map(_.positive)
+          .map(_.lastOffset.unwrap)
           .getOrElse(0L) - ledgerEndLongBefore) shouldBe updates.size,
     ).discard
     val timeSpan = seconds(System.currentTimeMillis - startTime)
@@ -725,17 +725,16 @@ class IndexComponentLoadTest
       LoggingContextWithTrace(loggerFactory)
     logger.warn("start fetching updates stream...")
     val startTime = System.currentTimeMillis()
-    val fetchAndCountUpdates = for {
-      ledgerEnd <- index.currentLedgerEnd()
-      source = index.updates(
-        begin = None,
-        endAt = ledgerEnd,
-        updateFormat = updateFormat(LedgerEffects),
-        descendingOrder = descendingOrder,
-        skipPruningChecks = false,
-      )
-      updates <- source.grouped(1000).map(_.size).runWith(Sink.seq)(materializer)
-    } yield updates.sum
+    val ledgerEnd = index.currentLedgerEnd()
+    val source = index.updates(
+      begin = None,
+      endAt = ledgerEnd.map(_.lastOffset),
+      updateFormat = updateFormat(LedgerEffects),
+      descendingOrder = descendingOrder,
+      skipPruningChecks = false,
+    )
+    val fetchAndCountUpdates =
+      source.grouped(1000).map(_.size).runWith(Sink.seq)(materializer).map(_.sum)
 
     fetchAndCountUpdates
       .map { count =>
@@ -781,20 +780,18 @@ class IndexComponentLoadTest
     logger.warn(s"start fetching updates pages($pageSize) in ${if (descendingOrder) "descending"
       else "ascending"} order...")
     val startTime = System.currentTimeMillis()
-    val fetchAndCountUpdates = for {
-      ledgerEnd <- index.currentLedgerEnd()
-      request = GetUpdatesPageRequest(
-        startExclusive = None,
-        endInclusive = ledgerEnd,
-        continueStreamFromIncl = None,
-        maxPageSize = pageSize,
-        updateFormat = updateFormat(LedgerEffects),
-        descendingOrder = descendingOrder,
-        requestChecksum = ByteString.empty(),
-        participantChecksum = ByteString.empty(),
-      )
-      res <- fetchAllPages(request, 0)
-    } yield res
+    val ledgerEnd = index.currentLedgerEnd()
+    val request = GetUpdatesPageRequest(
+      startExclusive = None,
+      endInclusive = ledgerEnd.map(_.lastOffset),
+      continueStreamFromIncl = None,
+      maxPageSize = pageSize,
+      updateFormat = updateFormat(LedgerEffects),
+      descendingOrder = descendingOrder,
+      requestChecksum = ByteString.empty(),
+      participantChecksum = ByteString.empty(),
+    )
+    val fetchAndCountUpdates = fetchAllPages(request, 0)
 
     fetchAndCountUpdates
       .map { count =>

@@ -223,7 +223,7 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
       final case class Error(override val cause: String)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(cause)
-          with SynchronizerRegistryError {}
+          with SynchronizerRegistryError
     }
 
     @Explanation(
@@ -238,7 +238,7 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
       final case class Error(override val cause: String)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(cause)
-          with SynchronizerRegistryError {}
+          with SynchronizerRegistryError
     }
 
     @Explanation(
@@ -260,7 +260,7 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
       ) extends CantonError.Impl(
             cause = s"Can not auto-issue a synchronizer-trust certificate on this node: $reason"
           )
-          with SynchronizerRegistryError {}
+          with SynchronizerRegistryError
     }
 
     @Explanation(

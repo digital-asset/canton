@@ -22,8 +22,17 @@ object DocsOpenBuild {
 
   lazy val makeSiteFull = taskKey[Unit]("Builds docs from scratch")
 
+  lazy val makeSiteFromExistingSnippets = taskKey[Unit](
+    "Builds docs reusing already-generated snippet JSON data (i.e. without re-running the snippet " +
+      "generation tests). Used to fan-in the parallel `build_docs_snippets` CI job."
+  )
+
   lazy val reset = taskKey[Unit](
     "Removes generated content and initializes the preprocessed directory with source files"
+  )
+
+  lazy val resetExceptSnippets = taskKey[Unit](
+    "Like `reset`, but keeps the already-generated snippet JSON data (`snippet_json_data`)"
   )
 
   lazy val generate = taskKey[Unit](
@@ -139,8 +148,8 @@ object DocsOpenBuild {
 
       val testsDir =
         (`community-app` / baseDirectory).value / "src" / "test" / "scala" / "com" / "digitalasset" / "canton" / "integration" / "tests"
-      val generatorFile = testsDir / "docs" / "SphinxDocumentationGenerator.scala"
-      val packagePrefix = "com.digitalasset.canton.integration.tests.docs."
+      val generatorFile = testsDir / "docs" / "snippet" / "SphinxDocumentationGenerator.scala"
+      val packagePrefix = "com.digitalasset.canton.integration.tests.docs.snippet."
       val pathPrefix = "docs-open/src/sphinx/"
 
       require(

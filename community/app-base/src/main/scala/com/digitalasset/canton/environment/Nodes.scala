@@ -460,7 +460,7 @@ class ParticipantNodes[B <: CantonNodeBootstrap[N], N <: CantonNode](
         DeclarativeApiManager
           .forParticipants(runnerFactory, timeouts.dynamicStateConsistencyTimeout, loggerFactory)
       ),
-    ) {}
+    )
 
 class SequencerNodes(
     create: (String, SequencerNodeConfig) => SequencerNodeBootstrap,

@@ -1,14 +1,17 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.localstore.api
+package com.digitalasset.canton.user.store
 
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore.Result
+import com.digitalasset.canton.user.{
+  IdentityProviderConfig,
+  IdentityProviderConfigUpdate,
+  IdentityProviderId,
+}
 
 import scala.concurrent.{ExecutionContext, Future}
-
-import IdentityProviderConfigStore.Result
 
 trait IdentityProviderConfigStore { self: NamedLogging =>
 

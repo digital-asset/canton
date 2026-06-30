@@ -5,29 +5,23 @@ package com.digitalasset.canton.ledger.localstore
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.ledger.api.{
-  IdentityProviderConfig,
-  IdentityProviderId,
-  ObjectMeta,
-  User,
-  UserRight,
-}
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore.{
-  UserInfo,
-  UserNotFound,
-  UsersPage,
-}
-import com.digitalasset.canton.ledger.localstore.api.{
-  ObjectMetaUpdate,
-  UserManagementStore,
-  UserUpdate,
-}
 import com.digitalasset.canton.ledger.localstore.{
   CachedUserManagementStore,
   InMemoryUserManagementStore,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.store.UserManagementStore.{UserInfo, UserNotFound, UsersPage}
+import com.digitalasset.canton.user.{
+  IdentityProviderConfig,
+  IdentityProviderId,
+  ObjectMeta,
+  ObjectMetaUpdate,
+  User,
+  UserRight,
+  UserUpdate,
+}
 import com.digitalasset.daml.lf.data.Ref
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.freespec.AsyncFreeSpec

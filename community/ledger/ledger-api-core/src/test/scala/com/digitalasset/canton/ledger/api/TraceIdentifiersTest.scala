@@ -31,6 +31,7 @@ class TraceIdentifiersTest extends AnyWordSpec {
           None,
           None,
           None,
+          None,
         )
       )
       observed shouldEqual expected

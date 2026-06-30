@@ -89,7 +89,7 @@ class SyncEphemeralStateFactoryImpl(
       _ <- ledgerApiIndexer.value.ensureNoProcessingForSynchronizer(
         persistentState.synchronizerIdx.synchronizerId
       )
-      synchronizerIndex <- ledgerApiIndexer.value.ledgerApiStore.value
+      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
       _ = logger.info(
         s"Computing starting points for ${persistentState.psid} with $synchronizerIndex and predecessor $synchronizerPredecessor"

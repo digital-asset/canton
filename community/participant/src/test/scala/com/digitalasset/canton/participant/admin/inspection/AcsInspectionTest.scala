@@ -195,9 +195,9 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
     val mockStore = mock[LedgerApiStore]
     when(
       mockStore
-        .cleanSynchronizerIndex(same(fakeSynchronizerId))(any[TraceContext], any[ExecutionContext])
+        .cleanSynchronizerIndex(same(fakeSynchronizerId))
     )
-      .thenAnswer(FutureUnlessShutdown.pure(Some(MaxSynchronizerIndex)))
+      .thenAnswer(Some(MaxSynchronizerIndex))
     mockStore
   }
 

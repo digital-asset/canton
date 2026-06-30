@@ -23,7 +23,7 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{Party, SubmissionId, UserId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Time.Timestamp
-import com.google.protobuf.any
+import com.google.protobuf.{ByteString, any}
 import com.google.rpc.status.Status as StatusProto
 
 import java.sql.Connection
@@ -66,6 +66,9 @@ class CompletionStorageBackendTemplate(
     private val publishSource: RowDef[PublishSource] =
       (messageUuid.?, recordTime).mapN(publishSourceFromColumns)
 
+    private val transactionHash: RowDef[Option[ByteString]] =
+      column("transaction_hash", byteArray).?.map(_.map(ByteString.copyFrom(_)))
+
     private def commandCompletionSharedColumns(
         stringInterning: StringInterning,
         filterSubmitters: Seq[Party] => Set[String],
@@ -82,6 +85,7 @@ class CompletionStorageBackendTemplate(
       deduplicationOffset,
       deduplicationDurationSeconds,
       deduplicationDurationNanos,
+      transactionHash,
     ).mapN(
       CompletionFromTransaction.CommonCompletionProperties.createFromRecordTimeAndSynchronizerId
     )

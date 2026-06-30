@@ -13,7 +13,6 @@ import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import scalaz.\/-
-import scalaz.syntax.functor.*
 
 import java.io.File
 import scala.language.implicitConversions

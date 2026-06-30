@@ -657,7 +657,7 @@ final case class StakeholderGroup(
     passiveContractIds: Seq[LfContractId],
 )
 
-sealed class StakeholderGroupType {}
+sealed class StakeholderGroupType
 object StakeholderGroupType {
 
   def parse(string: String): StakeholderGroupType = string match {

@@ -22,6 +22,36 @@ build_scaladoc:
           - "scaladoc.tar.gz"
     - cleanup_test_job
 
+# Fan-out: run the documentation snippet generation tests
+# (com.digitalasset.canton.integration.tests.docs.snippet.*) split across parallel
+# containers, just like the `test` job. Each container runs a subset of the
+# snippet tests (which are ordinary integration tests producing snippet JSON in
+# `docs-open/target/snippet_json_data`) and persists that JSON to the workspace
+# so the `build_docs` fan-in job can build the site from the collected output.
+build_docs_snippets:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 6
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD\" checkErrors"
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.docs\\.snippet"
+        # Run every snippet test exactly once, distributed across the containers.
+        num_test_buckets: "$CIRCLE_NODE_TOTAL"
+        # Snippet tests each start several Canton nodes; keep per-container
+        # concurrency moderate to match the other integration test jobs.
+        num_parallel_tasks: "4"
+        # Persist the generated snippet JSON below, before cleaning up.
+        skip_cleanup: true
+    - persist_to_workspace:
+        # Each container produces a disjoint set of JSON files (one per RST
+        # source), so the per-container contributions merge cleanly here.
+        root: docs-open/target
+        paths:
+          - snippet_json_data
+    - cleanup_test_job
+
+# Fan-in: build the Sphinx site once from the snippet JSON generated in parallel
+# by `build_docs_snippets`.
 build_docs:
   executor: canton-xlarge-docker-with-postgres
   steps:
@@ -29,10 +59,13 @@ build_docs:
     - restore_packaged_release:
         location: community/app/target/release
     - unpack_scaladoc_in_workspace
+    - restore_generated_snippets
     - execute_sbt_command:
         cmd: "docs-open/test"
     - execute_sbt_command:
-        cmd: packageDocsWithExistingRelease
+        # Reuse the snippet JSON collected from the workspace instead of
+        # re-running the snippet generation tests.
+        cmd: packageDocsFromExistingSnippets
         # `use_maven_mirror` is set to false, because the sbt sphinx plugin is trying
         # to authorize in the mirror from Python but can't. and it fail the build
         use_maven_mirror: false

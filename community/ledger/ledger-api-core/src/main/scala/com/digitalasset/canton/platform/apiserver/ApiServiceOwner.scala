@@ -11,21 +11,14 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
-import com.digitalasset.canton.ledger.api.IdentityProviderConfig
 import com.digitalasset.canton.ledger.api.auth.*
-import com.digitalasset.canton.ledger.api.auth.interceptor.UserBasedClaimResolver
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  PartyRecordStore,
-  UserManagementStore,
-}
+import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
-import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandProgressTracker,
   DynamicSynchronizerParameterGetter,
@@ -48,6 +41,8 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.IdentityProviderConfig
+import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Engine
@@ -71,7 +66,6 @@ object ApiServiceOwner {
         ServerConfig.defaultMaxConcurrentCallsPerConnection.unwrap,
       port: Port = DefaultPort,
       tls: Option[TlsServerConfig] = DefaultTls,
-      seeding: Seeding = DefaultSeeding,
       managementServiceTimeout: NonNegativeFiniteDuration =
         ApiServiceOwner.DefaultManagementServiceTimeout,
       ledgerFeatures: LedgerFeatures,
@@ -135,6 +129,7 @@ object ApiServiceOwner {
       ongoingAuthorizationFactory = UserBasedOngoingAuthorization.Factory(
         now = Clock.systemUTC.instant _,
         userManagementStore = userManagementStore,
+        identityProviderConfigStore = identityProviderConfigStore,
         userRightsCheckIntervalInSeconds = userManagement.cacheExpiryAfterWriteInSeconds,
         pekkoScheduler = actorSystem.scheduler,
         jwtTimestampLeeway = jwtTimestampLeeway,
@@ -193,7 +188,6 @@ object ApiServiceOwner {
         commandExecutionContext = commandExecutionContext,
         metrics = metrics,
         healthChecks = healthChecksWithIndexService,
-        seedService = SeedService(seeding),
         managementServiceTimeout = managementServiceTimeout.underlying,
         checkOverloaded = checkOverloaded,
         userManagementStore = userManagementStore,
@@ -252,7 +246,6 @@ object ApiServiceOwner {
   val DefaultAddress: Option[String] = None
   val DefaultTls: Option[TlsServerConfig] = None
   val DefaultMaxInboundMessageSize: Int = 64 * 1024 * 1024 // Larger than ServerConfig default
-  val DefaultSeeding: Seeding = Seeding.Strong
   val DefaultManagementServiceTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(2)
   val DefaultUserManagement: UserManagementServiceConfig =

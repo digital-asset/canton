@@ -87,37 +87,4 @@ class StructSpec extends AnyWordSpec with Matchers with ScalaCheckPropertyChecks
     }
   }
 
-  "Struct.structOrderInstance" should {
-
-    "order as expected (first consider all names, then consider values)" in {
-
-      import Struct.structOrderInstance
-      import scalaz.Scalaz.*
-
-      val testCases =
-        Table(
-          "value" -> "index",
-          List(
-            List(),
-            List(f1 -> 1),
-            List(f1 -> 2),
-            List(f1 -> 1, f2 -> 1),
-            List(f1 -> 1, f2 -> 2),
-            List(f1 -> 2, f2 -> 1),
-            List(f1 -> 2, f2 -> 2),
-            List(f1 -> 1, f2 -> 2, f3 -> 3),
-            List(f2 -> 2),
-            List(f2 -> 2, f3 -> 3),
-            List(f3 -> 3),
-          ).map(Struct.assertFromSeq).zipWithIndex*
-        )
-
-      forEvery(testCases) { (x, i) =>
-        forEvery(testCases) { (y, j) =>
-          (x ?|? y) shouldBe (i ?|? j)
-        }
-      }
-    }
-  }
-
 }

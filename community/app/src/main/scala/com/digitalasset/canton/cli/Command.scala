@@ -16,7 +16,7 @@ object Mode {
   object Deamon extends Mode
 }
 
-sealed trait Command {}
+sealed trait Command
 
 object Command {
 

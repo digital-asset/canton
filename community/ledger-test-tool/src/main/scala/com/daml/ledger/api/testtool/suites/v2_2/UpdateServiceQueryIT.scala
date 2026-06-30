@@ -6,13 +6,17 @@ package com.daml.ledger.api.testtool.suites.v2_2
 import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
-import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
+import com.daml.ledger.api.testtool.infrastructure.{ExternalParty, LedgerTestSuite}
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.ledger.test.java.model.test.{Dummy, DummyWithParam}
+import com.digitalasset.base.error.ErrorResource
+import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.protocol.TestUpdateId
+import com.digitalasset.canton.util.HexString
+import com.google.protobuf.ByteString
 
 class UpdateServiceQueryIT(testDars: TestDars) extends LedgerTestSuite {
   import testDars.companionImplicits.*
@@ -634,6 +638,143 @@ class UpdateServiceQueryIT(testDars: TestDars) extends LedgerTestSuite {
       failure <- ledger
         .topologyTransactionByOffset(4200 * 60, Seq.empty)
         .mustFail("looking up an non-existent transaction")
+    } yield {
+      assertGrpcError(
+        failure,
+        RequestValidationErrors.NotFound.Update,
+        Some("Update not found, or not visible."),
+      )
+    }
+  })
+
+  test(
+    "TXTransactionByHashBasic",
+    "Expose a transaction by its hash (requires interactive submission)",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party: ExternalParty))) =>
+    val prepareRequest = ledger.prepareSubmissionRequest(
+      party,
+      new Dummy(party).create.commands,
+    )
+    for {
+      prepareResponse <- ledger.prepareSubmission(prepareRequest)
+      executeRequest = ledger.executeSubmissionRequest(party, prepareResponse)
+      _ <- ledger.executeSubmission(executeRequest)
+      _ <- ledger.firstCompletions(party)
+      transactions <- ledger.transactions(AcsDelta, party)
+      transaction = assertSingleton("expected one transaction", transactions)
+      byHash <- ledger.transactionByHash(
+        prepareResponse.preparedTransactionHash,
+        Seq(party),
+      )
+    } yield {
+      assertEquals(
+        "The transaction fetched by hash does not match",
+        transaction,
+        byHash,
+      )
+    }
+  })
+
+  test(
+    "TXTransactionByHashLedgerEffects",
+    "Expose a transaction tree by its hash (requires interactive submission)",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party: ExternalParty))) =>
+    val prepareRequest = ledger.prepareSubmissionRequest(
+      party,
+      new Dummy(party).create.commands,
+    )
+    for {
+      prepareResponse <- ledger.prepareSubmission(prepareRequest)
+      executeRequest = ledger.executeSubmissionRequest(party, prepareResponse)
+      _ <- ledger.executeSubmission(executeRequest)
+      _ <- ledger.firstCompletions(party)
+      transactions <- ledger.transactions(LedgerEffects, party)
+      transaction = assertSingleton("expected one transaction", transactions)
+      byHash <- ledger.transactionByHash(
+        prepareResponse.preparedTransactionHash,
+        Seq(party),
+        LedgerEffects,
+      )
+    } yield {
+      assertEquals(
+        "The transaction fetched by hash does not match",
+        transaction,
+        byHash,
+      )
+    }
+  })
+
+  test(
+    "TXTransactionByHashNotFound",
+    "Return NOT_FOUND for a non-existent transaction hash",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    // Deliberately use non-UTF-8 bytes to catch a possible regression in the missing-hash path.
+    // Rendering the binary hash with `toStringUtf8` corrupts arbitrary bytes, while ASCII test
+    // data such as `ByteString.copyFromUtf8("nonexistent-hash")` would mask that mistake.
+    val fakeHash = ByteString.copyFrom(Array.tabulate[Byte](32)(i => (0x80 + i).toByte))
+    val expectedHashHex = HexString.toHexString(fakeHash)
+    for {
+      failure <- ledger
+        .transactionByHash(fakeHash, Seq(party))
+        .mustFail("looking up a non-existent transaction hash")
+    } yield {
+      assertGrpcError(
+        failure,
+        RequestValidationErrors.NotFound.Update,
+        Some("Update not found, or not visible."),
+        additionalErrorAssertions = throwable => {
+          val decoded = DecodedCantonError
+            .unapply(throwable)
+            .getOrElse(fail("Failed to decode Canton error", throwable))
+          assertSameElements(
+            actual = decoded.resources,
+            expected = Seq(ErrorResource.TransactionHash -> expectedHashHex),
+            context = "expected transaction hash resource on NOT_FOUND response",
+          )
+        },
+      )
+    }
+  })
+
+  test(
+    "TXTransactionByHashEmpty",
+    "Return INVALID_ARGUMENT for an empty transaction hash",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      failure <- ledger
+        .transactionByHash(ByteString.EMPTY, Seq(party))
+        .mustFail("looking up a transaction by an empty hash")
+    } yield {
+      assertGrpcError(
+        failure,
+        RequestValidationErrors.MissingField,
+        Some("The submitted command is missing a mandatory field: transaction_hash"),
+      )
+    }
+  })
+
+  test(
+    "TXTransactionByHashInvisibleOtherParty",
+    "Do not expose a transaction by hash to a party not involved in the transaction",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party: ExternalParty))) =>
+    val prepareRequest = ledger.prepareSubmissionRequest(
+      party,
+      new Dummy(party).create.commands,
+    )
+    for {
+      prepareResponse <- ledger.prepareSubmission(prepareRequest)
+      executeRequest = ledger.executeSubmissionRequest(party, prepareResponse)
+      _ <- ledger.executeSubmission(executeRequest)
+      _ <- ledger.firstCompletions(party)
+      intruder <- ledger.allocateParty()
+      failure <- ledger
+        .transactionByHash(prepareResponse.preparedTransactionHash, Seq(intruder))
+        .mustFail("looking up a transaction by hash as a non-stakeholder")
     } yield {
       assertGrpcError(
         failure,

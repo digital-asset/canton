@@ -109,25 +109,25 @@ abstract class ClockSkewIntegrationTest(skews: Map[String, FiniteDuration])
 
 // We test with each node either ahead or behind of all the other nodes
 class ClockSkewIntegrationTestPostgresParticipant1Behind
-    extends ClockSkewIntegrationTest(Map("participant1" -> -10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("participant1" -> -10.seconds))
 
 class ClockSkewIntegrationTestPostgresParticipant1Ahead
-    extends ClockSkewIntegrationTest(Map("participant1" -> 10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("participant1" -> 10.seconds))
 
 class ClockSkewIntegrationTestPostgresParticipant2Behind
-    extends ClockSkewIntegrationTest(Map("participant2" -> -10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("participant2" -> -10.seconds))
 
 class ClockSkewIntegrationTestPostgresParticipant2Ahead
-    extends ClockSkewIntegrationTest(Map("participant2" -> 10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("participant2" -> 10.seconds))
 
 class ClockSkewIntegrationTestPostgresSequencerBehind
-    extends ClockSkewIntegrationTest(Map("sequencer1" -> -10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("sequencer1" -> -10.seconds))
 
 class ClockSkewIntegrationTestPostgresSequencerAhead
-    extends ClockSkewIntegrationTest(Map("sequencer1" -> 10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("sequencer1" -> 10.seconds))
 
 class ClockSkewIntegrationTestPostgresMediatorBehind
-    extends ClockSkewIntegrationTest(Map("mediator1" -> -10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("mediator1" -> -10.seconds))
 
 class ClockSkewIntegrationTestPostgresMediatorAhead
-    extends ClockSkewIntegrationTest(Map("mediator1" -> 10.seconds)) {}
+    extends ClockSkewIntegrationTest(Map("mediator1" -> 10.seconds))

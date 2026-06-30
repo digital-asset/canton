@@ -7,16 +7,14 @@ import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state
+import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
-import com.digitalasset.canton.ledger.participant.state.{SynchronizerIndex, Update}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
-  AchsLastPointers,
-  LedgerEnd,
-}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsLastPointers
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   IngestionStorageBackend,
+  LedgerEnd,
   ParameterStorageBackend,
 }
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
@@ -50,7 +48,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
   it should "store correctly in a happy path case" in {
     val storageBackendCaptor =
-      new StorageBackendCaptor(Some(LedgerEnd(offset(1), 5, 1, CantonTimestamp.MinValue)))
+      new StorageBackendCaptor(Some(LedgerEnd(offset(1), 5, 1, CantonTimestamp.MinValue, Map())))
     val ledgerEndCache = MutableLedgerEndCache()
     val testee = SequentialWriteDaoImpl(
       parameterStorageBackend = storageBackendCaptor,
@@ -79,6 +77,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       5,
       1,
       CantonTimestamp.MinValue,
+      Map(),
     )
     storageBackendCaptor
       .captured(2)
@@ -104,6 +103,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       7,
       1,
       CantonTimestamp.MinValue,
+      Map(),
     )
     storageBackendCaptor
       .captured(7) shouldBe LedgerEnd(
@@ -111,6 +111,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       7,
       1,
       CantonTimestamp.MinValue,
+      Map(),
     )
     storageBackendCaptor.captured(8) shouldBe someParty
     storageBackendCaptor
@@ -123,6 +124,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       8,
       1,
       CantonTimestamp.MinValue,
+      Map(),
     )
     storageBackendCaptor.captured should have size 11
   }
@@ -150,6 +152,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       0,
       0,
       CantonTimestamp.MinValue,
+      Map(),
     )
     storageBackendCaptor.captured(1) shouldBe someParty
     storageBackendCaptor
@@ -162,11 +165,12 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       1,
       0,
       CantonTimestamp.MinValue,
+      Map(),
     )
     storageBackendCaptor.captured should have size 4
   }
 
-  class StorageBackendCaptor(initialLedgerEnd: Option[ParameterStorageBackend.LedgerEnd])
+  class StorageBackendCaptor(initialLedgerEnd: Option[LedgerEnd])
       extends IngestionStorageBackend[Vector[DbDto]]
       with ParameterStorageBackend {
 
@@ -182,14 +186,15 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       }
     )
 
-    override def deletePartiallyIngestedData(ledgerEnd: Option[ParameterStorageBackend.LedgerEnd])(
+    override def deletePartiallyIngestedData(
+        ledgerEnd: Option[LedgerEnd]
+    )(
         connection: Connection
     ): Unit =
       throw new UnsupportedOperationException
 
     override def updateLedgerEnd(
-        params: ParameterStorageBackend.LedgerEnd,
-        synchronizerIndexes: Map[SynchronizerId, SynchronizerIndex],
+        params: LedgerEnd
     )(connection: Connection): Unit =
       (lock.exclusive {
         connection shouldBe someConnection
@@ -197,7 +202,9 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       })
 
     private var ledgerEndCalled = false
-    override def ledgerEnd(connection: Connection): Option[ParameterStorageBackend.LedgerEnd] =
+    override def ledgerEnd(
+        connection: Connection
+    ): Option[LedgerEnd] =
       (lock.exclusive {
         connection shouldBe someConnection
         ledgerEndCalled shouldBe false
@@ -229,11 +236,6 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     override def prunedUpToInclusiveAndLedgerEnd(
         connection: Connection
     ): ParameterStorageBackend.PruneUptoInclusiveAndLedgerEnd =
-      throw new UnsupportedOperationException
-
-    override def cleanSynchronizerIndex(synchronizerId: SynchronizerId)(
-        connection: Connection
-    ): Option[SynchronizerIndex] =
       throw new UnsupportedOperationException
 
     override def updatePostProcessingEnd(postProcessingEnd: Option[Offset])(
@@ -416,7 +418,7 @@ object SequentialWriteDaoSpec {
       case _ => throw new Exception
     }
 
-  private val stringInterningViewFixture: StringInterning with InternizingStringInterningView =
+  private val stringInterningViewFixture: StringInterning & InternizingStringInterningView =
     new StringInterning with InternizingStringInterningView {
       override def templateId: StringInterningDomain[NameTypeConRef] =
         ???

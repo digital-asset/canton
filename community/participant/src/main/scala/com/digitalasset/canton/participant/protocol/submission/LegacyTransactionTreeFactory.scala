@@ -802,12 +802,12 @@ class LegacyTransactionTreeFactory(
             coreInputs = coreInputsWithInstances,
             createdCore = created,
             createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
-            resolvedKeys = resolvedKeys.toMap.fmap(_.map(_.tryToNextGen())),
+            keyResolution = resolvedKeys.toMap.fmap(_.map(_.tryToNextGen())),
             actionDescription = actionDescription,
             rollbackContext = rbContextCore,
             salt = salt,
-            protocolVersion = protocolVersion,
             externalCallResults = ImmArray.Empty,
+            protocolVersion = protocolVersion,
           )
         )
         .leftMap[TransactionTreeConversionError](ViewParticipantDataError.apply)

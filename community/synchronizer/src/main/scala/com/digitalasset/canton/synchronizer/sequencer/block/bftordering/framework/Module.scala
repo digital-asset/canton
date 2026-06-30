@@ -68,7 +68,7 @@ trait Module[E <: Env[E], MessageT] extends NamedLogging with FlagCloseable with
     *
     * It is also called by the module system when the module changes behavior.
     */
-  def ready(self: ModuleRef[MessageT]): Unit = ()
+  def ready(self: ModuleRef[MessageT])(implicit traceContext: TraceContext): Unit = ()
 
   protected def receiveInternal(
       message: MessageT
@@ -332,7 +332,7 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
   def setModule[OtherModuleMessageT](
       moduleRef: E#ModuleRefT[OtherModuleMessageT],
       module: Module[E, OtherModuleMessageT],
-  ): Unit
+  )(implicit traceContext: TraceContext): Unit
 
   // Handler API, used by module implementations
 
@@ -426,7 +426,7 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
 
   def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration): X
 
-  def become(module: Module[E, MessageT]): Unit
+  def become(module: Module[E, MessageT])(implicit traceContext: TraceContext): Unit
 
   def stop(onStop: () => Unit = () => ()): Unit
 
@@ -475,7 +475,7 @@ trait ModuleSystem[E <: Env[E]] {
   def setModule[AcceptedMessageT](
       moduleRef: E#ModuleRefT[AcceptedMessageT],
       module: Module[E, AcceptedMessageT],
-  ): Unit
+  )(implicit traceContext: TraceContext): Unit
 }
 
 object Module {
@@ -494,6 +494,7 @@ object Module {
     final case class SetBehavior[E <: Env[E], AcceptedMessageT](
         module: Module[E, AcceptedMessageT],
         ready: Boolean,
+        traceContext: TraceContext,
     ) extends ModuleControl[E, AcceptedMessageT]
         with ControlMessage
 
@@ -524,6 +525,8 @@ object Module {
             P2PConnectionEventListener,
             ModuleRef[P2PMessageT],
         ) => P2PNetworkManagerT,
+    )(implicit
+        traceContext: TraceContext
     ): SystemInitializationResult[E, P2PNetworkManagerT, P2PMessageT, InputMessageT]
   }
 

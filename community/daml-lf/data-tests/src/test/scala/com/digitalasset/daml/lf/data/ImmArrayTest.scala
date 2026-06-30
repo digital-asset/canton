@@ -3,17 +3,13 @@
 
 package com.digitalasset.daml.lf.data
 
-import com.daml.scalatest.{FlatSpecCheckLaws, Unnatural}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import scalaz.scalacheck.ScalazProperties
-import scalaz.std.anyVal.*
+import org.scalatestplus.scalacheck.Checkers
 
 import ImmArray.ImmArraySeq
 
-class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
-  import DataArbitrary.*
-  import ImmArraySeq.*
+class ImmArrayTest extends AnyFlatSpec with Matchers with Checkers {
 
   behavior of "toString"
 
@@ -79,11 +75,26 @@ class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
 
   behavior of "traverse"
 
-  checkLaws(ScalazProperties.traverse.laws[ImmArray])
+  {
+    import cats.Eq
+    import cats.laws.discipline.TraverseTests
+    import DataArbitrary.`arb ImmArray`
+
+    implicit val eqImmArray: Eq[ImmArray[Int]] = Eq.fromUniversalEquals
+
+    // Equivalent of the former `checkLaws(ScalazProperties.traverse.laws[ImmArray])`,
+    // expressed with cats-laws and registered as individual flat-spec tests.
+    TraverseTests[ImmArray]
+      .traverse[Int, Int, Int, Int, Option, Option]
+      .all
+      .properties
+      .foreach { case (id, prop) =>
+        it should id in check(prop)
+      }
+  }
 
   it should "work with List as applicative" in {
-    import scalaz.syntax.traverse.ToTraverseOps
-    import scalaz.std.list.listInstance
+    import cats.syntax.traverse.*
 
     ImmArray(1, 2).traverse(n => (0 to n).toList) shouldBe
       List(
@@ -97,8 +108,7 @@ class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
   }
 
   it should "work with Either as applicative" in {
-    import scalaz.syntax.traverse.ToTraverseOps
-    import scalaz.std.either.eitherMonad
+    import cats.syntax.traverse.*
 
     type F[A] = Either[Int, A]
 
@@ -110,24 +120,19 @@ class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
   }
 
   it should "work with Writer as applicative" in {
-    import scalaz.syntax.traverse.ToTraverseOps
-    import scalaz.Writer
-    import scalaz.WriterT
-    import scalaz.WriterT.*
-    import scalaz.std.vector.vectorMonoid
-    import scalaz.*
+    import cats.syntax.traverse.*
+    import cats.data.Writer
 
     type F[A] = Writer[Vector[String], A]
 
     ImmArray(1, 2, 3)
-      .traverse[F, Int](n => WriterT.tell(Vector(n.toString)).map { case () => -n })
+      .traverse[F, Int](n => Writer.tell(Vector(n.toString)).map(_ => -n))
       .run shouldBe
       ((Vector("1", "2", "3"), ImmArray(-1, -2, -3)))
   }
 
   it should "work with Function0 as applicative" in {
-    import scalaz.syntax.traverse.ToTraverseOps
-    import scalaz.std.function.function0Instance
+    import cats.syntax.traverse.*
 
     ImmArray(1, 2, 3)
       .traverse[Function0, String](n => () => n.toString)
@@ -182,11 +187,4 @@ class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
     ImmArraySeq[Int]().drop(1) shouldBe ImmArraySeq[Int]()
   }
 
-  behavior of "Equal instance"
-
-  checkLaws(ScalazProperties.equal.laws[ImmArray[Unnatural[Int]]])
-
-  behavior of "Traverse instance"
-
-  checkLaws(ScalazProperties.traverse.laws[ImmArraySeq])
 }

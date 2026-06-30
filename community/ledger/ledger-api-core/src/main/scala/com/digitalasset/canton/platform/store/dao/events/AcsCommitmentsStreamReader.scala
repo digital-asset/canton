@@ -105,6 +105,7 @@ class AcsCommitmentsStreamReader(
     raw.offset -> UpdateResponse.AcsCommitment(
       ReceivedAcsCommitment(
         offset = raw.offset,
+        updateId = raw.updateId,
         synchronizerId = raw.synchronizerId,
         recordTime = raw.recordTime,
         payload = ByteString.copyFrom(raw.payload),

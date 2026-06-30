@@ -138,6 +138,11 @@ final case class ExecuteTransactionData(
 
   override def maxRecordTime: Option[Timestamp] = externallySignedSubmission.maxRecordTime
 
+  def withTransactionHash(hash: Hash): ExecuteTransactionData =
+    copy(
+      submitterInfo = submitterInfo.copy(transactionHash = Some(hash))
+    )
+
   def impoverish: CommandInterpretationResult = {
     val normalizedTransaction = Enricher.impoverish(transaction)
     CommandInterpretationResult(
@@ -158,7 +163,7 @@ final case class ExecuteTransactionData(
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Hash] =
     for {
       externallySignedSubmission <- EitherT.fromEither[FutureUnlessShutdown](
         submitterInfo.externallySignedSubmission
@@ -210,5 +215,5 @@ final case class ExecuteTransactionData(
           logger,
           protocolVersion,
         )
-    } yield ()
+    } yield hash
 }

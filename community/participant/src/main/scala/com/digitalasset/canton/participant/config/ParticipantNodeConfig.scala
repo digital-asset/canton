@@ -583,14 +583,16 @@ object JournalPruningConfig {
   * @param contractIdSeeding
   *   test-only way to override the contract-id seeding scheme. Must be Strong in production (and
   *   Strong is the default). Only configurable to reduce the amount of secure random numbers
-  *   consumed by tests and to avoid flaky timeouts during continuous integration.
+  *   consumed by tests and to avoid flaky timeouts during continuous integration. **This parameter
+  *   is deprecated and no longer used** (see `ledgerApiServerParametersConfigReader` in
+  *   CantonConfig.scala). The seeding is now always of the `Strong` type.
   * @param indexer
   *   parameters how the participant populates the index db used to serve the ledger api
   * @param tokenExpiryGracePeriodForStreams
   *   grace periods for streams that postpone termination beyond the JWT expiry
   */
 final case class LedgerApiServerParametersConfig(
-    contractIdSeeding: Seeding = Seeding.Strong,
+    contractIdSeeding: Seeding = Seeding.Strong, // TODO(i33818): Remove
     indexer: IndexerConfig = IndexerConfig(),
     tokenExpiryGracePeriodForStreams: Option[config.NonNegativeDuration] = None,
     contractLoader: ContractLoaderConfig = ContractLoaderConfig(),

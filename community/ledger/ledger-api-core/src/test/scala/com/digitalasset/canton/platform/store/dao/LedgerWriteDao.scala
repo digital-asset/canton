@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao
 
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.api.ParticipantId
@@ -10,6 +11,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.transaction.CommittedTransaction
@@ -38,6 +40,7 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       recordTime: Timestamp,
       offset: Offset,
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
+      transactionHash: Option[Hash] = None,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse]
@@ -63,9 +66,15 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
       offset: Offset,
       transaction: CommittedTransaction,
       recordTime: Timestamp,
+      transactionHash: Option[Hash],
       contractActivenessChanged: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse]
 
+  /** Defaults to None if ledger_end is unset
+    */
+  def lookupLedgerEnd()(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[LedgerEnd]]
 }

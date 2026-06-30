@@ -178,13 +178,10 @@ trap on_exit EXIT
 # Necessary workaround to prevent sbt from setting default JVM options
 export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
 
-if [ -z "${TEMPDIR}" ]; then
-  # Create a local temp folder in the working directory
-  # This prevents protoc failures caused by 'noexec' locks on the global /tmp partition.
-  mkdir -p .citmp
-  TEMPDIR="$PWD/.citmp"
-fi
-
+# Create a local temp folder in the working directory
+# This prevents protoc failures caused by 'noexec' locks on the global /tmp partition.
+mkdir -p .citmp
+export TEMPDIR="$PWD/.citmp"
 export SBT_OPTS="${SBT_OPTS} -Djava.io.tmpdir=${TEMPDIR}"
 
 _print_header "${c_white}Running parameters:${c_reset}"

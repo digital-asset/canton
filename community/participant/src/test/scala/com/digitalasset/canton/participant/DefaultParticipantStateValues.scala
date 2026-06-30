@@ -37,6 +37,7 @@ object DefaultParticipantStateValues {
       deduplicationPeriod,
       submissionId,
       externallySignedSubmission = None,
+      transactionHash = None,
     )
 
   def completionInfo(

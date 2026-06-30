@@ -129,12 +129,12 @@ class JsCommandService(
       timeoutOpenEndedStream = (_: command_completion_service.CompletionStreamRequest) => true,
     ),
     websocket(
-      JsCommandService.getCompletionsEndpoint,
-      getCompletionsStream,
+      JsCommandService.commandCompletionsEndpoint,
+      commandCompletionsStream,
     ),
     asList(
-      JsCommandService.getCompletionsListEndpoint,
-      getCompletionsStream,
+      JsCommandService.commandCompletionsListEndpoint,
+      commandCompletionsStream,
       timeoutOpenEndedStream = (_: command_completion_service.GetCompletionsRequest) => true,
     ),
   )
@@ -153,7 +153,7 @@ class JsCommandService(
     )
   }
 
-  private def getCompletionsStream(
+  private def commandCompletionsStream(
       caller: CallerContext
   ): TracedInput[Unit] => Flow[
     command_completion_service.GetCompletionsRequest,
@@ -425,9 +425,9 @@ object JsCommandService extends DocumentationEndpoints {
        """.stripMargin.trim)
       .inStreamListParamsAndDescription()
 
-  val getCompletionsEndpoint =
+  val commandCompletionsEndpoint =
     commands.get
-      .in(sttp.tapir.stringToPath("get-completions"))
+      .in(sttp.tapir.stringToPath("command-completions"))
       .out(
         webSocketBody[
           command_completion_service.GetCompletionsRequest,
@@ -438,9 +438,9 @@ object JsCommandService extends DocumentationEndpoints {
       )
       .protoRef(command_completion_service.CommandCompletionServiceGrpc.METHOD_GET_COMPLETIONS)
 
-  val getCompletionsListEndpoint =
+  val commandCompletionsListEndpoint =
     commands.post
-      .in(sttp.tapir.stringToPath("get-completions"))
+      .in(sttp.tapir.stringToPath("command-completions"))
       .in(jsonBody[command_completion_service.GetCompletionsRequest])
       .out(jsonBody[Seq[command_completion_service.CompletionStreamResponse]])
       .description(s"""|
@@ -461,8 +461,8 @@ object JsCommandService extends DocumentationEndpoints {
     submitReassignmentAsyncEndpoint,
     completionStreamEndpoint,
     completionListEndpoint,
-    getCompletionsEndpoint,
-    getCompletionsListEndpoint,
+    commandCompletionsEndpoint,
+    commandCompletionsListEndpoint,
   )
 }
 

@@ -748,7 +748,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         p2pEndpointsStore,
         isGenesis,
       )
-    module.ready(context.self)
+    module.ready(context.self)(TraceContext.createNew("p2p-network-out-module-test"))
     context.selfMessages should contain only P2PNetworkOut.Start
     context.extractSelfMessages().foreach(module.receive) // Start connecting to initial nodes
     (context, state, module, p2pNetworkManager)

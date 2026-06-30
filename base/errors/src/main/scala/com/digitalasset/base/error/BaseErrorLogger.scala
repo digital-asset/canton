@@ -20,7 +20,7 @@ trait BaseErrorLogger {
   def error(message: => String, throwable: Throwable): Unit
 }
 object NoBaseLogging
-    extends NoBaseLogging(properties = Map.empty, correlationId = None, traceId = None) {}
+    extends NoBaseLogging(properties = Map.empty, correlationId = None, traceId = None)
 
 class NoBaseLogging(
     val properties: Map[String, String],

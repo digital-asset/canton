@@ -7,9 +7,9 @@ import anorm.SqlParser.{bool, int, str}
 import anorm.{RowParser, SqlParser, ~}
 import com.daml.jwt.JwksUrl
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
+import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
 
 import java.sql.Connection
 

@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.config.{ParticipantNodeConfig, TestingTimeServiceConfig}
-import com.digitalasset.canton.platform.apiserver.SeedService
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
@@ -36,8 +35,6 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
             .replace(true)
             .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
             .replace(20000)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
         }
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
@@ -90,8 +87,6 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
             .replace(true)
             .focus(_.ledgerApi.userManagementService.maxCacheSize)
             .replace(2)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
             .focus(_.ledgerApi.indexService.activeContractsServiceStreams.maxIdsPerIdPage)
             .replace(2)
             .focus(
@@ -160,8 +155,6 @@ trait LedgerApiCachesDisabledConformanceTest extends SingleVersionLedgerApiConfo
             .replace(0)
             .focus(_.ledgerApi.userManagementService.maxRightsPerUser)
             .replace(100)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
             .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
             .replace(0)
             .focus(_.ledgerApi.indexService.maxContractStateCacheSize)
@@ -204,8 +197,6 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
       .addConfigTransforms(
         ConfigTransforms.updateParticipantConfig("participant1") { (c: ParticipantNodeConfig) =>
           c
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
             .focus(_.testingTime)
             .replace(
               Some(TestingTimeServiceConfig.MonotonicTime)

@@ -10,8 +10,10 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Sequen
   IdRange,
   Ids,
 }
+import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.google.protobuf.ByteString
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Inside, OptionValues}
@@ -47,6 +49,10 @@ private[backend] trait StorageBackendTestsAcsCommitments
     RawAcsCommitment(
       offset = Offset.tryFromLong(dbDto.event_offset),
       eventSequentialId = dbDto.event_sequential_id,
+      updateId = UpdateId
+        .fromProtoPrimitive(ByteString.copyFrom(dbDto.update_id))
+        .fold(err => throw new IllegalArgumentException(err.message), identity)
+        .toHexString,
       synchronizerId = dbDto.synchronizer_id.toProtoPrimitive,
       recordTime = Timestamp.assertFromLong(dbDto.record_time),
       payload = dbDto.payload,

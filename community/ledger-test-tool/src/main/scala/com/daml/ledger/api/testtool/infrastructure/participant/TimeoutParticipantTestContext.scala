@@ -59,6 +59,7 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
+  GetLedgerEndResponse,
 }
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
 import com.daml.ledger.api.v2.transaction.Transaction
@@ -581,6 +582,12 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       delegate.updateById(request),
     )
 
+  override def updateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+    withTimeout(
+      s"Update by hash for request $request",
+      delegate.updateByHash(request),
+    )
+
   override def transactionById(
       updateId: String,
       parties: Seq[Party],
@@ -589,6 +596,16 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): Future[Transaction] = withTimeout(
     s"Transaction by id for update id $updateId, parties $parties and templates $templateIds",
     delegate.transactionById(updateId, parties, transactionShape, templateIds),
+  )
+
+  override def transactionByHash(
+      hash: ByteString,
+      parties: Seq[Party],
+      transactionShape: TransactionShape,
+      templateIds: Seq[Identifier],
+  ): Future[Transaction] = withTimeout(
+    s"Transaction by hash, parties $parties and templates $templateIds",
+    delegate.transactionByHash(hash, parties, transactionShape, templateIds),
   )
 
   def topologyTransactionById(
@@ -935,4 +952,9 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       s"Flat transactions for request $request",
       delegate.transactionsWithVariants(request, clue),
     )
+
+  override def getLedgerEnd(): Future[GetLedgerEndResponse] = withTimeout(
+    "Get ledger end request",
+    delegate.getLedgerEnd(),
+  )
 }

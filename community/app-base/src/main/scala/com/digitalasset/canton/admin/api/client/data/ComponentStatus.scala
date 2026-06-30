@@ -87,7 +87,7 @@ object ComponentHealthState extends ShowUtil {
     case unhealthy: HasUnhealthyState => HasUnhealthyState.prettyHasUnhealthyState.treeOf(unhealthy)
   }
 
-  final case class Ok(description: Option[String] = None) extends ComponentHealthState {}
+  final case class Ok(description: Option[String] = None) extends ComponentHealthState
 
   object Ok {
     implicit val okEncoder: Encoder[Ok.type] = Encoder.encodeString.contramap(_ => "ok")
@@ -103,7 +103,7 @@ object ComponentHealthState extends ShowUtil {
     */
   final case class Degraded(state: UnhealthyState = UnhealthyState()())
       extends ComponentHealthState
-      with HasUnhealthyState {}
+      with HasUnhealthyState
 
   object Degraded {
     implicit val degradedEncoder: Encoder[Degraded] = deriveEncoder[Degraded]
@@ -116,7 +116,7 @@ object ComponentHealthState extends ShowUtil {
     */
   final case class Failed(state: UnhealthyState = UnhealthyState()())
       extends ComponentHealthState
-      with HasUnhealthyState {}
+      with HasUnhealthyState
 
   object Failed {
     implicit val failedEncoder: Encoder[Failed] = deriveEncoder[Failed]
@@ -128,7 +128,7 @@ object ComponentHealthState extends ShowUtil {
     */
   final case class Fatal(state: UnhealthyState = UnhealthyState()())
       extends ComponentHealthState
-      with HasUnhealthyState {}
+      with HasUnhealthyState
 
   /** Unhealthy state data
     *

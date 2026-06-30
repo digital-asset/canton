@@ -28,7 +28,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     identity shouldBe None
-    end shouldBe ParameterStorageBackend.LedgerEnd.beforeBegin
+    end shouldBe LedgerEnd.beforeBegin
     parties shouldBe empty
     stringInterningEntries shouldBe empty
   }
@@ -192,7 +192,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     // verify queries indeed return something
     identity should not be None
-    end should not be ParameterStorageBackend.LedgerEnd.beforeBegin
+    end should not be LedgerEnd.beforeBegin
     events.size shouldBe 7
     parties should not be empty
     stringInterningEntries should not be empty
@@ -208,7 +208,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     // Check the contents (queries that do not depend on ledger end)
     identity shouldBe None
-    end shouldBe ParameterStorageBackend.LedgerEnd.beforeBegin
+    end shouldBe LedgerEnd.beforeBegin
     events shouldBe empty
 
     // Check the contents (queries that don't read beyond ledger end)

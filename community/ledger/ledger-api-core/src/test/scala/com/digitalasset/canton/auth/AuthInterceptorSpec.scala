@@ -4,7 +4,7 @@
 package com.digitalasset.canton.auth
 
 import com.digitalasset.canton.config.ApiLoggingConfig
-import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.MethodDescriptor.Marshaller
 import io.grpc.protobuf.StatusProto
@@ -48,6 +48,36 @@ class AuthInterceptorSpec
     )
   }
 
+  it should "log the deferred warnings only once when no AuthService verifies the token" in {
+    val warnRule =
+      SuppressionRule.forLogger[AuthInterceptor] && SuppressionRule.LevelAndAbove(Level.WARN)
+
+    // Two services that both fail to verify a present token, each contributing a deferred warning.
+    val firstService = mock[AuthService]
+    val secondService = mock[AuthService]
+    when(firstService.decodeToken(any[Option[String]], any[String])(anyTraceContext))
+      .thenReturn(
+        Future.successful(AuthService.Result(ClaimSet.Unauthenticated, Some("first failure")))
+      )
+    when(secondService.decodeToken(any[Option[String]], any[String])(anyTraceContext))
+      .thenReturn(
+        Future.successful(AuthService.Result(ClaimSet.Unauthenticated, Some("second failure")))
+      )
+
+    val authInterceptor =
+      new AuthInterceptor(List(firstService, secondService), loggerFactory, executionContext)
+    implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
+
+    // Passing exactly one entry assertion makes assertLogs fail if more than one warning is logged,
+    // so this also proves the two failures are collapsed into a single warning.
+    loggerFactory.assertLogs(warnRule)(
+      within = authInterceptor
+        .headerToClaims(Some("Bearer some-token"), "some-service")
+        .map(_ shouldBe ClaimSet.Unauthenticated),
+      _.warningMessage should (fullyMatch regex ".*[(]1[)].* first failure.* [(]2[)].* second failure"),
+    )
+  }
+
   private def testServerCloseError(
       assertRpcStatus: (Status, Metadata) => Assertion
   ): Future[Assertion] = {
@@ -63,7 +93,7 @@ class AuthInterceptorSpec
       .setType(MethodDescriptor.MethodType.UNARY)
       .build()
     val failedMetadataDecode =
-      Future.failed[ClaimSet](new RuntimeException("some internal failure"))
+      Future.failed[AuthService.Result](new RuntimeException("some internal failure"))
 
     val promise = Promise[Unit]()
     // Using a promise to ensure the verify call below happens after the expected call to `serverCall.close`

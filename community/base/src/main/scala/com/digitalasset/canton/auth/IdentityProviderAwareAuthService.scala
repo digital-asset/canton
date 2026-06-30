@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.auth
+package com.digitalasset.canton.auth
 
 import com.auth0.jwt.JWT
 import com.daml.jwt.{
@@ -13,10 +13,9 @@ import com.daml.jwt.{
   JwtVerifier,
   StandardJWTPayload,
 }
-import com.digitalasset.canton.auth.{AuthService, ClaimSet, JwtVerifierLoader}
-import com.digitalasset.canton.ledger.api.IdentityProviderId
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.IdentityProviderId
 import io.circe.parser
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -33,15 +32,17 @@ class IdentityProviderAwareAuthService(
   def decodeToken(
       authToken: Option[String],
       serviceName: String,
-  )(implicit traceContext: TraceContext): Future[ClaimSet] =
+  )(implicit traceContext: TraceContext): Future[AuthService.Result] =
     authToken match {
-      case None => Future.successful(ClaimSet.Unauthenticated)
+      case None => Future.successful(AuthService.Result(ClaimSet.Unauthenticated))
       case Some(header) =>
-        parseJWTPayload(header).recover { case error =>
+        parseJWTPayload(header).map(AuthService.Result(_)).recover { case error =>
           // While we failed to authorize the token using IDP, it could still be possible
           // to be valid by other means of authorizations, i.e. using default auth service
-          logger.warn("Failed to authorize the token: " + error.getMessage)
-          ClaimSet.Unauthenticated
+          AuthService.Result(
+            ClaimSet.Unauthenticated,
+            Some("Failed to authorize the token: " + error.getMessage),
+          )
         }
     }
 

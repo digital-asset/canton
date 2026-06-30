@@ -26,7 +26,6 @@ import com.digitalasset.canton.participant.config.{
   RemoteParticipantConfig,
   TestingTimeServiceConfig,
 }
-import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.sequencing.SequencerAggregatorTesting
@@ -86,7 +85,8 @@ object ConfigTransforms {
     val updateParticipants = Seq(
       updateAllParticipantConfigs_(
         _.focus(_.parameters.minimumProtocolVersion)
-          .replace(Some(ParticipantProtocolVersion(pv)))
+          // Set a minimum protocol version only when not already configured
+          .modify(_.orElse(Some(ParticipantProtocolVersion(pv))))
       )
     )
 
@@ -97,39 +97,15 @@ object ConfigTransforms {
     BaseTest.testedProtocolVersion
   )
 
-  val generousRateLimiting: ConfigTransform =
+  private val generousRateLimiting: ConfigTransform =
     updateAllParticipantConfigs_(
       _.focus(_.ledgerApi.rateLimit).replace(Some(RateLimitingConfig.Default))
-    )
-
-  val useFeaturesWithFeatureFlags =
-    Seq(
-      ConfigTransforms.updateAllMediatorConfigs_(
-        _.focus(_.topology.useNewProcessor)
-          .replace(true)
-          .focus(_.topology.useNewClient)
-          .replace(true)
-      ),
-      ConfigTransforms.updateAllSequencerConfigs_(
-        _.focus(_.topology.useNewProcessor)
-          .replace(true)
-          .focus(_.topology.useNewClient)
-          .replace(true)
-      ),
-      ConfigTransforms.updateAllParticipantConfigs_(
-        _.focus(_.topology.useNewProcessor)
-          .replace(true)
-          .focus(_.topology.useNewClient)
-          .replace(true)
-      ),
     )
 
   /** Config transforms to apply to heavy-weight tests using an [[EnvironmentDefinition]]. For
     * example, these transforms should be applied to toxiproxy tests.
     */
   val heavyTestDefaults: Seq[ConfigTransform] = protocolVersionTransforms ++
-    setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++
-    useFeaturesWithFeatureFlags ++
     Seq(
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,
@@ -141,8 +117,6 @@ object ConfigTransforms {
       ConfigTransforms.updateAllParticipantConfigs_(
         _.focus(_.parameters.adminWorkflow.bongTestMaxLevel)
           .replace(NonNegativeInt.tryCreate(20))
-          .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-          .replace(Seeding.Weak)
           .focus(_.parameters.engine.enableAdditionalConsistencyChecks)
           .replace(true)
       ),
@@ -245,7 +219,6 @@ object ConfigTransforms {
     */
   val defaults: Seq[ConfigTransform] =
     heavyTestDefaults ++
-      setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++
       Seq(
         // Make unbounded durations bounded for integration tests
         _.focus(_.parameters.timeouts.console.unbounded)
@@ -454,11 +427,6 @@ object ConfigTransforms {
   /** Enable the testing time service in the ledger API */
   def useTestingTimeService: ParticipantNodeConfig => ParticipantNodeConfig =
     _.focus(_.testingTime).replace(Some(TestingTimeServiceConfig.MonotonicTime))
-
-  def updateContractIdSeeding(seeding: Seeding): ConfigTransform =
-    updateAllParticipantConfigs_(
-      _.focus(_.parameters.ledgerApiServer.contractIdSeeding).replace(seeding)
-    )
 
   def generateUniqueH2DatabaseName(nodeName: String): String = {
     val dbPrefix = Random.alphanumeric.take(8).map(_.toLower).mkString

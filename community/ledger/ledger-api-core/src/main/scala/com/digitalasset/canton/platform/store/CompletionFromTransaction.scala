@@ -34,6 +34,7 @@ object CompletionFromTransaction {
       deduplicationOffset: Option[Long],
       deduplicationDurationSeconds: Option[Long],
       deduplicationDurationNanos: Option[Int],
+      transactionHash: Option[com.google.protobuf.ByteString] = None,
   )
 
   object CommonCompletionProperties {
@@ -50,6 +51,7 @@ object CompletionFromTransaction {
         deduplicationOffset: Option[Long],
         deduplicationDurationSeconds: Option[Long],
         deduplicationDurationNanos: Option[Int],
+        transactionHash: Option[com.google.protobuf.ByteString],
     ): CommonCompletionProperties = CommonCompletionProperties(
       submitters = submitters,
       completionOffset = completionOffset.unwrap,
@@ -62,6 +64,7 @@ object CompletionFromTransaction {
       deduplicationOffset = deduplicationOffset,
       deduplicationDurationSeconds = deduplicationDurationSeconds,
       deduplicationDurationNanos = deduplicationDurationNanos,
+      transactionHash = transactionHash,
     )
   }
 
@@ -71,11 +74,7 @@ object CompletionFromTransaction {
   ): CompletionStreamResponse =
     CompletionStreamResponse.of(
       completionResponse = CompletionResponse.Completion(
-        toApiCompletion(
-          commonCompletionProperties,
-          updateId = updateId.toHexString,
-          optStatus = Some(OkStatus),
-        )
+        toApiAcceptedCompletion(commonCompletionProperties, updateId)
       )
     )
 
@@ -85,12 +84,28 @@ object CompletionFromTransaction {
   ): CompletionStreamResponse =
     CompletionStreamResponse.of(
       completionResponse = CompletionResponse.Completion(
-        toApiCompletion(
-          commonCompletionProperties = commonCompletionProperties,
-          updateId = RejectionUpdateId,
-          optStatus = Some(status),
-        )
+        toApiRejectedCompletion(commonCompletionProperties, status)
       )
+    )
+
+  def toApiAcceptedCompletion(
+      commonCompletionProperties: CommonCompletionProperties,
+      updateId: UpdateId,
+  ): Completion =
+    toApiCompletion(
+      commonCompletionProperties,
+      updateId = updateId.toHexString,
+      optStatus = Some(OkStatus),
+    )
+
+  def toApiRejectedCompletion(
+      commonCompletionProperties: CommonCompletionProperties,
+      status: StatusProto,
+  ): Completion =
+    toApiCompletion(
+      commonCompletionProperties = commonCompletionProperties,
+      updateId = RejectionUpdateId,
+      optStatus = Some(status),
     )
 
   private def toApiSynchronizerTime(
@@ -125,6 +140,7 @@ object CompletionFromTransaction {
       offset = commonCompletionProperties.completionOffset,
       synchronizerTime = commonCompletionProperties.synchronizerTime,
       paidTrafficCost = commonCompletionProperties.trafficCost,
+      transactionHash = commonCompletionProperties.transactionHash,
     )
   }
 

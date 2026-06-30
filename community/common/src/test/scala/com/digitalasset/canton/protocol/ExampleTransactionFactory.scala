@@ -768,7 +768,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[GenContractInstance],
       created: Seq[NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       seed: Option[LfHash],
       packagePreference: Set[LfPackageId],
       subviews: Seq[TransactionView],
@@ -809,16 +809,17 @@ class ExampleTransactionFactory(
         packagePreference = packagePreference,
       )
 
-    val viewParticipantData = ViewParticipantData.tryCreate(
+    val viewParticipantData = ViewParticipantData.tryCreate(cryptoOps)(
       coreInputs = coreInputContracts,
       createdCore = createdContracts,
       createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
-      keyResolution = resolvedKeys,
+      keyResolution = keyResolution,
       actionDescription = actionDescription,
       rollbackContext = rollbackContextFactory.empty,
       salt = participantDataSalt(viewIndex),
       externalCallResults = ImmArray.Empty,
-    )(cryptoOps, protocolVersion, None)
+      protocolVersion = protocolVersion,
+    )
 
     val subViews = TransactionSubviews(subviews)(protocolVersion, cryptoOps)
     TransactionView.tryCreate(cryptoOps)(
@@ -835,7 +836,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[GenContractInstance],
       created: Seq[NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       seed: Option[LfHash],
       isRoot: Boolean,
       packagePreference: Set[LfPackageId],
@@ -861,7 +862,7 @@ class ExampleTransactionFactory(
       consumed,
       coreInputs,
       created,
-      resolvedKeys,
+      keyResolution,
       seed,
       packagePreference,
       subviews,
@@ -875,7 +876,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[ContractInstance],
       created: Seq[NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       seed: Option[LfHash],
       isRoot: Boolean,
       packagePreference: Set[LfPackageId],
@@ -919,7 +920,7 @@ class ExampleTransactionFactory(
       consumed,
       coreInputs,
       created,
-      resolvedKeys,
+      keyResolution,
       seed,
       packagePreference,
       subviews,

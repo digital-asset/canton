@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
+  HasCycleUtils,
   SharedEnvironment,
 }
 import com.digitalasset.canton.ledger.client.LedgerClient
@@ -43,6 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import monocle.macros.syntax.lens.*
 
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Future, Promise}
 import scala.util.{Random, Try}
@@ -51,6 +53,7 @@ trait InFlightSubmissionTrackingIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasProgrammableSequencer
+    with HasCycleUtils
     with CommandDeduplicationTestHelpers {
 
   private val overrideMaxRequestSize = NonNegativeInt.tryCreate(100 * 1024)
@@ -59,6 +62,7 @@ trait InFlightSubmissionTrackingIntegrationTest
     EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        ConfigTransforms.enableInteractiveSubmissionTransforms,
         // Set a small request size for the participant so that the participant's sequencer client refuses to
         // send big requests to the sequencer and thus the participant can produce a rejection event
         // without having to wait for the max sequencing time elapsing.
@@ -303,6 +307,64 @@ trait InFlightSubmissionTrackingIntegrationTest
       possibleErrors.exists(
         CantonBaseError.isStatusErrorCode(_, completion.getStatus)
       ) shouldBe true
+    }
+
+    participant1.synchronizers.reconnect_all()
+  }
+
+  "include transaction hash in timeout completions for interactive submissions" in { implicit env =>
+    import env.*
+
+    val externalAlice = participant1.parties.testing.external.enable("ExternalAlice")
+
+    val prepared = participant1.ledger_api.interactive_submission.prepare(
+      actAs = Seq(externalAlice),
+      commands = Seq(createCycleCommand(externalAlice, "iss-timeout-test")),
+      hashingSchemeVersion = externalAlice.preferredHashingSchemeVersion.toLedgerApiProto,
+    )
+    val expectedHash = prepared.preparedTransactionHash
+
+    val signatures = Map(
+      externalAlice.partyId -> global_secret.sign(prepared.preparedTransactionHash, externalAlice)
+    )
+
+    val seq1 = getProgrammableSequencer(sequencer1.name)
+    val p1id = participant1.id
+    val requestObserved = Promise[Unit]()
+    seq1.setPolicy("drop ISS confirmation requests")(
+      SendPolicy.processTimeProofs { _ => submissionRequest =>
+        if (submissionRequest.isConfirmationRequest && submissionRequest.sender == p1id) {
+          requestObserved.trySuccess(())
+          SendDecision.Drop
+        } else SendDecision.Process
+      }
+    )
+
+    val ledgerEnd = participant1.ledger_api.state.end()
+    val submissionId = UUID.randomUUID().toString
+
+    try {
+      participant1.ledger_api.interactive_submission.execute(
+        prepared.preparedTransaction.value,
+        signatures,
+        submissionId,
+        prepared.hashingSchemeVersion,
+      )
+
+      // Wait for the confirmation request to reach the sequencer before advancing time
+      requestObserved.future.futureValue
+
+      environment.simClock.value.advance(java.time.Duration.ofDays(365))
+
+      val completions = loggerFactory.assertLogs(
+        participant1.ledger_api.completions.list(externalAlice.partyId, 1, ledgerEnd),
+        _.warningMessage should include("Submission timed out at"),
+      )
+      val completion = completions.loneElement
+      CantonBaseError.isStatusErrorCode(TimeoutError, completion.status.value) shouldBe true
+      completion.transactionHash shouldBe Some(expectedHash)
+    } finally {
+      seq1.resetPolicy()
     }
   }
 }

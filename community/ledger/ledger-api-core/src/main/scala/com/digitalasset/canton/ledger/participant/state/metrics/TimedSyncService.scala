@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.daml.metrics.Timed
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
 import com.digitalasset.canton.health.HealthStatus
@@ -155,7 +155,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       traceContext: TraceContext
   ): FutureUnlessShutdown[Vector[Offset]] =
     Timed.futureUS(
-      metrics.services.read.getConnectedSynchronizers,
+      metrics.services.read.incompleteReassignmentOffsets,
       delegate.incompleteReassignmentOffsets(validAt, stakeholders),
     )
 
@@ -325,6 +325,8 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
     delegate.physicalSynchronizerIdForSynchronizerId(synchronizerId)
 
   override def hashOps: HashOps = delegate.hashOps
+
+  override def randomOps: RandomOps = delegate.randomOps
 
   override def participantId: ParticipantId = delegate.participantId
 

@@ -536,7 +536,11 @@ final class BftBlockOrderer(
             ServerInterceptors.intercept(
               BftOrderingServiceGrpc.bindService(
                 new P2PGrpcBftOrderingService(
-                  createPeerReceiverForIncomingConnection,
+                  sendingStreamObserver =>
+                    TraceContext.withNewTraceContext("p2p-incoming-connection") {
+                      implicit traceContext =>
+                        createPeerReceiverForIncomingConnection(sendingStreamObserver)
+                    },
                   loggerFactory,
                 ),
                 executionContext,

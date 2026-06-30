@@ -7,6 +7,7 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 
 final class StateServiceIT extends LedgerTestSuite {
+
   test(
     "StateServiceGetConnectedSynchronizersWithoutParty",
     "Get connected synchronizers without party filter",

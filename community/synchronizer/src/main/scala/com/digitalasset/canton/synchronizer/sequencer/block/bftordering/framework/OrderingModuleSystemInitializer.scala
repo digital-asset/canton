@@ -14,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Pruning,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
+import com.digitalasset.canton.tracing.TraceContext
 
 import Module.{SystemInitializationResult, SystemInitializer}
 
@@ -36,7 +37,7 @@ class OrderingModuleSystemInitializer[
           P2PConnectionEventListener,
           ModuleRef[BftOrderingMessage],
       ) => P2PNetworkManagerT,
-  ): SystemInitializationResult[
+  )(implicit traceContext: TraceContext): SystemInitializationResult[
     E,
     P2PNetworkManagerT,
     BftOrderingMessage,

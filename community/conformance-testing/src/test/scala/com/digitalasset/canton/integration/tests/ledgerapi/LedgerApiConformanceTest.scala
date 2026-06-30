@@ -167,6 +167,7 @@ object LedgerApiConformanceBase {
     "ExplicitDisclosureIT:EDRouteByDisclosedContractSynchronizerId",
     "VettingIT:PVListVettedPackagesMultiSynchronizer",
     "VettingIT:PVListVettedPackagesPagination",
+    "StateServiceGetLedgerEndIT:StateServiceGetLedgerEnd",
   )
   private val disabledTests = Seq(
     // Exclude tests which are run separately below

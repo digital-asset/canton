@@ -55,15 +55,7 @@ object Debug {
       case Descriptor.Date => buf.append("date")
       case Descriptor.Party => buf.append("party")
       case ContractId(value) => buf.append("contractId("); go(value); buf.append(")")
-      case Unknown(id, args) =>
-        buf.append(s"<unknown ${id.show}>"): Unit
-        if args.nonEmpty then
-          buf.append("("): Unit
-          args.zipWithIndex.foreach { (arg, ix) =>
-            go(arg)
-            if ix < args.length - 1 then buf.append(", ")
-          }
-          buf.append(")")
+      case Unknown => buf.append(s"<unknown>")
 
     buf.append("--- Dictionary ---").append(System.lineSeparator()): Unit
     buf

@@ -71,6 +71,7 @@ class V2_2(override val testDars: TestDars) extends AvailableTests {
       new WronglyTypedContractIdIT(testDars),
       new VettingIT(testDars),
       new ContractServiceIT(testDars),
+      new StateServiceGetLedgerEndIT,
     )
 
   override def optionalTests(tlsConfiguration: Option[TlsClientConfig]): Vector[LedgerTestSuite] =

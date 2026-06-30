@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import com.digitalasset.canton.crypto.{SigningAlgorithmSpec, SigningKeySpec}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.google.common.annotations.VisibleForTesting
 
 /** Configuration for enabling session signing keys with a specified validity period. This setting
   * is applicable only when using a KMS provider with externally stored keys.
@@ -98,17 +97,4 @@ final case class SessionSigningKeysConfig(
 object SessionSigningKeysConfig {
   val disabled: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = false)
   val enabled: SessionSigningKeysConfig = SessionSigningKeysConfig(enabled = true)
-
-  /** Short test-only configuration: durations are small enough to trigger key rotation and validity
-    * edge cases within a test.
-    */
-  @VisibleForTesting
-  val short: SessionSigningKeysConfig = SessionSigningKeysConfig(
-    enabled = true,
-    keyValidityDuration = PositiveFiniteDuration.ofSeconds(10),
-    toleranceShiftDuration = NonNegativeFiniteDuration.ofSeconds(5),
-    cutOffDuration = NonNegativeFiniteDuration.ofSeconds(2),
-    keyEvictionPeriod = PositiveFiniteDuration.ofMinutes(1),
-    disableBoundChecks = true,
-  )
 }

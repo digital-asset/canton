@@ -152,25 +152,6 @@ trait SchemaProcessorSpecDefault extends ZIOSpecDefault:
           )
         case (left: Descriptor.ContractId, right: Descriptor.ContractId) =>
           go(left.value, right.value)
-        case (left: Descriptor.Unknown, right: Descriptor.Unknown) =>
-          DiffResult.Nested(
-            "Unknown",
-            List(
-              Some("id") -> left.id.diffed(right.id),
-              Some("args") -> DiffResult.Nested(
-                "$",
-                left.args.toList
-                  .map(Option.apply)
-                  .zipAll(right.args.toList.map(Option.apply), None, None)
-                  .collect {
-                    case (Some(l), Some(r)) => go(l, r)
-                    case (None, Some(r)) => DiffResult.Added(r)
-                    case (Some(l), None) => DiffResult.Removed(l)
-                  }
-                  .map(None -> _),
-              ),
-            ),
-          )
         case (left, right) =>
           DiffResult.Different(left, right)
 

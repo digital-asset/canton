@@ -30,6 +30,7 @@ class OriginalLeaderSegmentState(
     initialCompletedBlocks: Seq[Block],
     initialCurrentViewPrePrepareBlockNumbers: Seq[BlockNumber],
     override val loggerFactory: NamedLoggerFactory,
+    initTraceContext: TraceContext,
 ) extends NamedLogging {
   private val segment = state.segment
 
@@ -96,7 +97,7 @@ class OriginalLeaderSegmentState(
   logger.debug(
     s"At segment creation with initialCompletedBlocks = ${initialCompletedBlocks.map(_.blockNumber)}, " +
       s"next relative block to propose = $nextRelativeBlockToPropose$absoluteNextBlockToProposeLogSuffix"
-  )(TraceContext.empty)
+  )(initTraceContext)
 
   def segmentIsInProgress: Boolean = segment.slotNumbers.sizeIs > nextRelativeBlockToPropose
 

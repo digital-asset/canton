@@ -287,7 +287,6 @@ trait RepairSynchronizerRecoveryIntegrationTest
               val synchronizerIndex = participant1.testing.state_inspection
                 .lookupCleanSynchronizerIndex(daName)
                 .value
-                .futureValueUS
               synchronizerIndex.value.sequencerIndex.value shouldBe expectedSequencerIndex
             }
 

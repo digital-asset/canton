@@ -4,8 +4,8 @@
 package com.digitalasset.canton.ledger.localstore
 
 import com.daml.testing.utils.TestResourceContext
-import com.digitalasset.canton.ledger.api.IdentityProviderConfig
 import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
+import com.digitalasset.canton.user.IdentityProviderConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, AsyncTestSuite, EitherValues, OptionValues}
 

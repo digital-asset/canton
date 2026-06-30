@@ -136,9 +136,9 @@ final case class TransactionView private (
     param("subviews", _.subviews),
   )
 
-  // This constructor is intended for monocle GenLens/test use where the intention is to bypass the validation
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
-  private[data] def copy(
+  def copy(
       viewCommonData: MerkleTree[ViewCommonData] = this.viewCommonData,
       viewParticipantData: MerkleTree[ViewParticipantData] = this.viewParticipantData,
       subviews: TransactionSubviews = this.subviews,

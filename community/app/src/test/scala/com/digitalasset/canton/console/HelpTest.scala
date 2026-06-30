@@ -12,7 +12,7 @@ class HelpTest extends AnyFunSuite with BaseTest {
 
   object Example {
 
-    class MoreNested {}
+    class MoreNested
 
     class Nested {
       @Help.Summary("A nested method")
@@ -70,7 +70,7 @@ class HelpTest extends AnyFunSuite with BaseTest {
     def trait2(): Unit = {}
   }
 
-  class MultipleTraits extends Helpful with Trait1 with Trait2 {}
+  class MultipleTraits extends Helpful with Trait1 with Trait2
 
   test("Producing help for Example") {
     forInstance(Example) should be(

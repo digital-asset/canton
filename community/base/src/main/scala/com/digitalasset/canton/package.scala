@@ -6,7 +6,7 @@ package com.digitalasset
 import com.digitalasset.canton.data.{Counter, CounterCompanion}
 import com.digitalasset.canton.serialization.DeterministicEncoding.encodeLong
 import com.digitalasset.daml.lf.command.ReplayCommand
-import com.digitalasset.daml.lf.data.{IdString, Ref, Time}
+import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.{GlobalKey, Versioned}
 import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
@@ -160,7 +160,7 @@ package object canton {
   }
 
   implicit val lfPartyOrdering: Ordering[LfPartyId] =
-    IdString.`Party order instance`.toScalaOrdering
+    LfPartyId.ordering
 
   /** Use this type when scalac struggles to infer `Nothing` due to it being treated specially.
     *

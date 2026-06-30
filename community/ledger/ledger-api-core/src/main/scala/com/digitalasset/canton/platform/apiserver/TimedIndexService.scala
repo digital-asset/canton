@@ -14,12 +14,15 @@ import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.value.Value
@@ -32,8 +35,11 @@ import scala.concurrent.Future
 final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMetrics)
     extends IndexService {
 
-  override def currentLedgerEnd(): Future[Option[Offset]] =
-    Timed.future(metrics.services.index.currentLedgerEnd, delegate.currentLedgerEnd())
+  override def currentLedgerEnd(): Option[LedgerEnd] =
+    Timed.value(
+      metrics.services.index.currentLedgerEnd,
+      delegate.currentLedgerEnd(),
+    )
 
   override def getCompletions(
       begin: Option[Offset],
@@ -53,7 +59,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       skipPruningChecks: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Source[UpdateResponse, NotUsed] =
     Timed.source(
-      metrics.services.index.transactions,
+      metrics.services.index.updates,
       delegate.updates(
         begin = begin,
         endAt = endAt,
@@ -68,7 +74,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       updateFormat: UpdateFormat,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetUpdateResponse]] =
     Timed.future(
-      metrics.services.index.getUpdateByOffset,
+      metrics.services.index.getUpdate,
       delegate.getUpdateBy(lookupKey, updateFormat),
     )
 
@@ -82,6 +88,19 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
     Timed.source(
       metrics.services.index.getActiveContracts,
       delegate.getActiveContracts(eventFormat, activeAt, rangeInfo),
+    )
+
+  override def acs(
+      synchronizerId: SynchronizerId,
+      activeAt: Offset,
+      stakeholders1: Set[Party],
+      stakeholders2: Set[Party],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[InternalIndexService.ActiveContract, NotUsed] =
+    Timed.source(
+      metrics.services.index.acs,
+      delegate.acs(synchronizerId, activeAt, stakeholders1, stakeholders2),
     )
 
   override def lookupActiveContract(

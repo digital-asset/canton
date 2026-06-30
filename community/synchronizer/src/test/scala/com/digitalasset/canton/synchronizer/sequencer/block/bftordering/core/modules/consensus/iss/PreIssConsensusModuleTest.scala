@@ -212,6 +212,7 @@ class PreIssConsensusModuleTest
             cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
             latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
             epochInProgress: EpochInProgress,
+            _traceContext: TraceContext,
         )(
             segmentState: SegmentState,
             metricsAccumulator: EpochMetricsAccumulator,

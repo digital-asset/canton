@@ -51,13 +51,21 @@ final case class AssignmentValidationResult private[reassignment] (
   override def activenessResultIsSuccessful: Boolean = {
 
     // The activeness check is performed at request time and may flag the reassignmentId as inactive
-    // if the unassignment is still in progress. Once the unassignment is complete, its data becomes
-    // available in the reassignment cache. If the activeness check flags the reassignmentId as inactive
-    // but the reassignment cache indicates it is known and the assignment is not yet completed,
-    // the activeness check can be considered valid.
+    // if the unassignment is still in progress. This covers two cases:
+    //   Case 1: the unassignment data is still not available at validation time. If the activeness check flags the reassignmentId as inactive
+    //          but the reassignment cache indicates it is known and the assignment is not yet completed, the activeness check can be considered valid.
+    //           Nevertheless, since the unassignment data is not yet available, we will send an abstain
+    //   Case 2: once the unassignment is complete, its data becomes available in the reassignment cache,
+    //           so the data only becomes available after the check. We tolerate the inactive flag here
+    //           so that we approve.
+    // The only inactive case we must not tolerate is an actually completed assignment, hence the
+    // isAssignmentCompleted guard. The contract activeness must still be successful on its own.
+    // TODO(#12871): Once the reassignment store becomes prunable, a completed-and-pruned
+    //   reassignment will be reported as UnassignmentDataNotFound, indistinguishable from one
+    //   that was never seen. With this guard, isAssignmentCompleted would then be false and we
+    //   would wrongly treat it as active (isReassignmentActive = true) instead of rejecting.
     val isReassignmentActive: Boolean =
-      !reassigningParticipantValidationResult.isUnassignmentDataNotFound &&
-        !reassigningParticipantValidationResult.isAssignmentCompleted &&
+      !reassigningParticipantValidationResult.isAssignmentCompleted &&
         commonValidationResult.activenessResult.inactiveReassignments.contains(reassignmentId)
         && commonValidationResult.activenessResult.contracts.isSuccessful
 
@@ -148,6 +156,10 @@ object AssignmentValidationResult {
   final case class ReassigningParticipantValidationResult(
       errors: Seq[ReassignmentValidationError]
   ) extends ReassignmentValidationResult.ReassigningParticipantValidationResult {
+
+    // We abstain when the unassignment data is not found, as this participant may
+    // simply not have processed the unassignment yet.
+    override def isAbstain: Boolean = isUnassignmentDataNotFound
 
     def isUnassignmentDataNotFound: Boolean = errors.exists {
       case AssignmentValidationError.UnassignmentDataNotFound(_) => true

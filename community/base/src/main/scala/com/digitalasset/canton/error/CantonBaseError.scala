@@ -289,4 +289,4 @@ final case class GenericCantonRpcError(
     traceId: Option[String],
     asGrpcStatus: Status,
     asGrpcError: StatusRuntimeException,
-) extends RpcError {}
+) extends RpcError

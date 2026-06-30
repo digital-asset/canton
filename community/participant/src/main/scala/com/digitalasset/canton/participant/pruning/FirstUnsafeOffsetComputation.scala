@@ -246,15 +246,13 @@ class FirstUnsafeOffsetComputation(
         (),
         LedgerPruningNothingToPrune: LedgerPruningError,
       )
-      res <- EitherT
-        .right(
-          MonadUtil
-            .sequentialTraverse(lsids)(lsid =>
-              participantNodePersistentState.value.ledgerApiStore
+      res = lsids.map(
+        (
+            lsid =>
+              lsid -> participantNodePersistentState.value.ledgerApiStore
                 .cleanSynchronizerIndex(lsid)
-                .map(lsid -> _)
-            )
         )
+      )
     } yield res.toMap
 
   // Make sure that we do not prune an offset whose publication time has not been elapsed since the max deduplication duration.

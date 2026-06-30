@@ -133,6 +133,10 @@ data ${id.entityName} = ${cases.mkString(" | ")}
   deriving (Eq, Show, Ord)"""
           val _ = defs.put(id, (Seq.empty, content))
 
+        case Descriptor.Unknown =>
+          val content = s"data ${id.entityName} ${params.mkString(" ")}"
+          val _ = defs.put(id, (List.empty, content))
+
   def toDamlValue(descriptor: Descriptor, dv: DynamicValue)(using
       vars: Map[TypeVarName, Descriptor]
   ): String =
@@ -161,6 +165,7 @@ data ${id.entityName} = ${cases.mkString(" | ")}
               case other => s"(${toDamlValue(other, caseValue)})"
             )
           case Descriptor.Enumeration(cases) => s"${id.moduleName}.${cases(dv.enumeration)}"
+          case Descriptor.Unknown => throw RuntimeException(s"Unexpected value of unknown type")
 
       case Descriptor.Variable(name) => toDamlValue(vars(name), dv)
 
@@ -203,9 +208,6 @@ data ${id.entityName} = ${cases.mkString(" | ")}
         s"DA.Date.date (${date.getYear}) DA.Date.$month ${date.getDayOfMonth}"
       case Descriptor.Party => "payload" // sentinel, not implemented yet
       case Descriptor.ContractId(value) => "payload" // sentinel, not implemented yet
-      case Descriptor.Unknown(id, _) =>
-        import Debug.show
-        throw RuntimeException(s"Failed to encode value: unknown type ${id.show}")
 
   def toDamlRef(d: Descriptor)(using Defs): (Seq[Identifier], String) = d match
     case Descriptor.List(value) =>
@@ -237,12 +239,6 @@ data ${id.entityName} = ${cases.mkString(" | ")}
     case Descriptor.Constructor.Applied(id, varMap, body) =>
       toDef(id, body, varMap.map(_._1))
       val (imports, refs) = varMap.map(_._2).map(toDamlRef(_)).unzip
-      (
-        id +: imports.flatten,
-        s"${id.moduleName}.${id.entityName} ${refs.map(x => s"($x)").mkString(" ")}",
-      )
-    case Descriptor.Unknown(id, args) =>
-      val (imports, refs) = args.map(toDamlRef(_)).unzip
       (
         id +: imports.flatten,
         s"${id.moduleName}.${id.entityName} ${refs.map(x => s"($x)").mkString(" ")}",

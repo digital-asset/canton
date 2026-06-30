@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.store.{
   DamlPackageStore,
   ReassignmentStore,
 }
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError.*
 import com.digitalasset.canton.topology.transaction.HostingParticipant
@@ -156,7 +156,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
       nextHostingParticipants: Seq[HostingParticipant],
       forceFlags: ForceFlags,
       reassignmentStores: () => Map[SynchronizerId, ReassignmentStore],
-      ledgerEnd: () => FutureUnlessShutdown[Option[ParameterStorageBackend.LedgerEnd]],
+      ledgerEnd: () => Option[LedgerEnd],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -165,10 +165,9 @@ trait ParticipantTopologyValidation extends NamedLogging {
       case (synchronizerId, reassignmentStore) =>
         EitherT(
           for {
-            ledgerEnd <- ledgerEnd()
             incompleteReassignments <- reassignmentStore.findIncomplete(
               sourceSynchronizer = None,
-              validAt = ledgerEnd.map(_.lastOffset).getOrElse(Offset.firstOffset),
+              validAt = ledgerEnd().map(_.lastOffset).getOrElse(Offset.firstOffset),
               stakeholders = NonEmpty.from(Set(party.toLf)),
               limit = NonNegativeInt.maxValue,
             )

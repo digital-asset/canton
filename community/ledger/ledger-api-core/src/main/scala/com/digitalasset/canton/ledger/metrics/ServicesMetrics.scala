@@ -73,17 +73,14 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
     item
   }
 
-  private[metrics] val listLfPackages: Item = extend("list_lf_packages", baseInfo)
-  private[metrics] val getLfArchive: Item = extend("get_lf_archive", baseInfo)
   private[metrics] val currentLedgerEnd: Item = extend("current_ledger_end", baseInfo)
   private[metrics] val latestPrunedOffsets: Item = extend("latest_pruned_offsets", baseInfo)
   private[metrics] val getCompletions: Item = extend("get_completions", baseInfo)
-  private[metrics] val transactions: Item = extend("transactions", baseInfo)
-  private[metrics] val transactionTrees: Item = extend("transaction_trees", baseInfo)
-  private[metrics] val getUpdateByOffset: Item = extend("get_update_by_offset", baseInfo)
-  private[metrics] val getUpdateById: Item = extend("get_update_by_id", baseInfo)
+  private[metrics] val updates: Item = extend("updates", baseInfo)
+  private[metrics] val getUpdate: Item = extend("get_update", baseInfo)
   private[metrics] val getUpdatesPage: Item = extend("get_updates_page", baseInfo)
   private[metrics] val getActiveContracts: Item = extend("get_active_contracts", baseInfo)
+  private[metrics] val acs: Item = extend("acs", baseInfo)
   private[metrics] val lookupActiveContract: Item = extend("lookup_active_contract", baseInfo)
   private[metrics] val lookupContractState: Item = extend("lookup_contract_state", baseInfo)
   private[metrics] val lookupContractKey: Item = extend("lookup_contract_key", baseInfo)
@@ -93,8 +90,6 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
   private[metrics] val getParticipantId: Item = extend("get_participant_id", baseInfo)
   private[metrics] val getParties: Item = extend("get_parties", baseInfo)
   private[metrics] val listKnownParties: Item = extend("list_known_parties", baseInfo)
-  private[metrics] val partyEntries: Item = extend("party_entries", baseInfo)
-  private[metrics] val lookupConfiguration: Item = extend("lookup_configuration", baseInfo)
   private[metrics] val prune: Item = extend("prune", baseInfo)
 
   private[metrics] val bufferedReaderPrefix: MetricName = indexPrefix :+ "buffer_reader"
@@ -142,8 +137,6 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
                     |each operation.""",
     qualification = MetricQualification.Debug,
   )
-  private[metrics] val readStateUpdates: Item = extend("state_updates", readBaseInfo)
-
   private[metrics] val readGetConnectedSynchronizers: Item =
     extend("get_connected_synchronizers", readBaseInfo)
 
@@ -199,21 +192,18 @@ final class ServicesMetrics private[metrics] (
   final class IndexMetrics private[ServicesMetrics] {
     private val prefix = inventory.indexPrefix
 
-    val listLfPackages: Timer = openTelemetryMetricsFactory.timer(inventory.listLfPackages.info)
-    val getLfArchive: Timer = openTelemetryMetricsFactory.timer(inventory.getLfArchive.info)
     val currentLedgerEnd: Timer = openTelemetryMetricsFactory.timer(inventory.currentLedgerEnd.info)
     val latestPrunedOffsets: Timer =
       openTelemetryMetricsFactory.timer(inventory.latestPrunedOffsets.info)
     val getCompletions: Timer = openTelemetryMetricsFactory.timer(inventory.getCompletions.info)
-    val transactions: Timer = openTelemetryMetricsFactory.timer(inventory.transactions.info)
-    val transactionTrees: Timer = openTelemetryMetricsFactory.timer(inventory.transactionTrees.info)
-    val getUpdateByOffset: Timer =
-      openTelemetryMetricsFactory.timer(inventory.getUpdateByOffset.info)
-    val getUpdateById: Timer =
-      openTelemetryMetricsFactory.timer(inventory.getUpdateById.info)
+    val updates: Timer = openTelemetryMetricsFactory.timer(inventory.updates.info)
+    val getUpdate: Timer =
+      openTelemetryMetricsFactory.timer(inventory.getUpdate.info)
     val getUpdatesPage: Timer = openTelemetryMetricsFactory.timer(inventory.getUpdatesPage.info)
     val getActiveContracts: Timer =
       openTelemetryMetricsFactory.timer(inventory.getActiveContracts.info)
+    val acs: Timer =
+      openTelemetryMetricsFactory.timer(inventory.acs.info)
     val lookupActiveContract: Timer =
       openTelemetryMetricsFactory.timer(inventory.lookupActiveContract.info)
 
@@ -237,12 +227,6 @@ final class ServicesMetrics private[metrics] (
 
     val listKnownParties: Timer =
       openTelemetryMetricsFactory.timer(inventory.listKnownParties.info)
-
-    val partyEntries: Timer =
-      openTelemetryMetricsFactory.timer(inventory.partyEntries.info)
-
-    val lookupConfiguration: Timer =
-      openTelemetryMetricsFactory.timer(inventory.lookupConfiguration.info)
 
     val prune: Timer = openTelemetryMetricsFactory.timer(inventory.prune.info)
 
@@ -310,8 +294,6 @@ final class ServicesMetrics private[metrics] (
 
   // Private constructor to avoid being instantiated multiple times by accident
   final class ReadMetrics private[ServicesMetrics] {
-
-    val stateUpdates: Timer = openTelemetryMetricsFactory.timer(inventory.readStateUpdates.info)
 
     val getConnectedSynchronizers: Timer =
       openTelemetryMetricsFactory.timer(inventory.readGetConnectedSynchronizers.info)

@@ -9,11 +9,8 @@ import com.digitalasset.canton.pekkostreams.dispatcher.Dispatcher
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
-  AchsLastPointers,
-  LedgerEnd,
-}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsLastPointers
+import com.digitalasset.canton.platform.store.backend.{LedgerEnd, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.cache.{
   AchsStateCache,
   ContractStateCaches,
@@ -59,10 +56,16 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
       val initStringInterningId = 17
       val initPublicationTime = CantonTimestamp.now()
 
-      val initLedgerEnd = ParameterStorageBackend
-        .LedgerEnd(initOffset, initEventSequentialId, initStringInterningId, initPublicationTime)
+      val initLedgerEnd = LedgerEnd(
+        initOffset,
+        initEventSequentialId,
+        initStringInterningId,
+        initPublicationTime,
+        Map.empty,
+      ) // Fake map
 
-      when(updateStringInterningView(stringInterningView, initLedgerEnd)).thenReturn(Future.unit)
+      when(updateStringInterningView(stringInterningView, initLedgerEnd))
+        .thenReturn(Future.unit)
       when(dispatcherState.stopDispatcher()).thenReturn(Future.unit)
       when(dispatcherState.isRunning).thenReturn(true)
       when(mutableLedgerEndCache.apply()).thenReturn(None)
@@ -106,13 +109,13 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         reInitEventSequentialId = 9999L
         reInitStringInterningId = 50
         reInitPublicationTime = CantonTimestamp.now()
-        reInitLedgerEnd = ParameterStorageBackend
-          .LedgerEnd(
-            reInitOffset,
-            reInitEventSequentialId,
-            reInitStringInterningId,
-            reInitPublicationTime,
-          )
+        reInitLedgerEnd = LedgerEnd(
+          reInitOffset,
+          reInitEventSequentialId,
+          reInitStringInterningId,
+          reInitPublicationTime,
+          Map.empty,
+        )
 
         // RESET MOCKS
         _ = {
@@ -122,9 +125,10 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
             inMemoryFanoutBuffer,
             updateStringInterningView,
           )
-          when(updateStringInterningView(stringInterningView, reInitLedgerEnd)).thenReturn(
-            Future.unit
-          )
+          when(updateStringInterningView(stringInterningView, reInitLedgerEnd))
+            .thenReturn(
+              Future.unit
+            )
 
           when(dispatcherState.stopDispatcher()).thenReturn(Future.unit)
           when(mutableLedgerEndCache.apply()).thenReturn(Some(initLedgerEnd))
@@ -244,7 +248,8 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
     val inMemoryFanoutBuffer = mock[InMemoryFanoutBuffer]
     val stringInterningView = mock[StringInterningView]
     val dispatcherState = mock[DispatcherState]
-    val updateStringInterningView = mock[(UpdatingStringInterningView, LedgerEnd) => Future[Unit]]
+    val updateStringInterningView =
+      mock[(UpdatingStringInterningView, LedgerEnd) => Future[Unit]]
     val transactionSubmissionTracker = mock[SubmissionTracker]
     val reassignmentSubmissionTracker = mock[SubmissionTracker]
     val partyAllocationTracker = mock[PartyAllocation.Tracker]

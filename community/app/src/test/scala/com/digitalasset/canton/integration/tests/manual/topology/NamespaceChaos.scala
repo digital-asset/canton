@@ -346,4 +346,4 @@ private[topology] trait NamespaceChaos extends TopologyOperations with Matchers 
     s"{${namespaceDefinition.threshold.value},(${getOwnerNodes(namespaceDefinition).map(_.name).mkString(",")})}"
 }
 
-object NamespaceChaos extends TopologyOperationsCompanion {}
+object NamespaceChaos extends TopologyOperationsCompanion

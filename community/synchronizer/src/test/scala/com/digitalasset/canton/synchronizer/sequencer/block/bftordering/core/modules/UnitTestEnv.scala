@@ -108,7 +108,7 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
   override def setModule[NewModuleMessageT](
       moduleRef: E#ModuleRefT[NewModuleMessageT],
       module: Module[E, NewModuleMessageT],
-  ): Unit =
+  )(implicit traceContext: TraceContext): Unit =
     unsupported()
 
   override def delayedEvent(delay: FiniteDuration, message: MessageT)(implicit
@@ -134,7 +134,8 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
 
   override def abort(failure: Throwable): Nothing = fail(failure)
 
-  override def become(module: Module[E, MessageT]): Unit = unsupported()
+  override def become(module: Module[E, MessageT])(implicit traceContext: TraceContext): Unit =
+    unsupported()
 
   override def stop(onStop: () => Unit): Unit = unsupported()
 
@@ -499,7 +500,9 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
   override def blockingAwait[X](future: () => X, duration: FiniteDuration): X =
     blockingAwait(future)
 
-  override def become(module: Module[ProgrammableUnitTestEnv, MessageT]): Unit =
+  override def become(module: Module[ProgrammableUnitTestEnv, MessageT])(implicit
+      traceContext: TraceContext
+  ): Unit =
     becomesQueue.enqueue(module)
 
   def extractBecomes(): Seq[Module[ProgrammableUnitTestEnv, MessageT]] = {

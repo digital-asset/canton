@@ -7,7 +7,6 @@ import com.digitalasset.transcode.schema.*
 
 package object conformance:
   val RoundtripId: Identifier = Identifier.fromString("examples:Conformance:Roundtrip")
-  val Void: Identifier = Identifier.fromString("examples:Conformance:Void")
 
   trait TestCase:
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -88,10 +87,6 @@ package object conformance:
     case Descriptor.Optional(value) => s"Optional_${descriptorPart(value)}"
     case Descriptor.TextMap(value) => s"TextMap_${descriptorPart(value)}"
     case Descriptor.GenMap(key, value) => s"GenMap_${descriptorPart(key)}_${descriptorPart(value)}"
-
-    case Descriptor.Unknown(id, args) =>
-      if args.isEmpty then id.entityName
-      else s"${id.entityName}_${args.map(descriptorPart).mkString("_")}"
 
     case _ => "__"
   }

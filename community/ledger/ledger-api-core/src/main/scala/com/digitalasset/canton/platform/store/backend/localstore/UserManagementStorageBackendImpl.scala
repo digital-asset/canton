@@ -6,7 +6,10 @@ package com.digitalasset.canton.platform.store.backend.localstore
 import anorm.SqlParser.{bool, int, long, str}
 import anorm.{RowParser, SqlParser, SqlStringInterpolation, ~}
 import com.daml.ledger.api.v2.admin.user_management_service.Right
-import com.digitalasset.canton.ledger.api.UserRight.{
+import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
+import com.digitalasset.canton.platform.store.backend.common.{ComposableQuery, QueryStrategy}
+import com.digitalasset.canton.platform.{LedgerString, Party, UserId}
+import com.digitalasset.canton.user.UserRight.{
   CanActAs,
   CanActAsAnyParty,
   CanExecuteAs,
@@ -16,10 +19,7 @@ import com.digitalasset.canton.ledger.api.UserRight.{
   IdentityProviderAdmin,
   ParticipantAdmin,
 }
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, UserRight}
-import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
-import com.digitalasset.canton.platform.store.backend.common.{ComposableQuery, QueryStrategy}
-import com.digitalasset.canton.platform.{LedgerString, Party, UserId}
+import com.digitalasset.canton.user.{IdentityProviderId, UserRight}
 
 import java.sql.Connection
 import scala.util.Try

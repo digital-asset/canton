@@ -524,6 +524,9 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.update_service.GetUpdateByOffsetRequest, openapi.GetUpdateByOffsetRequest](
           openapi.GetUpdateByOffsetRequest.fromJson
         ),
+        Mapping[v2.update_service.GetUpdateByHashRequest, openapi.GetUpdateByHashRequest](
+          openapi.GetUpdateByHashRequest.fromJson
+        ),
         Mapping[LegacyDTOs.GetUpdatesRequest, openapi.GetUpdatesRequest](
           openapi.GetUpdatesRequest.fromJson
         ),

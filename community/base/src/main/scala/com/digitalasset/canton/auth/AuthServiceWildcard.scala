@@ -12,6 +12,6 @@ object AuthServiceWildcard extends AuthService {
   override def decodeToken(
       authToken: Option[String],
       serviceName: String,
-  )(implicit traceContext: TraceContext): Future[ClaimSet] =
-    Future.successful(ClaimSet.Claims.Wildcard)
+  )(implicit traceContext: TraceContext): Future[AuthService.Result] =
+    Future.successful(AuthService.Result(ClaimSet.Claims.Wildcard))
 }

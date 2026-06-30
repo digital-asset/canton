@@ -27,9 +27,9 @@ import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.submission.*
 import com.digitalasset.canton.ledger.api.benchtool.submission.foo.RandomPartySelecting
 import com.digitalasset.canton.ledger.api.benchtool.util.TypedActorSystemResourceOwner
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
+import com.digitalasset.canton.user.store.UserManagementStore
 import com.typesafe.scalalogging
 import io.grpc.Channel
 import io.grpc.netty.shaded.io.grpc.netty.{NegotiationType, NettyChannelBuilder}

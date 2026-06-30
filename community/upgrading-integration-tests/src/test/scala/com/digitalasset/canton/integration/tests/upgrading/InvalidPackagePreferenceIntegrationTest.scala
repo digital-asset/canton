@@ -172,7 +172,7 @@ class InvalidPackagePreferenceIntegrationTest
                   packagePreferenceOverride = Some(Set(preferred)),
                   packageMapOverride = Some(upgradePackageMap),
                 ),
-                transactionTreeInterceptor = GenTransactionTree.rootViewsUnsafe
+                transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
                   .andThen(firstElement[TransactionView])
                   .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
                   .andThen(MerkleTree.tryUnwrap[ViewParticipantData])

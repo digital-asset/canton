@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.localstore
 
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore.{
   MaxAnnotationsSizeExceeded,
   PartyRecordExistsFatal,
@@ -19,6 +18,7 @@ import com.digitalasset.canton.ledger.localstore.api.{
 import com.digitalasset.canton.ledger.localstore.utils.LocalAnnotationsUtils
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party

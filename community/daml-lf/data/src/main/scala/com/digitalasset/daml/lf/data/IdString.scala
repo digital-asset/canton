@@ -5,7 +5,6 @@ package com.digitalasset.daml.lf.data
 
 import com.daml.scalautil.Statement.discard
 import com.google.common.io.{BaseEncoding, ByteStreams}
-import scalaz.{Equal, Order}
 
 import java.io.{StringReader, StringWriter}
 import scala.collection.Factory
@@ -17,8 +16,6 @@ sealed trait StringModule[T] {
 
   @throws[IllegalArgumentException]
   def assertFromString(s: String): T
-
-  implicit def equalInstance: Equal[T]
 
   implicit def ordering: Ordering[T]
 
@@ -113,9 +110,6 @@ sealed abstract class IdString {
 }
 
 object IdString {
-  import Ref.{Name, Party}
-  implicit def `Name order instance`: Order[Name] = Order fromScalaOrdering Name.ordering
-  implicit def `Party order instance`: Order[Party] = Order fromScalaOrdering Party.ordering
 
   private[data] def asciiCharsToRejectionArray(s: Iterable[Char]): Array[Boolean] = {
     val array = Array.fill(0x80)(true)
@@ -134,8 +128,6 @@ object IdString {
 private sealed abstract class StringModuleImpl extends StringModule[String] {
 
   type T = String
-
-  final implicit def equalInstance: Equal[T] = scalaz.std.string.stringInstance
 
   final val Array: ArrayFactory[T] = new ArrayFactory[T]
 

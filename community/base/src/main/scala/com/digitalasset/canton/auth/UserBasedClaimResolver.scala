@@ -1,12 +1,11 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.auth.interceptor
+package com.digitalasset.canton.auth
 
-import com.digitalasset.canton.auth.*
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, User, UserRight}
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.{IdentityProviderId, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.UserId
 

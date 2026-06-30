@@ -128,6 +128,10 @@ class JsUpdateService(
       getTransactionTreeById,
     ),
     withServerLogic(
+      JsUpdateService.getUpdateByHashEndpoint,
+      getUpdateByHash,
+    ),
+    withServerLogic(
       JsUpdateService.getUpdatesPageEndpoint,
       getUpdatesPage,
     ),
@@ -276,6 +280,19 @@ class JsUpdateService(
       implicit val tc = caller.traceContext()
       updateServiceClient(caller.token())
         .getUpdateById(req.in)
+        .flatMap(protocolConverters.GetUpdateResponse.toJson(_))
+        .resultToRight
+    }
+
+  private def getUpdateByHash(
+      caller: CallerContext
+  ): TracedInput[update_service.GetUpdateByHashRequest] => Future[
+    Either[JsCantonError, JsGetUpdateResponse]
+  ] =
+    req => {
+      implicit val tc = caller.traceContext()
+      updateServiceClient(caller.token())
+        .getUpdateByHash(req.in)
         .flatMap(protocolConverters.GetUpdateResponse.toJson(_))
         .resultToRight
     }
@@ -566,6 +583,13 @@ object JsUpdateService extends DocumentationEndpoints {
       .out(jsonBody[JsGetUpdateResponse])
       .protoRef(update_service.UpdateServiceGrpc.METHOD_GET_UPDATE_BY_ID)
 
+  val getUpdateByHashEndpoint =
+    updates.post
+      .in(sttp.tapir.stringToPath("update-by-hash"))
+      .in(jsonBody[update_service.GetUpdateByHashRequest])
+      .out(jsonBody[JsGetUpdateResponse])
+      .protoRef(update_service.UpdateServiceGrpc.METHOD_GET_UPDATE_BY_HASH)
+
   val getUpdatesPageEndpoint =
     updates.post
       .in(sttp.tapir.stringToPath("get-updates-page"))
@@ -586,6 +610,7 @@ object JsUpdateService extends DocumentationEndpoints {
     getTransactionByIdEndpoint,
     getUpdateByIdEndpoint,
     getTransactionTreeByIdEndpoint,
+    getUpdateByHashEndpoint,
     getUpdatesPageEndpoint,
   )
 }
@@ -647,6 +672,8 @@ object JsUpdateServiceCodecs {
   implicit val getUpdateByIdRequestRW: Codec[update_service.GetUpdateByIdRequest] =
     deriveRelaxedCodec
   implicit val getUpdateByOffsetRequestRW: Codec[update_service.GetUpdateByOffsetRequest] =
+    deriveRelaxedCodec
+  implicit val getUpdateByHashRequestRW: Codec[update_service.GetUpdateByHashRequest] =
     deriveRelaxedCodec
 
   implicit val jsGetUpdatesResponseRW: Codec[JsGetUpdatesResponse] = deriveConfiguredCodec

@@ -57,8 +57,8 @@ object TransactionLogUpdate {
     *   The successful submission's completion details.
     * @param recordTime
     *   The time at which the transaction was recorded.
-    * @param externalTransactionHash
-    *   Hash of the transaction (for externall signed transactions only)
+    * @param transactionHash
+    *   Hash of the transaction (for externally signed transactions only)
     */
   final case class TransactionAccepted(
       updateId: String,
@@ -70,7 +70,7 @@ object TransactionLogUpdate {
       completionStreamResponseO: Option[CompletionStreamResponse],
       synchronizerId: String,
       recordTime: Timestamp,
-      externalTransactionHash: Option[CantonHash],
+      transactionHash: Option[CantonHash],
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate
 

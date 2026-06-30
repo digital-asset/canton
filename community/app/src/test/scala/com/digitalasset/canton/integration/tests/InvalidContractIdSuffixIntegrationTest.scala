@@ -154,7 +154,7 @@ class InvalidContractIdSuffixIntegrationTest
     val vpdMutation =
       addInputContractMutation andThen vpdActionDescriptionMutation andThen removeInputContractMutation
 
-    val treeMutation = GenTransactionTree.rootViewsUnsafe
+    val treeMutation = GenTransactionTree.Optics.rootViewsUnsafe
       .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
       .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
       .andThen(TransactionView.Optics.viewParticipantDataUnsafe)

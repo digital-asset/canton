@@ -611,9 +611,11 @@ final class SyncStateInspection(
       .map(state =>
         (for {
           cleanTs <- OptionT(
-            participantNodePersistentState.value.ledgerApiStore
-              .cleanSynchronizerIndex(state.synchronizerIdx.synchronizerId)
-              .map(_.map(_.recordTime))
+            FutureUnlessShutdown.pure(
+              participantNodePersistentState.value.ledgerApiStore
+                .cleanSynchronizerIndex(state.synchronizerIdx.synchronizerId)
+                .map(_.recordTime)
+            )
           )
           cleanTimeOfRequest <- OptionT(
             state.requestJournalStore.lastRequestTimeWithRequestTimestampBeforeOrAt(cleanTs)
@@ -621,9 +623,9 @@ final class SyncStateInspection(
         } yield cleanTimeOfRequest).value
       )
 
-  def lookupCleanSynchronizerIndex(synchronizerAlias: SynchronizerAlias)(implicit
-      traceContext: TraceContext
-  ): Either[String, FutureUnlessShutdown[Option[SynchronizerIndex]]] = syncPersistentStateManager
+  def lookupCleanSynchronizerIndex(
+      synchronizerAlias: SynchronizerAlias
+  ): Either[String, Option[SynchronizerIndex]] = syncPersistentStateManager
     .getLatest(synchronizerAlias)
     .toRight(s"Unable to find persistent state for $synchronizerAlias")
     .map { state =>
@@ -638,19 +640,17 @@ final class SyncStateInspection(
       .map(state =>
         participantNodePersistentState.value.ledgerApiStore
           .cleanSynchronizerIndex(state.synchronizerIdx.synchronizerId)
-          .flatMap(
-            _.flatMap(_.sequencerIndex)
-              .traverse(sequencerIndex =>
-                state.sequencedEventStore
-                  .find(ByTimestamp(sequencerIndex))
-                  .value
-                  .map(
-                    _.getOrElse(
-                      ErrorUtil.invalidState(
-                        s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
-                      )
-                    ).counter
+          .flatMap(_.sequencerIndex)
+          .traverse(sequencerIndex =>
+            state.sequencedEventStore
+              .find(ByTimestamp(sequencerIndex))
+              .value
+              .map(
+                _.getOrElse(
+                  ErrorUtil.invalidState(
+                    s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
                   )
+                ).counter
               )
           )
       )
@@ -1007,19 +1007,17 @@ final class SyncStateInspection(
     val sequencerCounterF: FutureUnlessShutdown[Option[SequencerCounter]] =
       participantNodePersistentState.value.ledgerApiStore
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
-        .flatMap(
-          _.flatMap(_.sequencerIndex)
-            .traverse(sequencerIndex =>
-              persistentState.sequencedEventStore
-                .find(ByTimestamp(sequencerIndex))
-                .value
-                .map(
-                  _.getOrElse(
-                    ErrorUtil.invalidState(
-                      s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
-                    )
-                  ).counter
+        .flatMap(_.sequencerIndex)
+        .traverse(sequencerIndex =>
+          persistentState.sequencedEventStore
+            .find(ByTimestamp(sequencerIndex))
+            .value
+            .map(
+              _.getOrElse(
+                ErrorUtil.invalidState(
+                  s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
                 )
+              ).counter
             )
         )
 

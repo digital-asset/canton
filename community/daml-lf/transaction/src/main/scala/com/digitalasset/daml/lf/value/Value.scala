@@ -9,13 +9,8 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, TypeConId}
 import com.digitalasset.daml.lf.language.{Ast, StablePackages}
-import scalaz.syntax.order.*
-import scalaz.syntax.semigroup.*
-import scalaz.{Equal, Order}
 
 import java.nio.{ByteBuffer, ByteOrder}
-
-import data.ScalazEqual.*
 
 sealed abstract class GenValue[+X]
     extends CidContainer[GenValue[X]]
@@ -271,30 +266,28 @@ object Value {
   type ValueUnit = GenValue.Unit.type
   val ValueUnit: GenValue.Unit.type = GenValue.Unit
 
-  import scalaz.syntax.traverse.*
-  import scalaz.std.either.*
-  import scalaz.std.option.*
-
   // Casts from GenValue[Extension[From]] to GenValue[Nothing] i.e. `Value`
+  // USED BY DAML_SCRIPT DO NOT REMOVE
   def castExtendedValue[From](
       value: GenValue[GenValue.Extension[From]]
-  ): Either[RuntimeException, GenValue[Nothing]] =
+  ): Either[RuntimeException, GenValue[Nothing]] = {
+    import cats.implicits.*
     value match {
       case _: GenValue.Blob[From] => Left(new RuntimeException("Illegal Blob in Value"))
       case _: GenValue.Any[From] => Left(new RuntimeException("Illegal Any in Value"))
       case _: GenValue.TypeRep[From] => Left(new RuntimeException("Illegal TypeRep in Value"))
       case ValueRecord(tycon, content) =>
-        content
+        content.toList
           .traverse { case (label, value) => castExtendedValue(value).map((label, _)) }
-          .map(ValueRecord(tycon, _))
+          .map(content => ValueRecord(tycon, content.to(ImmArray)))
       case ValueVariant(tycon, variant, content) =>
         castExtendedValue(content).map(ValueVariant(tycon, variant, _))
       case ValueList(content) =>
-        content.traverse(castExtendedValue(_)).map(ValueList(_))
+        content.traverse(castExtendedValue).map(ValueList(_))
       case ValueOptional(content) =>
-        content.traverse(castExtendedValue(_)).map(ValueOptional(_))
+        content.traverse(castExtendedValue).map(ValueOptional(_))
       case ValueTextMap(content) =>
-        content.traverse(castExtendedValue(_)).map(ValueTextMap(_))
+        content.traverse(castExtendedValue).map(ValueTextMap(_))
       case ValueGenMap(content) =>
         content
           .traverse { case (key, value) =>
@@ -315,6 +308,7 @@ object Value {
       case v: ValueBool => Right(v)
       case v: ValueUnit => Right(v)
     }
+  }
 
   class ValueArithmeticError(stablePackages: StablePackages) {
     val tyCon: TypeConId = stablePackages.ArithmeticError
@@ -397,10 +391,8 @@ object Value {
 
       def assertFromString(s: String): V1 = assertRight(fromString(s))
 
-      implicit val `V1 Order`: Order[V1] = {
-        case (ContractId.V1(hash1, suffix1), ContractId.V1(hash2, suffix2)) =>
-          hash1 ?|? hash2 |+| suffix1 ?|? suffix2
-      }
+      implicit val `V1 Ordering`: Ordering[V1] =
+        Ordering.by { case V1(local, global) => (local, global) }
     }
 
     final case class V2 private[digitalasset] (local: Bytes, suffix: Bytes)
@@ -495,10 +487,9 @@ object Value {
 
       def assertFromString(s: String): V2 = assertRight(fromString(s))
 
-      implicit val `V2 Order`: Order[V2] = {
-        case (ContractId.V2(local1, suffix1), ContractId.V2(local2, suffix2)) =>
-          local1 ?|? local2 |+| suffix1 ?|? suffix2
-      }
+      implicit val `V2 Ordering`: Ordering[V2] =
+        Ordering.by { case V2(local, global) => (local, global) }
+
     }
 
     def fromString(s: String): Either[String, ContractId] =
@@ -517,30 +508,12 @@ object Value {
       else if (bytes.startsWith(V1.prefix)) V1.fromBytes(bytes)
       else Left(s"cannot parse ContractId: unknown version prefix ${bytes.slice(0, 1).toHexString}")
 
-    implicit val `Cid Order`: Order[ContractId] = new Order[ContractId] {
-      override def order(a: ContractId, b: ContractId): scalaz.Ordering =
-        (a, b) match {
-          case (a: V2, b: V2) => a ?|? b
-          case (a: V1, b: V1) => a ?|? b
-          case (_: V1, _: V2) => scalaz.Ordering.LT
-          case (_: V2, _: V1) => scalaz.Ordering.GT
-        }
-
-      override def equal(a: ContractId, b: ContractId): Boolean =
-        (a, b).match2 {
-          case V1(discA, suffA) => { case V1(discB, suffB) =>
-            discA == discB && suffA.toByteString == suffB.toByteString
-          }
-          case V2(localA, suffA) => { case V2(localB, suffB) =>
-            localA == localB && suffA.toByteString == suffB.toByteString
-          }
-        }(fallback = false)
+    implicit val `Cid Ordering`: Ordering[ContractId] = {
+      case (a: V1, b: V1) => Ordering[V1].compare(a, b)
+      case (a: V2, b: V2) => Ordering[V2].compare(a, b)
+      case (_: V1, _: V2) => -1
+      case (_: V2, _: V1) => +1
     }
-
-    implicit val contractIdOrdering: Ordering[ContractId] =
-      `Cid Order`.toScalaOrdering
-
-    implicit val equalInstance: Equal[ContractId] = Equal.equalA
   }
 
   val ValueTrue: ValueBool = ValueBool.True

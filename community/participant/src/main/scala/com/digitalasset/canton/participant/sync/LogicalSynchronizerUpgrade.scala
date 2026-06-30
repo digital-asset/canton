@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.sync
 
-import cats.data.{EitherT, OptionT}
+import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
@@ -438,17 +438,16 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
     */
   protected def checkCleanSynchronizerIndex(
       upgradeTime: CantonTimestamp
-  ): EitherT[FutureUnlessShutdown, NegativeResult, Unit] =
+  ): Either[NegativeResult, Unit] =
     for {
-      synchronizerIndex <- EitherT.fromOptionF(
+      synchronizerIndex <- Either.fromOption(
         ledgerApiIndexer.asEval.value.ledgerApiStore.value.cleanSynchronizerIndex(lsid),
         NegativeResult(
           s"Unable to get synchronizer index for $lsid",
           isRetryable = true,
         ),
       )
-
-      checkResultE =
+      _ <-
         if (synchronizerIndex.recordTime < upgradeTime)
           NegativeResult(
             s"Synchronizer index is not yet at upgrade time: should be at $upgradeTime time but found ${synchronizerIndex.recordTime}",
@@ -460,8 +459,6 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
             isRetryable = false,
           ).asLeft
         else ().asRight
-
-      _ <- EitherT.fromEither[FutureUnlessShutdown](checkResultE)
     } yield ()
 
   /** Check whether the current psid and the successor psid are compatible.
@@ -677,7 +674,7 @@ class AutomaticLogicalSynchronizerUpgrade(
     def upgradeCheck(): EitherT[FutureUnlessShutdown, NegativeResult, Unit] = for {
       _ <- checkPsids()
 
-      _ <- checkCleanSynchronizerIndex(upgradeTime)
+      _ <- EitherT.fromEither[FutureUnlessShutdown](checkCleanSynchronizerIndex(upgradeTime))
 
       currentSyncPersistentState <- EitherT.fromEither[FutureUnlessShutdown](
         syncPersistentStateManager
@@ -940,7 +937,9 @@ class OnlineManualLogicalSynchronizerUpgrade(
     def upgradeCheck(): EitherT[FutureUnlessShutdown, NegativeResult, Unit] = for {
       _ <- checkPsids()
 
-      _ <- checkCleanSynchronizerIndex(request.upgradeTime)
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        checkCleanSynchronizerIndex(request.upgradeTime)
+      )
 
       successorSynchronizerConnectionConfig <- prepareNewSynchronizerConnectionConfig()
 
@@ -1025,16 +1024,17 @@ class OfflineManualLogicalSynchronizerUpgrade(
         )
 
       // ... so that the clean synchronizer index will not progress anymore
-      upgradeTime <- OptionT(
+      upgradeTime <- EitherT.fromEither[FutureUnlessShutdown](
         ledgerApiIndexer.asEval.value.ledgerApiStore.value
           .cleanSynchronizerIndex(request.lsid)
-      ).map(_.recordTime)
-        .toRight(
-          NegativeResult(
-            s"Unable to get synchronizer index for ${request.lsid}",
-            isRetryable = true,
+          .map(_.recordTime)
+          .toRight(
+            NegativeResult(
+              s"Unable to get synchronizer index for ${request.lsid}",
+              isRetryable = true,
+            )
           )
-        )
+      )
 
       _ <- storesSuccessorSynchronizerConnectionConfig(
         upgradeTime,

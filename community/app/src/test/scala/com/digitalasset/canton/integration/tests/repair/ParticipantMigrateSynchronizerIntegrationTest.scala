@@ -50,9 +50,8 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, PartyId}
-import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
-import monocle.macros.syntax.lens.*
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Assertion
 
@@ -83,6 +82,7 @@ final class ParticipantMigrateSynchronizerIntegrationTest
   private def sourceProtocol: ProtocolVersion = testedProtocolVersion
   private def targetProtocol: ProtocolVersion =
     // The goal is to test: n -> n+1 and last -> last
+    // For PV=dev the migration tests from dev -> dev
     ProtocolVersion.fromProtoPrimitive(testedProtocolVersion.v + 1).getOrElse(testedProtocolVersion)
 
   private val deprecatedProtocolMessage =
@@ -106,18 +106,8 @@ final class ParticipantMigrateSynchronizerIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-      .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(targetProtocol.isAlpha)*)
-      .addConfigTransforms(ConfigTransforms.setBetaSupport(targetProtocol.isBeta)*)
-      .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
-      .addConfigTransforms(
-        ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-        ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.minimumProtocolVersion)
-            .replace(Some(ParticipantProtocolVersion(sourceProtocol)))
-            .focus(_.parameters.alphaVersionSupport)
-            .replace(targetProtocol.isAlpha)
-        ),
-      )
+      .addConfigTransform(ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration))
+      .addConfigTransforms(ConfigTransforms.setProtocolVersion(targetProtocol)*)
 
   private val remedy = operabilityTest("Participant.RepairService")("ProtocolVersion") _
 

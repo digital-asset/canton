@@ -826,7 +826,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
 
       final case class Reject(override val cause: String, err: LfInterpretationError.ValueNesting)(
           implicit loggingContext: ErrorLoggingContext
-      ) extends DamlErrorWithDefiniteAnswer(cause = cause) {}
+      ) extends DamlErrorWithDefiniteAnswer(cause = cause)
     }
 
     @Explanation(
@@ -838,7 +838,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
 
       final case class Reject(override val cause: String, err: LfInterpretationError.MalformedText)(
           implicit loggingContext: ErrorLoggingContext
-      ) extends DamlErrorWithDefiniteAnswer(cause = cause) {}
+      ) extends DamlErrorWithDefiniteAnswer(cause = cause)
     }
 
     @Explanation(
@@ -1130,7 +1130,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
           cause = cause
-        ) {}
+        )
   }
 
   @Explanation(

@@ -15,8 +15,6 @@ import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.FatContractInstance
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.value.Value.ContractId.V1.`V1 Order`
-import com.digitalasset.daml.lf.value.Value.ContractId.`Cid Order`
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -124,9 +122,6 @@ class CompilerTest
 object CompilerTest {
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
   val pkgId = parserParameters.defaultPackageId
-
-  implicit val contractIdOrder: Ordering[ContractId] = `Cid Order`.toScalaOrdering
-  implicit val contractIdV1Order: Ordering[ContractId.V1] = `V1 Order`.toScalaOrdering
 
   val recordCon: Ref.Identifier =
     Ref.Identifier(pkgId, Ref.QualifiedName.assertFromString("Module:Record"))

@@ -8,7 +8,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   ApiUserManagementServiceSuppressionRule,
-  IDPAndJWTSuppressionRule,
+  AuthInterceptorSuppressionRule,
 }
 
 import java.util.UUID
@@ -35,7 +35,9 @@ final class CreateUserAuthIT
         attackPermissionDenied(threat = "Duplicate userId creation in a different IDP")
       ) in { implicit env =>
       import env.*
-      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule || IDPAndJWTSuppressionRule) {
+      loggerFactory.suppress(
+        ApiUserManagementServiceSuppressionRule || AuthInterceptorSuppressionRule
+      ) {
         expectPermissionDenied {
           val userId = "fresh-user-" + UUID.randomUUID().toString
           for {

@@ -391,7 +391,7 @@ final class GeneratorsData(
         // createdInSubviewArchivedInCore and notTransient should be disjoint
         .map(_ -- notTransient)
 
-      resolvedKeys <- actionDescription match {
+      keyResolution <- actionDescription match {
         case _: ExerciseActionDescription if protocolVersion >= ProtocolVersion.v35 =>
           val keyedInputs =
             coreInputs.map(c => (c.contract.contractKeyWithMaintainers, c)).collect {
@@ -422,16 +422,17 @@ final class GeneratorsData(
       externalCallResults <- viewExternalCallResultsGenFor(actionDescription)
 
       hashOps = TestHash // Not used for serialization
-    } yield ViewParticipantData.tryCreate(
+    } yield ViewParticipantData.tryCreate(hashOps)(
       coreInputs.map(contract => (contract.contractId, contract)).toMap,
       createdCore.toSeq,
       createdInSubviewArchivedInCore,
-      resolvedKeys,
+      keyResolution,
       actionDescription,
       rollbackContext,
       salt,
       externalCallResults,
-    )(hashOps, protocolVersion, None)
+      protocolVersion,
+    )
   )
 
   // If this pattern match is not exhaustive anymore, update the generator below

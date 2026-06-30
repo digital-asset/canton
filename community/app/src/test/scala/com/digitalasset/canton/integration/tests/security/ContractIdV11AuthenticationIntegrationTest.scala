@@ -189,7 +189,7 @@ sealed trait ContractIdV11AuthenticationIntegrationTest
           .submitCommand(
             cmd,
             // Flip myMap1 and myMap2 in the contract data of the input contract.
-            transactionTreeInterceptor = GenTransactionTree.rootViewsUnsafe
+            transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
               .andThen(
                 MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion)
               )

@@ -154,17 +154,20 @@ object FullInformeeTree extends VersioningCompanionContextPVValidation2[FullInfo
       .toMap
 
   /** Indicates an attempt to create an invalid [[FullInformeeTree]]. */
-  final case class InvalidInformeeTree(message: String) extends RuntimeException(message) {}
+  final case class InvalidInformeeTree(message: String) extends RuntimeException(message)
 
   /** Lens for modifying the [[GenTransactionTree]] inside of a full informee tree. It does not
     * check if the new `tree` actually constitutes a valid full informee tree, therefore: DO NOT USE
     * IN PRODUCTION.
     */
   @VisibleForTesting
-  lazy val genTransactionTreeUnsafe: Lens[FullInformeeTree, GenTransactionTree] =
-    Lens[FullInformeeTree, GenTransactionTree](_.tree)(newTree =>
-      fullInformeeTree => FullInformeeTree(newTree)(fullInformeeTree.representativeProtocolVersion)
-    )
+  object Optics {
+    val genTransactionTreeUnsafe: Lens[FullInformeeTree, GenTransactionTree] =
+      Lens[FullInformeeTree, GenTransactionTree](_.tree)(newTree =>
+        fullInformeeTree =>
+          FullInformeeTree(newTree)(fullInformeeTree.representativeProtocolVersion)
+      )
+  }
 
   def fromProtoV30(
       context: (HashOps, ProtocolVersion),

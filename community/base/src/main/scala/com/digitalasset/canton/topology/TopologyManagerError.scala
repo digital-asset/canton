@@ -668,7 +668,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     ) extends CantonError.Impl(cause = s"""REMOVE must not change the topology mapping:
          |actual: $actual
          |expected: $expected""".stripMargin)
-        with TopologyManagerError {}
+        with TopologyManagerError
   }
 
   @Explanation(

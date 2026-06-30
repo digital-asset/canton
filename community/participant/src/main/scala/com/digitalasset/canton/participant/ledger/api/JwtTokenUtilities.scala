@@ -11,7 +11,7 @@ import com.daml.jwt.{
   StandardJWTPayload,
   StandardJWTTokenFormat,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
+import com.digitalasset.canton.user.store.UserManagementStore
 
 import java.time.{Duration, Instant}
 

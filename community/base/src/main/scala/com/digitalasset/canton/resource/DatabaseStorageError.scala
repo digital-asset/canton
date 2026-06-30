@@ -33,7 +33,7 @@ object DatabaseStorageError extends StorageErrorGroup {
           cause = s"""A database task was rejected from the database task queue.
            |The full error message from the task queue is:
            |$messageFromSlick""".stripMargin
-        ) {}
+        )
   }
 
   @Explanation(
@@ -59,6 +59,6 @@ object DatabaseStorageError extends StorageErrorGroup {
           cause =
             s"Database health check failed to establish a valid connection: $messageFromSlick",
           throwableO = None,
-        ) {}
+        )
   }
 }

@@ -29,8 +29,8 @@ class PruningMetrics private[metrics] (prefix: MetricName, factory: LabeledMetri
         MetricQualification.Debug,
       )
     )
-  val contractPruningRetried: MetricHandle.Meter =
-    factory.meter(
+  val contractPruningRetried: MetricHandle.Histogram =
+    factory.histogram(
       MetricInfo(
         prefix :+ "contract_pruning_retried",
         """Optimistic locking with contention might result in retries. This metric tracks if the operation was retried this many times.""",

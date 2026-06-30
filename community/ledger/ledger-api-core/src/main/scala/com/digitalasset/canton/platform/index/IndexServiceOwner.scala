@@ -147,6 +147,7 @@ final class IndexServiceOwner(
         getPreferredPackages = getPackagePreference,
         materializer = materializer,
         executionContext = commandExecutionContext,
+        ledgerEndCache = inMemoryState.ledgerEndCache,
         updateServiceConfig = updateServiceConfig,
       )
     } yield new TimedIndexService(indexService, metrics)

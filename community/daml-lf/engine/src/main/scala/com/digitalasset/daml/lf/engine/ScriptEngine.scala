@@ -62,9 +62,9 @@ object ScriptEngine {
           compiledPackages: CompiledPackages,
           translator: ExtendedValueTranslator,
       ): Either[RuntimeException, SExpr] = {
-        import scalaz.syntax.traverse.*
-        import scalaz.std.list.*
-        import scalaz.std.either.*
+        import cats.syntax.traverse.*
+        import cats.instances.list.*
+        import cats.instances.either.*
         args
           .traverse(v => translator.translateExtendedValue(v).map(SEValue(_)))
           .map(sArgs => SEAppAtomicGeneral(SEValue(f.getContent), ArraySeq.from(sArgs)))
@@ -92,10 +92,10 @@ object ScriptEngine {
           compiledPackages: CompiledPackages,
           translator: ExtendedValueTranslator,
       ): Either[RuntimeException, SExpr] = {
-        import scalaz.syntax.traverse.*
-        import scalaz.std.list.*
-        import scalaz.std.either.*
-        import scalaz.std.option.*
+        import cats.syntax.traverse.*
+        import cats.instances.list.*
+        import cats.instances.either.*
+        import cats.instances.option.*
         for {
           sExpr <-
             compiledPackages.getDefinition(ref) match {

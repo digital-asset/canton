@@ -8,7 +8,6 @@ import com.daml.crypto.MessageDigestPrototype
 import com.daml.scalautil.Statement.discard
 import com.google.common.io.BaseEncoding
 import com.google.protobuf.ByteString
-import scalaz.Order
 
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
@@ -63,10 +62,6 @@ object Utf8 {
       } else xs.length - ys.length
 
     lp(0)
-  }
-
-  object ImplicitOrder {
-    implicit val `String Utf8 Order`: Order[String] = scalaz.Order fromScalaOrdering Ordering
   }
 
   def unpack(s: String): ImmArray[Long] =

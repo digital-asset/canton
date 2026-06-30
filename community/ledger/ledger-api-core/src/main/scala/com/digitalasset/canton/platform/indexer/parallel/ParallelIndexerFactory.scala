@@ -20,10 +20,11 @@ import com.digitalasset.canton.platform.indexer.ha.{
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
 import com.digitalasset.canton.platform.indexer.{Indexer, IndexerParams}
 import com.digitalasset.canton.platform.store.DbSupport.DbConfig
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{AchsState, LedgerEnd}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsState
 import com.digitalasset.canton.platform.store.backend.{
   DBLockStorageBackend,
   DataSourceStorageBackend,
+  LedgerEnd,
 }
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.time.Clock

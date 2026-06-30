@@ -3,12 +3,17 @@
 
 package com.digitalasset.canton.ledger.api.auth
 
-import com.digitalasset.canton.auth.{AuthInterceptor, AuthService, ClaimSet, GrpcAuthInterceptor}
+import com.digitalasset.canton.auth.{
+  AuthInterceptor,
+  AuthService,
+  ClaimSet,
+  GrpcAuthInterceptor,
+  UserBasedClaimResolver,
+}
 import com.digitalasset.canton.config.ApiLoggingConfig
-import com.digitalasset.canton.ledger.api.auth.interceptor.UserBasedClaimResolver
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.MethodDescriptor.Marshaller
 import io.grpc.protobuf.StatusProto
@@ -69,7 +74,7 @@ class UserBasedAuthInterceptorSpec
       .setType(MethodDescriptor.MethodType.UNARY)
       .build()
     val failedMetadataDecode =
-      Future.failed[ClaimSet](new RuntimeException("some internal failure"))
+      Future.failed[AuthService.Result](new RuntimeException("some internal failure"))
 
     val promise = Promise[Unit]()
     // Using a promise to ensure the verify call below happens after the expected call to `serverCall.close`
@@ -99,7 +104,7 @@ class UserBasedAuthInterceptorSpec
         any[TraceContext]
       )
     )
-      .thenReturn(Future.successful(ClaimSet.Unauthenticated))
+      .thenReturn(Future.successful(AuthService.Result(ClaimSet.Unauthenticated)))
     when(authService.decodeToken(any[Option[String]], any[String])(anyTraceContext))
       .thenReturn(failedMetadataDecode)
     new GrpcAuthInterceptor(

@@ -209,6 +209,17 @@ update_main_after_release_branch() {
   run "Stage $RELEASE_SCRIPT_VERSION_FILE" "$_GIT" add "$RELEASE_SCRIPT_VERSION_FILE"
   run "Stage $RELEASE_SCRIPT_VERSION_MAPPING_FILE" "$_GIT" add "$RELEASE_SCRIPT_VERSION_MAPPING_FILE"
 
+  # Keep Dependabot in sync with the supported release lines (centralized on main).
+  info "Adding release-line-$release_version to supported release lines and syncing Dependabot"
+  local -r supported_lines_file="$REPO_ROOT/release/supported-release-lines.txt"
+  if ! grep -qxF "$release_version" "$supported_lines_file"; then
+    echo "$release_version" >> "$supported_lines_file"
+  fi
+  run "Sync Dependabot config from supported release lines" \
+    python3 "$REPO_ROOT/release/update_dependabot.py"
+  run "Stage supported release lines and Dependabot config" \
+    "$_GIT" add "$supported_lines_file" "$REPO_ROOT/.github/dependabot.yml"
+
   run "Commit updates after release-line is created" "$_GIT" commit -m "$description"
 
   info "Push update branch"
@@ -444,7 +455,7 @@ create_release_line() {
   # push release-line branch to github
   run "Pushing release-branch $branch to main" "$_GIT" push --set-upstream origin $branch
 
-  # open a pull request to update main
+  # open a pull request to update main (also syncs Dependabot for the new line)
   update_main_after_release_branch "$major.$minor"
 }
 

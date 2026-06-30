@@ -68,5 +68,5 @@ trait LocalInstancesExtensions[LocalInstanceRef <: LocalInstanceReference] exten
 
 object LocalInstancesExtensions {
   class Impl[LocalInstanceRef <: LocalInstanceReference](val instances: Seq[LocalInstanceRef])
-      extends LocalInstancesExtensions[LocalInstanceRef] {}
+      extends LocalInstancesExtensions[LocalInstanceRef]
 }

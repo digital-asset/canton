@@ -44,6 +44,12 @@ service UpdateService {
   // If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
   rpc GetUpdateById(GetUpdateByIdRequest) returns (GetUpdateResponse);
 
+  // Look up an update by its transaction hash.
+  // This is only available for updates received after upgrading to Canton version 3.6.
+  // If there is no update with this transaction hash, or all the events are filtered,
+  // or the update was populated before upgrading to Canton version 3.6, an UPDATE_NOT_FOUND error will be raised.
+  rpc GetUpdateByHash(GetUpdateByHashRequest) returns (GetUpdateResponse);
+
   // Read a page of ledger's filtered updates. It returns the event types in accordance with
   // the specified contents and filters.
   // Additionally, the selection criteria for individual events depends on the transaction shape chosen.
@@ -120,6 +126,18 @@ message GetUpdateByIdRequest {
   //
   // Required
   string update_id = 1;
+
+  // The format for the update.
+  //
+  // Required
+  UpdateFormat update_format = 2;
+}
+
+message GetUpdateByHashRequest {
+  // The transaction hash to look up.
+  //
+  // Required: must be non-empty
+  bytes transaction_hash = 1;
 
   // The format for the update.
   //

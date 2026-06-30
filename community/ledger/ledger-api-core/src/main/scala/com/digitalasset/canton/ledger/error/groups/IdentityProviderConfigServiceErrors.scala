@@ -138,6 +138,6 @@ object IdentityProviderConfigServiceErrors extends IdentityProviderConfigService
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
           cause = s"$operation failed."
-        ) {}
+        )
   }
 }
