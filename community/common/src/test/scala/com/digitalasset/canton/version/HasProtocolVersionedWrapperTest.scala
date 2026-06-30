@@ -5,7 +5,7 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ProtoDeserializationError.UnknownProtoVersion
+import com.digitalasset.canton.ProtoDeserializationError.{OtherError, UnknownProtoVersion}
 import com.digitalasset.canton.protobuf.{VersionedMessageV0, VersionedMessageV1, VersionedMessageV2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ProtocolVersion.ProtocolVersionWithStatus
@@ -13,19 +13,18 @@ import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.annotation.unused
+import scala.annotation.{nowarn, unused}
 
-class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
+/*
+ Supposing that basePV is 30, we get the scheme
+
+  proto               0           1     2
+  protocolVersion     30    31    32    33    34  ...
+ */
+final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
   import HasProtocolVersionedWrapperTest.*
-
-  /*
-     Supposing that basePV is 30, we get the scheme
-
-      proto               0           1     2
-      protocolVersion     30    31    32    33    34  ...
-   */
-  "HasVersionedWrapperV2" should {
+  "HasProtocolVersionedWrapper" should {
     "use correct proto version depending on the protocol version for serialization" in {
       def message(pv: ProtocolVersion): Message =
         Message("Hey", 1, 2.0)(protocolVersionRepresentative(pv), None)
@@ -205,6 +204,19 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
       }
     }
   }
+
+  "HasProtocolVersionWrapperE" should {
+    "return an error when serialization is not possible" in {
+      def message(pv: ProtocolVersion): MessageE =
+        MessageE("Hey", 1, 2.0)(MessageE.protocolVersionRepresentativeFor(pv), None)
+
+      message(basePV).toProtoVersioned.value.version shouldBe 0
+      message(basePV + 1).toProtoVersioned.value.version shouldBe 0
+      message(basePV + 2).toProtoVersioned.value.version shouldBe 1
+      message(basePV + 3).toProtoVersioned.left.value shouldBe "Nope"
+      message(basePV + 4).toProtoVersioned.left.value shouldBe "Nope"
+    }
+  }
 }
 
 object HasProtocolVersionedWrapperTest {
@@ -242,12 +254,6 @@ object HasProtocolVersionedWrapperTest {
       with IgnoreInSerializationTestExhaustivenessCheck {
     def name: String = "Message"
 
-    /*
-       Supposing that basePV is 30, we get the scheme
-
-        proto               0           1     2
-        protocolVersion     30    31    32    33    34  ...
-     */
     override val versioningTable: VersioningTable = VersioningTable(
       ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.createAlpha((basePV + 2).v))(
         VersionedMessageV1
@@ -300,5 +306,66 @@ object HasProtocolVersionedWrapperTest {
         protocolVersionRepresentativeFor(ProtoVersion(2)).value,
         Some(bytes),
       ).asRight
+  }
+
+  final case class MessageE(
+      msg: String,
+      iValue: Int,
+      dValue: Double,
+  )(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[MessageE.type],
+      val deserializedFrom: Option[ByteString] = None,
+  ) extends HasProtocolVersionedWrapperE[MessageE] {
+
+    @transient override protected lazy val companionObj: MessageE.type = MessageE
+
+    def toProtoV0: Either[String, VersionedMessageV0] = VersionedMessageV0(msg).asRight
+    def toProtoV1: Either[String, VersionedMessageV1] = VersionedMessageV1(msg, iValue).asRight
+    def toProtoV2: Either[String, VersionedMessageV2] = "Nope".asLeft
+  }
+
+  object MessageE
+      extends VersioningCompanionMemoizationE[MessageE]
+      with IgnoreInSerializationTestExhaustivenessCheck {
+    def name: String = "Message"
+
+    override val versioningTable: VersioningTable = VersioningTable(
+      ProtoVersion(1) -> VersionedProtoCodec.applyE(ProtocolVersion.createAlpha((basePV + 2).v))(
+        VersionedMessageV1
+      )(
+        supportedProtoVersionMemoized(_)(fromProtoV1),
+        _.toProtoV1,
+      ),
+      // Can use a stable Protobuf message in a stable protocol version
+      ProtoVersion(0) -> VersionedProtoCodec.applyE(ProtocolVersion.createStable(basePV.v))(
+        VersionedMessageV0
+      )(
+        supportedProtoVersionMemoized(_)(fromProtoV0),
+        _.toProtoV0,
+      ),
+      // Can use an alpha Protobuf message in an alpha protocol version
+      ProtoVersion(2) -> VersionedProtoCodec.applyE(
+        ProtocolVersion.createAlpha((basePV + 3).v)
+      )(VersionedMessageV2)(
+        supportedProtoVersionMemoized(_)(fromProtoV2),
+        _.toProtoV2,
+      ),
+    )
+
+    def fromProtoV0(message: VersionedMessageV0)(bytes: ByteString): ParsingResult[MessageE] =
+      MessageE(message.msg, 0, 0)(
+        protocolVersionRepresentativeFor(ProtoVersion(0)).value,
+        Some(bytes),
+      ).asRight
+
+    def fromProtoV1(message: VersionedMessageV1)(bytes: ByteString): ParsingResult[MessageE] =
+      MessageE(message.msg, message.value, 1)(
+        protocolVersionRepresentativeFor(ProtoVersion(1)).value,
+        Some(bytes),
+      ).asRight
+
+    @nowarn("msg=parameter .* in method .* is never used")
+    def fromProtoV2(message: VersionedMessageV2)(bytes: ByteString): ParsingResult[MessageE] =
+      OtherError("No deserialization from v2").asLeft
   }
 }

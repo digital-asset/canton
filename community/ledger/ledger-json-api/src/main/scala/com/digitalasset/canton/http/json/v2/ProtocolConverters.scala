@@ -1551,15 +1551,22 @@ class ProtocolConverters(
 }
 
 object IdentifierConverter extends ConversionErrorSupport {
-  def fromJson(jsIdentifier: String): lapi.value.Identifier =
+  private[v2] val expectedFormat = "<package>:<moduleName>:<entityName>"
+
+  def fromJsonEither(jsIdentifier: String): Either[String, lapi.value.Identifier] =
     jsIdentifier.split(":").toSeq match {
       case Seq(packageId, moduleName, entityName) =>
-        lapi.value.Identifier(
-          packageId = packageId,
-          moduleName = moduleName,
-          entityName = entityName,
+        Right(
+          lapi.value.Identifier(
+            packageId = packageId,
+            moduleName = moduleName,
+            entityName = entityName,
+          )
         )
-      case _ => invalidArgument(jsIdentifier, "<package>:<moduleName>:<entityName>")
+      case _ =>
+        Left(
+          s"Invalid identifier format ($jsIdentifier) not matching the expected format ($expectedFormat)"
+        )
     }
 
   def toJson(lapiIdentifier: lapi.value.Identifier): String =

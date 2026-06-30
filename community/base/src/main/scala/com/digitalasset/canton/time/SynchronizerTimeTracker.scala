@@ -458,8 +458,9 @@ class SynchronizerTimeTracker(
             // schedule next update
             val nextF =
               clock
-                .scheduleAt(
+                .scheduleAtCancelledOnShutdown(
                   _ => maybeScheduleUpdate(immediately = false),
+                  s"${getClass.getName}: scheduling next update",
                   updateBy.value,
                 )
                 .unwrap

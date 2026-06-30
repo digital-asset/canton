@@ -71,6 +71,9 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
   either at user creation time or through the `GrantAccessRight` command.
 - *BREAKING*: Unknown config keys are now making config parsing failing. This mechanism was already in place, but it didn't include all the config keys, which is now fixed.
 - *BREAKING*: Separated the config for support of dev and alpha protocol versions. In order to use pv=dev, you now have to specify `dev-version-support = true` instead of `alpha-version-support = true` (`canton.parameters.non-standard-config = true` is still needed).
+- The JSON Ledger API now rejects malformed identifiers (e.g. template-id) provided in requests (one that does not follow the
+  `<package>:<moduleName>:<entityName>` format) with a descriptive `400 Bad Request` error that names the
+  expected format, instead of surfacing it as an internal error.
 - The default size of the Ledger API in-memory fan-out buffer (`<participant>.ledger-api.index-service.max-transactions-in-memory-fan-out-buffer-size`) has been increased from 1000 to 1100 to accommodate serving ACS commitments from the buffer.
 - Ledger API and Indexer metrics clean-up:
   - *BREAKING*: The indexer queue metrics `daml.participant.api.indexer.indexer_queue_blocked`, `daml.participant.api.indexer.indexer_queue_buffered` and `daml.participant.api.indexer.indexer_queue_uncommitted` are now exposed as gauges instead of meters.

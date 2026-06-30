@@ -12,7 +12,12 @@ import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.*
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
@@ -63,7 +68,8 @@ class MemberAuthenticationService(
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseable {
+    with FlagCloseable
+    with HasCloseContext {
 
   /** synchronizer generates nonce that he expects the participant to use to concatenate with the
     * synchronizer's id and sign to proceed with the authentication (step 2). We expect to find a
@@ -284,8 +290,13 @@ class MemberAuthenticationService(
       logger.debug(s"Expiring nonces and tokens up to $now")
       store.expireNoncesAndTokens(now)
     }.onShutdown(())
-
-    clock.scheduleAt(_ => run(), timestamp).discard
+    clock
+      .scheduleAtCancelledOnShutdown(
+        _ => run(),
+        s"${getClass.getName}: scheduling expirations",
+        timestamp,
+      )
+      .discard
   }
 
   private def isActive(

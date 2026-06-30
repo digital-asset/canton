@@ -21,6 +21,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -91,7 +92,8 @@ class ProgrammableSequencer(
 )(implicit ec: ExecutionContext)
     extends Sequencer
     with NamedLogging
-    with FlagCloseable {
+    with FlagCloseable
+    with HasCloseContext {
   import ProgrammableSequencer.QueuedSubmission
 
   override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
@@ -273,7 +275,13 @@ class ProgrammableSequencer(
       }
 
       FutureUtil.doNotAwait(
-        clock.scheduleAt(run, at).unwrap,
+        clock
+          .scheduleAtCancelledOnShutdown(
+            run,
+            s"${getClass.getName}: sending submission request",
+            at,
+          )
+          .unwrap,
         s"Programmable sequencer scheduled for message ID ${submission.messageId} at $at",
       )
       EitherT(promise.futureUS)

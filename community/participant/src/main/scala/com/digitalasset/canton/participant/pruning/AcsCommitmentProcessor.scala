@@ -247,6 +247,7 @@ class AcsCommitmentProcessor private (
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
     with FlagCloseable
+    with HasCloseContext
     with NamedLogging {
 
   private val protocolVersion: ProtocolVersion = sequencerClient.protocolVersion
@@ -2351,7 +2352,12 @@ class AcsCommitmentProcessor private (
       val at = clock.now.plus(java.time.Duration.ofMillis(randDelayMillis))
       FutureUnlessShutdownUtil
         .logOnFailureUnlessShutdown(
-          clock.scheduleAt(_ => stubbornSendUnlessClosing(), at),
+          clock
+            .scheduleAtCancelledOnShutdown(
+              _ => stubbornSendUnlessClosing(),
+              s"${getClass.getName}: sending commitment message",
+              at,
+            ),
           s"Failed to schedule sending commitment message batch for period $period at time $at}",
           logPassiveInstanceAtInfo = true,
         )

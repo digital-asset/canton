@@ -346,7 +346,11 @@ class DbLockedConnection private (
     logger.trace(s"At $now schedule next health check for $checkAt")(TraceContext.empty)
 
     clock
-      .scheduleAt(runLockedConnectionCheck, checkAt)
+      .scheduleAtCancelledOnShutdown(
+        runLockedConnectionCheck,
+        s"${getClass.getName}: checking connection",
+        checkAt,
+      )
       .discard
   }
 

@@ -636,7 +636,13 @@ private[sync] class SynchronizerConnectionsManager(
       nextO.foreach(scheduleReconnectAttempt(_, connectSynchronizer))
     }
 
-    clock.scheduleAt(reconnectAttempt, timestamp).discard
+    clock
+      .scheduleAtCancelledOnShutdown(
+        reconnectAttempt,
+        s"${getClass.getName}: scheduling reconnection",
+        timestamp,
+      )
+      .discard
   }
 
   /** Get the synchronizer connection corresponding to the alias. Fail if no connection can be

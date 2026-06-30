@@ -25,10 +25,7 @@ object DigestOps {
     val locallyHostedStakeholderIds =
       acsUpdate.locallyHostedStakeholders.toSet
 
-    val partiesByParticipant =
-      DigestOps.invertMap(acsUpdate.stakeholders.map { case (k, v) =>
-        k -> v.toSet
-      })
+    val partiesByParticipant = DigestOps.invertMap(acsUpdate.stakeholders)
 
     val partyPairsToCompute = (for {
       local <- locallyHostedStakeholderIds
@@ -78,9 +75,11 @@ object DigestOps {
           if (thisParticipantId < counterParticipant) LocalPartyFirst
           else RemotePartyFirst
 
-        val digestsForCounterParticipant = parties.map { party =>
+        val digestsForCounterParticipant = parties.view.map { party =>
           partyDeltas(PartyAndOrder(party, partyOrder)).digest
         }
+          // convert to a Seq to not calculate the hashcode of potentially many digests
+          .toSeq
 
         val digestForParticipant = DigestOps.combineDigests(digestsForCounterParticipant)
 

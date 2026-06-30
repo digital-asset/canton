@@ -470,7 +470,7 @@ object JsSchema {
       }
 
     implicit val decodeIdentifier: Decoder[com.daml.ledger.api.v2.value.Identifier] =
-      Decoder.decodeString.map(IdentifierConverter.fromJson)
+      Decoder.decodeString.emap(IdentifierConverter.fromJsonEither)
 
     implicit val jsEvent: Codec[JsEvent.Event] = deriveConfiguredCodec
     implicit val jsCreatedEvent: Codec[JsEvent.CreatedEvent] = deriveConfiguredCodec

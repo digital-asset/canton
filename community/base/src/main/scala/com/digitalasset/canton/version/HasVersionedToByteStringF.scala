@@ -15,11 +15,16 @@ import com.google.protobuf.ByteString
   *
   * Classes that use Protobuf for serialization should implement [[HasVersionedWrapper]] instead.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
+  *
+  * @tparam F
+  *   Typically Id (for classes whose serialization always succeeds) or Either[String, ?] if
+  *   serialization can fail (e.g., because the instance cannot be serialized to the specified
+  *   protocol version).
   */
-trait HasVersionedToByteString {
+trait HasVersionedToByteStringF[F[_]] {
 
   /** Returns the serialization of the object into a [[com.google.protobuf.ByteString]]. This method
     * may yield different results if it is invoked several times.
     */
-  def toByteString(version: ProtocolVersion): ByteString
+  def toByteString(version: ProtocolVersion): F[ByteString]
 }

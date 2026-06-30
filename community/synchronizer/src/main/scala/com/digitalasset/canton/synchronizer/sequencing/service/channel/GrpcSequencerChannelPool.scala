@@ -7,7 +7,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.protocol.channel.{
@@ -46,6 +46,7 @@ private[channel] final class GrpcSequencerChannelPool(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends FlagCloseable
+    with HasCloseContext
     with NamedLogging {
 
   // As sequencer channels are mutable, any access or modifications to channels are expected to be synchronized.
@@ -159,13 +160,14 @@ private[channel] final class GrpcSequencerChannelPool(
                   // schedule expiring the channel once token expires
                   // this could potentially happen immediately if the expiration has already passed
                   _ = tokenExpiresAt.foreach(ts =>
-                    clock.scheduleAt(
+                    clock.scheduleAtCancelledOnShutdown(
                       _ => {
                         logger.info(
                           s"Closing channel ${metadata.channelId} because ${channel.firstMember} token has expired at $ts"
                         )
                         closeChannel(metadata.channelId, channel)
                       },
+                      s"${getClass.getName}: closing channel at expiry",
                       ts,
                     )
                   )
