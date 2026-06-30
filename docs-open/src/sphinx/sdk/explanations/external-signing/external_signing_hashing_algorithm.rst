@@ -77,7 +77,7 @@ V4 follows the same general hashing approach as V3. The V3 section below defines
 Changes from V3
 ---------------
 
-- Development-version Exercise nodes include ``external_call_results`` in the prepared transaction hash.
+- Exercise nodes with version dev include ``external_call_results`` in the prepared transaction hash.
   This binds the recorded external-call result payloads shown in prepared transaction review to the external party's signature.
 
 V3
