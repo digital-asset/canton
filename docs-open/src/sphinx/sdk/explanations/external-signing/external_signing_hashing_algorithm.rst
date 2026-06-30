@@ -106,8 +106,6 @@ Changes from V2
 
 - Addition of an ``max_record_time`` field in :ref:`metadata <metadata_encoding>` to make maximum record time explicit in the signed metadata.
 
-V3 is the released PV35 hashing scheme for LF ``SerializationVersion.V2``. It remains stable and does not include development-version ``external_call_results``.
-
 Changes from V1
 ---------------
 
