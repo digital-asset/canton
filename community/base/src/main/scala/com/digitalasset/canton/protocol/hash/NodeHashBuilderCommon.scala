@@ -77,6 +77,11 @@ private[hash] abstract class NodeHashBuilderCommon(
         .withContext("Acting Parties")(_.addStringSet(actingParties))
   }
 
+  /** Whether this hashing scheme version encodes exercise-node external-call results. False for
+    * V2/V3 (which omit them); HashingSchemeVersion.V4 overrides to true.
+    */
+  protected def supportsExternalCallResults: Boolean = false
+
   /** Encodes an exercise node WITHOUT the children. DO NOT use this directly. It only exists so it
     * can be overridden in newer versions which may add new fields to the hash while keeping the
     * children at the end.
@@ -101,10 +106,13 @@ private[hash] abstract class NodeHashBuilderCommon(
           exerciseResult,
           keyOpt,
           byKey,
-          _, // externalCallResults - not part of the V2/V3 common exercise-node encoding.
-          // HashingSchemeVersion.V4 adds them in its override.
+          externalCallResults,
           version,
         ) =>
+      // V2/V3 do not encode external-call results; HashingSchemeVersion.V4 overrides
+      // supportsExternalCallResults and adds them. Fail rather than silently omit them.
+      if (externalCallResults.nonEmpty && !supportsExternalCallResults)
+        notSupported("external call results in Exercise node", version)
       if (choiceAuthorizers.nonEmpty)
         notSupported("choiceAuthorizers in Exercise node", version) // 2.dev feature
       if (keyOpt.nonEmpty && version == V1) notSupported("keyOpt in Exercise node", version)

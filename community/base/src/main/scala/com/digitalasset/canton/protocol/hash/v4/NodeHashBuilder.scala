@@ -27,6 +27,9 @@ private[hash] class NodeHashBuilder(
 
   override protected val hashingSchemeVersion: HashingSchemeVersion = HashingSchemeVersion.V4
 
+  // V4 is the first scheme that encodes exercise-node external-call results into the hash.
+  override protected def supportsExternalCallResults: Boolean = true
+
   override private[hash] def newBuilder(hashTracer: HashTracer): NodeHashBuilder =
     new NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
 

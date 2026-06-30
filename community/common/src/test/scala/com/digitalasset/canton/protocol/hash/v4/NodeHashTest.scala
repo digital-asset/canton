@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol.hash.v4
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.protocol.LfHash
+import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
 import com.digitalasset.canton.protocol.hash.{HashTracer, HashUtilsTest}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
@@ -132,6 +133,28 @@ class NodeHashTest extends BaseTest with AnyWordSpecLike with Matchers with Hash
         externalCallResult1.copy(output = Bytes.assertFromString("ff")),
       ).foreach { changedResult =>
         hashExerciseNode(exerciseNode(ImmArray(changedResult))) should not be hash
+      }
+    }
+  }
+
+  "Pre-V4 NodeHashBuilder" should {
+    "reject external-call results rather than silently dropping them" in {
+      // External-call results must never be silently omitted from the hash: a scheme that does
+      // not encode them must fail when they are present. Each scheme is paired with the highest
+      // LF serialization version it accepts (V2 -> V1, V3 -> V2) so the failure is the
+      // external-call rejection, not the upfront version-compatibility check.
+      Seq(
+        HashingSchemeVersion.V2 -> SerializationVersion.V1,
+        HashingSchemeVersion.V3 -> SerializationVersion.V2,
+      ).foreach { case (schemeVersion, lfVersion) =>
+        a[NodeHashingError.UnsupportedFeature] should be thrownBy
+          tryHashNodeWithVersion(
+            node = exerciseNode(ImmArray(externalCallResult1)).copy(version = lfVersion),
+            hashingSchemeVersion = schemeVersion,
+            nodeSeed = Some(nodeSeed),
+            hashTracer = HashTracer.NoOp,
+            enforceNodeSeedForCreateNodes = true,
+          )
       }
     }
   }
