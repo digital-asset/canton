@@ -57,8 +57,7 @@ Transaction Nodes
 Transaction nodes are additionally individually versioned with a Daml version (also called LF version).
 The encoding version is decoupled from the LF version and implementations should only focus on the hashing version.
 However, new LF versions may introduce new fields in nodes or new node types. For that reason, the protobuf representation of a node is
-versioned to accommodate those future changes. In stable protocol versions, new Daml language versions may result in new hashing
-versions. Development-only Daml versions may be supported under the development protocol before a stable hashing version is assigned.
+versioned to accommodate those future changes. In practice, every new Daml language version results in a new hashing version.
 
 .. literalinclude:: CANTON/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
     :start-after: [docs-entry-start: DamlTransaction.Node]
