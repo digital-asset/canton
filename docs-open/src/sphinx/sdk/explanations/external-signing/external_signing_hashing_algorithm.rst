@@ -643,51 +643,62 @@ Create
 Exercise
 ^^^^^^^^
 
-.. code-block::
+.. tabs::
 
-    fn encode_node(exercise):
-        0x01 || # Node encoding version
-        encode(exercise.lf_version) || # Node LF version
-        0x01 || # Exercise node tag
-        encode_seed(find_seed(node.node_id).get) ||
-        encode(exercise.contract_id) ||
-        encode(exercise.package_name) ||
-        encode(exercise.template_id) ||
-        encode(exercise.signatories) ||
-        encode(exercise.stakeholders) ||
-        encode(exercise.acting_parties) ||
-        encode(exercise.interface_id) ||
-        encode(exercise.choice_id) ||
-        encode(exercise.chosen_value) ||
-        encode(exercise.consuming) ||
-        encode(exercise.exercise_result) ||
-        encode(exercise.choice_observers) ||
-        encode(exercise.by_key) ||
-        encode(exercise.key) ||
-        encode(exercise.children)
+   .. tab:: V4
+
+      .. code-block::
+
+          fn encode_node(exercise):
+              encode(exercise.lf_version) || # Node LF version
+              0x01 || # Exercise node tag
+              encode_seed(find_seed(node.node_id).get) ||
+              encode(exercise.contract_id) ||
+              encode(exercise.package_name) ||
+              encode(exercise.template_id) ||
+              encode(exercise.signatories) ||
+              encode(exercise.stakeholders) ||
+              encode(exercise.acting_parties) ||
+              encode(exercise.interface_id) ||
+              encode(exercise.choice_id) ||
+              encode(exercise.chosen_value) ||
+              encode(exercise.consuming) ||
+              encode(exercise.exercise_result) ||
+              encode(exercise.choice_observers) ||
+              encode(exercise.by_key) ||
+              encode(exercise.key) ||
+              encode(exercise.external_call_results) || # new in V4
+              encode(exercise.children)
+
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode_node(exercise):
+              encode(exercise.lf_version) || # Node LF version
+              0x01 || # Exercise node tag
+              encode_seed(find_seed(node.node_id).get) ||
+              encode(exercise.contract_id) ||
+              encode(exercise.package_name) ||
+              encode(exercise.template_id) ||
+              encode(exercise.signatories) ||
+              encode(exercise.stakeholders) ||
+              encode(exercise.acting_parties) ||
+              encode(exercise.interface_id) ||
+              encode(exercise.choice_id) ||
+              encode(exercise.chosen_value) ||
+              encode(exercise.consuming) ||
+              encode(exercise.exercise_result) ||
+              encode(exercise.choice_observers) ||
+              encode(exercise.by_key) ||
+              encode(exercise.key) ||
+              encode(exercise.children)
 
 .. important::
 
     For Exercise nodes, the node seed **MUST** be defined. Therefore it is encoded as a **non** optional field, as noted via the
     ``.get`` in ``find_seed(node.node_id).get``. If the seed of an exercise node cannot be found in the list of ``node_seeds``, encoding must be stopped
     and it should be reported as a bug.
-
-.. note::
-
-    The V3 exercise-node encoding does not include ``external_call_results``. V4 preserves the V3 field order and inserts
-    ``external_call_results`` immediately before ``children``:
-
-    .. code-block::
-
-        encode(exercise.exercise_result) ||
-        encode(exercise.choice_observers) ||
-        encode(exercise.by_key) ||
-        encode(exercise.key) ||
-        encode(exercise.external_call_results) ||
-        encode(exercise.children)
-
-    The ``external_call_results`` field is encoded as an ordered repeated field in V4.
-    It is not included in V3, because V3 is the released PV35 hashing scheme and must remain stable.
 
 External call result
 ^^^^^^^^^^^^^^^^^^^^
