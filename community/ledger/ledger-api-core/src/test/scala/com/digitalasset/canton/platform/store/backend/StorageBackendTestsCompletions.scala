@@ -10,7 +10,9 @@ import com.digitalasset.canton.tracing.SerializableTraceContextConverter.Seriali
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.google.protobuf.ByteString
 import com.google.protobuf.duration.Duration
+import io.grpc.Status
 import org.scalatest.Inside
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -326,6 +328,59 @@ private[backend] trait StorageBackendTestsCompletions
       completion2.completionResponse.completion should not be empty
       completion2.completionResponse.completion.toList.head.actAs.toSet should be(
         Set(party)
+      )
+    }
+  }
+
+  it should "correctly persist and retrieve the transaction hash of a rejection" in {
+    val party = someParty
+    val transactionHash = someExternalTransactionHashBinary
+
+    val dtos = Vector(
+      // A rejection (update_id IS NULL) carrying a transaction hash.
+      dtoCompletion(
+        offset(1),
+        submitters = Set(party),
+        updateId = None,
+        rejectionStatusCode = Some(Status.Code.ABORTED.value()),
+        rejectionStatusMessage = Some("rejected"),
+        transactionHash = Some(transactionHash),
+      ),
+      // A rejection without a transaction hash.
+      dtoCompletion(
+        offset(2),
+        submitters = Set(party),
+        updateId = None,
+        rejectionStatusCode = Some(Status.Code.ABORTED.value()),
+        rejectionStatusMessage = Some("rejected"),
+        transactionHash = None,
+      ),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    val completions = executeSql(
+      backend.completion
+        .commandCompletions(
+          Offset.firstOffset,
+          offset(2),
+          Some(someUserId),
+          Set(party),
+          limit = 10,
+        )
+    ).toList
+
+    completions should have length 2
+    inside(completions) { case List(completionWithHash, completionWithoutHash) =>
+      completionWithHash.completionResponse.completion should not be empty
+      completionWithHash.completionResponse.completion.toList.head.transactionHash should be(
+        Some(ByteString.copyFrom(transactionHash))
+      )
+      completionWithoutHash.completionResponse.completion should not be empty
+      completionWithoutHash.completionResponse.completion.toList.head.transactionHash.isEmpty should be(
+        true
       )
     }
   }

@@ -424,8 +424,6 @@ private[reassignment] class AssignmentProcessingSteps(
   ] = {
     val reassignmentId = parsedRequest.reassignmentId
     val sourceSynchronizer = parsedRequest.fullViewTree.sourceSynchronizer
-    val isReassigningParticipant =
-      parsedRequest.fullViewTree.isReassigningParticipant(participantId)
 
     for {
       reassignmentDataE <- EitherT.right[ReassignmentProcessorError](
@@ -447,20 +445,6 @@ private[reassignment] class AssignmentProcessingSteps(
             "Not sending a verdict because the list of hosted confirming parties is empty"
           )
           FutureUnlessShutdown.pure(None)
-        } else if (
-          assignmentValidationResult.reassigningParticipantValidationResult.isUnassignmentDataNotFound && isReassigningParticipant
-        ) {
-          logger.info(
-            s"Sending an abstain verdict for ${assignmentValidationResult.hostedConfirmingReassigningParties} because unassignment data is not found in the reassignment store"
-          )
-          val confirmationResponses = createAbstainResponse(
-            parsedRequest.requestId,
-            assignmentValidationResult.rootHash,
-            s"Unassignment data not found when processing assignment $reassignmentId.",
-            assignmentValidationResult.hostedConfirmingReassigningParties,
-          )
-
-          FutureUnlessShutdown.pure(confirmationResponses)
         } else {
           createConfirmationResponses(
             parsedRequest.requestId,

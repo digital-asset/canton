@@ -11,7 +11,7 @@ import scala.concurrent.Future
 
 /** Trait for an individual scheduler
   */
-trait Scheduler extends StartStoppable with AutoCloseable {}
+trait Scheduler extends StartStoppable with AutoCloseable
 
 /** Extends the Scheduler with the concept of retention used for the pruning cut-off
   */

@@ -13,6 +13,7 @@ import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.*
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
+import com.google.protobuf.ByteString
 
 import scala.collection.Searching.{Found, InsertionPoint, SearchResult}
 import scala.collection.View
@@ -44,6 +45,8 @@ class InMemoryFanoutBuffer(
     Vector.empty[(Offset, TransactionLogUpdate)]
   @volatile private[cache] var _lookupMap =
     Map.empty[String, TransactionLogUpdate]
+  @volatile private[cache] var _acceptedByHash =
+    Map.empty[ByteString, TransactionLogUpdate.TransactionAccepted]
 
   private val bufferMetrics = metrics.services.index.inMemoryFanoutBuffer
   private val pushTimer = bufferMetrics.push
@@ -78,6 +81,9 @@ class InMemoryFanoutBuffer(
           _bufferLog = _bufferLog :+ entry.offset -> entry
           extractEntryFromMap(entry).foreach { case (key, value) =>
             _lookupMap = _lookupMap.updated(key, value)
+          }
+          extractHashFromEntry(entry).foreach { case (hash, value) =>
+            _acceptedByHash = _acceptedByHash.updated(hash, value)
           }
         }
       }),
@@ -183,6 +189,7 @@ class InMemoryFanoutBuffer(
   ): Option[TransactionLogUpdate] = lookupKey match {
     case LookupKey.ByUpdateId(updateId) => lookup(updateId.toHexString)
     case LookupKey.ByOffset(offset) => lookup(offset)
+    case LookupKey.ByHash(hash) => _acceptedByHash.get(hash)
   }
 
   /** Lookup the accepted transaction log update by update id. */
@@ -226,6 +233,7 @@ class InMemoryFanoutBuffer(
   def flush(): Unit = (lock.exclusive {
     _bufferLog = Vector.empty
     _lookupMap = Map.empty
+    _acceptedByHash = Map.empty
   })
 
   private def ensureSize(targetSize: Int)(implicit traceContext: TraceContext): Unit = (
@@ -255,9 +263,12 @@ class InMemoryFanoutBuffer(
     val (evicted, remainingBufferLog) = _bufferLog.splitAt(dropCount)
     val lookupKeysToEvict: View[String] =
       evicted.view.map(_._2).flatMap(extractEntryFromMap).map(_._1)
+    val hashKeysToEvict: View[ByteString] =
+      evicted.view.map(_._2).flatMap(extractHashFromEntry).map(_._1)
 
     _bufferLog = remainingBufferLog
     _lookupMap = _lookupMap -- lookupKeysToEvict
+    _acceptedByHash = _acceptedByHash -- hashKeysToEvict
   })
 
   private def extractEntryFromMap(
@@ -272,6 +283,15 @@ class InMemoryFanoutBuffer(
         Some(topologyTx.updateId -> topologyTx)
       case _: TransactionLogUpdate.TransactionRejected => None
       case _: TransactionLogUpdate.ReceivedAcsCommitment => None
+    }
+
+  private def extractHashFromEntry(
+      transactionLogUpdate: TransactionLogUpdate
+  ): Option[(ByteString, TransactionLogUpdate.TransactionAccepted)] =
+    transactionLogUpdate match {
+      case txAccepted: TransactionLogUpdate.TransactionAccepted =>
+        txAccepted.transactionHash.map(_.unwrap -> txAccepted)
+      case _ => None
     }
 
 }

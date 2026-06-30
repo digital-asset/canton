@@ -1,34 +1,13 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.localstore.api
+package com.digitalasset.canton.user.store
 
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
+import com.digitalasset.canton.user.{IdentityProviderId, User, UserRight, UserUpdate}
 import com.digitalasset.daml.lf.data.Ref
 
 import scala.concurrent.{ExecutionContext, Future}
-
-final case class UserUpdate(
-    id: Ref.UserId,
-    identityProviderId: IdentityProviderId,
-    primaryPartyUpdateO: Option[Option[Ref.Party]] = None,
-    isDeactivatedUpdateO: Option[Boolean] = None,
-    metadataUpdate: ObjectMetaUpdate,
-    primaryPartyAuthenticationUpdateO: Option[Boolean] = None,
-)
-
-final case class ObjectMetaUpdate(
-    resourceVersionO: Option[Long],
-    annotationsUpdateO: Option[Map[String, String]],
-)
-
-object ObjectMetaUpdate {
-  def empty: ObjectMetaUpdate = ObjectMetaUpdate(
-    resourceVersionO = None,
-    annotationsUpdateO = None,
-  )
-}
 
 trait UserManagementStore { self: NamedLogging =>
 

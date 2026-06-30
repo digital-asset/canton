@@ -86,6 +86,14 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
           (ErrorResource.Offset, offset.toString)
         )
       }
+
+      final case class RejectWithHash(hash: String)(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(cause = "Update not found, or not visible.") {
+        override def resources: Seq[(ErrorResource, String)] = Seq(
+          (ErrorResource.TransactionHash, hash)
+        )
+      }
     }
 
     @Explanation(

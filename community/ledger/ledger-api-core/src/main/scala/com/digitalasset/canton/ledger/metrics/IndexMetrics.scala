@@ -38,20 +38,6 @@ class IndexMetrics(
   import MetricsContext.Implicits.empty
   private val prefix = inventory.prefix
 
-  val transactionTreesBufferSize: Counter =
-    openTelemetryMetricsFactory.counter(
-      MetricInfo(
-        prefix :+ "transaction_trees_buffer_size",
-        summary = "The buffer size for transaction trees requests.",
-        description =
-          """An Pekko stream buffer is added at the end of all streaming queries, allowing
-                      |to absorb temporary downstream backpressure (e.g. when the client is
-                      |slower than upstream delivery throughput). This metric gauges the
-                      |size of the buffer for queries requesting transaction trees.""",
-        qualification = MetricQualification.Debug,
-      )
-    )
-
   val updatesBufferSize: Counter =
     openTelemetryMetricsFactory.counter(
       MetricInfo(

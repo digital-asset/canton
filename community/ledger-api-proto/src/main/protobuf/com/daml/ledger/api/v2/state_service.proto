@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.daml.ledger.api.v2;
 
 import "com/daml/ledger/api/v2/event.proto";
+import "com/daml/ledger/api/v2/offset_checkpoint.proto";
 import "com/daml/ledger/api/v2/reassignment.proto";
 import "com/daml/ledger/api/v2/transaction_filter.proto";
 
@@ -291,6 +292,12 @@ message GetLedgerEndResponse {
   //
   // Optional
   int64 offset = 1;
+
+  // Final record times observed by this participant for each of the sequencers that were ever connected.
+  // If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
+  //
+  // Optional: can be empty
+  repeated SynchronizerTime synchronizer_times = 2;
 }
 
 message GetLatestPrunedOffsetsRequest {

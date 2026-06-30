@@ -10,8 +10,8 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.auth.AuthorizationError.Expired
 import com.digitalasset.canton.auth.{AuthorizationChecksErrors, ClaimSet}
 import com.digitalasset.canton.config.NonNegativeDuration
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.{ErrorLoggingContext, SuppressionRule}
+import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.ServerCallStreamObserver
 import org.apache.pekko.actor.{Cancellable, Scheduler}
@@ -213,6 +213,7 @@ class UserBasedOngoingAuthorizationSpec
       ),
       nowF = () => clock.instant,
       userManagementStore = mock[UserManagementStore],
+      identityProviderConfigStore = mock[IdentityProviderConfigStore],
       userRightsCheckIntervalInSeconds = userRightsCheckIntervalInSeconds,
       pekkoScheduler = mockScheduler,
       jwtTimestampLeeway = jwtTimestampLeeway,

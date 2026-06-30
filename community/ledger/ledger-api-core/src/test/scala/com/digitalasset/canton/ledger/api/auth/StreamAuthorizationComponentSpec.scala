@@ -25,16 +25,19 @@ import com.digitalasset.canton.auth.{
 }
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ServerConfig
-import com.digitalasset.canton.ledger.api.UserRight.CanReadAs
 import com.digitalasset.canton.ledger.api.auth.services.UpdateServiceAuthorization
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, User}
-import com.digitalasset.canton.ledger.localstore.InMemoryUserManagementStore
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
+import com.digitalasset.canton.ledger.localstore.{
+  InMemoryIdentityProviderConfigStore,
+  InMemoryUserManagementStore,
+}
 import com.digitalasset.canton.logging.SuppressionRule.{FullSuppression, LoggerNameContains}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.{ApiServiceOwner, GrpcServerOwner}
+import com.digitalasset.canton.user.UserRight.CanReadAs
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.{IdentityProviderId, User}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.*
@@ -232,12 +235,14 @@ class StreamAuthorizationComponentSpec
       )(LoggingContextWithTrace.ForTesting)
       .futureValue
       .isRight shouldBe true
+    val identityProviderConfigStore = new InMemoryIdentityProviderConfigStore(loggerFactory)
     val authorizer = new Authorizer(
       now = () => nowRef.get(),
       participantId = participantId,
       ongoingAuthorizationFactory = UserBasedOngoingAuthorization.Factory(
         now = () => nowRef.get(),
         userManagementStore = userManagementStore,
+        identityProviderConfigStore = identityProviderConfigStore,
         userRightsCheckIntervalInSeconds = 1,
         pekkoScheduler = system.scheduler,
         jwtTimestampLeeway = None,
@@ -278,6 +283,9 @@ class StreamAuthorizationComponentSpec
       override def getUpdateById(
           request: GetUpdateByIdRequest
       ): Future[GetUpdateResponse] = notSupported
+
+      override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+        notSupported
 
       def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
         notSupported

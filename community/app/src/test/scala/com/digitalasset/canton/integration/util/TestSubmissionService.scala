@@ -35,7 +35,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.participant.ParticipantNode
-import com.digitalasset.canton.platform.apiserver.SeedService.WeakRandom
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
@@ -290,7 +290,7 @@ class TestSubmissionService(
       readAs: Seq[PartyId],
       disclosedContracts: Map[LfContractId, FatContractInstance],
       disclosedKeyContracts: Map[GlobalKey, Vector[FatContractInstance]],
-      submissionSeed: crypto.Hash = WeakRandom.nextSeed(),
+      submissionSeed: crypto.Hash = SubmissionSeed.generate(randomOps),
       packageMapOverride: Option[
         Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]
       ] = None,
@@ -644,7 +644,7 @@ object TestSubmissionService {
       submissionId: String = UUID.randomUUID().toString,
       deduplicationPeriodO: Option[DeduplicationPeriod] = None,
       ledgerTime: Time.Timestamp = Time.Timestamp.now(),
-      submissionSeed: crypto.Hash = WeakRandom.nextSeed(),
+      submissionSeed: crypto.Hash = SubmissionSeed.generate(randomOps),
       transactionSeed: SaltSeed = SaltSeed.generate()(randomOps),
       transactionUuid: UUID = UUID.randomUUID(),
       packageMapOverride: Option[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]] = None,
@@ -681,6 +681,7 @@ object TestSubmissionService {
         deduplicationPeriod,
         SubmissionId.fromString(submissionId).toOption,
         externallySignedSubmission = None,
+        transactionHash = None,
       )
     }
 

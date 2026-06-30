@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.integration.tests.docs
+package com.digitalasset.canton.integration.tests.docs.snippet
 
 import better.files.*
 import better.files.Dsl.{ln_s, mkdirs, rm}
@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.tests.docs.DocsGenerationSynchronization.{
+import com.digitalasset.canton.integration.tests.docs.snippet.DocsGenerationSynchronization.{
   cleanUpDarsSimlink,
   createDarsSimlink,
 }
@@ -102,7 +102,7 @@ import scala.util.{Failure, Success, Using}
   *
   * To ensure source RST file and target JSON output file paths are as expected by the tooling,
   * implement your "snippet generator" by extending from
-  * [[com.digitalasset.canton.integration.tests.docs.SnippetGenerator]].
+  * [[com.digitalasset.canton.integration.tests.docs.snippet.SnippetGenerator]].
   *
   * Future improvements / known limitations:
   *   - compilation failures are not properly included as output
@@ -477,7 +477,7 @@ class PocDocumentationIntegrationTest
       File(
         "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
       ),
-    ) {}
+    )
 
 class ExternalSigningTopologyTransactionIntegrationTest
     extends SnippetGenerator(

@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf.archive
 
 import com.digitalasset.daml.lf.data.Bytes
-import scalaz.syntax.traverse.*
 
 import java.io.{ByteArrayOutputStream, FileOutputStream, OutputStream}
 import java.nio.file.Path

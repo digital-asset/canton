@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
-import anorm.SqlParser.{int, long}
+import anorm.SqlParser.{int, long, str}
 import anorm.{BatchSql, NamedParameter, RowParser, ~}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.RepairCounter
@@ -17,13 +17,18 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsState,
 }
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
+import com.digitalasset.canton.platform.store.backend.{
+  Conversions,
+  LedgerEnd,
+  ParameterStorageBackend,
+}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import scalaz.syntax.tag.*
 
 import java.sql.Connection
+import scala.util.chaining.scalaUtilChainingOps
 
 import SimpleSqlExtensions.*
 
@@ -34,8 +39,7 @@ private[backend] class ParameterStorageBackendImpl(
   import Conversions.OffsetToStatement
 
   override def updateLedgerEnd(
-      ledgerEnd: ParameterStorageBackend.LedgerEnd,
-      lastSynchronizerIndex: Map[SynchronizerId, SynchronizerIndex] = Map.empty,
+      ledgerEnd: LedgerEnd
   )(connection: Connection): Unit = discard {
     queryStrategy.forceSynchronousCommitForCurrentTransactionForPostgreSQL(connection)
     discard(
@@ -68,7 +72,7 @@ private[backend] class ParameterStorageBackendImpl(
         |WHERE
         |  synchronizer_id = {internalizedSynchronizerId}
         |""".stripMargin,
-      lastSynchronizerIndex.toList.map { case (synchronizerId, synchronizerIndex) =>
+      ledgerEnd.synchronizerIndices.toList.map { case (synchronizerId, synchronizerIndex) =>
         Seq[NamedParameter](
           "internalizedSynchronizerId" -> stringInterning.synchronizerId.internalize(
             synchronizerId
@@ -95,10 +99,13 @@ private[backend] class ParameterStorageBackendImpl(
         lapi_parameters
       """
 
-  override def ledgerEnd(connection: Connection): Option[ParameterStorageBackend.LedgerEnd] =
+  override def ledgerEnd(connection: Connection): Option[LedgerEnd] =
     SqlGetLedgerEnd
       .as(LedgerEndParser.singleOpt)(connection)
       .flatten
+      .map(
+        _.copy(synchronizerIndices = cleanSynchronizerIndices(connection))
+      )
 
   private val TableName: String = "lapi_parameters"
   private val ParticipantIdColumnName: String = "participant_id"
@@ -106,6 +113,7 @@ private[backend] class ParameterStorageBackendImpl(
   private val LedgerEndSequentialIdColumnName: String = "ledger_end_sequential_id"
   private val LedgerEndStringInterningIdColumnName: String = "ledger_end_string_interning_id"
   private val LedgerEndPublicationTimeColumnName: String = "ledger_end_publication_time"
+  private val SynchronizerIdInterningPrefix: String = "d|"
 
   private val ParticipantIdParser: RowParser[ParticipantId] =
     Conversions.participantId(ParticipantIdColumnName).map(ParticipantId(_))
@@ -127,17 +135,18 @@ private[backend] class ParameterStorageBackendImpl(
   private val LedgerEndPublicationTimeParser: RowParser[Option[CantonTimestamp]] =
     long(LedgerEndPublicationTimeColumnName).map(CantonTimestamp.ofEpochMicro).?
 
-  private val LedgerEndParser: RowParser[Option[ParameterStorageBackend.LedgerEnd]] =
+  private val LedgerEndParser: RowParser[Option[LedgerEnd]] =
     LedgerEndOffsetParser ~ LedgerEndSequentialIdParser ~ LedgerEndStringInterningIdParser ~ LedgerEndPublicationTimeParser map {
       case Some(lastOffset) ~ Some(lastEventSequentialId) ~
           Some(lastStringInterningId) ~ Some(lastPublicationTime) =>
         // the four values are updated the same time, so it is expected that if one is not null, then all of them will not be null
         Some(
-          ParameterStorageBackend.LedgerEnd(
-            lastOffset,
-            lastEventSequentialId,
-            lastStringInterningId,
-            lastPublicationTime,
+          LedgerEnd(
+            lastOffset = lastOffset,
+            lastEventSeqId = lastEventSequentialId,
+            lastStringInterningId = lastStringInterningId,
+            lastPublicationTime = lastPublicationTime,
+            synchronizerIndices = Map(),
           )
         )
       case None ~ None ~ None ~ None => None
@@ -246,75 +255,88 @@ private[backend] class ParameterStorageBackendImpl(
         )
       )
 
-  override def cleanSynchronizerIndex(synchronizerId: SynchronizerId)(
+  /** This method is called during node initialization, when string interning was not yet
+    * initialized, hence externalization is done using join on string interning table.
+    */
+  private def cleanSynchronizerIndices(
       connection: Connection
-  ): Option[SynchronizerIndex] =
-    stringInterning.synchronizerId
-      .tryInternalize(synchronizerId)
-      .orElse(
-        // allow fallback to stringInterning persistence here to allow broader usage with tricky state inspection integration tests
-        SQL"""
-          SELECT internal_id
-          FROM lapi_string_interning
-          WHERE external_string = ${"d|" + synchronizerId.toProtoPrimitive}
-          """
-          .asSingleOpt(int("internal_id"))(connection)
-      )
-      .flatMap(internedSynchronizerId =>
-        SQL"""
-            SELECT
-              sequencer_timestamp,
-              repair_timestamp,
-              repair_counter,
-              record_time
-            FROM
-              lapi_ledger_end_synchronizer_index
-            WHERE
-              synchronizer_id = $internedSynchronizerId
-            """
-          .asSingleOpt(
-            for {
-              repairTimestampO <- long("repair_timestamp").?
-              repairCounterO <- long("repair_counter").?
-              sequencerTimestampO <- long("sequencer_timestamp").?
-              recordTime <- long("record_time")
-            } yield {
-              val repairIndex = (repairTimestampO, repairCounterO) match {
-                case (Some(repairTimestamp), Some(repairCounter)) =>
-                  List(
-                    SynchronizerIndex.forRepairUpdate(
-                      RepairIndex(
-                        timestamp = CantonTimestamp.ofEpochMicro(repairTimestamp),
-                        counter = RepairCounter(repairCounter),
-                      )
-                    )
-                  )
+  ): Map[SynchronizerId, SynchronizerIndex] =
+    SQL"""
+        SELECT
+          string_interning.external_string AS synchronizer_id,
+          synchronizer_index.synchronizer_id AS internalized_synchronizer_id,
+          synchronizer_index.sequencer_timestamp,
+          synchronizer_index.repair_timestamp,
+          synchronizer_index.repair_counter,
+          synchronizer_index.record_time
+        FROM
+          lapi_ledger_end_synchronizer_index synchronizer_index
+          LEFT JOIN lapi_string_interning string_interning
+            ON string_interning.internal_id = synchronizer_index.synchronizer_id
+        """
+      .asVectorOf(CleanSynchronizerIndicesParser)(connection)
+      .toMap
 
-                case (None, None) =>
-                  Nil
-
-                case _ =>
-                  throw new IllegalStateException(
-                    s"Invalid persisted data in lapi_ledger_end_synchronizer_index table: either both repair_counter and repair_timestamp should be defined or none of them, but an invalid combination found for synchronizer:${synchronizerId.toProtoPrimitive} repair_counter: $repairCounterO, repair_timestamp: $repairTimestampO"
-                  )
-              }
-              val sequencerIndex = sequencerTimestampO
-                .map(CantonTimestamp.ofEpochMicro)
-                .map(SynchronizerIndex.forSequencedUpdate)
-                .toList
-              val recordTimeSynchronizerIndex = SynchronizerIndex.forFloatingUpdate(
-                CantonTimestamp.ofEpochMicro(recordTime)
+  private val CleanSynchronizerIndicesParser: RowParser[(SynchronizerId, SynchronizerIndex)] =
+    for {
+      internalizedSynchronizerId <- int("internalized_synchronizer_id")
+      prefixedSynchronizerId <- str("synchronizer_id").?
+      synchronizerId =
+        SynchronizerId.tryFromString(
+          prefixedSynchronizerId
+            .getOrElse(
+              throw new IllegalStateException(
+                s"String interning entry for internalized synchornizer id=$internalizedSynchronizerId missing"
               )
-              (recordTimeSynchronizerIndex :: repairIndex ::: sequencerIndex)
-                .reduceOption(_ max _)
-                .getOrElse(
-                  throw new IllegalStateException(
-                    s"Invalid persisted data in lapi_ledger_end_synchronizer_index table: none of the optional fields are defined for synchronizer ${synchronizerId.toProtoPrimitive}"
-                  )
+            )
+            .tap(s =>
+              if (!s.startsWith(SynchronizerIdInterningPrefix))
+                throw new IllegalStateException(
+                  s"Externalized string $s does not have the expected synchronizer id prefix $SynchronizerIdInterningPrefix"
                 )
-            }
-          )(connection)
+            )
+            .stripPrefix(SynchronizerIdInterningPrefix)
+        )
+      repairTimestampO <- long("repair_timestamp").?
+      repairCounterO <- long("repair_counter").?
+      sequencerTimestampO <- long("sequencer_timestamp").?
+      recordTime <- long("record_time")
+    } yield {
+      val repairIndex = (repairTimestampO, repairCounterO) match {
+        case (Some(repairTimestamp), Some(repairCounter)) =>
+          List(
+            SynchronizerIndex.forRepairUpdate(
+              RepairIndex(
+                timestamp = CantonTimestamp.ofEpochMicro(repairTimestamp),
+                counter = RepairCounter(repairCounter),
+              )
+            )
+          )
+
+        case (None, None) =>
+          Nil
+
+        case _ =>
+          throw new IllegalStateException(
+            s"Invalid persisted data in lapi_ledger_end_synchronizer_index table: either both repair_counter and repair_timestamp should be defined or none of them, but an invalid combination found for synchronizer:${synchronizerId.toProtoPrimitive} repair_counter: $repairCounterO, repair_timestamp: $repairTimestampO"
+          )
+      }
+      val sequencerIndex = sequencerTimestampO
+        .map(CantonTimestamp.ofEpochMicro)
+        .map(SynchronizerIndex.forSequencedUpdate)
+        .toList
+      val recordTimeSynchronizerIndex = SynchronizerIndex.forFloatingUpdate(
+        CantonTimestamp.ofEpochMicro(recordTime)
       )
+      val synchronizerIndex = (recordTimeSynchronizerIndex :: repairIndex ::: sequencerIndex)
+        .reduceOption(_ max _)
+        .getOrElse(
+          throw new IllegalStateException(
+            s"Invalid persisted data in lapi_ledger_end_synchronizer_index table: none of the optional fields are defined for synchronizer ${synchronizerId.toProtoPrimitive}"
+          )
+        )
+      synchronizerId -> synchronizerIndex
+    }
 
   override def updatePostProcessingEnd(postProcessingEnd: Option[Offset])(
       connection: Connection

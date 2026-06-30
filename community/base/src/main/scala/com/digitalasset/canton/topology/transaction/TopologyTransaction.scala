@@ -175,7 +175,7 @@ object TopologyTransaction
       TopologyTransaction[TopologyChangeOp, TopologyMapping]
     ] {
 
-  final case class TxHash(hash: Hash) extends AnyVal {}
+  final case class TxHash(hash: Hash) extends AnyVal
 
   override val name: String = "TopologyTransaction"
 

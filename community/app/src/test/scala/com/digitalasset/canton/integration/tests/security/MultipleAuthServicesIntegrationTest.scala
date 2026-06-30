@@ -155,7 +155,6 @@ trait MultipleAuthServicesIntegrationTest
           loggerFactory.assertThrowsAndLogs[CommandFailure](
             client.ledger_api.state.acs.of_party(owner),
             _.warningMessage should include("The Token's Signature resulted invalid"),
-            _.warningMessage should include("The Token's Signature resulted invalid"),
             _.warningMessage should include regex
               """UNAUTHENTICATED\(6,.{8}\): The command is missing a \(valid\) JWT token""".r,
             _.commandFailureMessage should include("UNAUTHENTICATED"),

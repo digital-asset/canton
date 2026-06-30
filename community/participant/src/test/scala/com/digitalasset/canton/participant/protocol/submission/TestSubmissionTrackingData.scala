@@ -17,5 +17,6 @@ object TestSubmissionTrackingData {
         .completionInfo(List.empty, paidTrafficCost = NonNegativeLong.tryCreate(12356)),
       TransactionSubmissionTrackingData.TimeoutCause,
       SynchronizerId.tryFromString("da::default").toPhysical,
+      transactionHash = None,
     )
 }

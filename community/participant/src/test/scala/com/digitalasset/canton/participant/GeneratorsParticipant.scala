@@ -108,10 +108,12 @@ final class GeneratorsParticipant(
       completionInfo <- Arbitrary.arbitrary[CompletionInfo]
       rejectionCause <- Arbitrary.arbitrary[RejectionCause]
       physicalSynchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+      transactionHash <- Gen.option(Arbitrary.arbitrary[Hash])
     } yield TransactionSubmissionTrackingData(
       completionInfo,
       rejectionCause,
       physicalSynchronizerId,
+      transactionHash = transactionHash,
     )
 
   implicit val submissionTrackingDataArg: Arbitrary[SubmissionTrackingData] =

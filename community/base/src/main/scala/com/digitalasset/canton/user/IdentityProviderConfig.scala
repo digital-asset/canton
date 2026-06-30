@@ -1,10 +1,17 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.localstore.api
+package com.digitalasset.canton.user
 
 import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.ledger.api.IdentityProviderId
+
+final case class IdentityProviderConfig(
+    identityProviderId: IdentityProviderId.Id,
+    isDeactivated: Boolean = false,
+    jwksUrl: JwksUrl,
+    issuer: String,
+    audience: Option[String],
+)
 
 final case class IdentityProviderConfigUpdate(
     identityProviderId: IdentityProviderId.Id,

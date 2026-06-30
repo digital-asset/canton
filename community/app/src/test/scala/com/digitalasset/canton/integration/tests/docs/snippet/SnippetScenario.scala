@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.integration.tests.docs
+package com.digitalasset.canton.integration.tests.docs.snippet
 
 import better.files.File
 import cats.syntax.either.*
@@ -56,7 +56,7 @@ object SnippetScenario extends LazyLogging {
 
   // Location of snippet macros
   private val macroFolder =
-    File.currentWorkingDirectory / "community/app/src/test/scala/com/digitalasset/canton/integration/tests/docs/macros"
+    File.currentWorkingDirectory / "community/app/src/test/scala/com/digitalasset/canton/integration/tests/docs/snippet/macros"
 
   def parse(lines: Seq[String]): Seq[SnippetScenario] = {
 

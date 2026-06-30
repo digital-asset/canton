@@ -195,10 +195,10 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           module.receive(message)(context, traceContext)
         }
 
-      case ModuleControl.SetBehavior(module, ready) =>
+      case setBehavior @ ModuleControl.SetBehavior(module, ready, _) =>
         machine.allReactors.addOne(to -> Reactor(module))
         if (ready)
-          module.ready(context.self)
+          module.ready(context.self)(setBehavior.traceContext)
         logger.info(s"$node has set a behavior for module $to (ready=$ready)")(TraceContext.empty)
 
       case ModuleControl.Stop(onStop) =>
@@ -503,7 +503,9 @@ final case class Machine[OnboardingDataT, SystemNetworkMessageT](
     init.p2pGrpcConnectionState.clear()
     val _ = init
       .systemInitializerFactory(onboardingManager.provide(ProvideForRestart, node))
-      .initialize(system, (_, _) => simulationP2PNetworkManager)
+      .initialize(system, (_, _) => simulationP2PNetworkManager)(
+        TraceContext.createNew("dabft_pekko_module_system_simulation_restart")
+      )
     crashed = false
   }
 

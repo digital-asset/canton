@@ -98,6 +98,7 @@ final class IssConsensusModule[E <: Env[E]](
     //  to avoid two different constructor calls depending on whether the test want to customize it or not.
     customOnboardingAndServerStateTransferManager: Option[StateTransferManager[E]] = None,
     private var activeTopologyInfo: OrderingTopologyInfo[E] = initialState.topologyInfo,
+    initTraceContext: TraceContext,
 )(
     private var catchupDetector: CatchupDetector = new DefaultCatchupDetector(
       activeTopologyInfo.currentMembership,
@@ -114,7 +115,7 @@ final class IssConsensusModule[E <: Env[E]](
 
   logger.info(
     s"Consensus module instantiated with epoch length ${initialState.topologyInfo.currentMembership.orderingTopology.epochLength}"
-  )(TraceContext.empty)
+  )(initTraceContext)
 
   private val thisNode = initialState.topologyInfo.thisNode
 
@@ -138,7 +139,7 @@ final class IssConsensusModule[E <: Env[E]](
       s"membership = ${initialState.topologyInfo.currentMembership}, " +
       s"latest completed epoch = ${initialState.latestCompletedEpoch.info}, " +
       s"current epoch = ${initialState.epochState.epoch.info} (completed: ${initialState.epochState.epochCompletionStatus.isComplete})"
-  )(TraceContext.empty)
+  )(initTraceContext)
 
   private var latestCompletedEpoch: EpochStore.Epoch = initialState.latestCompletedEpoch
   @VisibleForTesting
@@ -166,7 +167,9 @@ final class IssConsensusModule[E <: Env[E]](
   private[iss] def getActiveTopologyInfo: OrderingTopologyInfo[E] = activeTopologyInfo
 
   // TODO(#16761) resend locally-led ordered blocks (PrePrepare) in activeEpoch in case my node crashed
-  override def ready(self: ModuleRef[Consensus.Message[E]]): Unit = ()
+  override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
+      traceContext: TraceContext
+  ): Unit = ()
 
   override protected def receiveInternal(message: Consensus.Message[E])(implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -752,6 +755,7 @@ final class IssConsensusModule[E <: Env[E]](
             completedBlocks = Seq.empty,
             pbftMessagesForIncompleteBlocks = Seq.empty,
           ),
+          traceContext,
         ),
         completedBlocks = Seq.empty,
         loggerFactory = loggerFactory,

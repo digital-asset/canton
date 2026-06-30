@@ -25,6 +25,8 @@ import com.digitalasset.daml.lf.data.Ref.Party
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
+import scala.collection.mutable
+
 class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndexService {
 
   override def activeContracts(
@@ -109,17 +111,34 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
       activeAt: Offset,
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
-  )(implicit
-      traceContext: TraceContext
-  ): Source[InternalIndexService.ActiveContract, NotUsed] =
-    throw new UnsupportedOperationException() // TODO(#33232): Implement
+  )(implicit traceContext: TraceContext): Source[InternalIndexService.ActiveContract, NotUsed] =
+    if (stakeholders1.isEmpty)
+      Source.failed(
+        new IllegalArgumentException("acs requires a non-empty stakeholders1 set")
+      )
+    else
+      indexService.acs(synchronizerId, activeAt, stakeholders1, stakeholders2)(loggingContext)
 
   override def counterParties(
       synchronizerId: SynchronizerId,
       activeAt: Offset,
       party: Option[Party],
-  ): Source[LfPartyId, NotUsed] =
-    throw new UnsupportedOperationException() // TODO(#33232): Implement
+  )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed] =
+    indexService
+      .acs(
+        synchronizerId = synchronizerId,
+        activeAt = activeAt,
+        // an empty stakeholders1 means "any party"
+        stakeholders1 = party.toList.toSet,
+        stakeholders2 = Set.empty,
+      )(loggingContext)
+      .mapConcat(_.stakeholders)
+      // Emits each distinct element of the stream only once.
+      // The full set of already-seen elements is kept in memory for the lifetime of the stream.
+      .statefulMapConcat { () =>
+        val seen = mutable.Set.empty[Party]
+        elem => Option.when(seen.add(elem))(elem).toList
+      }
 
   private def loggingContext(implicit traceContext: TraceContext): LoggingContextWithTrace =
     new LoggingContextWithTrace(LoggingEntries.empty, traceContext)

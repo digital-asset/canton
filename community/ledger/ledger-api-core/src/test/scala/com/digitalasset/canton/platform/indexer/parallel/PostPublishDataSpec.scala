@@ -145,6 +145,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       synchronizerId = synchronizerId,
       recordTime = cantonTime2,
       isTransaction = true,
+      transactionHash = None,
     )(TraceContext.empty)
 
     PostPublishData.from(
@@ -190,6 +191,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       recordTime = cantonTime2,
       messageUuid = messageUuid,
       isTransaction = true,
+      transactionHash = None,
     )(TraceContext.empty)
 
     PostPublishData.from(

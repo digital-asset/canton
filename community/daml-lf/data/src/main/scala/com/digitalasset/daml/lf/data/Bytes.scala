@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf.data
 
 import com.google.protobuf.ByteString
-import scalaz.Order
 
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -46,8 +45,6 @@ object Bytes {
     val comparator = ByteString.unsignedLexicographicalComparator()
     (x, y) => comparator.compare(x.value, y.value)
   }
-
-  implicit val order: Order[Bytes] = Order.fromScalaOrdering
 
   def fromByteString(value: ByteString): Bytes =
     new Bytes(value)

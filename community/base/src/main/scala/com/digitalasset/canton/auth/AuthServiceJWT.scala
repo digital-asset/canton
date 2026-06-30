@@ -45,23 +45,19 @@ abstract class AuthServiceJWTBase(
   override def decodeToken(
       authToken: Option[String],
       serviceName: String,
-  )(implicit traceContext: TraceContext): Future[ClaimSet] =
+  )(implicit traceContext: TraceContext): Future[AuthService.Result] =
     Future.successful {
       authToken match {
-        case None => ClaimSet.Unauthenticated
+        case None => AuthService.Result(ClaimSet.Unauthenticated)
         case Some(header) => parseHeader(header, serviceName)
       }
     }
 
-  private[this] def parseHeader(header: String, serviceName: String)(implicit
-      traceContext: TraceContext
-  ): ClaimSet =
+  private[this] def parseHeader(header: String, serviceName: String): AuthService.Result =
     parseJWTPayload(header).fold(
-      error => {
-        logger.warn("Authorization error: " + error.message)
-        ClaimSet.Unauthenticated
-      },
-      payloadToClaims(serviceName),
+      error =>
+        AuthService.Result(ClaimSet.Unauthenticated, Some("Authorization error: " + error.message)),
+      payload => AuthService.Result(payloadToClaims(serviceName)(payload)),
     )
 
   private[this] def parsePayload(jwtPayload: String): Either[Error, AuthServiceJWTPayload] = {

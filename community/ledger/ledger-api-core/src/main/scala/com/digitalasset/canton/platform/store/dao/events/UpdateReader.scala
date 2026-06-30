@@ -46,7 +46,6 @@ import com.digitalasset.canton.platform.store.dao.{
 }
 import com.digitalasset.canton.platform.{FatContract, InternalUpdateFormat, TemplatePartiesFilter}
 import com.digitalasset.canton.util.MonadUtil
-import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Span
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.{Done, NotUsed}
@@ -420,8 +419,9 @@ private[dao] object UpdateReader {
             synchronizerId = first.synchronizerId,
             traceContext = Some(DamlTraceContext.parseFrom(first.traceContext)),
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
-            externalTransactionHash = first.externalTransactionHash.map(ByteString.copyFrom),
+            externalTransactionHash = first.transactionHash,
             paidTrafficCost = first.trafficCost,
+            transactionHash = first.transactionHash,
           )
         }
       )

@@ -1294,6 +1294,7 @@ class BftOrderingMetrics private[metrics] (
       private val prefix = histograms.p2p.send.prefix
 
       object labels {
+        val SourceSequencer: String = "source-sequencer"
         val TargetSequencer: String = "target-sequencer"
         val DroppedAsUnauthenticated: String = "dropped-as-unauthenticated"
 

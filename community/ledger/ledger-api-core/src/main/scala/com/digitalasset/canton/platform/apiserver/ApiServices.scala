@@ -13,11 +13,7 @@ import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
 import com.digitalasset.canton.ledger.api.validation.*
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  PartyRecordStore,
-  UserManagementStore,
-}
+import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -38,6 +34,7 @@ import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.daml.lf.data.Ref
@@ -106,7 +103,6 @@ object ApiServices {
       commandExecutionContext: ExecutionContext,
       metrics: LedgerApiServerMetrics,
       healthChecks: HealthChecks,
-      seedService: SeedService,
       managementServiceTimeout: FiniteDuration,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       ledgerFeatures: LedgerFeatures,
@@ -321,7 +317,6 @@ object ApiServices {
           syncService,
           timeProvider,
           timeProviderType,
-          seedService,
           commandExecutor,
           checkOverloaded,
           metrics,
@@ -394,7 +389,6 @@ object ApiServices {
           InteractiveSubmissionServiceImpl.createApiService(
             updateServices,
             syncService,
-            seedService,
             commandExecutor,
             metrics,
             checkOverloaded,

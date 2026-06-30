@@ -52,6 +52,13 @@ final class UpdateServiceAuthorization(
       )*
     )(request)
 
+  override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+    authorizer.rpc(service.getUpdateByHash)(
+      request.updateFormat.toList.flatMap(
+        RequiredClaims.updateFormatClaims[GetUpdateByHashRequest]
+      )*
+    )(request)
+
   def getUpdatesPage(request: GetUpdatesPageRequest): Future[GetUpdatesPageResponse] =
     authorizer.rpc(service.getUpdatesPage)(
       request.updateFormat.toList.flatMap(RequiredClaims.updateFormatClaims[GetUpdatesPageRequest])*

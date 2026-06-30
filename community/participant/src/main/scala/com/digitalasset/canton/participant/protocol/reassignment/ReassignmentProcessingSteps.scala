@@ -351,6 +351,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         psid.unwrap.logical,
         ts,
         isTransaction = false,
+        transactionHash = None,
       )
     )
     (updateO, rootHash.some)
@@ -383,6 +384,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         psid.unwrap.logical,
         pendingReassignment.requestId.unwrap,
         isTransaction = false,
+        transactionHash = None,
       )
     )
     Right(updateO)
@@ -444,37 +446,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
       )
     }
 
-  protected def createAbstainResponse(
-      requestId: RequestId,
-      rootHash: RootHash,
-      msg: String,
-      hostedConfirmingReassigningParties: Set[LfPartyId],
-  ): Option[ConfirmationResponses] =
-    NonEmpty
-      .from(hostedConfirmingReassigningParties)
-      .map { parties =>
-        checked(
-          ConfirmationResponses.tryCreate(
-            requestId,
-            rootHash,
-            psid.unwrap,
-            participantId,
-            NonEmpty.mk(
-              Seq,
-              ConfirmationResponse
-                .tryCreate(
-                  Some(ViewPosition.root),
-                  LocalAbstainError.CannotPerformAllValidations
-                    .Abstain(msg)
-                    .toLocalAbstain(protocolVersion.unwrap),
-                  parties,
-                ),
-            ),
-            protocolVersion.unwrap,
-          )
-        )
-      }
-
   private def responsesForWellformedPayloads(
       requestId: RequestId,
       protocolVersion: ProtocolVersion,
@@ -505,11 +476,12 @@ private[reassignment] trait ReassignmentProcessingSteps[
               LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
             )
 
-          val reassigningParticipantResult =
-            validationResult.reassigningParticipantValidationResult
-          val abstainErrors = reassigningParticipantResult.abstainErrors
-          val rejectingReassignmentErrors =
-            reassigningParticipantResult.errors.filterNot(abstainErrors.contains)
+          val reassigningParticipantResult = validationResult.reassigningParticipantValidationResult
+
+          val (abstainErrors, rejectingReassignmentErrors) =
+            if (reassigningParticipantResult.isAbstain)
+              (reassigningParticipantResult.errors, Seq.empty)
+            else (Seq.empty, reassigningParticipantResult.errors)
 
           val failedValidationRejection =
             rejectingReassignmentErrors

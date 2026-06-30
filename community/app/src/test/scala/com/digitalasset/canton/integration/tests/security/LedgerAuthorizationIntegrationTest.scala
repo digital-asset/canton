@@ -1006,7 +1006,7 @@ trait LedgerAuthorizationIntegrationTest
     }
 
     lazy val setOneThresholdToZero: GenTransactionTree => GenTransactionTree =
-      GenTransactionTree.rootViewsUnsafe
+      GenTransactionTree.Optics.rootViewsUnsafe
         .andThen(firstElement[TransactionView])
         .andThen(TransactionView.Optics.viewCommonDataUnsafe)
         .andThen(MerkleTree.tryUnwrap[ViewCommonData])
@@ -1033,8 +1033,8 @@ trait LedgerAuthorizationIntegrationTest
       ): TransactionConfirmationRequest =
         confirmationRequest
           .focus(_.informeeMessage.fullInformeeTree)
-          .andThen(FullInformeeTree.genTransactionTreeUnsafe)
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(FullInformeeTree.Optics.genTransactionTreeUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(firstElement[TransactionView])
           .andThen(TransactionView.Optics.viewCommonDataUnsafe)
           .modify(_.blindFully)
@@ -1138,7 +1138,7 @@ trait LedgerAuthorizationIntegrationTest
             )
 
           val withNonUniqueHashes: GenTransactionTree => GenTransactionTree =
-            GenTransactionTree.rootViewsUnsafe.modify { rootViews =>
+            GenTransactionTree.Optics.rootViewsUnsafe.modify { rootViews =>
               val rootViewsSeq = rootViews.unblindedElements
               val res =
                 MerkleSeq.fromSeq(pureCrypto, testedProtocolVersion)(rootViewsSeq ++ rootViewsSeq)

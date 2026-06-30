@@ -25,7 +25,7 @@ class CantonAdminTokenAuthService(
   override def decodeToken(
       authToken: Option[String],
       serviceName: String,
-  )(implicit traceContext: TraceContext): Future[ClaimSet] = {
+  )(implicit traceContext: TraceContext): Future[AuthService.Result] = {
     val bearerTokenRegex = "Bearer (.*)".r
     val authTokenOpt = for {
       authKey <- authToken
@@ -45,10 +45,12 @@ class CantonAdminTokenAuthService(
   private val adminClaim = Option.when(adminTokenConfig.adminClaim)(ClaimAdmin).toList
 
   private val permit = Future.successful(
-    ClaimSet.Claims.Empty.copy(
-      claims = List[Claim](ClaimPublic) ++ partyClaim ++ adminClaim
+    AuthService.Result(
+      ClaimSet.Claims.Empty.copy(
+        claims = List[Claim](ClaimPublic) ++ partyClaim ++ adminClaim
+      )
     )
   )
 
-  private val deny = Future.successful(ClaimSet.Unauthenticated: ClaimSet)
+  private val deny = Future.successful(AuthService.Result(ClaimSet.Unauthenticated))
 }

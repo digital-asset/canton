@@ -29,12 +29,7 @@ import com.digitalasset.canton.crypto.{
   TestHash,
   v30,
 }
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, ObjectMeta}
-import com.digitalasset.canton.ledger.localstore.api.{
-  PartyRecord,
-  PartyRecordStore,
-  UserManagementStore,
-}
+import com.digitalasset.canton.ledger.localstore.api.{PartyRecord, PartyRecordStore}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Added
@@ -79,6 +74,8 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.{Spanning, TestTelemetrySetup, TraceContext}
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString

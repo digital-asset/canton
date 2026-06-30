@@ -64,7 +64,7 @@ import org.slf4j.event.Level
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import scala.concurrent.{ExecutionContext, Promise}
+import scala.concurrent.Promise
 import scala.jdk.CollectionConverters.*
 
 trait AcsCommitmentToolingIntegrationTest
@@ -797,11 +797,10 @@ trait AcsCommitmentToolingIntegrationTest
       def getCleanReqTs(
           participant: LocalParticipantReference,
           synchronizerId: SynchronizerId,
-      )(implicit ec: ExecutionContext): Option[CantonTimestamp] = {
+      ): Option[CantonTimestamp] = {
         val cleanReqTs = eventually() {
           participant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore
             .cleanSynchronizerIndex(synchronizerId)
-            .futureValueUS
             .flatMap(_.sequencerIndex)
         }
         cleanReqTs

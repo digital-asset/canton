@@ -183,6 +183,7 @@ private[events] object TransactionLogUpdatesConversions {
         UpdateResponse.AcsCommitment(
           IndexUpdateService.ReceivedAcsCommitment(
             offset = commitment.offset,
+            updateId = commitment.update.updateId.toHexString,
             synchronizerId = commitment.update.synchronizerId.toProtoPrimitive,
             recordTime = commitment.update.recordTime.toLf,
             payload = commitment.update.payload,
@@ -279,8 +280,9 @@ private[events] object TransactionLogUpdatesConversions {
             synchronizerId = transactionAccepted.synchronizerId,
             traceContext = SerializableTraceContext(transactionAccepted.traceContext).toDamlProto,
             recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
-            externalTransactionHash = transactionAccepted.externalTransactionHash.map(_.unwrap),
+            externalTransactionHash = transactionAccepted.transactionHash.map(_.unwrap),
             paidTrafficCost = transactionAccepted.paidTrafficCost(requestingParties),
+            transactionHash = transactionAccepted.transactionHash.map(_.unwrap),
           )
         )
     }

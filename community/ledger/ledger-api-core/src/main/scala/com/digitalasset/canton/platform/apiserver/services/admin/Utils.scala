@@ -5,10 +5,10 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin as proto_admin
 import com.digitalasset.canton.auth.AuthorizationChecksErrors
-import com.digitalasset.canton.ledger.api.ObjectMeta
 import com.digitalasset.canton.ledger.error.groups.UserManagementServiceErrors
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.user.ObjectMeta
+import com.digitalasset.canton.user.store.UserManagementStore
 
 import scala.concurrent.Future
 

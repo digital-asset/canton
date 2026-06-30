@@ -265,7 +265,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         val (singleCreateTree, instance) = mkCreateData()
 
         // Duplicate root view in the transaction tree. The mediator will reject this due to non-unique view hashes.
-        val doubleCreateTree = GenTransactionTree.rootViewsUnsafe
+        val doubleCreateTree = GenTransactionTree.Optics.rootViewsUnsafe
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .modify(seq => seq ++ seq)(singleCreateTree)
 
@@ -289,7 +289,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Modify the salt of ViewParticipantData.
         // This would recover the uniqueness of view hashes, but it will fail the model conformance check.
-        val createTreeModifiedSalt = GenTransactionTree.rootViewsUnsafe
+        val createTreeModifiedSalt = GenTransactionTree.Optics.rootViewsUnsafe
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -336,7 +336,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
           maliciousP1
             .submitCommand(
               cmd,
-              transactionTreeInterceptor = GenTransactionTree.rootViewsUnsafe
+              transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
                 .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
                 .modify(_.reverse)(_),
             ),
@@ -393,7 +393,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
               createAndArchiveCmd,
               // Replace the ViewParticipantData salt of view 0, the view that creates the contract
               // in order to cause a model conformance error.
-              transactionTreeInterceptor = GenTransactionTree.rootViewsUnsafe
+              transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
                 .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
                 .index(0)
                 .andThen(MerkleTree.Optics.unblinded[TransactionView])
@@ -533,12 +533,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         // Assign the contract
         val (_, events) = runMaliciously()(
           assignMaliciously(instance),
-          LogEntry.assertLogSeq(
-            mustContainWithClue = Seq.empty,
-            mayContain = Seq(
-              _.shouldBeCantonErrorCode(AcsCommitmentProcessor.Errors.InternalError)
-            ),
-          ),
+          LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
         )
 
         events.assertStatusOk(participant1)
@@ -705,7 +700,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
         val instance = create()
 
         val (_, events) = runMaliciously()(
-          assignMaliciously(instance)
+          assignMaliciously(instance),
+          LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
         )
 
         events.assertStatusOk(participant1)
@@ -938,7 +934,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Assign the contract again
         val (_, events) = runMaliciously()(
-          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(2))
+          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(2)),
+          LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
         )
 
         events.assertStatusOk(participant1)
@@ -968,7 +965,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         val (transactionTree, instance) =
           assignNonExistentContract(mkCreateCmds = _ => dummyCmd ++ createAndArchive)
 
-        val revertedTransactionTree = GenTransactionTree.rootViewsUnsafe
+        val revertedTransactionTree = GenTransactionTree.Optics.rootViewsUnsafe
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .modify(_.reverse)(transactionTree)
 

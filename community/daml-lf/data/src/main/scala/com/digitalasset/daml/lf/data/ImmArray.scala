@@ -3,18 +3,14 @@
 
 package com.digitalasset.daml.lf.data
 
-import com.daml.scalautil.FoldableContravariant
+import cats.{Applicative, Eval, Traverse}
 import com.daml.scalautil.Statement.discard
-import scalaz.syntax.applicative.*
-import scalaz.{Applicative, Equal, Foldable, Order, Traverse}
 
 import scala.annotation.tailrec
 import scala.collection.StrictOptimizedSeqFactory
 import scala.collection.immutable.{AbstractSeq, ArraySeq, IndexedSeqOps, StrictOptimizedSeqOps}
 import scala.collection.mutable.Builder
 import scala.reflect.ClassTag
-
-import ScalazEqual.{equalBy, orderBy, toIterableForScalazInstances}
 
 /** Simple immutable array. The intention is that all the operations have the "obvious" operational
   * behavior (like Vector in haskell).
@@ -320,9 +316,6 @@ final class ImmArray[+A] private (
   /** O(1) */
   def indices: Range = 0 until length
 
-  /** O(1) */
-  def canEqual(that: Any) = that.isInstanceOf[ImmArray[?]]
-
   /** O(n) */
   override def equals(that: Any): Boolean = that match {
     case thatArr: ImmArray[?] if length == thatArr.length =>
@@ -331,14 +324,6 @@ final class ImmArray[+A] private (
       }
     case _ => false
   }
-
-  /** O(n) */
-  private[data] def equalz[B >: A](thatArr: ImmArray[B])(implicit B: Equal[B]): Boolean =
-    (length == thatArr.length) && {
-      indices forall { i =>
-        B.equal(uncheckedGet(i), thatArr.uncheckedGet(i))
-      }
-    }
 
   /** O(n) */
   override def toString: String = iterator.mkString("ImmArray(", ",", ")")
@@ -374,31 +359,6 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
   def fromArraySeq[T](arr: ArraySeq[T]): ImmArray[T] =
     new ImmArray(0, arr.length, arr)
 
-  implicit val immArrayInstance: Traverse[ImmArray] = new Traverse[ImmArray] {
-    override def traverseImpl[F[_]: Applicative, A, B](
-        immArr: ImmArray[A]
-    )(f: A => F[B]): F[ImmArray[B]] =
-      immArr
-        .foldLeft(BackStack.empty[B].point[F]) { (ys, x) =>
-          ^(ys, f(x))(_ :+ _)
-        }
-        .map(_.toImmArray)
-
-    override def foldLeft[A, B](fa: ImmArray[A], z: B)(f: (B, A) => B) =
-      fa.foldLeft(z)(f)
-
-    override def foldRight[A, B](fa: ImmArray[A], z: => B)(f: (A, => B) => B) =
-      fa.foldRight(z)(f(_, _))
-  }
-
-  implicit def immArrayOrderInstance[A: Order]: Order[ImmArray[A]] = {
-    import scalaz.std.iterable.*
-    orderBy(ia => toIterableForScalazInstances(ia.iterator), true)
-  }
-
-  implicit def immArrayEqualInstance[A: Equal]: Equal[ImmArray[A]] =
-    ScalazEqual.withNatural(Equal[A].equalIsNatural)(_ equalz _)
-
   override def from[A](it: IterableOnce[A]): ImmArray[A] =
     it match {
       case arraySeq: ImmArray.ImmArraySeq[A] =>
@@ -416,6 +376,33 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
       .newBuilder[Any]
       .asInstanceOf[Builder[A, ArraySeq[A]]]
       .mapResult(ImmArray.fromArraySeq(_))
+
+  implicit val traverseInstance: Traverse[ImmArray] = new cats.Traverse[ImmArray] {
+    override def traverse[G[_]: Applicative, A, B](
+        fa: ImmArray[A]
+    )(f: A => G[B]): G[ImmArray[B]] = {
+      val g = cats.Applicative[G]
+      val accumulated =
+        foldRight(fa, Eval.now(g.pure(List.empty[B])))((a, acc) => g.map2Eval(f(a), acc)(_ :: _))
+      g.map(accumulated.value) { elems =>
+        val builder = newBuilder[B]
+        builder.sizeHint(fa.length)
+        builder.addAll(elems).result()
+      }
+    }
+
+    override def foldLeft[A, B](fa: ImmArray[A], b: B)(f: (B, A) => B): B =
+      fa.foldLeft(b)(f)
+
+    override def foldRight[A, B](fa: ImmArray[A], lb: Eval[B])(
+        f: (A, Eval[B]) => Eval[B]
+    ): Eval[B] = {
+      def loop(i: Int, lb: Eval[B]): Eval[B] =
+        if (i < fa.length) f(fa.uncheckedGet(i), Eval.defer(loop(i + 1, lb)))
+        else lb
+      loop(0, lb)
+    }
+  }
 
   /** Note: we define this purely to be able to write `toSeq`.
     *
@@ -454,32 +441,29 @@ object ImmArray extends scala.collection.IterableFactory[ImmArray] {
   }
 
   object ImmArraySeq extends StrictOptimizedSeqFactory[ImmArraySeq] {
-    type Factory[A] = Unit
-    final def canBuildFrom[A]: Factory[A] = ()
     final def empty[A]: ImmArraySeq[Nothing] = Empty
     final def from[E](it: IterableOnce[E]): ImmArraySeq[E] =
       ImmArray.newBuilder.addAll(it).result().toSeq
     final def newBuilder[A] = ImmArray.newBuilder.mapResult(_.toSeq)
 
     val Empty: ImmArraySeq[Nothing] = ImmArray.Empty.toSeq
-    implicit val `immArraySeq Traverse instance`: Traverse[ImmArraySeq] = new Traverse[ImmArraySeq]
-      with Foldable.FromFoldr[ImmArraySeq]
-      with FoldableContravariant[ImmArraySeq, ImmArray] {
-      override def map[A, B](fa: ImmArraySeq[A])(f: A => B) = fa.toImmArray.map(f).toSeq
 
-      protected[this] override def Y = Foldable[ImmArray]
-      protected[this] override def ctmap[A](xa: ImmArraySeq[A]) = xa.toImmArray
+    implicit val traverseInstance: Traverse[ImmArraySeq] = new cats.Traverse[ImmArraySeq] {
+      import ImmArray.traverseInstance as traverseImmArray
+      override def traverse[G[_]: Applicative, A, B](fa: ImmArraySeq[A])(
+          f: A => G[B]
+      ): G[ImmArraySeq[B]] =
+        Applicative[G].map(traverseImmArray.traverse(fa.toImmArray)(f))(_.toSeq)
 
-      override def traverseImpl[F[_], A, B](
-          immArr: ImmArraySeq[A]
-      )(f: A => F[B])(implicit F: Applicative[F]): F[ImmArraySeq[B]] =
-        F.map(immArr.foldLeft[F[BackStack[B]]](F.point(BackStack.empty)) { case (ys, x) =>
-          F.apply2(ys, f(x))(_ :+ _)
-        })(_.toImmArray.toSeq)
+      override def foldLeft[A, B](fa: ImmArraySeq[A], b: B)(f: (B, A) => B): B =
+        traverseImmArray.foldLeft(fa.toImmArray, b)(f)
+
+      override def foldRight[A, B](fa: ImmArraySeq[A], lb: Eval[B])(
+          f: (A, Eval[B]) => Eval[B]
+      ): Eval[B] =
+        traverseImmArray.foldRight(fa.toImmArray, lb)(f)
     }
 
-    implicit def `immArraySeq Equal instance`[A: Equal]: Equal[ImmArraySeq[A]] =
-      equalBy(_.toImmArray, true)
   }
 }
 

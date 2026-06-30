@@ -68,6 +68,7 @@ final class CommandServiceIT(override protected val testDars: TestDars)
       updateId = response.updateId
       retrievedTransaction <- ledger.transactionById(updateId, Seq(party))
       transactions <- ledger.transactions(AcsDelta, party)
+      completions <- ledger.firstCompletions(party)
     } yield {
 
       assert(updateId.nonEmpty, "The transaction identifier was empty but shouldn't.")
@@ -91,8 +92,18 @@ final class CommandServiceIT(override protected val testDars: TestDars)
       )
 
       assert(
+        transactions.headOption.value.transactionHash.isEmpty,
+        "Expected empty transaction hash for a local party transaction",
+      )
+
+      assert(
         transactions.headOption.flatMap(_.paidTrafficCost).exists(_ > 0),
         "Expected a non empty traffic cost",
+      )
+
+      assert(
+        completions.headOption.exists(_.transactionHash.isEmpty),
+        "Expected empty transaction hash on completion for non-interactive submission",
       )
 
       assert(
@@ -918,6 +929,7 @@ final class CommandServiceIT(override protected val testDars: TestDars)
         recordTime = transactionLedgerEffects.recordTime,
         externalTransactionHash = transactionLedgerEffects.externalTransactionHash,
         paidTrafficCost = transactionLedgerEffects.paidTrafficCost,
+        transactionHash = transactionLedgerEffects.transactionHash,
       ),
     )
 

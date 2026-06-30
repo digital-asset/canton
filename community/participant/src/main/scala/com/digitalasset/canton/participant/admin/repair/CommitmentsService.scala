@@ -105,17 +105,13 @@ final class CommitmentsService(
 
     val resultPerSynchronizer = synchronizers.map { synchronizer =>
       val synchronizerId = synchronizer.psid.logical
+      val synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
+        .cleanSynchronizerIndex(
+          synchronizerId
+        )
+      val reinitRecordTime = SyncEphemeralStateFactory.currentTimeOfChange(synchronizerIndex)
       val statusPerSynchronizer =
         for {
-          synchronizerIndex <- EitherT
-            .right(
-              ledgerApiIndexer.value.ledgerApiStore.value
-                .cleanSynchronizerIndex(
-                  synchronizerId
-                )
-            )
-          reinitRecordTime = SyncEphemeralStateFactory.currentTimeOfChange(synchronizerIndex)
-
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
             synchronizer.acsCommitmentProcessor.reinitializeCommitments(reinitRecordTime),
             s"Reinitialization is already scheduled or in progress for ${synchronizer.psid}.",

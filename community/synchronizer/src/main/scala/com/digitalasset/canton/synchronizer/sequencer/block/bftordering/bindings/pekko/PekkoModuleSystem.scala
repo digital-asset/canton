@@ -95,11 +95,11 @@ object PekkoModuleSystem {
         .supervise(
           Behaviors
             .receiveMessage[ModuleControl[PekkoEnv, MessageT]] {
-              case SetBehavior(m: framework.Module[PekkoEnv, MessageT], ready) =>
+              case setBehavior @ SetBehavior(m: framework.Module[PekkoEnv, MessageT], ready, _) =>
                 maybeModule.foreach(_.close())
                 maybeModule = Some(m)
                 if (ready)
-                  m.ready(pekkoContext.self)
+                  m.ready(pekkoContext.self)(setBehavior.traceContext)
                 // Emit queue stats for postponed messages that were awaiting a module
                 sendsAwaitingAModule.foreach {
                   case Send(
@@ -234,7 +234,7 @@ object PekkoModuleSystem {
     override def setModule[OtherModuleMessageT](
         moduleRef: PekkoModuleRef[OtherModuleMessageT],
         module: framework.Module[PekkoEnv, OtherModuleMessageT],
-    ): Unit =
+    )(implicit traceContext: TraceContext): Unit =
       moduleSystem.setModule(moduleRef, module)
 
     override protected def pipeToSelfInternal[X](
@@ -319,8 +319,10 @@ object PekkoModuleSystem {
       isOrdererHealthy.set(false)
     }
 
-    override def become(module: framework.Module[PekkoEnv, MessageT]): Unit =
-      underlying.self ! SetBehavior(module, ready = true)
+    override def become(module: framework.Module[PekkoEnv, MessageT])(implicit
+        traceContext: TraceContext
+    ): Unit =
+      underlying.self ! SetBehavior(module, ready = true, traceContext)
 
     // Note that further messages sent to stopped actors land in the dead letters. Pekko is configured to log them.
     override def stop(onStop: () => Unit): Unit =
@@ -547,8 +549,8 @@ object PekkoModuleSystem {
     override def setModule[AcceptedMessageT](
         moduleRef: PekkoModuleRef[AcceptedMessageT],
         module: framework.Module[PekkoEnv, AcceptedMessageT],
-    ): Unit =
-      moduleRef.ref ! SetBehavior(module, ready = false)
+    )(implicit traceContext: TraceContext): Unit =
+      moduleRef.ref ! SetBehavior(module, ready = false, traceContext)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))

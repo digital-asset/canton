@@ -8,7 +8,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService
 import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.topology.SynchronizerId
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -35,6 +35,7 @@ class IdentifyHighestOffsetByTimestampTest extends AnyWordSpec with BaseTest {
     lastPublicationTime = CantonTimestamp.ofEpochSecond(
       40L
     ),
+    Map(),
   )
 
   "offline party replication offset-from-timestamp computation" should {

@@ -220,7 +220,7 @@ object TransactionProcessor {
 
       // TODO(i5990) properly set `definiteAnswer` where appropriate when sub-categories are created
       final case class Error(message: String, reason: TransactionConfirmationRequestCreationError)
-          extends TransactionErrorImpl(cause = "Malformed request") {}
+          extends TransactionErrorImpl(cause = "Malformed request")
     }
 
     @Explanation(

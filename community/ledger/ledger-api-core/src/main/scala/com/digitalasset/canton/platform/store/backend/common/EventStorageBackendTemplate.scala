@@ -50,6 +50,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   NameTypeConRefConverter,
 }
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.google.protobuf.ByteString
 
 import java.sql.{Connection, PreparedStatement}
 import scala.util.Using
@@ -85,8 +86,8 @@ object EventStorageBackendTemplate {
         submitters(stringInterning).?,
       ).mapN(filteredCommandId(_, _, allQueryingPartiesO))
 
-    val externalTransactionHash: RowDef[Option[Array[Byte]]] =
-      column("external_transaction_hash", byteArray(_).?)
+    val transactionHash: RowDef[Option[ByteString]] =
+      column("external_transaction_hash", byteArray).?.map(_.map(ByteString.copyFrom(_)))
 
     def trafficCost(
         stringInterning: StringInterning,
@@ -226,7 +227,7 @@ object EventStorageBackendTemplate {
       (
         commonEventPropertiesParser(stringInterning),
         commonUpdatePropertiesParser(stringInterning, allQueryingPartiesO),
-        externalTransactionHash,
+        transactionHash,
       ).mapN(TransactionProperties.apply)
 
     def reassignmentPropertiesParser(
@@ -416,6 +417,7 @@ object EventStorageBackendTemplate {
       (
         eventOffset,
         eventSequentialId,
+        updateIdDef,
         synchronizerId(stringInterning).map(_.toProtoPrimitive),
         recordTime,
         payload,

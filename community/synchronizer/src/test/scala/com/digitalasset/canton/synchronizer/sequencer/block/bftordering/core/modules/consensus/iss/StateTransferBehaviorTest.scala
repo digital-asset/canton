@@ -83,7 +83,9 @@ class StateTransferBehaviorTest
       "init" in {
         val (context, stateTransferBehavior) = createStateTransferBehavior()
 
-        stateTransferBehavior.ready(context.self)
+        stateTransferBehavior.ready(context.self)(
+          TraceContext.createNew("state_transfer_behavior_test")
+        )
 
         context.extractSelfMessages() shouldBe Seq(Consensus.Init.KickOff)
       }
@@ -546,6 +548,7 @@ class StateTransferBehaviorTest
             failingCryptoProvider,
             latestCompletedEpochFromStore.lastBlockCommits,
             epochStore.loadEpochProgress(latestEpochFromStore.info)(TraceContext.empty)(),
+            traceContext,
           )
           new EpochState[ProgrammableUnitTestEnv](
             epoch,
@@ -596,6 +599,7 @@ class StateTransferBehaviorTest
           cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
           latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
           epochInProgress: EpochStore.EpochInProgress,
+          _traceContext: TraceContext,
       )(
           segmentState: SegmentState,
           metricsAccumulator: EpochMetricsAccumulator,

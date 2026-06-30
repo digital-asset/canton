@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.platform.store.backend.localstore.PartyRecordStorageBackend
+import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.LedgerString
 import org.scalatest.flatspec.AnyFlatSpec

@@ -551,8 +551,14 @@ def recent_nightly_commits() -> tuple:
         # Stale origin/main would mis-enumerate the nightly commits; log and carry on.
         print(f"recent_nightly_commits: 'git fetch origin main' failed, using local origin/main: {fetch.stderr.strip()}")
     now = datetime.datetime.utcnow()
+    # `now` is after the current run's own nightly cron slot, so the most recent
+    # cron time enumerated below resolves to `current` again. We therefore request
+    # NIGHTLY_CONSECUTIVE_FAILURES slots (not N-1): the newest collapses onto
+    # `current` on dedup, leaving the current run plus the N-1 genuinely-prior
+    # nightly commits. Requesting only N-1 here yielded N-1 distinct commits and
+    # made nightly_streak's `len(last) < N` guard fail every time.
     commits = [current]
-    for dt in _previous_nightly_datetimes(NIGHTLY_CONSECUTIVE_FAILURES - 1, now):
+    for dt in _previous_nightly_datetimes(NIGHTLY_CONSECUTIVE_FAILURES, now):
         sha = _git_commit_before(dt)
         if sha:
             commits.append(sha)
@@ -659,6 +665,7 @@ def self_test():
     test_report_issue_skips_slack_if_assignee()
     test_is_nightly_job()
     test_nightly_streak_detection()
+    test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
     print("All self-checks passed")
 
@@ -713,6 +720,47 @@ def test_nightly_streak_detection():
     with patch.dict(os.environ, env, clear=False), \
          patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits[:1])):
         assert nightly_streak(_nightly_body(prior)) is False
+
+
+def test_recent_nightly_commits_counts_current_run_once():
+    """Regression: the current run's own cron slot aliases `current`, so the
+    enumeration must still produce N distinct commits (current + N-1 priors).
+    Exercises the real recent_nightly_commits()/_previous_nightly_datetimes,
+    so it fails if the slot count regresses to N-1."""
+    global _nightly_commits_cache
+    n = NIGHTLY_CONSECUTIVE_FAILURES
+    current = format(0xc, '040x')
+    priors = [format(i, '040x') for i in range(1, n)]
+    env = {
+        'CIRCLECI': 'true', 'GITHUB_ACTIONS': 'false', 'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test', 'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+    # _previous_nightly_datetimes returns slots newest-first; the newest resolves
+    # to the current run's commit, each earlier one to a distinct prior commit.
+    counter = {'i': 0}
+    def fake_before(_dt):
+        i = counter['i']
+        counter['i'] += 1
+        if i == 0:
+            return current
+        return priors[i - 1] if i - 1 < len(priors) else format(0xdead + i, '040x')
+
+    saved_cache = _nightly_commits_cache
+    _nightly_commits_cache = None
+    try:
+        with patch.dict(os.environ, env, clear=False), \
+             patch(f'{__name__}.subprocess.run',
+                   return_value=subprocess.CompletedProcess([], 0, '', '')), \
+             patch(f'{__name__}._git_commit_before', side_effect=fake_before):
+            result = recent_nightly_commits()
+    finally:
+        _nightly_commits_cache = saved_cache
+
+    assert len(result) == n, f"expected {n} distinct nightly commits, got {len(result)}: {result}"
+    assert current in result
+    for p in priors:
+        assert p in result, f"prior commit {p} missing from {result}"
 
 
 def test_update_issue_nightly_streak_labels_and_returns():

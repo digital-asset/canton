@@ -40,7 +40,7 @@ public final class Transaction {
 
   @NonNull private final List<@NonNull Integer> rootNodeIds;
 
-  @NonNull private final ByteString externalTransactionHash;
+  @NonNull private final ByteString transactionHash;
 
   @NonNull private final Long paidTrafficCost;
 
@@ -98,7 +98,7 @@ public final class Transaction {
       @NonNull String synchronizerId,
       TraceContextOuterClass.@NonNull TraceContext traceContext,
       @NonNull Instant recordTime,
-      @NonNull ByteString externalTransactionHash,
+      @NonNull ByteString transactionHash,
       @NonNull Long paidTrafficCost) {
     // Check if events are sorted by nodeId
     for (int i = 1; i < events.size(); i++) {
@@ -134,7 +134,7 @@ public final class Transaction {
     this.rootNodes = buildNodeForest(nodes);
 
     this.rootNodeIds = rootNodes.stream().map(node -> node.nodeId).toList();
-    this.externalTransactionHash = externalTransactionHash;
+    this.transactionHash = transactionHash;
     this.paidTrafficCost = paidTrafficCost;
   }
 
@@ -168,9 +168,16 @@ public final class Transaction {
     return paidTrafficCost;
   }
 
+  /** @deprecated use {@link #getTransactionHash()} instead (same value). */
+  @Deprecated
   @NonNull
   public ByteString getExternalTransactionHash() {
-    return externalTransactionHash;
+    return transactionHash;
+  }
+
+  @NonNull
+  public ByteString getTransactionHash() {
+    return transactionHash;
   }
 
   @NonNull
@@ -344,6 +351,12 @@ public final class Transaction {
         transaction.getEventsList().stream()
             .map(Event::fromProtoEvent)
             .collect(Collectors.toList());
+    // Prefer the new transaction_hash field; fall back to the legacy
+    // external_transaction_hash so old data with only the legacy field still parses.
+    ByteString transactionHash =
+        !transaction.getTransactionHash().isEmpty()
+            ? transaction.getTransactionHash()
+            : transaction.getExternalTransactionHash();
     return new Transaction(
         transaction.getUpdateId(),
         transaction.getCommandId(),
@@ -354,7 +367,7 @@ public final class Transaction {
         transaction.getSynchronizerId(),
         transaction.getTraceContext(),
         Utils.instantFromProto(transaction.getRecordTime()),
-        transaction.getExternalTransactionHash(),
+        transactionHash,
         transaction.getPaidTrafficCost());
   }
 
@@ -373,7 +386,8 @@ public final class Transaction {
         .setSynchronizerId(synchronizerId)
         .setTraceContext(traceContext)
         .setRecordTime(Utils.instantToProto(recordTime))
-        .setExternalTransactionHash(externalTransactionHash)
+        .setExternalTransactionHash(transactionHash)
+        .setTransactionHash(transactionHash)
         .build();
   }
 
@@ -403,8 +417,8 @@ public final class Transaction {
         + traceContext
         + ", recordTime="
         + recordTime
-        + ", externalTransactionHash="
-        + externalTransactionHash
+        + ", transactionHash="
+        + transactionHash
         + '}';
   }
 
@@ -422,7 +436,7 @@ public final class Transaction {
         && Objects.equals(synchronizerId, that.synchronizerId)
         && Objects.equals(traceContext, that.traceContext)
         && Objects.equals(recordTime, that.recordTime)
-        && Objects.equals(externalTransactionHash, that.externalTransactionHash);
+        && Objects.equals(transactionHash, that.transactionHash);
   }
 
   @Override
@@ -438,6 +452,6 @@ public final class Transaction {
         synchronizerId,
         traceContext,
         recordTime,
-        externalTransactionHash);
+        transactionHash);
   }
 }

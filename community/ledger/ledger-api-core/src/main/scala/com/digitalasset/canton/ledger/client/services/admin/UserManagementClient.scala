@@ -6,9 +6,9 @@ package com.digitalasset.canton.ledger.client.services.admin
 import com.daml.ledger.api.v2.admin as admin_proto
 import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.ledger.api.v2.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Party, UserId}
 

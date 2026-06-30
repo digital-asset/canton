@@ -25,10 +25,16 @@ On upgrade, a participant database migration updates the reassignment store: it 
 automatically as part of the startup migration step. Its duration scales with the number of
 reassignments in the store, taking roughly 1 second per 10,000 reassignments.
 
+### Lookup by Transaction Hash (Ledger API)
+
+The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a transaction hash, it returns the corresponding transaction if the caller has visibility over it. The hash is available on externally-signed (Interactive Submission Service) transactions.
+
+- gRPC: `UpdateService.GetUpdateByHash`
+- JSON API: `POST /v2/updates/update-by-hash`
 
 ### Minor Improvements
 - The concurrency limit interceptor `ActiveRequestInterceptor` now caches rejection responses instead of generating a new error (and thereby filling the stack trace) for each
-rejected response, once the concurrency limit is filled.
+  rejected response, once the concurrency limit is filled.
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
   of an onboarding party.
 - OpenAPI and AsyncAPI files are now included in the API archive, and the bundle is published as a Maven artifact on
@@ -45,8 +51,8 @@ rejected response, once the concurrency limit is filled.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 - *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
 - Connection pool metrics:
-  - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
-  - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
+    - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
+    - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
 - Updated com.google.protobuf libs from 3.25.5 --> 3.25.9
 - A call to `AcknowledgeSigned` with a timestamp before the upgrade time returns immediately, without any acknowledgement being done.
 - (Potentially) *BREAKING*: Aggregatable submissions are now rejected eagerly to preserve bandwidth.
@@ -65,6 +71,12 @@ rejected response, once the concurrency limit is filled.
   either at user creation time or through the `GrantAccessRight` command.
 - *BREAKING*: Unknown config keys are now making config parsing failing. This mechanism was already in place, but it didn't include all the config keys, which is now fixed.
 - *BREAKING*: Separated the config for support of dev and alpha protocol versions. In order to use pv=dev, you now have to specify `dev-version-support = true` instead of `alpha-version-support = true` (`canton.parameters.non-standard-config = true` is still needed).
+- The default size of the Ledger API in-memory fan-out buffer (`<participant>.ledger-api.index-service.max-transactions-in-memory-fan-out-buffer-size`) has been increased from 1000 to 1100 to accommodate serving ACS commitments from the buffer.
+- Ledger API and Indexer metrics clean-up:
+  - *BREAKING*: The indexer queue metrics `daml.participant.api.indexer.indexer_queue_blocked`, `daml.participant.api.indexer.indexer_queue_buffered` and `daml.participant.api.indexer.indexer_queue_uncommitted` are now exposed as gauges instead of meters.
+  - *BREAKING*: The metric `daml.participant.api.services.pruning.contract_pruning_retried`, which tracks how many times contract pruning was retried, is now a histogram.
+  - *BREAKING*: Removed the unused metrics `daml.participant.api.lapi.streams.transaction_trees_sent` and `daml.participant.api.index.transaction_trees_buffer_size`.
+- The `ledger-api-server-parameters.contract-id-seeding` configuration parameter is deprecated and no longer used. The contract ID seeding now uses the same random source as the rest of Canton, which is the equivalent of the `strong` type.
 
 ### Preview Features
 - preview feature

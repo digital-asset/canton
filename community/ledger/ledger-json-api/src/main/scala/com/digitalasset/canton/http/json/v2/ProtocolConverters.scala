@@ -443,6 +443,13 @@ class ProtocolConverters(
               .map(Hash.assertFromByteArray)
               .map(_.toHexString),
           )
+          .withFieldComputed(
+            _.transactionHash,
+            _.transactionHash
+              .map(_.toByteArray)
+              .map(Hash.assertFromByteArray)
+              .map(_.toHexString),
+          )
           .transform
       }
 
@@ -456,6 +463,10 @@ class ProtocolConverters(
       .withFieldComputed(
         _.externalTransactionHash,
         _.externalTransactionHash.map(ByteString.fromHex),
+      )
+      .withFieldComputed(
+        _.transactionHash,
+        _.transactionHash.map(ByteString.fromHex),
       )
       .transform
   }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.entries
 
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.daml.lf.data.Relation
@@ -24,5 +25,6 @@ private[platform] object LedgerEntry {
       recordedAt: Timestamp,
       transaction: CommittedTransaction,
       explicitDisclosure: Relation[NodeId, Party],
+      transactionHash: Option[Hash] = None,
   ) extends LedgerEntry
 }

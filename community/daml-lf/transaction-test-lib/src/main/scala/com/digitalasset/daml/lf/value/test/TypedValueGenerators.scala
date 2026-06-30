@@ -6,12 +6,13 @@ package lf
 package value
 package test
 
+import cats.instances.option.*
+import cats.instances.vector.*
+import cats.syntax.traverse.*
 import org.scalacheck.{Arbitrary, Gen, Shrink}
-import scalaz.std.option.*
-import scalaz.std.tuple.*
-import scalaz.syntax.bitraverse.*
-import scalaz.syntax.traverse.*
-import scalaz.{@@, Order, Ordering, Tag}
+
+import scala.math.Ordering
+import scala.math.Ordering.Implicits.seqOrdering
 
 import data.{FrontStack, ImmArray, ImmArrayCons, Numeric, Ref, SortedLookupList, Time}
 import ImmArray.ImmArraySeq
@@ -36,7 +37,7 @@ object TypedValueGenerators {
     def t: Type
     def inj(v: Inj): Value
     def prj: Value => Option[Inj]
-    implicit def injord: Order[Inj]
+    implicit def injord: Ordering[Inj]
     implicit def injarb: Arbitrary[Inj]
     implicit def injshrink: Shrink[Inj]
     final override def toString = s"${classOf[ValueAddend].getSimpleName}{t = ${t.toString}}"
@@ -55,7 +56,7 @@ object TypedValueGenerators {
     type NoCid[Inj0] = Aux[Inj0]
 
     private sealed abstract class Leaf0[Inj0](implicit
-        ord: Order[Inj0],
+        ord: Ordering[Inj0],
         arb: Arbitrary[Inj0],
         shr: Shrink[Inj0],
     ) extends ValueAddend {
@@ -65,7 +66,7 @@ object TypedValueGenerators {
       override final def injshrink = shr
     }
 
-    private def leaf[Inj0: Order: Arbitrary: Shrink](typ: Type, inj0: Inj0 => Value)(
+    private def leaf[Inj0: Ordering: Arbitrary: Shrink](typ: Type, inj0: Inj0 => Value)(
         prj0: Value PartialFunction Inj0
     ): Aux[Inj0] = new Leaf0[Inj0] {
       override val t = typ
@@ -73,8 +74,13 @@ object TypedValueGenerators {
       override def prj = prj0.lift
     }
 
-    import Value.*, ValueGenerators.Implicits.*, data.Utf8.ImplicitOrder.*
-    import scalaz.std.anyVal.*
+    import Value.*, ValueGenerators.Implicits.*
+
+    // use Utf8 codepoint ordering for strings, for compatibility with SValue ordering
+    private implicit val stringOrder: Ordering[String] = data.Utf8.Ordering
+    private implicit val numericOrder: Ordering[Numeric] = _ compareTo _
+    private implicit val dateOrder: Ordering[Time.Date] = _ compare _
+    private implicit val timestampOrder: Ordering[Time.Timestamp] = _ compare _
 
     val text = leaf(TText, ValueText.apply) { case ValueText(t) => t }
     val int64 = leaf(TInt64, ValueInt64.apply) { case ValueInt64(i) => i }
@@ -119,18 +125,17 @@ object TypedValueGenerators {
         ValueList(elts.map(elt.inj(_)).to(FrontStack))
       override def prj = {
         case ValueList(v) =>
-          import scalaz.std.vector.*
-          v.toImmArray.toSeq.to(Vector) traverse elt.prj
+          v.toImmArray.toSeq.to(Vector).traverse(elt.prj)
         case _ => None
       }
       override def injord = {
-        import scalaz.std.iterable.* // compatible with SValue ordering
-        implicit val e: Order[elt.Inj] = elt.injord
-        Order[Iterable[elt.Inj]] contramap identity
+        implicit val e: Ordering[elt.Inj] = elt.injord
+        // lexicographic ordering, compatible with SValue ordering
+        seqOrdering[Vector, elt.Inj]
       }
       override def injarb = {
         implicit val e: Arbitrary[elt.Inj] = elt.injarb
-        Tag unsubst implicitly[Arbitrary[Vector[elt.Inj] @@ Div3]]
+        smallContainer[Vector[elt.Inj], elt.Inj]
       }
       override def injshrink = implicitly[Shrink[Vector[elt.Inj]]]
     }
@@ -140,12 +145,12 @@ object TypedValueGenerators {
       override val t = TOptional(elt.t)
       override def inj(oe: Inj) = ValueOptional(oe map (elt.inj(_)))
       override def prj = {
-        case ValueOptional(v) => v traverse elt.prj
+        case ValueOptional(v) => v.traverse(elt.prj)
         case _ => None
       }
       override def injord = {
-        implicit val e: Order[elt.Inj] = elt.injord
-        Order[Option[elt.Inj]]
+        implicit val e: Ordering[elt.Inj] = elt.injord
+        Ordering[Option[elt.Inj]]
       }
       override def injarb = {
         implicit val e: Arbitrary[elt.Inj] = elt.injarb
@@ -158,18 +163,23 @@ object TypedValueGenerators {
       type Inj = SortedLookupList[elt.Inj]
       override val t = TTextMap(elt.t)
       override def inj(sll: SortedLookupList[elt.Inj]) =
-        ValueTextMap(sll map (elt.inj(_)))
+        ValueTextMap(sll mapValue (elt.inj(_)))
       override def prj = {
-        case ValueTextMap(sll) => sll traverse elt.prj
+        case ValueTextMap(sll) =>
+          sll.toImmArray.toSeq
+            .to(Vector)
+            .traverse { case (k, v) => elt.prj(v).map(k -> _) }
+            .flatMap(kvs => SortedLookupList.fromOrderedImmArray(kvs.to(ImmArray)).toOption)
         case _ => None
       }
       override def injord = {
-        implicit val e: Order[elt.Inj] = elt.injord
-        Order[SortedLookupList[elt.Inj]]
+        implicit val e: Ordering[elt.Inj] = elt.injord
+        // for compatibility with SValue ordering
+        Ordering.by((sll: SortedLookupList[elt.Inj]) => sll.toImmArray.toSeq.to(Vector))
       }
       override def injarb = {
         implicit val e: Arbitrary[elt.Inj] = elt.injarb
-        Tag unsubst implicitly[Arbitrary[SortedLookupList[elt.Inj] @@ Div3]]
+        smallSortedLookupList[elt.Inj]
       }
       override def injshrink =
         Shrink.shrinkAny // XXX descend
@@ -182,8 +192,7 @@ object TypedValueGenerators {
       override val t = TGenMap(key.t, elt.t)
       override def inj(m: key.Inj Map elt.Inj) =
         ValueGenMap {
-          import key.injord as keyorder
-          implicit val skeyord: math.Ordering[key.Inj] = Order[key.Inj].toScalaOrdering
+          implicit val skeyord: Ordering[key.Inj] = key.injord
           m.to(ImmArraySeq)
             .sortBy(_._1)
             .map { case (k, v) => (key.inj(k), elt.inj(v)) }
@@ -191,22 +200,26 @@ object TypedValueGenerators {
         }
       override def prj = {
         case ValueGenMap(kvs) =>
-          kvs traverse (_.bitraverse(key.prj, elt.prj)) map (_.toSeq.toMap)
+          kvs.toSeq
+            .to(Vector)
+            .traverse { case (k, v) =>
+              for { pk <- key.prj(k); pv <- elt.prj(v) } yield (pk, pv)
+            }
+            .map(_.toMap)
         case _ => None
       }
       override def injord = {
-        implicit val k: Order[key.Inj] = key.injord
-        implicit val ki: math.Ordering[key.Inj] = k.toScalaOrdering
-        implicit val e: Order[elt.Inj] = elt.injord
+        implicit val k: Ordering[key.Inj] = key.injord
+        implicit val e: Ordering[elt.Inj] = elt.injord
         // for compatibility with SValue ordering
-        Order[ImmArray[(key.Inj, elt.Inj)]] contramap { m =>
-          m.to(ImmArraySeq).sortBy(_._1).toImmArray
+        Ordering.by { (m: key.Inj Map elt.Inj) =>
+          m.to(ImmArraySeq).sortBy(_._1).to(Vector)
         }
       }
       override def injarb = {
         implicit val k: Arbitrary[key.Inj] = key.injarb
         implicit val e: Arbitrary[elt.Inj] = elt.injarb
-        Tag unsubst implicitly[Arbitrary[key.Inj Map elt.Inj @@ Div3]]
+        smallContainer[key.Inj Map elt.Inj, (key.Inj, elt.Inj)]
       }
       override def injshrink = {
         import key.injshrink as keyshrink, elt.injshrink as eltshrink
@@ -276,14 +289,14 @@ object TypedValueGenerators {
           case ValueEnum(_, dc) => get(dc)
           case _ => None
         }
-        override def injord = Order.orderBy(values.indexOf)
+        override def injord = Ordering.by(values.indexOf)
         override def injarb = Arbitrary(
           Gen.oneOf(values)
         )
         override def injshrink =
           Shrink { ev =>
-            if (!(values.headOption contains ev)) values.headOption.toStream
-            else Stream.empty: @annotation.nowarn("cat=deprecation")
+            (if (!(values.headOption contains ev)) values.headOption.toStream
+             else Stream.empty): @annotation.nowarn("cat=deprecation")
           }
       }
 
@@ -301,7 +314,7 @@ object TypedValueGenerators {
       override def inj(v: Inj) = under.inj(g(v))
       override def prj = under.prj andThen (_ map f)
 
-      override def injord = under.injord contramap g
+      override def injord = under.injord on g
       override def injarb =
         Arbitrary(under.injarb.arbitrary map f)
       override def injshrink =
@@ -324,14 +337,14 @@ object TypedValueGenerators {
 
       def injRec(v: HRec): List[Value]
       def prjRec(v: ImmArray[(?, Value)]): Option[HRec]
-      implicit def record: Order[HRec]
+      implicit def record: Ordering[HRec]
       implicit def recarb: Arbitrary[HRec]
       implicit def recshrink: Shrink[HRec]
 
       def injVar(v: HVar): (Ref.Name, Value)
       type PrjResult = Option[HVar]
       val prjVar: Map[Ref.Name, Value => PrjResult]
-      implicit def varord: Order[HVar]
+      implicit def varord: Ordering[HVar]
       implicit def vararb: Map[Ref.Name, Gen[HVar]]
       implicit def varshrink: Shrink[HVar]
     }
@@ -355,7 +368,7 @@ object TypedValueGenerators {
         override def injRec(v: HNil) = List.empty
         override def prjRec(v: ImmArray[(?, Value)]) =
           Some(HNil)
-        override def record = (_, _) => Ordering.EQ
+        override def record = (_, _) => 0
         override def recarb =
           Arbitrary(Gen const HNil)
         override def recshrink =
@@ -400,7 +413,7 @@ object TypedValueGenerators {
 
           override def record = {
             import hVA.injord as hord, tlRules.record as tailord
-            Order.orderBy { case ah :: at => (ah: hVA.Inj, at) }
+            Ordering.by { case ah :: at => (ah: hVA.Inj, at) }
           }
 
           override def recarb = {
@@ -435,10 +448,10 @@ object TypedValueGenerators {
           override def varord =
             (a, b) =>
               (a, b) match {
-                case (Inr(at), Inr(bt)) => tlRules.varord.order(at, bt)
-                case (Inl(_), Inr(_)) => Ordering.LT
-                case (Inr(_), Inl(_)) => Ordering.GT
-                case (Inl(ah), Inl(bh)) => hVA.injord.order(ah, bh)
+                case (Inr(at), Inr(bt)) => tlRules.varord.compare(at, bt)
+                case (Inl(_), Inr(_)) => -1
+                case (Inr(_), Inl(_)) => 1
+                case (Inl(ah), Inl(bh)) => hVA.injord.compare(ah, bh)
               }
 
           override def vararb: Map[Ref.Name, Gen[HVar]] = {

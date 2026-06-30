@@ -7,7 +7,10 @@ import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
-import com.digitalasset.canton.data.ViewParticipantData.InvalidSerializationVersion
+import com.digitalasset.canton.data.ViewParticipantData.{
+  InvalidSerializationVersion,
+  InvalidViewParticipantData,
+}
 import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.{
@@ -347,7 +350,7 @@ final class SerializationDeserializationTest
         extraCreatedCore: Option[CreatedContract],
     ): Assertion = {
       val vpd = generators.data.viewParticipantDataArb.arbitrary.sample.value
-      ViewParticipantData.tryCreate(
+      ViewParticipantData.tryCreate(vpd.hashOps)(
         coreInputs = vpd.coreInputs ++ extraCoreInput.map(i => i.contract.contractId -> i),
         createdCore = vpd.createdCore ++ extraCreatedCore,
         createdInSubviewArchivedInCore = vpd.createdInSubviewArchivedInCore,
@@ -356,10 +359,7 @@ final class SerializationDeserializationTest
         rollbackContext = vpd.rollbackContext,
         salt = vpd.salt,
         externalCallResults = vpd.externalCallResults,
-      )(
-        hashOps = vpd.hashOps,
         protocolVersion = ProtocolVersion.v34,
-        deserializedFrom = vpd.deserializedFrom,
       )
       succeed
     }
@@ -372,23 +372,27 @@ final class SerializationDeserializationTest
       recreateWith(None, None)
     }
     s"disallow ${LfSerializationVersion.V2} input contracts" in {
-      intercept[InvalidSerializationVersion] {
+      intercept[InvalidViewParticipantData] {
         recreateWith(Some(InputContract(v2Contract, consumed = false)), None)
-      } shouldBe InvalidSerializationVersion(
-        NonEmptyUtil.fromUnsafe(Map(v2Contract.contractId -> v2Contract.inst.version)),
-        ProtocolVersion.v34,
+      } shouldBe InvalidViewParticipantData(
+        InvalidSerializationVersion(
+          NonEmptyUtil.fromUnsafe(Map(v2Contract.contractId -> v2Contract.inst.version)),
+          ProtocolVersion.v34,
+        ).getMessage
       )
     }
 
     s"disallow ${LfSerializationVersion.V2} created contracts" in {
-      intercept[InvalidSerializationVersion] {
+      intercept[InvalidViewParticipantData] {
         recreateWith(
           None,
           Some(CreatedContract.tryCreate(v2Contract, consumedInCore = false, rolledBack = false)),
         )
-      } shouldBe InvalidSerializationVersion(
-        NonEmptyUtil.fromUnsafe(Map(v2Contract.contractId -> v2Contract.inst.version)),
-        ProtocolVersion.v34,
+      } shouldBe InvalidViewParticipantData(
+        InvalidSerializationVersion(
+          NonEmptyUtil.fromUnsafe(Map(v2Contract.contractId -> v2Contract.inst.version)),
+          ProtocolVersion.v34,
+        ).getMessage
       )
     }
 

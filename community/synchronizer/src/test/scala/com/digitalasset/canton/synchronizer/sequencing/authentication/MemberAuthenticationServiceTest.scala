@@ -7,7 +7,16 @@ import cats.data.EitherT
 import cats.implicits.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, DefaultProcessingTimeouts}
-import com.digitalasset.canton.crypto.Nonce
+import com.digitalasset.canton.crypto.Signature.noSignature
+import com.digitalasset.canton.crypto.SigningKeyUsage.SequencerAuthenticationOnly
+import com.digitalasset.canton.crypto.{
+  Nonce,
+  SignatureCheckError,
+  SigningKeyUsage,
+  SigningPublicKey,
+  SynchronizerCryptoClient,
+  SynchronizerSnapshotSyncCryptoApi,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   AuthenticationError,
@@ -18,7 +27,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
-import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
@@ -26,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyTransaction,
 }
+import com.digitalasset.canton.topology.{Member, *}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -245,12 +255,12 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     val sutImpl = serviceImpl(store)
 
     val retainedKey = syncCrypto.crypto
-      .generateSigningKey(usage = com.digitalasset.canton.crypto.SigningKeyUsage.All)
+      .generateSigningKey(usage = SigningKeyUsage.All)
       .value
       .futureValueUS
       .getOrElse(fail("Retained key generation failed"))
     val evictedKey = syncCrypto.crypto
-      .generateSigningKey(usage = com.digitalasset.canton.crypto.SigningKeyUsage.All)
+      .generateSigningKey(usage = SigningKeyUsage.All)
       .value
       .futureValueUS
       .getOrElse(fail("Evicted key generation failed"))
@@ -288,7 +298,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     // create a SignedTopologyTransaction wrapping the removal transaction
     val txElement = SignedTopologyTransaction.withSignature(
       transaction = removeTopologyTx,
-      signature = com.digitalasset.canton.crypto.Signature.noSignature,
+      signature = noSignature,
       isProposal = false,
       protocolVersion = testedProtocolVersion,
     )
@@ -333,13 +343,13 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     // We do this by fetching the pre-existing default key from the testing topology to act as the evicted key.
     val snapshot = syncCrypto.currentSnapshotApproximation.futureValueUS
     val defaultKeys = snapshot.ipsSnapshot
-      .signingKeys(p1, com.digitalasset.canton.crypto.SigningKeyUsage.SequencerAuthenticationOnly)
+      .signingKeys(p1, SequencerAuthenticationOnly)
       .futureValueUS
     val evictedKey = defaultKeys.headOption.getOrElse(fail("Evicted key fetch failed"))
 
     // Generate a new key to act as the retained key that replaces the old mapping
     val retainedKey = syncCrypto.crypto
-      .generateSigningKey(usage = com.digitalasset.canton.crypto.SigningKeyUsage.All)
+      .generateSigningKey(usage = SigningKeyUsage.All)
       .value
       .futureValueUS
       .getOrElse(fail("Retained key generation failed"))
@@ -376,7 +386,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     // create a SignedTopologyTransaction wrapping the removal transaction
     val txElement = SignedTopologyTransaction.withSignature(
       transaction = replaceTopologyTx,
-      signature = com.digitalasset.canton.crypto.Signature.noSignature,
+      signature = noSignature,
       isProposal = false,
       protocolVersion = testedProtocolVersion,
     )
@@ -399,6 +409,224 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
 
       // Verify the evicted token is revoked and the retained token persists
       tokensAfter should contain.only(retainedToken)
+    }
+  }
+
+  "fail token persistence if the signing key is revoked mid-flight (TOCTOU race condition check)" in {
+    val store = new MemberAuthenticationStore(
+      PositiveInt.tryCreate(10),
+      PositiveInt.tryCreate(10),
+      loggerFactory,
+    )
+    val dummySignature = noSignature
+    // Prepare a valid nonce in the store to satisfy the challenge check
+    val nonce = Nonce.generate(syncCrypto.pureCrypto)
+    val storedNonce = StoredNonce(p1, nonce, clock.now, JDuration.ofMinutes(1))
+    store.saveNonce(storedNonce)
+    val expectedHash = MemberAuthentication
+      .hashSynchronizerNonce(nonce, physicalSynchronizerId, syncCrypto.pureCrypto)
+
+    // create mocks of the crypto API and snapshot objects
+    val mockCryptoApi = mock[SynchronizerCryptoClient]
+    val approxSnapshot = mock[SynchronizerSnapshotSyncCryptoApi]
+    val headSnapshot = mock[SynchronizerSnapshotSyncCryptoApi]
+    val headIpsSnapshot = mock[TopologySnapshot]
+
+    org.mockito.Mockito.when(mockCryptoApi.pureCrypto).thenReturn(syncCrypto.pureCrypto)
+    // Connect the snapshot to its inner IPS snapshot component
+    org.mockito.Mockito.when(headSnapshot.ipsSnapshot).thenReturn(headIpsSnapshot)
+
+    // Mock the different snapshot views
+    org.mockito.Mockito
+      .when(
+        mockCryptoApi.currentSnapshotApproximation(org.mockito.ArgumentMatchers.any[TraceContext])
+      )
+      .thenReturn(FutureUnlessShutdown.pure(approxSnapshot))
+    org.mockito.Mockito.when(mockCryptoApi.headSnapshot).thenReturn(headSnapshot)
+
+    // Allow the signature validation to pass for this member, hash, and signature
+    org.mockito.Mockito
+      .when(
+        approxSnapshot.verifySignature(
+          org.mockito.ArgumentMatchers.eq(expectedHash),
+          org.mockito.ArgumentMatchers.eq(p1: Member),
+          org.mockito.ArgumentMatchers.eq(dummySignature),
+          org.mockito.ArgumentMatchers
+            .any[com.daml.nonempty.NonEmpty[Set[SigningKeyUsage]]](),
+        )(org.mockito.ArgumentMatchers.any[TraceContext])
+      )
+      .thenReturn(
+        EitherT.pure[FutureUnlessShutdown, SignatureCheckError](())
+      )
+
+    // Simulate the mid-flight key revocation via headSnapshot
+    // Mockito will return an empty set of signing keys when queried for p1 in the head snapshot
+    org.mockito.Mockito
+      .when(
+        headIpsSnapshot.signingKeys(
+          org.mockito.ArgumentMatchers.eq(p1: Member),
+          org.mockito.ArgumentMatchers
+            .eq(SequencerAuthenticationOnly),
+        )(org.mockito.ArgumentMatchers.any[TraceContext])
+      )
+      .thenReturn(
+        FutureUnlessShutdown.pure(Seq.empty[SigningPublicKey])
+      )
+
+    // Instantiate the authService
+    val authService = new MemberAuthenticationService(
+      physicalSynchronizerId,
+      mockCryptoApi,
+      store,
+      clock,
+      JDuration.ofMinutes(1),
+      JDuration.ofHours(1),
+      useExponentialRandomTokenExpiration = false,
+      _ => (),
+      FutureUnlessShutdown.unit,
+      DefaultProcessingTimeouts.testing,
+      BatchingConfig(),
+      loggerFactory,
+    ) {
+      // The real isParticipantActive method queries the topology snapshots to determine if the participant is allowed to connect.
+      // Since we mocked headSnapshot to return an empty sequence of signing keys to simulate the revocation, the real isParticipantActive would cause
+      // the method to fail early during the initial checking phase. To avoid this, we override it to return true.
+      override def isParticipantActive(participant: ParticipantId)(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Boolean] =
+        FutureUnlessShutdown.pure(true)
+    }
+
+    // Execute validateSignature to test the behaviour. This will call headIpsSnapshot.signingKeys, which will return an empty set, which
+    // tells the method that the member's key has been revoked and triggers the rollback behaviour.
+    for {
+      resultError <- leftOrFail(authService.validateSignature(p1, dummySignature, nonce))(
+        "should catch mid-flight revocation"
+      )
+    } yield {
+      // Assert that the method correctly returned an InvalidSignature error based on the headSnapshot
+      resultError shouldBe a[MemberAuthentication.InvalidSignature]
+
+      // Assert that the rollback successfully removed the newly saved token from the database
+      store.fetchTokens(p1) shouldBe empty
+    }
+  }
+
+  "fail token generation if the member is deactivated mid-flight (TOCTOU race condition check)" in {
+    val store = new MemberAuthenticationStore(
+      PositiveInt.tryCreate(10),
+      PositiveInt.tryCreate(10),
+      loggerFactory,
+    )
+    val dummySignature = noSignature
+
+    // Prepare a valid nonce in the store to satisfy the challenge check
+    val nonce = Nonce.generate(syncCrypto.pureCrypto)
+    val storedNonce = StoredNonce(p1, nonce, clock.now, JDuration.ofMinutes(1))
+    store.saveNonce(storedNonce)
+    val expectedHash = MemberAuthentication
+      .hashSynchronizerNonce(nonce, physicalSynchronizerId, syncCrypto.pureCrypto)
+
+    // create mocks of the crypto API and snapshot objects
+    val mockCryptoApi = mock[SynchronizerCryptoClient]
+    val approxSnapshot = mock[SynchronizerSnapshotSyncCryptoApi]
+    val headSnapshot = mock[SynchronizerSnapshotSyncCryptoApi]
+    val headIpsSnapshot = mock[TopologySnapshot]
+
+    org.mockito.Mockito.when(mockCryptoApi.pureCrypto).thenReturn(syncCrypto.pureCrypto)
+
+    // Connect the snapshot to its inner IPS snapshot component
+    org.mockito.Mockito.when(headSnapshot.ipsSnapshot).thenReturn(headIpsSnapshot)
+
+    // Mock the different snapshot views
+    org.mockito.Mockito
+      .when(
+        mockCryptoApi.currentSnapshotApproximation(org.mockito.ArgumentMatchers.any[TraceContext])
+      )
+      .thenReturn(FutureUnlessShutdown.pure(approxSnapshot))
+    org.mockito.Mockito.when(mockCryptoApi.headSnapshot).thenReturn(headSnapshot)
+
+    // Allow the signature validation to pass for this member, hash, and dummySignature
+    org.mockito.Mockito
+      .when(
+        approxSnapshot.verifySignature(
+          org.mockito.ArgumentMatchers.eq(expectedHash),
+          org.mockito.ArgumentMatchers.eq(p1: Member),
+          org.mockito.ArgumentMatchers.eq(dummySignature),
+          org.mockito.ArgumentMatchers
+            .any[com.daml.nonempty.NonEmpty[Set[SigningKeyUsage]]](),
+        )(org.mockito.ArgumentMatchers.any[TraceContext])
+      )
+      .thenReturn(
+        EitherT.pure[FutureUnlessShutdown, SignatureCheckError](())
+      )
+
+    // Force the mocked key validation check to pass seamlessly and return proxyActiveKeys when headIpsSnapshot.signingKeys is called
+    val proxyActiveKeys =
+      new scala.collection.immutable.Seq[SigningPublicKey] {
+        override def length: Int = 1
+        override def apply(idx: Int): SigningPublicKey =
+          throw new UnsupportedOperationException()
+        override def iterator: Iterator[SigningPublicKey] =
+          Iterator.empty
+        override def exists(
+            p: SigningPublicKey => Boolean
+        ): Boolean = true
+      }
+
+    org.mockito.Mockito
+      .when(
+        headIpsSnapshot.signingKeys(
+          org.mockito.ArgumentMatchers.eq(p1: Member),
+          org.mockito.ArgumentMatchers
+            .eq(SequencerAuthenticationOnly),
+        )(org.mockito.ArgumentMatchers.any[TraceContext])
+      )
+      .thenReturn(FutureUnlessShutdown.pure(proxyActiveKeys))
+
+    // A counter to dynamically track the execution stages
+    var activeCheckCount = 0
+
+    // Instantiate the authService with a stateful countdown trap
+    val authService = new MemberAuthenticationService(
+      physicalSynchronizerId,
+      mockCryptoApi,
+      store,
+      clock,
+      JDuration.ofMinutes(1),
+      JDuration.ofHours(1),
+      useExponentialRandomTokenExpiration = false,
+      _ => (),
+      FutureUnlessShutdown.unit,
+      DefaultProcessingTimeouts.testing,
+      BatchingConfig(),
+      loggerFactory,
+    ) {
+      override def isParticipantActive(participant: ParticipantId)(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Boolean] = {
+        activeCheckCount += 1
+        if (activeCheckCount == 1) {
+          // pass the check on the first call (initial validation phase)
+          FutureUnlessShutdown.pure(true)
+        } else {
+          // fail the check on subsequent calls to simulate member deactivation
+          FutureUnlessShutdown.pure(false)
+        }
+      }
+    }
+
+    // Execute validateSignature to test the behaviour
+    for {
+      resultError <- leftOrFail(authService.validateSignature(p1, dummySignature, nonce))(
+        "should catch mid-flight deactivation"
+      )
+    } yield {
+      // Assert that the method correctly returned a MemberAccessDisabled error
+      resultError shouldBe a[MemberAuthentication.MemberAccessDisabled]
+
+      // Assert that the rollback successfully removed the newly saved token from the database
+      store.fetchTokens(p1) shouldBe empty
     }
   }
 }

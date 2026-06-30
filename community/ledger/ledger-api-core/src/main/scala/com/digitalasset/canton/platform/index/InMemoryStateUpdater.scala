@@ -23,7 +23,7 @@ import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResul
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
@@ -71,7 +71,7 @@ private[platform] object InMemoryStateUpdaterFlow {
       .mapAsync(1) { case (batch, result) =>
         Future {
           update(result, repairMode)
-          metrics.index.ledgerEndSequentialId.updateValue(result.ledgerEnd.lastEventSeqId)
+          metrics.index.ledgerEndSequentialId.updateValue(result.ledgerEndUpdate.lastEventSeqId)
           batch
         }(updateCachesExecutionContext)
       }
@@ -178,7 +178,7 @@ private[platform] object InMemoryStateUpdaterFlow {
 private[platform] object InMemoryStateUpdater {
   final case class PrepareResult(
       updates: Vector[TransactionLogUpdate],
-      ledgerEnd: LedgerEnd,
+      ledgerEndUpdate: LedgerEnd,
       lastTraceContext: TraceContext,
       batchTraceContext: TraceContext,
       contractStateEvents: Vector[ContractStateEvent],
@@ -237,7 +237,7 @@ private[platform] object InMemoryStateUpdater {
         case (offset, u: Update.ReceivedAcsCommitment) =>
           convertReceivedAcsCommitment(offset, u)
       },
-      ledgerEnd = batch.ledgerEnd,
+      ledgerEndUpdate = batch.ledgerEnd,
       lastTraceContext = traceContext,
       batchTraceContext = batch.batchTraceContext,
       contractStateEvents = batch.contractStateEvents,
@@ -251,7 +251,7 @@ private[platform] object InMemoryStateUpdater {
     updateCaches(
       inMemoryState = inMemoryState,
       updates = result.updates,
-      ledgerEnd = result.ledgerEnd,
+      ledgerEndUpdate = result.ledgerEndUpdate,
       batchTraceContext = result.batchTraceContext,
       contractStateEvents = result.contractStateEvents,
     )
@@ -261,7 +261,7 @@ private[platform] object InMemoryStateUpdater {
     if (!repairMode) {
       updateLedgerEnd(
         inMemoryState,
-        result.ledgerEnd,
+        result.ledgerEndUpdate,
         logger,
       )(
         result.lastTraceContext
@@ -337,7 +337,7 @@ private[platform] object InMemoryStateUpdater {
   private[index] def updateCaches(
       inMemoryState: InMemoryState,
       updates: Vector[TransactionLogUpdate],
-      ledgerEnd: LedgerEnd,
+      ledgerEndUpdate: LedgerEnd,
       batchTraceContext: TraceContext,
       contractStateEvents: Vector[ContractStateEvent],
   ): Unit = {
@@ -346,24 +346,26 @@ private[platform] object InMemoryStateUpdater {
     NonEmptyVector
       .fromVector(contractStateEvents)
       .foreach(
-        inMemoryState.contractStateCaches.push(_, ledgerEnd.lastEventSeqId)(batchTraceContext)
+        inMemoryState.contractStateCaches.push(_, ledgerEndUpdate.lastEventSeqId)(batchTraceContext)
       )
-    inMemoryState.cachesUpdatedUpto.set(Some(ledgerEnd.lastOffset))
+    inMemoryState.cachesUpdatedUpto.set(Some(ledgerEndUpdate.lastOffset))
   }
 
   def updateLedgerEnd(
       inMemoryState: InMemoryState,
-      ledgerEnd: LedgerEnd,
+      ledgerEndUpdate: LedgerEnd,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
   ): Unit = {
-    inMemoryState.ledgerEndCache.set(Some(ledgerEnd))
+    inMemoryState.ledgerEndCache.update(ledgerEndUpdate)
     // the order here is very important: first we need to make data available for point-wise lookups
     // and SQL queries, and only then we can make it available on the streams.
     // (consider example: completion arrived on a stream, but the transaction cannot be looked up)
-    inMemoryState.dispatcherState.getDispatcher.signalNewHead(ledgerEnd.lastOffset)
-    logger.debug(s"Updated ledger end $ledgerEnd")
+    inMemoryState.dispatcherState.getDispatcher.signalNewHead(ledgerEndUpdate.lastOffset)
+    logger.debug(
+      s"Updated ledger end properties: $ledgerEndUpdate"
+    )
   }
 
   private def convertTransactionAccepted(
@@ -476,6 +478,7 @@ private[platform] object InMemoryStateUpdater {
               synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
               traceContext = SerializableTraceContext(txAccepted.traceContext).toDamlProto,
               trafficCost = completionInfo.paidTrafficCost.value,
+              transactionHash = txAccepted.transactionHash.map(_.unwrap),
             ),
           updateId = txAccepted.updateId,
         )
@@ -491,7 +494,7 @@ private[platform] object InMemoryStateUpdater {
       completionStreamResponseO = completionStreamResponse,
       synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
       recordTime = txAccepted.recordTime.toLf,
-      externalTransactionHash = txAccepted.externalTransactionHash,
+      transactionHash = txAccepted.transactionHash,
     )(txAccepted.traceContext)
   }
 
@@ -505,20 +508,22 @@ private[platform] object InMemoryStateUpdater {
     TransactionLogUpdate.TransactionRejected(
       offset = offset,
       completionStreamResponse = CompletionFromTransaction.rejectedCompletion(
-        CompletionFromTransaction.CommonCompletionProperties.createFromRecordTimeAndSynchronizerId(
-          submitters = u.completionInfo.actAs.toSet,
-          recordTime = u.recordTime.toLf,
-          completionOffset = offset,
-          commandId = u.completionInfo.commandId,
-          userId = u.completionInfo.userId,
-          submissionId = u.completionInfo.submissionId,
-          deduplicationOffset = deduplicationOffset,
-          deduplicationDurationSeconds = deduplicationDurationSeconds,
-          deduplicationDurationNanos = deduplicationDurationNanos,
-          synchronizerId = u.synchronizerId.toProtoPrimitive,
-          traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
-          trafficCost = u.completionInfo.paidTrafficCost.value,
-        ),
+        CompletionFromTransaction.CommonCompletionProperties
+          .createFromRecordTimeAndSynchronizerId(
+            submitters = u.completionInfo.actAs.toSet,
+            recordTime = u.recordTime.toLf,
+            completionOffset = offset,
+            commandId = u.completionInfo.commandId,
+            userId = u.completionInfo.userId,
+            submissionId = u.completionInfo.submissionId,
+            deduplicationOffset = deduplicationOffset,
+            deduplicationDurationSeconds = deduplicationDurationSeconds,
+            deduplicationDurationNanos = deduplicationDurationNanos,
+            synchronizerId = u.synchronizerId.toProtoPrimitive,
+            traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
+            trafficCost = u.completionInfo.paidTrafficCost.value,
+            transactionHash = u.transactionHash.map(_.unwrap),
+          ),
         status = u.reasonTemplate.status,
       ),
     )(u.traceContext)
@@ -548,6 +553,7 @@ private[platform] object InMemoryStateUpdater {
               synchronizerId = u.synchronizerId.toProtoPrimitive,
               traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
               trafficCost = completionInfo.paidTrafficCost.value,
+              transactionHash = None,
             ),
           updateId = u.updateId,
         )

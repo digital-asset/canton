@@ -827,10 +827,12 @@ class ConnectedSynchronizer(
               cleanProcessingTsO,
               monitor(messageHandler),
               ephemeral.timeTracker,
-              tc =>
-                participantNodePersistentState.value.ledgerApiStore
-                  .cleanSynchronizerIndex(psid.logical)(tc, ec)
-                  .map(_.flatMap(_.sequencerIndex)),
+              _ =>
+                FutureUnlessShutdown.pure(
+                  participantNodePersistentState.value.ledgerApiStore
+                    .cleanSynchronizerIndex(psid.logical)
+                    .flatMap(_.sequencerIndex)
+                ),
             )(initializationTraceContext)
           )
 
@@ -1287,9 +1289,9 @@ object ConnectedSynchronizer {
       )
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
-        tc =>
+        () =>
           participantNodePersistentState.value.ledgerApiStore
-            .cleanSynchronizerIndex(synchronizerHandle.psid.logical)(tc, ec),
+            .cleanSynchronizerIndex(synchronizerHandle.psid.logical),
         sortedReconciliationIntervalsProvider,
         persistentState.acsCommitmentStore,
         persistentState.activeContractStore,

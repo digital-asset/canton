@@ -353,6 +353,7 @@ run_ordinary_tests:
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.variations \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.modelbased \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.docs\\.snippet \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.UpgradesMatrixIntegration \
           "
@@ -366,6 +367,7 @@ run_ordinary_tests:
           # - benchmark
           # - protocol_continuity_test
           # - variations_test
+          # - build_docs_snippets (docs snippet generation tests)
           #
           # If you update this list, please also go through analogue usages of the `filter` parameter and update them as well.
         num_test_buckets: << parameters.num_test_buckets >>
@@ -450,6 +452,7 @@ run_db_tests:
                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.release \
                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks \
                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.docs\\.snippet \
                    "
         num_test_buckets: << parameters.num_test_buckets >>
         succeed_on_error: << parameters.succeed_on_error >>

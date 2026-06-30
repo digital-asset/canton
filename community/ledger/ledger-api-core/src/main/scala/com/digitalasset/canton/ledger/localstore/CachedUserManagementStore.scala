@@ -5,10 +5,10 @@ package com.digitalasset.canton.ledger.localstore
 
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.FallbackExecutor
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, User, UserRight}
-import com.digitalasset.canton.ledger.localstore.api.{UserManagementStore, UserUpdate}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.{IdentityProviderId, User, UserRight, UserUpdate}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.UserId

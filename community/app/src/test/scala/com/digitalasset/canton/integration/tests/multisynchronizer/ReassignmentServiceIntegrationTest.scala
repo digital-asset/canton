@@ -729,6 +729,7 @@ abstract class ReassignmentServiceIntegrationTest
       offset = 0L,
       synchronizerTime = None,
       paidTrafficCost = unassignCost,
+      transactionHash = None,
     )
 
     unassignmentCompletion.copy(
@@ -796,6 +797,7 @@ abstract class ReassignmentServiceIntegrationTest
       offset = 0L,
       synchronizerTime = None,
       paidTrafficCost = assignCost,
+      transactionHash = None,
     )
 
     assignmentCompletion.copy(

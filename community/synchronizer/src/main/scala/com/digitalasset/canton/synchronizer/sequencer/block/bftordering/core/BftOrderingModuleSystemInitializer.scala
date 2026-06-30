@@ -127,7 +127,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           P2PConnectionEventListener,
           ModuleRef[BftOrderingMessage],
       ) => P2PNetworkManagerT,
-  ): SystemInitializationResult[
+  )(implicit traceContext: TraceContext): SystemInitializationResult[
     E,
     P2PNetworkManagerT,
     BftOrderingMessage,
@@ -139,7 +139,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       synchronizerProtocolVersion,
       stores.outputStore,
       timeouts,
-      msg => implicit context => failBootstrap(msg),
+      msg => context => failBootstrap(msg)(context),
       metrics,
       loggerFactory,
     )
@@ -329,8 +329,9 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
   private def fetchBootstrapTopologyInfo(
       moduleSystem: ModuleSystem[E],
       leaderSelectionPolicyFactory: LeaderSelectionInitializer[E],
+  )(implicit
+      traceContext: TraceContext
   ): (EpochNumber, OrderingTopologyInfo[E], BlacklistLeaderSelectionPolicyState) = {
-    import TraceContext.Implicits.Empty.*
 
     val bti @ BootstrapTopologyInfo(
       initialEpochNumber,

@@ -72,12 +72,11 @@ trait CodecVisitor[T]
         (typeParams zip appliedArgs).toMap
     }
 
-  override final def unknown(id: Identifier, args: Seq[Type]): Type = new Type:
-    import Debug.show
+  override final def unknown: Type = new Type:
     override def toDynamicValue(v: T)(using VarMap[Decoder[T]]): DynamicValue =
-      throw new RuntimeException(s"Failed to decode payload: unknown type ${id.show}")
+      throw new RuntimeException(s"Failed to decode payload of unknown type")
     override def fromDynamicValue(dv: DynamicValue)(using VarMap[Encoder[T]]): T =
-      throw new RuntimeException(s"Unexpected value of type ${id.show}")
+      throw new RuntimeException(s"Unexpected value of unknown type")
 
   extension [A](array: Array[A])
     inline def getMaybe(ix: Int): A =

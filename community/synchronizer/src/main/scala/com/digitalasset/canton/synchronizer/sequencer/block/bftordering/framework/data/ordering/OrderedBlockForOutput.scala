@@ -24,4 +24,4 @@ final case class OrderedBlockForOutput(
     orderingMode: OrderingMode,
 )
 
-object OrderedBlockForOutput {}
+object OrderedBlockForOutput

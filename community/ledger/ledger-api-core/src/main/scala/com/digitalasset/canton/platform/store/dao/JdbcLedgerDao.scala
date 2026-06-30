@@ -22,7 +22,6 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.store.*
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.PruningContractsBlockedException
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
@@ -82,16 +81,6 @@ private[platform] class JdbcLedgerDao(
     dbDispatcher
       .executeSql(metrics.index.db.getParticipantId)(
         parameterStorageBackend.ledgerIdentity(_).map(_.participantId)
-      )
-
-  /** Defaults to None if ledger_end is unset
-    */
-  override def lookupLedgerEnd()(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[LedgerEnd]] =
-    dbDispatcher
-      .executeSql(metrics.index.db.getLedgerEnd)(
-        parameterStorageBackend.ledgerEnd
       )
 
   override def getParties(
@@ -199,9 +188,9 @@ private[platform] class JdbcLedgerDao(
               },
             attempts = contractPruningMaxRetries + 1,
             delayFunction = attempt => {
-              // tracking each attempt individually
+              // recording the retry count of this pruning operation
               metrics.services.pruning.contractPruningRetried
-                .mark(attempt.toLong)(MetricsContext.Empty)
+                .update(attempt.toLong)(MetricsContext.Empty)
               // fix delay between retries
               Some(contractPruningDelayBeforeRetry)
             },

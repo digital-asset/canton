@@ -45,7 +45,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
-import com.digitalasset.canton.platform.apiserver.SeedService
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
@@ -82,7 +82,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
   def createApiService(
       updateServices: UpdateServices,
       submissionSyncService: state.SyncService,
-      seedService: SeedService,
       commandExecutor: CommandExecutor,
       metrics: LedgerApiServerMetrics,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
@@ -99,7 +98,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
   ): InteractiveSubmissionService & AutoCloseable = new InteractiveSubmissionServiceImpl(
     updateServices,
     submissionSyncService,
-    seedService,
     commandExecutor,
     metrics,
     checkOverloaded,
@@ -117,7 +115,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
 private[apiserver] final class InteractiveSubmissionServiceImpl private[services] (
     updateServices: UpdateServices,
     syncService: state.SyncService,
-    seedService: SeedService,
     commandExecutor: CommandExecutor,
     metrics: LedgerApiServerMetrics,
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
@@ -185,7 +182,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         )
       } else {
         evaluateAndHash(
-          seedService.nextSeed(),
+          SubmissionSeed.generate(syncService.randomOps),
           request.commands,
           request.verboseHashing,
           request.maxRecordTime,

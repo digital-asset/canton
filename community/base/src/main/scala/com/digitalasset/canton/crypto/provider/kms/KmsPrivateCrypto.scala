@@ -18,11 +18,12 @@ import com.digitalasset.canton.crypto.kms.{
 import com.digitalasset.canton.crypto.store.KmsMetadataStore.KmsMetadata
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, KmsCryptoPrivateStore}
 import com.digitalasset.canton.health.{
+  CloseableHealthComponent,
   ComponentHealthState,
   CompositeHealthElement,
   HealthQuasiComponent,
 }
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{CryptoMetrics, DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.serialization.DeserializationError
@@ -44,11 +45,9 @@ class KmsPrivateCrypto(
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CryptoPrivateApi
+    with CloseableHealthComponent
     with NamedLogging
-    with FlagCloseable
     with CompositeHealthElement[String, HealthQuasiComponent] {
-
-  override private[crypto] def getInitialHealthState: ComponentHealthState = this.initialHealthState
 
   override def name: String = "kms-private-crypto"
 

@@ -265,6 +265,7 @@ object DbDto {
       is_transaction: Boolean,
       trace_context: Array[Byte],
       traffic_cost: Long,
+      transaction_hash: Option[Array[Byte]] = None,
   ) extends DbDto {
     override def provideInternedStrings(builder: StringInterningBuilder): Unit = {
       builder.addUserId(user_id)
@@ -293,6 +294,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       event_sequential_id_first: Long,
       event_sequential_id_last: Long,
+      transaction_hash: Option[Array[Byte]],
   ) extends DbDto {
     override def provideInternedStrings(builder: StringInterningBuilder): Unit =
       builder.addSynchronizerId(synchronizer_id)

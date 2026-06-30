@@ -10,7 +10,6 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
   optReaderEnabled,
   optWriterEnabled,
 }
-import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
@@ -174,17 +173,6 @@ class PureConfigReaderWriterSpec
       "unknown-key=yes\n" + validJwtTimestampLeewayValue,
     ).left.value
       .prettyPrint(0) should include("Unknown key")
-  }
-
-  behavior of "Seeding"
-
-  it should "read/write against predefined values" in {
-    seedingWriter.to(Seeding.Static) shouldBe fromAnyRef("testing-static")
-    seedingWriter.to(Seeding.Weak) shouldBe fromAnyRef("testing-weak")
-    seedingWriter.to(Seeding.Strong) shouldBe fromAnyRef("strong")
-    seedingReader.from(fromAnyRef("testing-static")).value shouldBe Seeding.Static
-    seedingReader.from(fromAnyRef("testing-weak")).value shouldBe Seeding.Weak
-    seedingReader.from(fromAnyRef("strong")).value shouldBe Seeding.Strong
   }
 
   behavior of "userManagementServiceConfig"
@@ -464,7 +452,7 @@ class PureConfigReaderWriterSpec
       |in-memory-state-updater-parallelism=2
       |max-contract-key-state-cache-size=10000
       |max-contract-state-cache-size=10000
-      |max-transactions-in-memory-fan-out-buffer-size=1000
+      |max-transactions-in-memory-fan-out-buffer-size=1100
       |prepare-package-metadata-time-out-warning="5s"
       |updates-streams {
       |    max-ids-per-id-page=20000

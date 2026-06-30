@@ -16,7 +16,6 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.protocol.LfContractId
@@ -93,9 +92,6 @@ private[platform] trait LedgerReadDao extends ReportsHealth {
   def lookupParticipantId()(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ParticipantId]]
-
-  /** Looks up the current ledger end */
-  def lookupLedgerEnd()(implicit loggingContext: LoggingContextWithTrace): Future[Option[LedgerEnd]]
 
   def updateReader: LedgerDaoUpdateReader
 

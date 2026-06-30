@@ -22,8 +22,6 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.value.Value.*
 import com.google.protobuf.ByteString
 import org.scalacheck.{Arbitrary, Gen}
-import scalaz.scalacheck.ScalaCheckBinding.*
-import scalaz.syntax.apply.*
 
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.collection.immutable.HashMap
@@ -314,7 +312,10 @@ object ValueGenerators {
   private[lf] val genMaybeEmptyParties: Gen[Set[Party]] = Gen.listOf(party).map(_.toSet)
 
   private val genNonEmptyParties: Gen[Set[Party]] =
-    ^(party, genMaybeEmptyParties)((hd, tl) => tl + hd)
+    for {
+      hd <- party
+      tl <- genMaybeEmptyParties
+    } yield tl + hd
 
   def keyWithMaintainersGen(
       templateId: TypeConId,

@@ -116,6 +116,23 @@ jobs:
             - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
+  - build_docs_snippets:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
   - build_docs:
       context:
         - datadog
@@ -132,6 +149,7 @@ jobs:
       requires:
         - package_community
         - build_scaladoc
+        - build_docs_snippets
 
 ##### Tests
   - test:
@@ -167,8 +185,8 @@ jobs:
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - test:
-      name: test_protocol_version_34
-      protocol_version: "34"
+      name: test_protocol_version_36
+      protocol_version: "36"
       context:
         - datadog
         - artifactory
@@ -202,7 +220,7 @@ jobs:
         tags:
           only: /^v.*/
       requires:
-        - test_protocol_version_34
+        - test_protocol_version_36
   # TODO(#33536): Remove this job once the ACS commitment redesign development is complete
   - temp_acs_commitment_tests_pv_dev:
       name: temp_acs_commitment_tests_pv_dev

@@ -62,6 +62,7 @@ object IndexUpdateService {
 
   final case class ReceivedAcsCommitment(
       offset: Offset,
+      updateId: String,
       synchronizerId: String,
       recordTime: Timestamp,
       payload: ByteString,

@@ -77,9 +77,11 @@ final class P2PNetworkOutModule[
   val p2pNetworkManager: P2PNetworkManagerT =
     dependencies.createP2PNetworkManager(this, dependencies.p2pNetworkIn)
 
-  override def ready(self: ModuleRef[P2PNetworkOut.Message]): Unit = {
+  override def ready(
+      self: ModuleRef[P2PNetworkOut.Message]
+  )(implicit traceContext: TraceContext): Unit = {
     state.maybeSelf = Some(self)
-    self.asyncSendNoTrace(P2PNetworkOut.Start)
+    self.asyncSend(P2PNetworkOut.Start)
   }
 
   override def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit

@@ -150,7 +150,7 @@ object UnassignmentValidationResult {
       errors: Seq[ReassignmentValidationError]
   ) extends ReassignmentValidationResult.ReassigningParticipantValidationResult {
     // These validations read the target topology at this participant's localTargetTs, which may not
-    // yet reflect recent topology changes, so we abstain on any failure rather than reject.
-    override def abstainErrors: Seq[ReassignmentValidationError] = errors
+    // yet reflect recent topology changes, so we abstain on any failure.
+    override def isAbstain: Boolean = true
   }
 }

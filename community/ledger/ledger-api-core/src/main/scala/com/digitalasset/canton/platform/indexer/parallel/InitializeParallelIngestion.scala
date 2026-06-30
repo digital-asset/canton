@@ -18,12 +18,12 @@ import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.{
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
   AchsState,
-  LedgerEnd,
 }
 import com.digitalasset.canton.platform.store.backend.{
   CompletionStorageBackend,
   EventStorageBackend,
   IngestionStorageBackend,
+  LedgerEnd,
   ParameterStorageBackend,
   StringInterningStorageBackend,
 }

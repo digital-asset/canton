@@ -32,7 +32,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.Monocle.toAppliedFocusOps
@@ -226,8 +225,6 @@ final class ReferenceLedgerApiDynamicTemplateFilterIntegrationTestNoCaches
             .replace(0)
             .focus(_.ledgerApi.userManagementService.maxRightsPerUser)
             .replace(100)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
             .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
             .replace(0)
             .focus(_.ledgerApi.indexService.maxContractStateCacheSize)

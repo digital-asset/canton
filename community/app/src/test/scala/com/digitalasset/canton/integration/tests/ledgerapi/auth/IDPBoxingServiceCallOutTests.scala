@@ -15,6 +15,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait IDPBoxingServiceCallOutTests
     extends ServiceCallAuthTests
     with IdentityProviderConfigAuth
+    with UserManagementAuth
     with ErrorsAssertions {
 
   override protected def serviceCall(context: ServiceCallContext)(implicit
@@ -181,6 +182,33 @@ trait IDPBoxingServiceCallOutTests
               } yield ()
             }
           }
+        }
+      }
+    }
+
+    "deny IDP Admin claiming unassigned users" taggedAs adminSecurityAsset
+      .setAttack(
+        attackUnknownResource(threat = "Claim users without IDP")
+      ) in { implicit env =>
+      import env.*
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        expectPermissionDenied {
+          val suffix = UUID.randomUUID().toString
+          for {
+            (_, idpAdminContext, idpConfig) <- createIDPBundle(canBeAnAdmin, suffix)
+            unassigned <- createFreshUser(
+              token = canBeAnAdmin.token,
+              identityProviderId = "",
+            )
+            _ <- stub(uproto.UserManagementServiceGrpc.stub(channel), idpAdminContext.token)
+              .updateUserIdentityProviderId(
+                uproto.UpdateUserIdentityProviderIdRequest(
+                  userId = unassigned.user.value.id,
+                  sourceIdentityProviderId = "",
+                  targetIdentityProviderId = idpConfig.identityProviderId,
+                )
+              )
+          } yield ()
         }
       }
     }

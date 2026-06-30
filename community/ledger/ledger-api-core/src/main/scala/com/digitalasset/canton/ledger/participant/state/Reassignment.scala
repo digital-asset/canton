@@ -65,7 +65,7 @@ object Reassignment {
       reassignmentCounter: Long,
       nodeId: Int,
       keyOpt: Option[GlobalKeyWithMaintainers],
-  ) extends Reassignment {}
+  ) extends Reassignment
 
   /** Represents the update of assigning a contract to a synchronizer.
     *

@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.apiserver.SeedService
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
@@ -47,7 +47,6 @@ private[apiserver] object CommandSubmissionServiceImpl {
       syncService: state.SyncService,
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
-      seedService: SeedService,
       commandExecutor: CommandExecutor,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       metrics: LedgerApiServerMetrics,
@@ -59,7 +58,6 @@ private[apiserver] object CommandSubmissionServiceImpl {
     syncService,
     timeProvider,
     timeProviderType,
-    seedService,
     commandExecutor,
     checkOverloaded,
     metrics,
@@ -71,7 +69,6 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
     syncService: state.SyncService,
     timeProvider: TimeProvider,
     timeProviderType: TimeProviderType,
-    seedService: SeedService,
     commandExecutor: CommandExecutor,
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
     metrics: LedgerApiServerMetrics,
@@ -117,7 +114,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
         )
 
       val evaluatedCommand =
-        evaluateAndSubmit(seedService.nextSeed(), request.commands)
+        evaluateAndSubmit(SubmissionSeed.generate(syncService.randomOps), request.commands)
           .transform(handleSubmissionResult)
       evaluatedCommand.thereafter(logger.logErrorsOnCall[UnlessShutdown[Unit]])
     }

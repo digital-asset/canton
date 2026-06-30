@@ -160,6 +160,7 @@ import com.daml.ledger.api.v2.testing.time_service.TimeServiceGrpc
 import com.daml.ledger.api.v2.testing.time_service.TimeServiceGrpc.TimeService
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.UpdateService
 import com.daml.ledger.api.v2.update_service.{
+  GetUpdateByHashRequest,
   GetUpdateByIdRequest,
   GetUpdateByOffsetRequest,
   GetUpdateResponse,
@@ -546,7 +547,7 @@ private final class LedgerServicesJson(
         responseObserver: StreamObserver[CompletionStreamResponse],
     ): Unit =
       wsCall(
-        JsCommandService.getCompletionsEndpoint,
+        JsCommandService.commandCompletionsEndpoint,
         request,
         responseObserver,
         Future.successful(_: CompletionStreamResponse),
@@ -841,6 +842,13 @@ private final class LedgerServicesJson(
     ): Future[GetUpdateResponse] =
       clientCall(
         JsUpdateService.getUpdateByIdEndpoint,
+        request,
+      )
+        .flatMap(protocolConverters.GetUpdateResponse.fromJson)
+
+    override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+      clientCall(
+        JsUpdateService.getUpdateByHashEndpoint,
         request,
       )
         .flatMap(protocolConverters.GetUpdateResponse.fromJson)

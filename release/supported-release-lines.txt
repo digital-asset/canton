@@ -1,0 +1,10 @@
+# Supported Canton release lines, one major.minor per line.
+#
+# Source of truth for which release lines are actively maintained. Used by
+# release/update_dependabot.py to keep .github/dependabot.yml in sync, and
+# intended to drive scheduled CI workflows so unsupported lines stop being
+# built/tested.
+#
+# Add a line when it is cut; remove it when the line goes out of support.
+# Blank lines and `#` comments are ignored.
+3.5

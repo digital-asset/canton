@@ -3,12 +3,10 @@
 
 package com.digitalasset.daml.lf.data
 
-import com.daml.scalatest.{Unnatural, WordSpecCheckLaws}
+import com.daml.scalatest.WordSpecCheckLaws
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
-import scalaz.scalacheck.ScalazProperties
-import scalaz.std.anyVal.*
 
 class FrontStackSpec
     extends AnyWordSpec
@@ -74,14 +72,27 @@ class FrontStackSpec
   }
 
   "Traverse instance" should {
-    checkLaws(ScalazProperties.traverse.laws[FrontStack])
+    import cats.Eq
+    import cats.laws.discipline.TraverseTests
+    import DataArbitrary.`arb FrontStack`
+
+    implicit val eqFrontStack: Eq[FrontStack[Int]] = Eq.fromUniversalEquals
+
+    // Equivalent of the former `checkLaws(ScalazProperties.traverse.laws[FrontStack])`,
+    // expressed with cats-laws and registered as individual word-spec tests.
+    TraverseTests[FrontStack]
+      .traverse[Int, Int, Int, Int, Option, Option]
+      .all
+      .properties
+      .foreach { case (id, prop) =>
+        id in check(prop)
+      }
 
     "reconstruct itself with foldRight" in forAll { fs: FrontStack[Int] =>
-      scalaz.Foldable[FrontStack].foldRight(fs, FrontStack.empty[Int])(_ +: _) should ===(fs)
+      cats
+        .Foldable[FrontStack]
+        .foldRight(fs, cats.Eval.now(FrontStack.empty[Int]))((i, acc) => acc.map(i +: _))
+        .value should ===(fs)
     }
-  }
-
-  "Equal instance" should {
-    checkLaws(ScalazProperties.equal.laws[FrontStack[Unnatural[Int]]])
   }
 }

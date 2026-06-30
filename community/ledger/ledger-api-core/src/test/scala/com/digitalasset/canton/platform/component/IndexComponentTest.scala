@@ -159,10 +159,11 @@ trait IndexComponentTest
   protected def ledgerEndCache: MutableLedgerEndCache = testServices.inMemoryState.ledgerEndCache
   protected def contractStore: LedgerApiContractStore = testServices.participantContractStore
 
-  private def ledgerEndOffset = testServices.index.currentLedgerEnd().futureValue
+  private def ledgerEndOffset =
+    testServices.index.currentLedgerEnd()
 
   protected def ingestUpdates(updates: (Update, Vector[ContractInstance])*): Offset = {
-    val ledgerEndLongBefore = ledgerEndOffset.map(_.positive).getOrElse(0L)
+    val ledgerEndLongBefore = ledgerEndOffset.map(_.lastOffset.unwrap).getOrElse(0L)
     val ingestionTimeout = 60.minutes
     // contracts should be stored in participant contract store before ingesting the updates to get the internal contract ids mapping
     MonadUtil
@@ -172,7 +173,7 @@ trait IndexComponentTest
       .futureValue(timeout = PatienceConfiguration.Timeout(ingestionTimeout))
     val expectedOffset = Offset.tryFromLong(updates.size + ledgerEndLongBefore)
     eventually(timeUntilSuccess = ingestionTimeout) {
-      ledgerEndOffset shouldBe Some(expectedOffset)
+      ledgerEndOffset.map(_.lastOffset) shouldBe Some(expectedOffset)
       expectedOffset
     }
   }
@@ -181,11 +182,13 @@ trait IndexComponentTest
     testServices.indexer.offer(update).map(_ => ())
 
   protected def ingestUpdateSync(update: Update): Offset = {
-    val ledgerEndBefore = index.currentLedgerEnd().futureValue
+    val ledgerEndBefore = index
+      .currentLedgerEnd()
+      .map((_.lastOffset))
     ingestUpdateAsync(update).futureValue
 
     eventually() {
-      val ledgerEndAfter = index.currentLedgerEnd().futureValue
+      val ledgerEndAfter = index.currentLedgerEnd().map(_.lastOffset)
       ledgerEndAfter should be > ledgerEndBefore
       ledgerEndAfter.value
     }
@@ -619,7 +622,11 @@ trait IndexComponentTest
     transaction(synchronizerId = synchronizer1, recordTime = recordTime)(tx, contractsToCreate)
   }
 
-  protected def creates(recordTime: () => CantonTimestamp, payloadLength: Int)(
+  protected def creates(
+      recordTime: () => CantonTimestamp,
+      payloadLength: Int,
+      synchronizer: SynchronizerId = synchronizer1,
+  )(
       size: Int
   ): (Update.SequencedTransactionAccepted, Vector[ContractInstance]) = {
     val recordTimeAndLedgerEffectiveTime = recordTime()
@@ -629,7 +636,7 @@ trait IndexComponentTest
     contracts.map(_.inst.toCreateNode).foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
     transaction(
-      synchronizerId = synchronizer1,
+      synchronizerId = synchronizer,
       recordTime = recordTimeAndLedgerEffectiveTime,
     )(tx, contracts) -> contracts
   }
@@ -668,10 +675,13 @@ trait IndexComponentTest
       synchronizerId = synchronizer1,
       effectiveTime = recordTime,
     )
-    val ledgerEndBeforeTopology = index.currentLedgerEnd().futureValue
+    val ledgerEndBeforeTopology = index
+      .currentLedgerEnd()
+      .map(_.lastOffset)
     ingestUpdateAsync(topologyTransaction).futureValue
     eventually() {
-      val ledgerEndAfterTopology = index.currentLedgerEnd().futureValue
+      val ledgerEndAfterTopology =
+        index.currentLedgerEnd().map(_.lastOffset)
       ledgerEndAfterTopology should be > ledgerEndBeforeTopology
       ledgerEndAfterTopology.value
     }
@@ -784,7 +794,7 @@ trait IndexComponentTest
       synchronizerId = synchronizerId,
       recordTime = recordTime,
       acsChangeFactory = testAcsChangeFactory,
-      externalTransactionHash = None,
+      transactionHash = None,
       contractInfos = contracts.view.map { contract =>
         contract.contractId -> ContractInfo(
           representativePackageId = SameAsContractPackageId,

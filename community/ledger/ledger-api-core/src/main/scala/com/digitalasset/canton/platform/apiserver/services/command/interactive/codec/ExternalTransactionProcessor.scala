@@ -304,10 +304,10 @@ class ExternalTransactionProcessor(
           }
           .toLeft(())
       )
-      _ <- decoded
+      hash <- decoded
         .verifySignature(routingSynchronizerState, logger)
         .leftMap(err => InteractiveSubmissionExecuteError.Reject(err))
-      commandInterpretationResult = decoded.impoverish
+      commandInterpretationResult = decoded.withTransactionHash(hash).impoverish
       selectRoutingSynchronizer <- EitherT.liftF(
         syncService
           .selectRoutingSynchronizer(

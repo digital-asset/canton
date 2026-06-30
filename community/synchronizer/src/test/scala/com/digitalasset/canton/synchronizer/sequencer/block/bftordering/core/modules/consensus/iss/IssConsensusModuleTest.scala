@@ -331,7 +331,7 @@ class IssConsensusModuleTest
         }
 
         verify(segmentModuleMock, times(membership.orderingTopology.nodes.size))
-          .asyncSendNoTrace(ConsensusSegment.Start)
+          .asyncSend(ConsensusSegment.Start)
         succeed
       }
 
@@ -1438,6 +1438,7 @@ class IssConsensusModuleTest
         failingCryptoProvider,
         Seq.empty,
         EpochStore.EpochInProgress(),
+        traceContext,
       ),
       Seq.empty,
       loggerFactory,
@@ -1515,6 +1516,7 @@ class IssConsensusModuleTest
             failingCryptoProvider,
             latestCompletedEpochFromStore.lastBlockCommits,
             epochStore.loadEpochProgress(latestEpochFromStore.info)(TraceContext.empty)(),
+            traceContext,
           )
           new EpochState[ProgrammableUnitTestEnv](
             epoch,
@@ -1560,7 +1562,10 @@ class IssConsensusModuleTest
         timeouts,
         futurePbftMessageQueue,
         Some(postponedConsensusMessageQueue),
-      )(maybeOnboardingStateTransferManager)(
+      )(
+        maybeOnboardingStateTransferManager,
+        initTraceContext = TraceContext.createNew("iss-consensus-module-test"),
+      )(
         catchupDetector = maybeCatchupDetector.getOrElse(
           new DefaultCatchupDetector(topologyInfo.currentMembership, loggerFactory)
         ),
@@ -1620,6 +1625,7 @@ private[iss] object IssConsensusModuleTest {
           cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
           latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
           epochInProgress: EpochStore.EpochInProgress,
+          _traceContext: TraceContext,
       )(
           segmentState: SegmentState,
           metricsAccumulator: EpochMetricsAccumulator,

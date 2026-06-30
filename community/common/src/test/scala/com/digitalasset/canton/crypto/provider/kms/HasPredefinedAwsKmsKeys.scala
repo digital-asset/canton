@@ -41,4 +41,4 @@ trait HasPredefinedAwsKmsKeys extends HasPredefinedKmsKeys {
 
 }
 
-object PredefinedAwsKmsKeys extends HasPredefinedAwsKmsKeys {}
+object PredefinedAwsKmsKeys extends HasPredefinedAwsKmsKeys

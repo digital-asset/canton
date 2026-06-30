@@ -77,6 +77,13 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
   ): Source[InternalIndexService.AcsUpdateContainer, NotUsed] =
     internalIndexService.acsUpdates(synchronizerId, fromExclusive)
 
+  private def counterPartiesOf(
+      synchronizerId: SynchronizerId,
+      activeAt: Offset,
+      party: Option[Ref.Party],
+  ): Source[Ref.Party, NotUsed] =
+    internalIndexService.counterParties(synchronizerId, activeAt, party)
+
   private def acsUpdatesRaw(
       fromExclusive: Option[Offset],
       expected: Int,
@@ -111,7 +118,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
 
   "acsUpdates" should {
     "emit an activation for every created contract with reassignment counter 0" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val (recordTime1, create1, contract1) =
         createTxWithRecordTime(synchronizer1, Set(dsoParty, alice))
       val (recordTime2, create2, contract2) =
@@ -154,7 +161,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       val (create, contract) = createTx(Set(dsoParty, alice))
       ingestUpdates(create -> Vector(contract))
 
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       val archive = archives(
         recordTime = nextRecordTime,
@@ -176,7 +183,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
     }
 
     "omit an archived contract whose activation is not in the index DB" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       // Build (but never ingest) the creation of a contract, then ingest only its archive.
       val orphanContract = genContract(
@@ -216,7 +223,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       val (preCreate, archivedContract) = createTx(Set(dsoParty, alice))
       ingestUpdates(preCreate -> Vector(archivedContract))
 
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       val payload1 = ByteString.copyFromUtf8("commitment-payload-1")
       val payload2 = ByteString.copyFromUtf8("commitment-payload-2")
@@ -284,7 +291,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
     }
 
     "ignore updates from a different synchronizer" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       ingestUpdateSync(
         acsCommitment(synchronizer2, ByteString.copyFromUtf8("other-synchronizer-commitment"))
@@ -302,7 +309,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
     }
 
     "emit an activation with the assigned reassignment counter for a reassignment" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       val reassignmentCounter = 17L
       val (assign, contract) =
@@ -329,7 +336,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       ingestUpdates(assign -> Vector(contract))
 
       // Start reading after the assignment so only the archive's deactivation is in range.
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       val archive = archives(
         recordTime = nextRecordTime,
@@ -354,7 +361,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       val (create, contract) = createTx(Set(dsoParty, alice))
       ingestUpdates(create -> Vector(contract))
 
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       val unassignCounter = 42L
       ingestUpdates(
@@ -383,7 +390,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
         assign2 -> Vector(archived2),
       )
 
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       // Two new contracts created in the same transaction that archives the two assigned ones.
       val recordTime = nextRecordTime()
@@ -423,8 +430,385 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
     }
 
     "not emit ACS changes when the range is empty" in {
-      val rangeEnd = index.currentLedgerEnd().futureValue
+      val rangeEnd = index.currentLedgerEnd().map(_.lastOffset)
       acsUpdatesRaw(rangeEnd, expected = 0) shouldBe empty
+    }
+  }
+
+  "acs" should {
+    "return active contracts that have at least one stakeholder in stakeholders1" in {
+      val party1 = ValueParty(Ref.Party.assertFromString("acs-party-1"))
+      val party2 = ValueParty(Ref.Party.assertFromString("acs-party-2"))
+      val partyCommon = ValueParty(Ref.Party.assertFromString("acs-party-common"))
+
+      val (create1, contract1) = createTx(Set(party1, partyCommon))
+      val (create2, contract2) = createTx(Set(partyCommon, party2))
+      ingestUpdates(
+        create1 -> Vector(contract1),
+        create2 -> Vector(contract2),
+      )
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      val contractsParty1All = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(party1.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contractsParty1All shouldBe Seq(
+        InternalIndexService.ActiveContract(
+          contractId = contract1.contractId,
+          stakeholders = Set(party1.value, partyCommon.value),
+          reassignmentCounter = ReassignmentCounter(0L),
+        )
+      )
+
+      val contractsParty1 = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(party1.value),
+          stakeholders2 = Set(party1.value),
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contractsParty1 shouldBe contractsParty1All
+
+      val contractsParty1Common = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(party1.value),
+          stakeholders2 = Set(partyCommon.value),
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contractsParty1Common shouldBe contractsParty1All
+
+      val contractsPartyCommon1 = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(partyCommon.value),
+          stakeholders2 = Set(party1.value),
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contractsPartyCommon1 shouldBe contractsParty1All
+
+      val contractsParty2All = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(party2.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contractsParty2All shouldBe Seq(
+        InternalIndexService.ActiveContract(
+          contractId = contract2.contractId,
+          stakeholders = Set(party2.value, partyCommon.value),
+          reassignmentCounter = ReassignmentCounter(0L),
+        )
+      )
+
+      val contractsPartyCommonAll = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(partyCommon.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contractsPartyCommonAll shouldBe contractsParty1All ++ contractsParty2All
+
+    }
+
+    "treat an empty stakeholders1 as any party, filtered by stakeholders2" in {
+      val party1 = ValueParty(Ref.Party.assertFromString("acs-any-party-1"))
+      val party2 = ValueParty(Ref.Party.assertFromString("acs-any-party-2"))
+
+      val (create1, contract1) = createTx(Set(dsoParty, party1))
+      val (create2, contract2) = createTx(Set(dsoParty, party2))
+      ingestUpdates(
+        create1 -> Vector(contract1),
+        create2 -> Vector(contract2),
+      )
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      // An empty stakeholders1 with an empty stakeholders2 returns all active contracts.
+      val allContracts = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set.empty,
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      allContracts.map(_.contractId) should contain allOf (
+        contract1.contractId,
+        contract2.contractId,
+      )
+
+      val party1Contracts = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set.empty,
+          stakeholders2 = Set(party1.value),
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      party1Contracts.map(_.contractId) should contain(contract1.contractId)
+      party1Contracts.map(_.contractId) should not contain contract2.contractId
+    }
+
+    "return the full stakeholder set for matching contracts and reassignment counter 0" in {
+      val (create, contract) = createTx(Set(dsoParty, alice, bob))
+      ingestUpdates(create -> Vector(contract))
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      val active = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(alice.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+        .find(_.contractId == contract.contractId)
+        .value
+
+      active.stakeholders should contain theSameElementsAs Set(
+        dsoParty.value,
+        alice.value,
+        bob.value,
+      )
+      active.reassignmentCounter.v shouldBe 0L
+    }
+
+    "only return contracts that have a stakeholder in both stakeholders1 and stakeholders2" in {
+      val (createAB, contractAB) = createTx(Set(dsoParty, alice, bob))
+      val (createA, contractA) = createTx(Set(dsoParty, alice))
+      ingestUpdates(
+        createAB -> Vector(contractAB),
+        createA -> Vector(contractA),
+      )
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      val contracts = index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAt,
+          stakeholders1 = Set(alice.value),
+          stakeholders2 = Set(bob.value),
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      contracts.map(_.contractId) should contain(contractAB.contractId)
+      contracts.map(_.contractId) should not contain contractA.contractId
+    }
+
+    "return no contracts for a synchronizer without active contracts" in {
+      val (create, contract) = createTx(Set(dsoParty, alice))
+      ingestUpdates(create -> Vector(contract))
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      index
+        .acs(
+          synchronizerId = synchronizer2,
+          activeAt = activeAt,
+          stakeholders1 = Set(alice.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue shouldBe empty
+    }
+
+    "exclude archived contracts" in {
+      val acsArchivedParty = ValueParty(Ref.Party.assertFromString("acs-archived-party"))
+
+      val (create, contract) = createTx(Set(dsoParty, acsArchivedParty))
+      ingestUpdates(create -> Vector(contract))
+
+      // The contract is active right after the create.
+      val activeBeforeArchive = index.currentLedgerEnd().value.lastOffset
+      index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeBeforeArchive,
+          stakeholders1 = Set(acsArchivedParty.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+        .map(_.contractId) should contain(contract.contractId)
+
+      val archive = archives(
+        recordTime = nextRecordTime,
+        argumentLength = 8,
+        resultLength = 8,
+      )(Seq(contract.inst.toCreateNode))
+      ingestUpdates(archive -> Vector.empty)
+
+      // After the archive the contract is no longer part of the ACS.
+      val activeAfterArchive = index.currentLedgerEnd().value.lastOffset
+      index
+        .acs(
+          synchronizerId = synchronizer1,
+          activeAt = activeAfterArchive,
+          stakeholders1 = Set(acsArchivedParty.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue shouldBe empty
+    }
+  }
+
+  "counterParties" should {
+    "return the distinct stakeholders of the contracts of a given party" in {
+      val (create1, contract1) = createTx(Set(dsoParty, alice))
+      val (create2, contract2) = createTx(Set(dsoParty, alice, bob))
+      ingestUpdates(
+        create1 -> Vector(contract1),
+        create2 -> Vector(contract2),
+      )
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      val counterParties = counterPartiesOf(synchronizer1, activeAt, Some(alice.value))
+        .runWith(Sink.seq)
+        .futureValue
+
+      // each party emerges exactly once even across multiple contracts
+      counterParties.distinct should contain theSameElementsAs counterParties
+      counterParties should contain allElementsOf Seq(dsoParty.value, alice.value, bob.value)
+
+      val counterPartiesBob = counterPartiesOf(synchronizer1, activeAt, Some(bob.value))
+        .runWith(Sink.seq)
+        .futureValue
+
+      counterPartiesBob should contain allElementsOf counterParties
+
+      val counterPartiesDso = counterPartiesOf(synchronizer1, activeAt, Some(dsoParty.value))
+        .runWith(Sink.seq)
+        .futureValue
+
+      counterPartiesDso should contain allElementsOf counterParties
+    }
+
+    "return every distinct stakeholder when no party is given" in {
+      val (create1, contract1) = createTx(Set(dsoParty, alice))
+      val (create2, contract2) = createTx(Set(dsoParty, charlie))
+      ingestUpdates(
+        create1 -> Vector(contract1),
+        create2 -> Vector(contract2),
+      )
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      val counterParties = counterPartiesOf(synchronizer1, activeAt, None)
+        .runWith(Sink.seq)
+        .futureValue
+
+      counterParties.distinct should contain theSameElementsAs counterParties
+      counterParties should contain allElementsOf Seq(
+        dsoParty.value,
+        alice.value,
+        charlie.value,
+      )
+    }
+
+    "return no parties for a different synchronizer without active contracts" in {
+      val (create, contract) = createTx(Set(dsoParty, alice))
+      ingestUpdates(create -> Vector(contract))
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      counterPartiesOf(synchronizer2, activeAt, Some(alice.value))
+        .runWith(Sink.seq)
+        .futureValue shouldBe empty
+    }
+
+    "exclude parties from contracts of other synchronizers" in {
+      val onlyOnSynchronizer2 = ValueParty(Ref.Party.assertFromString("only-on-synchronizer2"))
+
+      // A contract living on synchronizer2 only.
+      val (create2, contract2) = createTxOn(synchronizer2, Set(dsoParty, onlyOnSynchronizer2))
+      ingestUpdates(create2 -> Vector(contract2))
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      counterPartiesOf(synchronizer1, activeAt, None)
+        .runWith(Sink.seq)
+        .futureValue should not contain onlyOnSynchronizer2.value
+    }
+
+    "exclude parties not sharing a contract with the given party" in {
+      val sharingParty = ValueParty(Ref.Party.assertFromString("sharing-party"))
+      val unrelatedParty = ValueParty(Ref.Party.assertFromString("unrelated-party"))
+
+      val (createShared, contractShared) = createTx(Set(dsoParty, sharingParty))
+      val (createUnrelated, contractUnrelated) = createTx(Set(dsoParty, unrelatedParty))
+      ingestUpdates(
+        createShared -> Vector(contractShared),
+        createUnrelated -> Vector(contractUnrelated),
+      )
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      // The counterparties of sharingParty must not include the unrelated party.
+      val counterParties = counterPartiesOf(synchronizer1, activeAt, Some(sharingParty.value))
+        .runWith(Sink.seq)
+        .futureValue
+
+      counterParties should contain(sharingParty.value)
+      counterParties should not contain unrelatedParty.value
+    }
+
+    "honor activeAt" in {
+      val earlyParty = ValueParty(Ref.Party.assertFromString("counterparties-early-party"))
+      val lateParty = ValueParty(Ref.Party.assertFromString("counterparties-late-party"))
+
+      // A first contract with earlyParty, then snapshot the offset.
+      val (createEarly, contractEarly) = createTx(Set(dsoParty, earlyParty))
+      ingestUpdates(createEarly -> Vector(contractEarly))
+      val activeAtBefore = index.currentLedgerEnd().value.lastOffset
+
+      // A second contract introducing lateParty, committed after the snapshot.
+      val (createLate, contractLate) = createTx(Set(dsoParty, earlyParty, lateParty))
+      ingestUpdates(createLate -> Vector(contractLate))
+
+      val archive = archives(
+        recordTime = nextRecordTime,
+        argumentLength = 8,
+        resultLength = 8,
+      )(Seq(contractEarly.inst.toCreateNode, contractLate.inst.toCreateNode))
+      ingestUpdates(archive -> Vector.empty)
+      val activeAtAfter = index.currentLedgerEnd().value.lastOffset
+
+      // Querying at the earlier snapshot must not surface the party introduced afterwards.
+      val counterParties = counterPartiesOf(synchronizer1, activeAtBefore, Some(earlyParty.value))
+        .runWith(Sink.seq)
+        .futureValue
+
+      counterParties should contain(earlyParty.value)
+      counterParties should not contain lateParty.value
+
+      counterPartiesOf(synchronizer1, activeAtAfter, Some(earlyParty.value))
+        .runWith(Sink.seq)
+        .futureValue shouldBe empty
     }
   }
 }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.digitalasset.canton.config.CantonRequireTypes.String185
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.api.ParticipantId
@@ -27,8 +28,11 @@ import com.digitalasset.canton.platform.config.{
   UpdatesStreamsConfig,
 }
 import com.digitalasset.canton.platform.store.*
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
-import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
+import com.digitalasset.canton.platform.store.backend.{
+  LedgerEnd,
+  ParameterStorageBackend,
+  ReadStorageBackend,
+}
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.protocol.{ContractInstance, TestUpdateId, UpdateId}
@@ -110,7 +114,11 @@ private class JdbcLedgerWriteDao(
 
   override def lookupLedgerEnd()(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[Option[LedgerEnd]] = readDao.lookupLedgerEnd()
+  ): Future[Option[LedgerEnd]] =
+    dbDispatcher
+      .executeSql(metrics.index.db.getLedgerEnd)(
+        parameterStorageBackend.ledgerEnd
+      )
 
   override def initialize(
       participantId: ParticipantId
@@ -167,6 +175,7 @@ private class JdbcLedgerWriteDao(
       recordTime: Timestamp,
       offset: Offset,
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
+      transactionHash: Option[Hash] = None,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] =
@@ -182,6 +191,7 @@ private class JdbcLedgerWriteDao(
               reasonTemplate = reason,
               synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
               isTransaction = true,
+              transactionHash = transactionHash,
             )
           ),
         )
@@ -239,6 +249,7 @@ private class JdbcLedgerWriteDao(
       offset: Offset,
       transaction: CommittedTransaction,
       recordTime: Timestamp,
+      transactionHash: Option[Hash],
       contractActivenessChanged: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
@@ -283,7 +294,7 @@ private class JdbcLedgerWriteDao(
               updateId = updateId,
               synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
               recordTime = CantonTimestamp(recordTime),
-              externalTransactionHash = None,
+              transactionHash = transactionHash,
               acsChangeFactory =
                 TestAcsChangeFactory(contractActivenessChanged = contractActivenessChanged),
               contractInfos = contracts.map { c =>

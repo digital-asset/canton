@@ -53,8 +53,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
 
   /** Produces offsets that are ordered the same as the input value */
   def offset(x: Long): Offset = Offset.tryFromLong(x)
-  def ledgerEnd(o: Long, e: Long): ParameterStorageBackend.LedgerEnd =
-    ParameterStorageBackend.LedgerEnd(offset(o), e, 0, CantonTimestamp.now())
+  def ledgerEnd(o: Long, e: Long): LedgerEnd =
+    LedgerEnd(offset(o), e, 0, CantonTimestamp.now(), Map())
   def updateIdFromOffset(x: Offset): UpdateId = TestUpdateId(x.toDecimalString)
   def updateIdArrayFromOffset(x: Offset): Array[Byte] = updateIdFromOffset(
     x
@@ -110,8 +110,10 @@ private[store] object StorageBackendTestValues extends OptionValues {
   val someExternalTransactionHash: CantonHash =
     CantonHash
       .digest(HashPurpose.PreparedSubmission, ByteString.copyFromUtf8("mock_hash"), Sha256)
+  val someExternalTransactionHashBinaryByteString: ByteString =
+    someExternalTransactionHash.getCryptographicEvidence
   val someExternalTransactionHashBinary: Array[Byte] =
-    someExternalTransactionHash.getCryptographicEvidence.toByteArray
+    someExternalTransactionHashBinaryByteString.toByteArray
   val reassignmentId: Array[Byte] =
     ReassignmentId.create("0012345678").toOption.get.toBytes.toByteArray
 
@@ -544,6 +546,10 @@ private[store] object StorageBackendTestValues extends OptionValues {
       publicationTime: Timestamp = someTime,
       isTransaction: Boolean = true,
       trafficCost: Long = 0L,
+      transactionHash: Option[Array[Byte]] = None,
+      rejectionStatusCode: Option[Int] = None,
+      rejectionStatusMessage: Option[String] = None,
+      rejectionStatusDetails: Option[Array[Byte]] = None,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.unwrap,
@@ -553,9 +559,9 @@ private[store] object StorageBackendTestValues extends OptionValues {
       submitters = submitters,
       command_id = commandId,
       update_id = updateId.filter(_.isEmpty).map(_ => updateIdArrayFromOffset(offset)),
-      rejection_status_code = None,
-      rejection_status_message = None,
-      rejection_status_details = None,
+      rejection_status_code = rejectionStatusCode,
+      rejection_status_message = rejectionStatusMessage,
+      rejection_status_details = rejectionStatusDetails,
       submission_id = submissionId,
       deduplication_offset = deduplicationOffset,
       deduplication_duration_seconds = deduplicationDurationSeconds,
@@ -565,6 +571,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       is_transaction = isTransaction,
       trace_context = traceContext,
       traffic_cost = trafficCost,
+      transaction_hash = transactionHash,
     )
 
   def dtoTransactionMeta(
@@ -575,6 +582,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       udpateId: Option[Array[Byte]] = None,
       synchronizerId: SynchronizerId = someSynchronizerId,
       publicationTime: Timestamp = someTime,
+      transactionHash: Option[Array[Byte]] = None,
   ): DbDto.TransactionMeta = DbDto.TransactionMeta(
     update_id = udpateId.getOrElse(updateIdArrayFromOffset(offset)),
     event_offset = offset.unwrap,
@@ -583,6 +591,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
     synchronizer_id = synchronizerId,
     event_sequential_id_first = event_sequential_id_first,
     event_sequential_id_last = event_sequential_id_last,
+    transaction_hash = transactionHash,
   )
 
   def dtoInterning(
@@ -626,6 +635,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
     synchronizer_id = someSynchronizerId,
     event_sequential_id_first = dtoEventSeqId(dbDto),
     event_sequential_id_last = dtoEventSeqId(dbDto),
+    transaction_hash = None,
   )
 
   def meta(
@@ -692,6 +702,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
           publication_time = publication_time,
           event_sequential_id_first = dtoEventSeqId(dbDtosInOrder.headOption.value),
           event_sequential_id_last = dtoEventSeqId(dbDtosInOrder.lastOption.value),
+          transaction_hash = None,
         )
       )
 }

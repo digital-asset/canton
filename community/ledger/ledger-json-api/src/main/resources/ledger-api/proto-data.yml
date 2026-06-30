@@ -2197,6 +2197,20 @@ fileComments:
           comments: 'A completion represents the status of a submitted command on
             the ledger: it can be successful or failed.'
           fieldComments:
+            transaction_hash: |-
+              The transaction hash signed by the external party for prepared transactions
+              that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+              or one of its variants.
+
+              Use this to correlate prepared transactions with their execution result
+              on the *same participant* that executed the transaction.
+
+              Not available for:
+
+              - transactions executed on Canton versions prior to 3.5
+              - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+              Optional: can be empty
             command_id: |-
               The ID of the succeeded or failed command.
               Must be a valid LedgerString (as described in ``value.proto``).
@@ -4535,6 +4549,11 @@ fileComments:
               If positive, the absolute offset of the ledger as viewed by the participant.
 
               Optional
+            synchronizer_times: |-
+              Final record times observed by this participant for each of the sequencers that were ever connected.
+              If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
+
+              Optional: can be empty
       IncompleteAssigned:
         message:
           comments: null
@@ -4770,12 +4789,27 @@ fileComments:
           comments: Filtered view of an on-ledger transaction's create and archive
             events.
           fieldComments:
+            transaction_hash: |-
+              The transaction hash signed by the external party for prepared transactions
+              that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+              or one of its variants.
+
+              Use this to correlate prepared transactions with their execution result
+              on the *same participant* that executed the transaction.
+
+              Not available for:
+
+              - transactions executed on Canton versions prior to 3.6
+              - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+              Optional: can be empty
             command_id: |-
               The ID of the command which resulted in this transaction. Missing for everyone except the submitting party.
               Must be a valid LedgerString (as described in ``value.proto``).
 
               Optional
             external_transaction_hash: |-
+              Deprecated: please use ``transaction_hash`` which has the same value.
               For transaction externally signed, contains the external transaction hash
               signed by the external party. Can be used to correlate an external submission with a committed transaction.
 
@@ -5049,6 +5083,18 @@ fileComments:
     services: {}
   update_service.proto:
     messages:
+      GetUpdateByHashRequest:
+        message:
+          comments: null
+          fieldComments:
+            transaction_hash: |-
+              The transaction hash to look up.
+
+              Required: must be non-empty
+            update_format: |-
+              The format for the update.
+
+              Required
       GetUpdateByIdRequest:
         message:
           comments: null
@@ -5186,6 +5232,7 @@ fileComments:
             offset_checkpoint: ''
             topology_transaction: ''
     oneOfs:
+      GetUpdateByHashRequest: {}
       GetUpdateByIdRequest: {}
       GetUpdateByOffsetRequest: {}
       GetUpdateResponse:
@@ -5232,6 +5279,12 @@ fileComments:
         comments: |-
           Lookup an update by its ID.
           If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+      - name: GetUpdateByHash
+        comments: |-
+          Look up an update by its transaction hash.
+          This is only available for updates received after upgrading to Canton version 3.6.
+          If there is no update with this transaction hash, or all the events are filtered,
+          or the update was populated before upgrading to Canton version 3.6, an UPDATE_NOT_FOUND error will be raised.
       - name: GetUpdatesPage
         comments: |-
           Read a page of ledger's filtered updates. It returns the event types in accordance with

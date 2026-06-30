@@ -206,10 +206,11 @@ object Update {
 
     def updateId: UpdateId
 
-    /** Transaction hash signed by the external party to authorize the transaction. Only on
-      * externally signed transactions
+    /** Transaction hash from the phase 1 execute request, signed by the external party to authorize
+      * the transaction. Only populated for externally signed transactions currently, but will be
+      * set for all transactions as the design progresses.
       */
-    def externalTransactionHash: Option[Hash]
+    def transactionHash: Option[Hash]
 
     def isAcsDelta(contractId: Value.ContractId): Boolean
 
@@ -299,7 +300,7 @@ object Update {
       recordTime: CantonTimestamp,
       acsChangeFactory: AcsChangeFactory,
       contractInfos: Map[Value.ContractId, ContractInfo],
-      externalTransactionHash: Option[Hash] = None,
+      transactionHash: Option[Hash] = None,
   )(implicit override val traceContext: TraceContext)
       extends TransactionAccepted
       with SequencedEventUpdate
@@ -336,7 +337,7 @@ object Update {
       extends TransactionAccepted
       with RepairUpdate {
 
-    override def externalTransactionHash: Option[Hash] = None
+    override def transactionHash: Option[Hash] = None
     override def completionInfoO: Option[CompletionInfo] = None
 
     // Repair transactions have only contracts which affect the ACS.
@@ -509,6 +510,10 @@ object Update {
       */
     def completionInfo: CompletionInfo
 
+    /** The transaction hash, if this was an interactive submission.
+      */
+    def transactionHash: Option[Hash]
+
     /** A template for generating the gRPC status code with error details. See ``error.proto`` for
       * the status codes of common rejection reasons.
       */
@@ -532,6 +537,7 @@ object Update {
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       isTransaction: Boolean,
+      transactionHash: Option[Hash],
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with SequencedEventUpdate
@@ -543,6 +549,7 @@ object Update {
       recordTime: CantonTimestamp,
       messageUuid: UUID,
       isTransaction: Boolean,
+      transactionHash: Option[Hash],
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with FloatingUpdate

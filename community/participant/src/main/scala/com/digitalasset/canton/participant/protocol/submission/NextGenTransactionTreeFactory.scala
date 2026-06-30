@@ -639,7 +639,7 @@ class NextGenTransactionTreeFactory(
       coreOtherNodes: List[(LfActionNode, RollbackScope)],
       childViews: Seq[TransactionView],
       createdContractInfo: collection.Map[LfContractId, NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
       salt: Salt,
       contractOfId: ContractInstanceOfId,
@@ -703,12 +703,12 @@ class NextGenTransactionTreeFactory(
             coreInputs = coreInputsWithInstances,
             createdCore = created,
             createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
-            resolvedKeys = resolvedKeys,
+            keyResolution = keyResolution,
             actionDescription = actionDescription,
             rollbackContext = rbContextCore,
             salt = salt,
-            protocolVersion = protocolVersion,
             externalCallResults = externalCallResults,
+            protocolVersion = protocolVersion,
           )
         )
         .leftMap[TransactionTreeConversionError](ViewParticipantDataError.apply)

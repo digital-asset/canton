@@ -13,7 +13,8 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
 import com.daml.nonempty.NonEmpty
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.base.error.ErrorsAssertions
-import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
 import com.digitalasset.canton.health.HealthStatus
@@ -283,5 +284,7 @@ object ApiPackageManagementServiceSpec {
       throw new UnsupportedOperationException()
 
     override def participantId: ParticipantId = DefaultTestIdentities.participant1
+
+    override def randomOps: RandomOps = new SymbolicPureCrypto
   }
 }

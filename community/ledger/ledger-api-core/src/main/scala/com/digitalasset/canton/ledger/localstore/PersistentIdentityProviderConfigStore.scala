@@ -5,19 +5,20 @@ package com.digitalasset.canton.ledger.localstore
 
 import cats.syntax.either.*
 import com.daml.metrics.DatabaseMetrics
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.localstore.CachedIdentityProviderConfigStore
 import com.digitalasset.canton.ledger.localstore.Ops.*
-import com.digitalasset.canton.ledger.localstore.api.IdentityProviderConfigStore.*
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  IdentityProviderConfigUpdate,
-}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore.*
+import com.digitalasset.canton.user.{
+  IdentityProviderConfig,
+  IdentityProviderConfigUpdate,
+  IdentityProviderId,
+}
 
 import java.sql.Connection
 import scala.concurrent.duration.FiniteDuration
