@@ -30,13 +30,18 @@ private[hash] class NodeHashBuilder(
   override private[hash] def newBuilder(hashTracer: HashTracer): NodeHashBuilder =
     new NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
 
-  private def addExternalCallResult(result: ExternalCallResult): this.type =
+  private def addExternalCallResult(result: ExternalCallResult): this.type = {
+    // Destructure so every field is named explicitly: if a field is ever added to
+    // ExternalCallResult, this binding stops compiling, forcing a conscious decision
+    // about whether the new field is included in the hash.
+    val ExternalCallResult(extensionId, functionId, config, input, output) = result
     addContext("External Call Result")
-      .withContext("Extension Id")(_.addString(result.extensionId))
-      .withContext("Function Id")(_.addString(result.functionId))
-      .withContext("Config")(_.addByteString(result.config.toByteString, "config"))
-      .withContext("Input")(_.addByteString(result.input.toByteString, "input"))
-      .withContext("Output")(_.addByteString(result.output.toByteString, "output"))
+      .withContext("Extension Id")(_.addString(extensionId))
+      .withContext("Function Id")(_.addString(functionId))
+      .withContext("Config")(_.addByteString(config.toByteString, "config"))
+      .withContext("Input")(_.addByteString(input.toByteString, "input"))
+      .withContext("Output")(_.addByteString(output.toByteString, "output"))
+  }
 
   override protected def addExerciseNodeNoChildren(
       nodeSeed: LfHash
