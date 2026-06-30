@@ -432,9 +432,7 @@ class ExampleTransactionConformanceTest
             .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
             .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
             .andThen(ViewParticipantData.Optics.externalCallResultsUnsafe)
-            .modify(results =>
-              ImmArray.from(results.toSeq.map(_.copy(checkingParties = Set.empty)))
-            )(fullTree)
+            .modify(_.map(_.copy(checkingParties = Set.empty)))(fullTree)
           _ = tamperedTree.validated shouldBe Right(tamperedTree)
           result <- check(
             buildUnderTest(reinterpretTransaction(example, transaction)),
@@ -444,9 +442,9 @@ class ExampleTransactionConformanceTest
         } yield inside(result) { case Left(ErrorWithSubTransaction(errors, _, _)) =>
           inside(errors.head) { case ViewReconstructionError(received, reconstructed) =>
             val receivedRecord =
-              received.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+              received.viewParticipantData.tryUnwrap.externalCallResults.loneElement
             val reconstructedRecord =
-              reconstructed.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
+              reconstructed.viewParticipantData.tryUnwrap.externalCallResults.loneElement
 
             receivedRecord.checkingParties shouldBe Set.empty
             reconstructedRecord.checkingParties shouldBe Set(submitter)

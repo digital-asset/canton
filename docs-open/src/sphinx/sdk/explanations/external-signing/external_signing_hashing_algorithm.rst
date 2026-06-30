@@ -43,12 +43,13 @@ The hashing algorithm is tied to the protocol version of the synchronizer used t
 Specifically, each hashing scheme version is supported on one or several protocol versions.
 Implementations must use a hashing scheme version supported on the synchronizer on which the transaction is submitted.
 
-==================  =========================
-Protocol Version    Supported Hashing Schemes
-==================  =========================
-v34                 V2
-v35                 V2, V3
-==================  =========================
+====================  =========================
+Protocol Version      Supported Hashing Schemes
+====================  =========================
+v34                   V2
+v35                   V2, V3
+development protocol  V2, V3, V4
+====================  =========================
 
 Transaction Nodes
 -----------------
@@ -56,7 +57,8 @@ Transaction Nodes
 Transaction nodes are additionally individually versioned with a Daml version (also called LF version).
 The encoding version is decoupled from the LF version and implementations should only focus on the hashing version.
 However, new LF versions may introduce new fields in nodes or new node types. For that reason, the protobuf representation of a node is
-versioned to accommodate those future changes. In practice, every new Daml language version results in a new hashing version.
+versioned to accommodate those future changes. In stable protocol versions, new Daml language versions may result in new hashing
+versions. Development-only Daml versions may be supported under the development protocol before a stable hashing version is assigned.
 
 .. literalinclude:: CANTON/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
     :start-after: [docs-entry-start: DamlTransaction.Node]
@@ -64,13 +66,27 @@ versioned to accommodate those future changes. In practice, every new Daml langu
     :caption: Versioned Daml Transaction Node
     :dedent: 4
 
+V4
+==
+
+General approach
+----------------
+
+V4 follows the same general hashing approach as V3. The V3 section below defines the common encoding used by V4 unless a V4-specific difference is stated.
+
+Changes from V3
+---------------
+
+- Development-version Exercise nodes include ``external_call_results`` in the prepared transaction hash.
+  This binds the recorded external-call result payloads shown in prepared transaction review to the external party's signature.
+
 V3
 ==
 
 General approach
 ----------------
 
-The hash of the ``PreparedTransaction`` is computed by encoding every protobuf field of the messages to byte arrays,
+The hash of the ``PreparedTransaction`` is computed by encoding the fields specified by this section to byte arrays,
 and feeding those encoded values into a ``SHA-256`` hash builder. The rest of this section details how to deterministically encode
 every proto message into a byte array. Sometimes during the process, partially encoded results are hashed with SHA-256, and the resulting hash value serves as the encoding in messages further up.
 This is explicit when necessary.
@@ -91,6 +107,8 @@ Changes from V2
 
 - Addition of an ``max_record_time`` field in :ref:`metadata <metadata_encoding>` to make maximum record time explicit in the signed metadata.
 
+V3 is the released PV35 hashing scheme for LF ``SerializationVersion.V2``. It remains stable and does not include development-version ``external_call_results``.
+
 Changes from V1
 ---------------
 
@@ -104,7 +122,7 @@ Changes from V1
 
     V3 introduces support for contract keys. Usage of contract keys in externally signed transactions
     requires usage of V3. Contract keys will not work on V2.
-    Also note that V3 is only :ref:`supported <hashing_scheme_version>` on protocol version 35.
+    Also note that V3 is the stable hashing scheme introduced at protocol version 35, and V4 is :ref:`supported <hashing_scheme_version>` only on the development protocol.
 
 
 Notation and Utility Functions
@@ -647,6 +665,8 @@ Exercise
         encode(exercise.consuming) ||
         encode(exercise.exercise_result) ||
         encode(exercise.choice_observers) ||
+        encode(exercise.by_key) ||
+        encode(exercise.key) ||
         encode(exercise.children)
 
 .. important::
@@ -657,7 +677,34 @@ Exercise
 
 .. note::
 
-    The last encoded value of the exercise node is its ``children`` field. This recursively traverses the transaction tree.
+    The V3 exercise-node encoding does not include ``external_call_results``. V4 preserves the V3 field order and inserts
+    ``external_call_results`` immediately before ``children``:
+
+    .. code-block::
+
+        encode(exercise.exercise_result) ||
+        encode(exercise.choice_observers) ||
+        encode(exercise.by_key) ||
+        encode(exercise.key) ||
+        encode(exercise.external_call_results) ||
+        encode(exercise.children)
+
+    The ``external_call_results`` field is encoded as an ordered repeated field in V4.
+    It is not included in V3, because V3 is the released PV35 hashing scheme and must remain stable.
+
+External call result
+^^^^^^^^^^^^^^^^^^^^
+
+When V4 encodes an ``external_call_results`` element, the element is encoded as follows:
+
+.. code-block::
+
+    fn encode_external_call_result(result):
+        return encode(result.extension_id) ||
+            encode(result.function_id) ||
+            encode(result.config) ||
+            encode(result.input) ||
+            encode(result.output)
 
 .. _fetch_node_encoding:
 
@@ -763,7 +810,7 @@ Finally, compute the hash that needs to be signed to commit to the ledger change
 
     fn encode(prepared_transaction):
         0x00000030 || # Hash purpose
-        0x03 || # Hashing Scheme Version
+        hashing_scheme_version_byte || # e.g. 0x03 for V3, 0x04 for V4
         hash(transaction) ||
         hash(metadata)
 
@@ -797,4 +844,3 @@ Both versions make use of the following common code:
 .. toggle::
 
     .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_common.py
-
