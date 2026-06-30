@@ -97,7 +97,7 @@ object LocalRejectError extends LocalRejectionGroup {
           extends LocalRejectErrorImpl(
             _causePrefix = s"Rejected transaction is referring to locked contracts ",
             _resourcesType = Some(ErrorResource.ContractId),
-          ) {}
+          )
     }
 
     @Explanation(

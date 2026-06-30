@@ -64,8 +64,8 @@ private class DescriptorSchemaProcessor[R](
             visitor.constructor(id, typeParams, lazyBody())
           },
         )
-      case Descriptor.Application(ctor @ Descriptor.Constructor(id, typeParams, body), args) =>
+      case Descriptor.Unknown => visitor.unknown
+      case Descriptor.Application(ctor @ Descriptor.Constructor(id, typeParams, _), args) =>
         visitor.application(handle(ctor), typeParams, args.map(handle))
-      case Descriptor.Unknown(id, args) => visitor.unknown(id, args.map(handle))
 
 }

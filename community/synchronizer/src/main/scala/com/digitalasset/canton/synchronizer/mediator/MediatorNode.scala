@@ -123,7 +123,7 @@ final case class DelayedVerdictSenderConfig(
 )
 
 object DelayedVerdictSenderConfig {
-  private val DefaultLivenessMargin = NonNegativeInt.two
+  private val DefaultLivenessMargin = NonNegativeInt.three
   private val DefaultImmediateBeforeDeadline = config.NonNegativeFiniteDuration.ofSeconds(5)
   private val DefaultInitialDelay = config.NonNegativeFiniteDuration.ofSeconds(3)
   private val DefaultDelay = config.NonNegativeFiniteDuration.ofSeconds(1)

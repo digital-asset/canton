@@ -585,9 +585,9 @@ object DbLock {
 
 }
 
-sealed trait DbLockConfigError extends Product with Serializable with PrettyPrinting {}
+sealed trait DbLockConfigError extends Product with Serializable with PrettyPrinting
 
-sealed trait DbLockError extends Product with Serializable with PrettyPrinting {}
+sealed trait DbLockError extends Product with Serializable with PrettyPrinting
 
 object DbLockError {
 

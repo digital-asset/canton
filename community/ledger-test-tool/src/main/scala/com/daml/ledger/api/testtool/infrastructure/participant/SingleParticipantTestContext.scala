@@ -161,6 +161,9 @@ final class SingleParticipantTestContext private[participant] (
       .getLedgerEnd(new GetLedgerEndRequest())
       .map(_.offset)
 
+  override def getLedgerEnd(): Future[GetLedgerEndResponse] =
+    services.state.getLedgerEnd(new GetLedgerEndRequest())
+
   override def latestPrunedOffsets(): Future[(Long, Long)] =
     services.state
       .getLatestPrunedOffsets(GetLatestPrunedOffsetsRequest())
@@ -1131,6 +1134,35 @@ final class SingleParticipantTestContext private[participant] (
 
   override def updateById(request: GetUpdateByIdRequest): Future[GetUpdateResponse] =
     services.update.getUpdateById(request)
+
+  override def updateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+    services.update.getUpdateByHash(request)
+
+  override def transactionByHash(
+      hash: ByteString,
+      parties: Seq[Party],
+      transactionShape: TransactionShape = AcsDelta,
+      templateIds: Seq[Identifier] = Seq.empty,
+  ): Future[Transaction] =
+    updateByHash(
+      GetUpdateByHashRequest(
+        transactionHash = hash,
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(
+              transactionFormat(
+                parties = Some(parties),
+                templateIds = templateIds,
+                transactionShape = transactionShape,
+                verbose = true,
+              )
+            ),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+      )
+    ).map(_.getTransaction)
 
   override def transactionById(
       updateId: String,

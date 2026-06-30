@@ -94,7 +94,6 @@ import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.OutputFileStreamObserver
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.networking.grpc.{
@@ -116,9 +115,11 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
+import com.google.protobuf.ByteString
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.stub.StreamObserver
 import io.grpc.{Context, StatusRuntimeException}
@@ -720,6 +721,25 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.UpdateService.GetUpdateByOffset(offset, updateFormat)(
+              consoleEnvironment.environment.executionContext
+            )
+          )
+        }
+
+      @Help.Summary("Get an update by its transaction hash")
+      @Help.Description(
+        """Get an update by its transaction hash. Returns None if the update is not (yet) known
+          |at the participant or all the events of the update are filtered due to the update format
+          |or if the update has been pruned via `pruning.prune`.
+          """
+      )
+      def update_by_hash(
+          hash: ByteString,
+          updateFormat: UpdateFormat,
+      ): Option[UpdateWrapper] =
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.UpdateService.GetUpdateByHash(hash, updateFormat)(
               consoleEnvironment.environment.executionContext
             )
           )

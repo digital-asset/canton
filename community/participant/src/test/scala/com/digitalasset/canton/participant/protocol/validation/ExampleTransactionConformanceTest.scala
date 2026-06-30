@@ -424,7 +424,7 @@ class ExampleTransactionConformanceTest
           genTree <- valueOrFail(createTree.failOnShutdown)("create transaction tree")
           fullTree = FullTransactionViewTree.tryCreate(genTree)
           tamperedTree = FullTransactionViewTree.Optics.tree
-            .andThen(GenTransactionTree.rootViewsUnsafe)
+            .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
             .andThen(
               MerkleSeq.Optics.toSeq[TransactionView](factory.cryptoOps, testedProtocolVersion)
             )

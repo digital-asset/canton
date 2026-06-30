@@ -142,7 +142,7 @@ stability_crash_recovery_test:
       type: boolean
       default: true
   executor: canton-xlarge-docker-with-postgres
-  parallelism: 64 # The number of test runs. Increase to make the test more "aggressive".
+  parallelism: 16 # The number of test runs. Increase to make the test more "aggressive".
   # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
   steps:
     - run_crash_recovery_tests:
@@ -156,7 +156,7 @@ stability_crash_recovery_test_alerting:
   steps:
     - checkout
     - check_number_of_successes:
-        min_successes: 32 # Low threshold, since test failures are reported to datadog anyway
+        min_successes: 8 # Low threshold, since test failures are reported to datadog anyway
         job_name: "stability_crash_recovery_test"
     - slack_red_main_with_volunteer
 

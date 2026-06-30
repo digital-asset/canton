@@ -31,7 +31,7 @@ import scala.language.implicitConversions
 class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
 
   private object Factory
-      extends TopologyTransactionTestFactory(loggerFactory, parallelExecutionContext) {}
+      extends TopologyTransactionTestFactory(loggerFactory, parallelExecutionContext)
   import Factory.*
   private lazy val sk = StateKey(ns1k1_k1.mapping)
 

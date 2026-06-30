@@ -631,6 +631,6 @@ object BufferedStreamsReaderSpec {
       completionStreamResponseO = None,
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Timestamp.Epoch,
-      externalTransactionHash = None,
+      transactionHash = None,
     )(TraceContext.empty)
 }

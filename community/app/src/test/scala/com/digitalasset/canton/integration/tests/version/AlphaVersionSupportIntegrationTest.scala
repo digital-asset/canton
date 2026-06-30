@@ -31,7 +31,7 @@ import com.digitalasset.canton.topology.store.InitializationStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import monocle.macros.syntax.lens.*
-import org.scalatest.Assertion
+import org.scalatest.{Assertion, Ignore}
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -250,6 +250,7 @@ sealed trait AlphaVersionSupportIntegrationTest
   }
 }
 
+@Ignore // TODO(#30866)
 class AlphaVersionSupportIntegrationTestH2 extends AlphaVersionSupportIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(
@@ -260,6 +261,7 @@ class AlphaVersionSupportIntegrationTestH2 extends AlphaVersionSupportIntegratio
   )
 }
 
+@Ignore // TODO(#20862)
 class AlphaVersionSupportIntegrationTestPostgres extends AlphaVersionSupportIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

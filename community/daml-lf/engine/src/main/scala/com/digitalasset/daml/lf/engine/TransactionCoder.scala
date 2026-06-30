@@ -76,9 +76,10 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def encodeNodeId(id: NodeId): String = id.index.toString
 
     private[this] def decodeNodeId(s: String): Either[DecodeError, NodeId] =
-      scalaz.std.string
-        .parseInt(s)
-        .fold(_ => Left(DecodeError(s"cannot parse node Id $s")), idx => Right(NodeId(idx)))
+      s.toIntOption match {
+        case Some(idx) => Right(NodeId(idx))
+        case None => Left(DecodeError(s"cannot parse node Id $s"))
+      }
 
     private[this] def encodeValue(
         nodeVersion: SerializationVersion,

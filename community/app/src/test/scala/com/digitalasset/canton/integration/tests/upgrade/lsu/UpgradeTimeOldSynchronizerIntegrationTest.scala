@@ -181,7 +181,6 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
         .ledgerApiStore
         .value
         .cleanSynchronizerIndex(daId)
-        .futureValueUS
         .value
 
       /** Despite the call to fetch time and the empty message triggered by the ping (ping messages

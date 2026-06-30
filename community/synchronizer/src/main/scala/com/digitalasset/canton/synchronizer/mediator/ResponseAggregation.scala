@@ -533,6 +533,8 @@ object ResponseAggregation {
       case object Abstain extends VoteKind
     }
 
+    // By design, votes to/from an Abstain are not considered contradictory: this is not necessarily
+    // alarming and can legitimately happen after a restart/reconnection.
     def isContradictoryToPreviousVote(
         previousVoteKind: ConsortiumVotingState.VoteKind,
         localVerdict: LocalVerdict,

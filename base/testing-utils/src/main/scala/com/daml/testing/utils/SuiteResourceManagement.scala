@@ -12,7 +12,7 @@ trait SuiteResource[+T] {
 /** Serves only to enforce the final mixin of a SuiteResourceManagementAroundAll or a
   * SuiteResourceManagementAroundEach
   */
-trait SuiteResourceManagement {}
+trait SuiteResourceManagement
 
 trait SuiteResourceManagementAroundAll
     extends SuiteResource[Any]

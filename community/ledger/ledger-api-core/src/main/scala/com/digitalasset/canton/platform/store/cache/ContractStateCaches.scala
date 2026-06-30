@@ -13,7 +13,7 @@ import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatu
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.{Empty, Last}
 import com.digitalasset.canton.platform.store.cache.ContractStateCaches.computeKeyStateChange
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent

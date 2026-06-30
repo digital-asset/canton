@@ -25,9 +25,19 @@ trait SessionSigningKeysLifecycleIntegrationTest
     with SharedEnvironment
     with KmsCryptoIntegrationTestBase {
 
-  private val sessionSigningKeysConfig = SessionSigningKeysConfig.short
+  /** Short test-only configuration: durations are small enough to trigger key rotation and validity
+    * edge cases.
+    */
+  private val sessionSigningKeysConfig: SessionSigningKeysConfig = SessionSigningKeysConfig(
+    enabled = true,
+    keyValidityDuration = config.PositiveFiniteDuration.ofSeconds(10),
+    toleranceShiftDuration = config.NonNegativeFiniteDuration.ofSeconds(2),
+    cutOffDuration = config.NonNegativeFiniteDuration.ofSeconds(2),
+    keyEvictionPeriod = config.PositiveFiniteDuration.ofMinutes(1),
+    disableBoundChecks = true,
+  )
   private val shortDuration = config.NonNegativeFiniteDuration.tryFromDuration(
-    SessionSigningKeysConfig.short.keyValidityDuration.duration.div(2.0)
+    sessionSigningKeysConfig.keyValidityDuration.duration.div(2.0)
   )
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(

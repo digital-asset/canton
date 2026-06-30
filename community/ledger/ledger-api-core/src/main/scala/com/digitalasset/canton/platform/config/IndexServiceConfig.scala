@@ -83,7 +83,7 @@ object IndexServiceConfig {
   val DefaultBufferedStreamsPageSize: Int = 100
   val DefaultMaxContractStateCacheSize: Long = 10000L
   val DefaultMaxContractKeyStateCacheSize: Long = 10000L
-  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 1000
+  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 1100
   val DefaultApiStreamShutdownTimeout: Duration = FiniteDuration(5, "seconds")
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
   val PreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =

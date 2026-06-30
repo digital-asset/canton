@@ -100,23 +100,19 @@ class AcsInspection(
   ): FutureUnlessShutdown[
     Option[AcsSnapshot[SortedMap[LfContractId, (TimeOfChange, ReassignmentCounter)]]]
   ] =
-    for {
-      latestIndexerTimeOfChange <- ledgerApiStore.value
-        .cleanSynchronizerIndex(synchronizerId)
-        .map(_.map(TimeOfChange.fromSynchronizerIndex))
-      snapshot <-
-        latestIndexerTimeOfChange
-          .traverse { toc =>
-            val snapshotF = activeContractStore
-              .snapshot(toc)
-              .map(_.map { case (id, (timestamp, reassignmentCounter)) =>
-                id -> (timestamp, reassignmentCounter)
-              })
+    ledgerApiStore.value
+      .cleanSynchronizerIndex(synchronizerId)
+      .map(TimeOfChange.fromSynchronizerIndex)
+      .traverse { toc =>
+        val snapshotF = activeContractStore
+          .snapshot(toc)
+          .map(_.map { case (id, (timestamp, reassignmentCounter)) =>
+            id -> (timestamp, reassignmentCounter)
+          })
 
-            snapshotF.map(snapshot => Some(AcsSnapshot(snapshot, toc)))
-          }
-          .map(_.flatten)
-    } yield snapshot
+        snapshotF.map(snapshot => Some(AcsSnapshot(snapshot, toc)))
+      }
+      .map(_.flatten)
 
   // fetch acs, optionally checking that the requested time is clean
   private def getSnapshotAt(synchronizerId: SynchronizerId)(
@@ -137,7 +133,7 @@ class AcsInspection(
               synchronizerId,
               ledgerApiStore.value
                 .cleanSynchronizerIndex(synchronizerId)
-                .map(_.map(TimeOfChange.fromSynchronizerIndex)),
+                .map(TimeOfChange.fromSynchronizerIndex),
               toc,
             )
         } else EitherT.pure[FutureUnlessShutdown, AcsInspectionError](())
@@ -313,10 +309,10 @@ object AcsInspection {
 
     def beforeCleanTimeOfChange(
         synchronizerId: SynchronizerId,
-        timeOfChange: FutureUnlessShutdown[Option[TimeOfChange]],
+        timeOfChange: Option[TimeOfChange],
         requestedToc: TimeOfChange,
     )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, AcsInspectionError, Unit] =
-      validate(timeOfChange)(requestedToc < _)(clean =>
+      validate(FutureUnlessShutdown.pure(timeOfChange))(requestedToc < _)(clean =>
         AcsInspectionError.RequestedAfterCleanTimeOfChange(synchronizerId, requestedToc, clean)
       )
 

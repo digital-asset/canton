@@ -366,6 +366,7 @@ private[backend] object AppendOnlySchema {
         "is_transaction" -> fieldStrategy.boolean(_ => _.is_transaction),
         "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
         "traffic_cost" -> fieldStrategy.bigint(_ => _.traffic_cost),
+        "transaction_hash" -> fieldStrategy.byteaOptional(_ => _.transaction_hash),
       )
 
     val stringInterningTable: Table[DbDto.StringInterningDto] =
@@ -385,6 +386,7 @@ private[backend] object AppendOnlySchema {
         ),
         "event_sequential_id_first" -> fieldStrategy.bigint(_ => _.event_sequential_id_first),
         "event_sequential_id_last" -> fieldStrategy.bigint(_ => _.event_sequential_id_last),
+        "transaction_hash" -> fieldStrategy.byteaOptional(_ => _.transaction_hash),
       )
 
     val acsCommitments: Table[DbDto.AcsCommitment] =

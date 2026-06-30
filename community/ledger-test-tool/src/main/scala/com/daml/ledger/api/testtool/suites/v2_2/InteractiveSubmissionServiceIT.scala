@@ -242,7 +242,7 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
       val transaction = assertSingleton("expected one transaction", transactions)
       val event = transaction.events.headOption.value.event
       assert(event.isCreated)
-      assert(transaction.externalTransactionHash.contains(prepareResponse.preparedTransactionHash))
+      assert(transaction.transactionHash.contains(prepareResponse.preparedTransactionHash))
     }
   })
 
@@ -272,7 +272,7 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
       val event = retrievedTransaction.events.headOption.value.event
       assert(event.isCreated, "Expected created event")
       assert(
-        retrievedTransaction.externalTransactionHash.contains(
+        retrievedTransaction.transactionHash.contains(
           prepareResponse.preparedTransactionHash
         ),
         "Transaction hash was not set or incorrect",
@@ -391,7 +391,7 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
         val event = transaction.events.headOption.value.event
         assert(event.isExercised)
         assert(
-          transaction.externalTransactionHash.contains(prepareResponse.preparedTransactionHash)
+          transaction.transactionHash.contains(prepareResponse.preparedTransactionHash)
         )
       }
   })

@@ -536,6 +536,7 @@ sealed trait GracefulRejectsIntegrationTest
                     _,
                     _,
                     _,
+                    _,
                   )
                 )
               ) =>

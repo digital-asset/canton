@@ -23,16 +23,16 @@ channels:
     bindings:
       ws:
         method: GET
-  /v2/commands/get-completions:
+  /v2/commands/command-completions:
     description: |-
       Subscribe to command completion events.
       This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
     subscribe:
-      operationId: onV2CommandsGet-completions
+      operationId: onV2CommandsCommand-completions
       message:
         $ref: '#/components/messages/Either_JsCantonError_CompletionStreamResponse'
     publish:
-      operationId: sendV2CommandsGet-completions
+      operationId: sendV2CommandsCommand-completions
       message:
         $ref: '#/components/messages/GetCompletionsRequest'
     bindings:
@@ -356,6 +356,22 @@ components:
             Optional
           type: integer
           format: int64
+        transactionHash:
+          description: |-
+            The transaction hash signed by the external party for prepared transactions
+            that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+            or one of its variants.
+
+            Use this to correlate prepared transactions with their execution result
+            on the *same participant* that executed the transaction.
+
+            Not available for:
+
+            - transactions executed on Canton versions prior to 3.5
+            - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+            Optional: can be empty
+          type: string
     JsStatus:
       title: JsStatus
       type: object
@@ -2030,6 +2046,7 @@ components:
           type: string
         externalTransactionHash:
           description: |-
+            Deprecated: please use ``transaction_hash`` which has the same value.
             For transaction externally signed, contains the external transaction hash
             signed by the external party. Can be used to correlate an external submission with a committed transaction.
 
@@ -2049,6 +2066,22 @@ components:
             Optional
           type: integer
           format: int64
+        transactionHash:
+          description: |-
+            The transaction hash signed by the external party for prepared transactions
+            that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+            or one of its variants.
+
+            Use this to correlate prepared transactions with their execution result
+            on the *same participant* that executed the transaction.
+
+            Not available for:
+
+            - transactions executed on Canton versions prior to 3.6
+            - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+            Optional: can be empty
+          type: string
     Event:
       title: Event
       description: |-

@@ -21,7 +21,7 @@ import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{
   CantonFixture,
   CantonFixtureAbstract,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
+import com.digitalasset.canton.user.store.UserManagementStore
 import io.grpc.stub.AbstractStub
 
 import java.security.KeyPairGenerator
@@ -70,6 +70,23 @@ trait SandboxRequiringAuthorizationFuns {
       format = StandardJWTTokenFormat.Scope,
       audiences = List.empty,
       scope = Some(defaultScope),
+    )
+
+  protected def audienceToken(
+      userId: String,
+      audience: List[String],
+      expiresIn: Option[Duration] = Some(defaultExpiresIn),
+      participantId: Option[String] = None,
+      issuer: Option[String] = None,
+  ): StandardJWTPayload =
+    StandardJWTPayload(
+      issuer = issuer,
+      participantId = participantId,
+      userId = userId,
+      exp = expiresIn.map(delta => Instant.now().plusNanos(delta.toNanos)),
+      format = StandardJWTTokenFormat.Audience,
+      audiences = audience,
+      scope = None,
     )
 
   protected def randomUserId(): String = UUID.randomUUID().toString

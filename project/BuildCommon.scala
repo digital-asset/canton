@@ -1091,7 +1091,6 @@ object BuildCommon {
           google_protobuf_java,
           org_apache_commons_commons_text,
           org_typelevel_paiges_core,
-          scalaz_core,
           scalactic,
           scalatest,
         ),
@@ -3243,6 +3242,7 @@ object BuildCommon {
         enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
+          cats,
           google_protobuf_java,
           guava,
         ),
@@ -3280,8 +3280,6 @@ object BuildCommon {
           scalacheck,
           scalatest,
           scalatestScalacheck,
-          scalaz_core,
-          scalaz_scalacheck_binding,
         ),
         addProtobufFilesToHeaderCheck(Compile),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
@@ -3313,11 +3311,11 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           google_protobuf_java,
           guava,
+          cats % Test,
+          cats_law % Test,
           scalacheck % Test,
           scalatest % Test,
           scalatestScalacheck % Test,
-          scalaz_core % Test,
-          scalaz_scalacheck_binding % Test,
         ),
         addProtobufFilesToHeaderCheck(Compile),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
@@ -3449,8 +3447,6 @@ object BuildCommon {
           scala_logging % Test,
           scalatestScalacheck % Test,
           scalatest % Test,
-          scalaz_core % Test,
-          scalaz_scalacheck_binding % Test,
           shapeless % Test,
         ),
         Compile / bufLintCheck := {},
@@ -3479,6 +3475,7 @@ object BuildCommon {
         // javaOnlySettings,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
+          cats,
           google_common_protos,
           google_common_protos % "protobuf",
           google_protobuf_java,
@@ -3486,8 +3483,6 @@ object BuildCommon {
           scala_logging,
           scalatestScalacheck,
           scalatest,
-          scalaz_core,
-          scalaz_scalacheck_binding,
           shapeless,
         ),
       )
@@ -3520,8 +3515,6 @@ object BuildCommon {
           scala_logging % Test,
           scalatestScalacheck % Test,
           scalatest % Test,
-          scalaz_core % Test,
-          scalaz_scalacheck_binding % Test,
           shapeless % Test,
         ),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
@@ -3534,7 +3527,6 @@ object BuildCommon {
         `daml-lf-archive` % Test,
         `daml-lf-data` % Test,
         `daml-lf-language`,
-        `daml-lf-parser` % Test,
         `nonempty` % Test,
         `daml-lf-transaction` % Test,
         `daml-lf-transaction-test-lib` % Test,
@@ -3555,6 +3547,7 @@ object BuildCommon {
         enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
+          cats,
           google_common_protos % "protobuf",
           google_common_protos,
           google_protobuf_java,
@@ -3563,8 +3556,6 @@ object BuildCommon {
           scalatest_flatspec % Test,
           scalatest_shouldmatchers % Test,
           scalatestScalacheck % Test,
-          scalaz_core % Test,
-          scalaz_scalacheck_binding % Test,
         ),
         Compile / bufLintCheck := {},
         Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
@@ -3702,7 +3693,6 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           google_protobuf_java,
           scalatest % Test,
-          scalaz_core,
           scopt,
         ),
         Test / damlJavaCodegen := Seq(
@@ -3740,8 +3730,6 @@ object BuildCommon {
           google_protobuf_java,
           org_apache_commons_commons_text,
           org_typelevel_paiges_core,
-          scalaz_core,
-          scalaz_scalacheck_binding % Test,
           spray_json,
           scalatest % Test,
           scalatest_shouldmatchers % Test,
@@ -3830,7 +3818,6 @@ object BuildCommon {
           google_protobuf_java,
           org_apache_commons_commons_text,
           org_typelevel_paiges_core,
-          scalaz_core,
           scalactic % Test,
           scalameter % Test,
           scalatest % Test,
@@ -3879,7 +3866,6 @@ object BuildCommon {
           google_protobuf_java,
           org_apache_commons_commons_text,
           org_typelevel_paiges_core,
-          scalaz_core,
           scalactic,
           scalatest,
         ),
@@ -3955,8 +3941,6 @@ object BuildCommon {
           google_protobuf_java,
           shapeless,
           scalacheck,
-          scalaz_core,
-          scalaz_scalacheck_binding,
           scala_lang_modules_scala_parser_combinators,
           scalatest % Test,
           scalatestScalacheck % Test,
@@ -3988,7 +3972,6 @@ object BuildCommon {
         coverageEnabled := false,
         libraryDependencies ++= List(
           google_protobuf_java,
-          scalaz_core,
           logback_classic % Runtime,
           scalatest % Test,
         ),
@@ -4020,8 +4003,7 @@ object BuildCommon {
         enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= List(
-          google_protobuf_java,
-          scalaz_core,
+          google_protobuf_java
         ),
       )
       .dependsOn(

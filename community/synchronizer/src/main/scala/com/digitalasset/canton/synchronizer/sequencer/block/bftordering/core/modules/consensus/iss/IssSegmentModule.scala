@@ -71,6 +71,7 @@ class IssSegmentModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
+    initTraceContext: TraceContext,
 )(implicit
     synchronizerProtocolVersion: ProtocolVersion,
     metricsContext: MetricsContext,
@@ -123,10 +124,9 @@ class IssSegmentModule[E <: Env[E]](
         initialCurrentViewPrePrepareBlockNumbers = rehydrationMessages.currentViewMessages
           .map(_.message)
           .collect { case m: PrePrepare => m }
-          .map(
-            _.blockMetadata.blockNumber
-          ),
+          .map(_.blockMetadata.blockNumber),
         loggerFactory,
+        initTraceContext,
       )
     )
 

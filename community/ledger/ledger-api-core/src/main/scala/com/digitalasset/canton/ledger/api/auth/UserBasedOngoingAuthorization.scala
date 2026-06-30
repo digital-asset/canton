@@ -9,7 +9,6 @@ import com.digitalasset.canton.auth.{
   ClaimSet,
   OngoingAuthorizationFactory,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
 import com.digitalasset.canton.util.Mutex
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.ServerCallStreamObserver
@@ -185,6 +185,7 @@ object UserBasedOngoingAuthorization {
   final case class Factory(
       now: () => Instant,
       userManagementStore: UserManagementStore,
+      identityProviderConfigStore: IdentityProviderConfigStore,
       userRightsCheckIntervalInSeconds: Int,
       pekkoScheduler: Scheduler,
       jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
@@ -202,6 +203,7 @@ object UserBasedOngoingAuthorization {
       originalClaims = claims,
       nowF = now,
       userManagementStore = userManagementStore,
+      identityProviderConfigStore = identityProviderConfigStore,
       userRightsCheckIntervalInSeconds = userRightsCheckIntervalInSeconds,
       pekkoScheduler = pekkoScheduler,
       jwtTimestampLeeway = jwtTimestampLeeway,
@@ -219,6 +221,7 @@ object UserBasedOngoingAuthorization {
       originalClaims: ClaimSet.Claims,
       nowF: () => Instant,
       userManagementStore: UserManagementStore,
+      identityProviderConfigStore: IdentityProviderConfigStore,
       userRightsCheckIntervalInSeconds: Int,
       pekkoScheduler: Scheduler,
       jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
@@ -236,6 +239,7 @@ object UserBasedOngoingAuthorization {
         originalClaims = originalClaims,
         nowF: () => Instant,
         userManagementStore: UserManagementStore,
+        identityProviderConfigStore,
         userRightsCheckIntervalInSeconds: Int,
         pekkoScheduler: Scheduler,
       )

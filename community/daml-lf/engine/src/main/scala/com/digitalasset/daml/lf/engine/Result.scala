@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf
 package engine
 
-import cats.Applicative
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{BackStack, FrontStack, ImmArray}
@@ -13,7 +12,6 @@ import com.digitalasset.daml.lf.engine.ResultNeedKey.Response.AuthenticableFatCo
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, NeedKeyProgression}
 import com.digitalasset.daml.lf.value.Value.*
-import scalaz.Monad
 
 import scala.annotation.tailrec
 
@@ -434,20 +432,4 @@ object Result {
       Result.Unit
     else
       ResultError(err)
-
-  object ResultInstances {
-
-    implicit val resultMonadInstance: Monad[Result] = new Monad[Result] {
-      override def point[A](a: => A): Result[A] = ResultDone(a)
-
-      override def bind[A, B](fa: Result[A])(f: A => Result[B]): Result[B] = fa.flatMap(f)
-    }
-
-    implicit val resultApplicativeInstance: Applicative[Result] = new Applicative[Result] {
-      override def pure[A](x: A): Result[A] = ResultDone(x)
-
-      override def ap[A, B](ff: Result[A => B])(fa: Result[A]): Result[B] =
-        fa.flatMap(a => ff.map(f => f(a)))
-    }
-  }
 }

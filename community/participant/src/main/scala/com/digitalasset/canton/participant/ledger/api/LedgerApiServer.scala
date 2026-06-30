@@ -20,9 +20,7 @@ import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.{HttpApiServer, JsonApiConfig}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.util.TimeProvider
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.ledger.localstore.*
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.ledger.participant.state.metrics.TimedSyncService
 import com.digitalasset.canton.ledger.participant.state.{
   InternalIndexServiceImpl,
@@ -78,6 +76,8 @@ import com.digitalasset.canton.platform.{
 }
 import com.digitalasset.canton.time.{Clock, RemoteClock, SimClock}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, TracerProvider}
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.{IdentityProviderId, User, UserRight}
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, config}
@@ -338,7 +338,6 @@ class LedgerApiServer(
         maxInboundMetadataSize = serverConfig.maxInboundMetadataSize.unwrap,
         maxConcurrentCallsPerConnection = serverConfig.maxConcurrentCallsPerConnection.unwrap,
         port = serverConfig.port,
-        seeding = cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
         syncService = timedSyncService,
         partyReplicationEndpointsO = partyReplicationEndpointsO,
         healthChecks = new HealthChecks(

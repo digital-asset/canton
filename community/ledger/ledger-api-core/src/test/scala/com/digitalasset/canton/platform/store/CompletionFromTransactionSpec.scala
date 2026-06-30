@@ -11,6 +11,7 @@ import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.daml.lf.data.Time
+import com.google.protobuf.ByteString
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.timestamp.Timestamp
 import com.google.rpc.status.Status
@@ -73,21 +74,14 @@ class CompletionFromTransactionSpec
             expectedDeduplicationPeriod,
         ) =>
           val completionStream = CompletionFromTransaction.acceptedCompletion(
-            CompletionFromTransaction.CommonCompletionProperties
-              .createFromRecordTimeAndSynchronizerId(
-                submitters = Set("party1", "party2"),
-                recordTime = Time.Timestamp.Epoch,
-                completionOffset = Offset.firstOffset,
-                commandId = "commandId",
-                userId = "userId",
-                submissionId = submissionId,
-                synchronizerId = "synchronizer id",
-                traceContext = SerializableTraceContext(traceContext).toDamlProto,
-                deduplicationOffset = deduplicationOffset,
-                deduplicationDurationSeconds = deduplicationDurationSeconds,
-                deduplicationDurationNanos = deduplicationDurationNanos,
-                trafficCost = 4324L,
-              ),
+            mkProps(
+              submitters = Set("party1", "party2"),
+              submissionId = submissionId,
+              deduplicationOffset = deduplicationOffset,
+              deduplicationDurationSeconds = deduplicationDurationSeconds,
+              deduplicationDurationNanos = deduplicationDurationNanos,
+              trafficCost = 4324L,
+            ),
             TestUpdateId("updateId"),
           )
 
@@ -115,19 +109,11 @@ class CompletionFromTransactionSpec
       forEvery(testCases) { (deduplicationDurationSeconds, deduplicationDurationNanos) =>
         an[IllegalArgumentException] shouldBe thrownBy(
           CompletionFromTransaction.acceptedCompletion(
-            CommonCompletionProperties.createFromRecordTimeAndSynchronizerId(
+            mkProps(
               submitters = Set.empty,
-              recordTime = Time.Timestamp.Epoch,
-              completionOffset = Offset.firstOffset,
-              commandId = "commandId",
-              userId = "userId",
-              submissionId = Some("submissionId"),
-              synchronizerId = "synchronizer id",
-              traceContext = SerializableTraceContext(traceContext).toDamlProto,
-              trafficCost = 4234L,
-              deduplicationOffset = None,
               deduplicationDurationSeconds = deduplicationDurationSeconds,
               deduplicationDurationNanos = deduplicationDurationNanos,
+              trafficCost = 4234L,
             ),
             updateId = TestUpdateId("updateId"),
           )
@@ -138,21 +124,8 @@ class CompletionFromTransactionSpec
     "create a rejected completion" in {
       val status = Status.of(io.grpc.Status.Code.INTERNAL.value(), "message", Seq.empty)
       val completionStream = CompletionFromTransaction.rejectedCompletion(
-        commonCompletionProperties = CompletionFromTransaction.CommonCompletionProperties
-          .createFromRecordTimeAndSynchronizerId(
-            submitters = Set("party"),
-            recordTime = Time.Timestamp.Epoch,
-            completionOffset = Offset.tryFromLong(2L),
-            commandId = "commandId",
-            userId = "userId",
-            submissionId = Some("submissionId"),
-            synchronizerId = "synchronizer id",
-            traceContext = SerializableTraceContext(traceContext).toDamlProto,
-            trafficCost = 4324L,
-            deduplicationOffset = None,
-            deduplicationDurationSeconds = None,
-            deduplicationDurationNanos = None,
-          ),
+        commonCompletionProperties =
+          mkProps(completionOffset = Offset.tryFromLong(2L), trafficCost = 4324L),
         status = status,
       )
 
@@ -167,5 +140,66 @@ class CompletionFromTransactionSpec
       completion.actAs shouldBe Seq("party")
       completion.paidTrafficCost shouldBe 4324
     }
+
+    "include transaction hash on accepted completion when provided" in {
+      val hash = ByteString.copyFromUtf8("tx-hash-1")
+      val completionStream = CompletionFromTransaction.acceptedCompletion(
+        mkProps(transactionHash = Some(hash)),
+        TestUpdateId("updateId"),
+      )
+
+      val completion = completionStream.completionResponse.completion.value
+      completion.transactionHash shouldBe Some(hash)
+    }
+
+    "include transaction hash on rejected completion when provided" in {
+      val hash = ByteString.copyFromUtf8("tx-hash-2")
+      val status = Status.of(io.grpc.Status.Code.INTERNAL.value(), "message", Seq.empty)
+      val completionStream = CompletionFromTransaction.rejectedCompletion(
+        commonCompletionProperties = mkProps(transactionHash = Some(hash)),
+        status = status,
+      )
+
+      val completion = completionStream.completionResponse.completion.value
+      completion.transactionHash shouldBe Some(hash)
+    }
+
+    "not include transaction hash when not provided" in {
+      val completionStream = CompletionFromTransaction.acceptedCompletion(
+        mkProps(),
+        TestUpdateId("updateId"),
+      )
+
+      val completion = completionStream.completionResponse.completion.value
+      completion.transactionHash shouldBe None
+    }
+
   }
+
+  private def mkProps(
+      submitters: Set[String] = Set("party"),
+      completionOffset: Offset = Offset.firstOffset,
+      submissionId: Option[String] = Some("submissionId"),
+      deduplicationOffset: Option[Long] = None,
+      deduplicationDurationSeconds: Option[Long] = None,
+      deduplicationDurationNanos: Option[Int] = None,
+      trafficCost: Long = 0L,
+      transactionHash: Option[ByteString] = None,
+  ): CommonCompletionProperties =
+    CommonCompletionProperties.createFromRecordTimeAndSynchronizerId(
+      submitters = submitters,
+      recordTime = Time.Timestamp.Epoch,
+      completionOffset = completionOffset,
+      commandId = "commandId",
+      userId = "userId",
+      submissionId = submissionId,
+      synchronizerId = "synchronizer id",
+      traceContext = SerializableTraceContext(traceContext).toDamlProto,
+      deduplicationOffset = deduplicationOffset,
+      deduplicationDurationSeconds = deduplicationDurationSeconds,
+      deduplicationDurationNanos = deduplicationDurationNanos,
+      trafficCost = trafficCost,
+      transactionHash = transactionHash,
+    )
+
 }

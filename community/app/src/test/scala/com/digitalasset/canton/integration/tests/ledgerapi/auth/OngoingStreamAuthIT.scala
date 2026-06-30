@@ -3,9 +3,15 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
+import com.daml.jwt.StandardJWTTokenFormat
 import com.daml.ledger.api.v2.admin as admin_proto
+import com.daml.ledger.api.v2.admin.identity_provider_config_service.UpdateIdentityProviderConfigRequest
 import com.daml.ledger.api.v2.admin.user_management_service as user_management_service_proto
 import com.daml.ledger.api.v2.admin.user_management_service.{Right, UpdateUserRequest}
+import com.daml.ledger.api.v2.command_service.CommandServiceGrpc
+import com.daml.ledger.api.v2.commands.Command as ApiCommand
+import com.daml.ledger.api.v2.state_service.{GetLedgerEndRequest, StateServiceGrpc}
+import com.daml.ledger.api.v2.update_service.GetUpdatesResponse.Update
 import com.daml.ledger.api.v2.update_service.{
   GetUpdatesRequest,
   GetUpdatesResponse,
@@ -14,23 +20,30 @@ import com.daml.ledger.api.v2.update_service.{
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.base.error.utils.ErrorDetails
+import com.digitalasset.canton.BigDecimalImplicits.*
+import com.digitalasset.canton.auth.AuthorizationChecksErrors.Unauthenticated
+import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.services.SubmitAndWaitDummyCommandHelpers
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.DelayUtil
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.stub.StreamObserver
-import io.grpc.{Status, StatusRuntimeException}
+import io.grpc.{Context, Status, StatusRuntimeException}
 
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.jdk.CollectionConverters.*
 
 final class OngoingStreamAuthIT
     extends ServiceCallAuthTests
+    with IdentityProviderConfigAuth
     with SubmitAndWaitDummyCommandHelpers
     with ErrorsAssertions {
   registerPlugin(new UseH2(loggerFactory))
@@ -236,6 +249,116 @@ final class OngoingStreamAuthIT
       }
       f.futureValue
     }
+
+    "abort an ongoing stream after the user's identity provider has been deactivated" taggedAs securityAsset
+      .setAttack(
+        streamAttack(threat =
+          "Continue privileged stream access after deactivation of identity provider"
+        )
+      ) in { implicit env =>
+      import env.*
+
+      val alice3UserId = s"alice-3-user"
+      val alice3PartyIdHint = s"alice-3-party"
+
+      val identityProviderConfig = createConfig(
+        canBeAnAdmin,
+        idpId = Some("my-idp-id"),
+        audience = Some("my-idp-audience"),
+        issuer = Some("my-idp-issuer"),
+      ).futureValue
+      val alice3PartyId = allocateParty(
+        canBeAnAdmin,
+        alice3PartyIdHint,
+        identityProviderIdOverride = Some(identityProviderConfig.identityProviderId),
+      ).futureValue
+      val alice3Token = Option(
+        toHeaderRSA(
+          keyId = key1.id,
+          payload = audienceToken(
+            alice3UserId,
+            audience = List(identityProviderConfig.audience),
+            issuer = Some(identityProviderConfig.issuer),
+            expiresIn = Some(Duration.ofMinutes(5)),
+          ),
+          privateKey = key1.privateKey,
+          enforceFormat = Some(StandardJWTTokenFormat.Audience),
+        )
+      )
+      val aliceRight = Right(Right.Kind.CanActAs(Right.CanActAs(alice3PartyId)))
+      val (_, alice3Context) = createUser(
+        alice3UserId,
+        alice3Token,
+        identityProviderConfig.identityProviderId,
+        Vector(aliceRight),
+        primaryParty = "",
+      ).futureValue
+      val ledgerEnd = stub(StateServiceGrpc.stub(channel), canBeAnAdmin.token)
+        .getLedgerEnd(GetLedgerEndRequest())
+        .map(_.offset)
+        .futureValue
+      val (firstSeenF, secondSeenF) = observePartyUpdates(alice3Context, ledgerEnd, alice3PartyId)
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule)(
+        submitObservedIou(
+          alice3Context,
+          alice3UserId,
+          alice3PartyId,
+          alice3PartyId,
+        ).futureValue
+      )
+      firstSeenF.futureValue
+      idpStub(canBeAnAdmin)
+        .updateIdentityProviderConfig(
+          UpdateIdentityProviderConfigRequest(
+            identityProviderConfig = Some(identityProviderConfig.copy(isDeactivated = true)),
+            updateMask = Some(FieldMask(Seq("is_deactivated"))),
+          )
+        )
+        .futureValue
+
+      // Fresh calls with the same IDP-issued token now fail, proving IDP deactivation took effect.
+      inside(
+        loggerFactory.assertLogs(
+          stub(StateServiceGrpc.stub(channel), alice3Context.token)
+            .getLedgerEnd(GetLedgerEndRequest())
+            .failed
+            .futureValue,
+          _.warningMessage should fullyMatch regex raw"Authorization failed: the provided token was not verified by any configured authentication service: " +
+            raw"\(1\) \[AuthServiceJWT\] Authorization error: Could not verify JWT token: The provided Algorithm doesn't match the one defined in the JWT's Header\.; " +
+            raw"\(2\) \[IdentityProviderAwareAuthService\] Failed to authorize the token: Identity Provider \S+ is deactivated\.",
+          _.shouldBeCantonError(
+            Unauthenticated,
+            _ shouldBe "The command is missing a (valid) JWT token",
+          ),
+        )
+      ) { case ex: StatusRuntimeException =>
+        ex.getStatus.getCode shouldBe Status.Code.UNAUTHENTICATED
+        ex.getMessage should fullyMatch regex raw"UNAUTHENTICATED: An error occurred\. Please contact the operator and inquire about the request \S+ with tid \S+"
+        ex.getCause shouldBe null
+      }
+
+      inside(secondSeenF.failed.futureValue) { case sre: StatusRuntimeException =>
+        assertError(
+          actual = sre,
+          expectedStatusCode = Status.Code.ABORTED,
+          expectedMessage =
+            "STALE_STREAM_AUTHORIZATION(2,0): Stale stream authorization. Retry quickly.",
+          expectedDetails = List(
+            ErrorDetails.ErrorInfoDetail(
+              "STALE_STREAM_AUTHORIZATION",
+              Map(
+                "participant" -> s"${participant1.name}",
+                "test" -> s"${this.getClass.getSimpleName}",
+                "category" -> "2",
+                "definite_answer" -> "false",
+              ),
+            ),
+            ErrorDetails.RetryInfoDetail(0.nanoseconds),
+          ),
+          verifyEmptyStackTrace = false,
+        )
+      }
+    }
   }
 
   private def deactivateUserByAdmin(userId: String)(implicit ec: ExecutionContext): Future[Unit] =
@@ -281,4 +404,69 @@ final class OngoingStreamAuthIT
       .map(_ => ())
   }
 
+  private def observePartyUpdates(
+      context: ServiceCallContext,
+      beginExclusive: Long,
+      party: String,
+  ): (Future[GetUpdatesResponse], Future[GetUpdatesResponse]) = {
+    val first = Promise[GetUpdatesResponse]()
+    val second = Promise[GetUpdatesResponse]()
+    val cancelContext = Context.ROOT.withCancellation()
+    val request = GetUpdatesRequest(
+      beginExclusive = beginExclusive,
+      endInclusive = None,
+      updateFormat = updateFormat(transactionsPartyO = Some(party)),
+      descendingOrder = false,
+    )
+
+    val observer = new StreamObserver[GetUpdatesResponse] {
+      private var seen = 0
+
+      override def onNext(value: GetUpdatesResponse): Unit = value.update match {
+        case _: Update.Transaction =>
+          seen = seen + 1
+          if (seen == 1) first.trySuccess(value)
+          if (seen == 2) {
+            second.trySuccess(value)
+            cancelContext.cancel(null)
+          }
+        case _: Update => // skip
+      }
+
+      override def onError(t: Throwable): Unit = {
+        first.tryFailure(t)
+        second.tryFailure(t)
+      }
+
+      override def onCompleted(): Unit = ()
+    }
+
+    cancelContext.run(() =>
+      stub(UpdateServiceGrpc.stub(channel), context.token).getUpdates(request, observer)
+    )
+    first.future -> second.future
+  }
+
+  private def submitObservedIou(
+      context: ServiceCallContext,
+      userId: String,
+      submitterParty: String,
+      observerParty: String,
+  )(implicit ec: ExecutionContext): Future[Unit] = {
+    val command = ApiCommand.fromJavaProto(
+      new Iou(
+        submitterParty,
+        observerParty,
+        new Amount(100.toBigDecimal, "USD"),
+        List.empty[String].asJava,
+      ).create.commands.asScala.toSeq.loneElement.toProtoCommand
+    )
+    val baseRequest = dummySubmitAndWaitRequest(userId, submitterParty, None)
+    val request =
+      baseRequest.copy(commands = baseRequest.commands.map(_.copy(commands = Seq(command))))
+
+    stub(CommandServiceGrpc.stub(channel), context.token)
+      .submitAndWait(request)
+      .map(_ => ())
+  }
 }

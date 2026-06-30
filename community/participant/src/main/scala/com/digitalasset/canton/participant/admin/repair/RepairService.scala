@@ -535,9 +535,8 @@ final class RepairService(
         ledgerApiIndexer.value
           .ensureNoProcessingForSynchronizer(psid.logical)
       )
-      synchronizerIndex <- EitherT.right(
-        ledgerApiIndexer.value.ledgerApiStore.value.cleanSynchronizerIndex(psid.logical)
-      )
+      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
+        .cleanSynchronizerIndex(psid.logical)
 
       startingPoints <- EitherT.right(
         SyncEphemeralStateFactory.startingPoints(
@@ -757,23 +756,24 @@ final class RepairService(
       synchronizerId: SynchronizerId,
       timestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    def check(): FutureUnlessShutdown[Either[String, Unit]] =
-      ledgerApiIndexer.value.ledgerApiStore.value
-        .cleanSynchronizerIndex(synchronizerId)
-        .map(SyncEphemeralStateFactory.lastSequencerTimestamp)
-        .map { lastSequencerTimestamp =>
-          if (lastSequencerTimestamp >= timestamp) {
-            logger.debug(
-              s"Clean sequencer index reached $lastSequencerTimestamp, clearing $timestamp"
-            )
-            Either.unit
-          } else {
-            val errMsg =
-              s"Clean sequencer index is still at $lastSequencerTimestamp which is not yet $timestamp"
-            logger.debug(errMsg)
-            Left(errMsg)
-          }
-        }
+    def check(): Either[String, Unit] = {
+      val lastSequencerTimestamp = SyncEphemeralStateFactory.lastSequencerTimestamp(
+        ledgerApiIndexer.value.ledgerApiStore.value
+          .cleanSynchronizerIndex(synchronizerId)
+      )
+      if (lastSequencerTimestamp >= timestamp) {
+        logger.debug(
+          s"Clean sequencer index reached $lastSequencerTimestamp, clearing $timestamp"
+        )
+        Either.unit
+      } else {
+        val errMsg =
+          s"Clean sequencer index is still at $lastSequencerTimestamp which is not yet $timestamp"
+        logger.debug(errMsg)
+        Left(errMsg)
+      }
+    }
+
     EitherT(
       retry
         .Pause(
@@ -784,7 +784,7 @@ final class RepairService(
           s"awaiting clean-head for=$synchronizerId at ts=$timestamp",
         )
         .unlessShutdown(
-          check(),
+          FutureUnlessShutdown.pure(check()),
           AllExceptionRetryPolicy,
         )
     )

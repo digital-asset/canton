@@ -1310,11 +1310,23 @@ class BlockSequencer(
             ().asRight[String]
         }
 
-      case Right(_value) =>
-        logger.info(
-          s"Successfully contacted sequencer successor on ${successorPsid.suffix}."
-        )
-        metrics.setLsuContactSuccessorStatus(1, successorPsid)
+      case Right(bootstrapInfo) =>
+        if (bootstrapInfo.psid != successorPsid) {
+          logger.warn(
+            s"Error when contacting successor: expecting psid to be $successorPsid but found ${bootstrapInfo.psid}"
+          )
+        } else if (bootstrapInfo.sequencerId != successor.mapping.sequencerId) {
+          logger.warn(
+            s"Error when contacting successor: expecting sequencer id to be ${successor.mapping.sequencerId} but found ${bootstrapInfo.sequencerId}"
+          )
+        } else {
+          logger.info(
+            s"Successfully contacted sequencer successor on ${successorPsid.suffix}."
+          )
+          metrics.setLsuContactSuccessorStatus(1, successorPsid)
+        }
+
+        // Always return a right to stop retries (on successor or fatal errors)
         ().asRight[String]
     }
 

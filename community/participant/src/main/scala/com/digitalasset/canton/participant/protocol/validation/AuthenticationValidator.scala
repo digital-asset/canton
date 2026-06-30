@@ -311,51 +311,36 @@ private[protocol] object AuthenticationValidator {
               contractEnricher = createNodeEnricher,
               hashTracer = hashTracer.getOrElse[HashTracer](HashTracer.NoOp),
             )
+            .leftMap[AuthenticationError](error =>
+              FailedToComputeExternallySignedHash(requestId, error)
+            )
             // If Hash computation is successful, verify the signature is valid
             .flatMap { hash =>
-              EitherT.liftF[FutureUnlessShutdown, String, Either[String, Option[Hash]]](
-                verifyExternalSignaturesForActAs(
-                  hash,
-                  externalAuthorization,
-                  submitterMetadata.actAs,
-                ).map {
-                  case error @ Some(_) =>
-                    hashTracer.map(_.result).foreach { trace =>
-                      logger.debug("Transaction hash computation trace:\n" + trace)
-                    }
-                    error
-                  case None => None
-                }.map(_.toLeft(Some(hash)))
-              )
-            }
-            .map(res =>
-              res.leftMap[AuthenticationError](signatureError =>
+              verifyExternalSignaturesForActAs(
+                hash,
+                externalAuthorization,
+                submitterMetadata.actAs,
+              ).leftMap[AuthenticationError] { error =>
+                hashTracer.map(_.result).foreach { trace =>
+                  logger.debug("Transaction hash computation trace:\n" + trace)
+                }
                 InvalidSignature(
                   requestId,
                   viewTree.viewPosition,
-                  signatureError,
-                )
-              )
-            )
-            // If we couldn't compute the hash, fail
-            .valueOr(error =>
-              Left(
-                FailedToComputeExternallySignedHash(
-                  requestId,
                   error,
                 )
-              )
-            )
+              }.map(_ => Some(hash))
+            }
+            .value
       }
 
     // Verify the signatures provided by the act as parties are valid.
     // This proves the request really comes from the actAs parties.
-    // Returns signature validation errors in the form of Some(errorString)
     def verifyExternalSignaturesForActAs(
         hash: Hash,
         externalAuthorization: ExternalAuthorization,
         actAs: NonEmpty[Set[LfPartyId]],
-    ): FutureUnlessShutdown[Option[String]] =
+    ): EitherT[FutureUnlessShutdown, String, Unit] =
       InteractiveSubmission
         .verifySignatures(
           hash,
@@ -366,13 +351,6 @@ private[protocol] object AuthenticationValidator {
           logger,
           physicalSynchronizerId.protocolVersion,
         )
-        .value
-        .map {
-          // Convert signature validation errors to a Some, as this is how we indicate failures
-          case Left(error) => Some(error)
-          // A valid signature verification translates to a None (absence of error)
-          case Right(_) => None
-        }
 
     submitterMetadata.externalAuthorization match {
       case Some(externalAuthorization) =>

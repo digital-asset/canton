@@ -1456,6 +1456,7 @@ object CantonConfig {
         : ConfigReader[LedgerApiServerParametersConfig] = {
       implicit val ledgerApiContractLoaderConfigReader: ConfigReader[ContractLoaderConfig] =
         deriveReader[ContractLoaderConfig]
+      // TODO(i33818): Remove
       implicit val contractIdSeedingReader: ConfigReader[Seeding] =
         // Not using deriveEnumerationReader[Seeding] as we prefer "testing-static" over static (that appears
         // in Seeding.name, but not in the case object name). This makes it clear that static is not to
@@ -1477,7 +1478,14 @@ object CantonConfig {
             )
         }
 
-      deriveReader[LedgerApiServerParametersConfig]
+      implicit val deprecatedFields: DeprecatedFieldsFor[LedgerApiServerParametersConfig] =
+        new DeprecatedFieldsFor[LedgerApiServerParametersConfig] {
+          override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
+            DeprecatedConfigPath[String]("contract-id-seeding", since = "3.6.0")
+          )
+        }
+
+      deriveReader[LedgerApiServerParametersConfig].applyDeprecations
     }
 
     lazy implicit final val participantNodeParameterConfigReader

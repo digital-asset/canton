@@ -5,6 +5,8 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
+import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TemplateFilter
 import com.digitalasset.canton.ledger.participant.state
@@ -29,6 +31,7 @@ import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, Tran
 import com.digitalasset.daml.lf.transaction.{SerializationVersion as LfSerializationVersion, *}
 import com.digitalasset.daml.lf.value.Value as LfValue
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueText}
+import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.{AsyncTestSuite, OptionValues}
 
@@ -195,6 +198,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         offset = offset,
         transaction = tx.transaction,
         recordTime = tx.recordedAt,
+        transactionHash = tx.transactionHash,
         contractActivenessChanged = contractActivenessChanged,
       )
     } yield offset -> tx
@@ -324,6 +328,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       recordedAt = let,
       transaction = txBuilder.buildCommitted(),
       explicitDisclosure = Map(eid -> (create.signatories union create.stakeholders)),
+      transactionHash = Some(preparedSubmissionHash(s"singleCreate-$id")),
     )
   }
 
@@ -649,6 +654,9 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       Some(submissionId),
       paidTrafficCost = NonNegativeLong.zero,
     )
+
+  protected final def preparedSubmissionHash(value: String): CantonHash =
+    CantonHash.digest(HashPurpose.PreparedSubmission, ByteString.copyFromUtf8(value), Sha256)
 
   protected final def storeSync(
       commands: Vector[(Offset, LedgerEntry.Transaction)]

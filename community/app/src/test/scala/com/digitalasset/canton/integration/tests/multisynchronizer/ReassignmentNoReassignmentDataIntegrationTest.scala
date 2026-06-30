@@ -285,9 +285,7 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
             participant3.id -> Seq("LocalApprove"),
           )
 
-          status.message should include(
-            s"Cannot perform all validations: Unassignment data not found when processing assignment"
-          )
+          status.message should include("unassignment data not found")
         }
     }
 

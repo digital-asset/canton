@@ -17,6 +17,13 @@ addCommandAlias(
   "packageDocsWithExistingRelease",
   "; licenseFileMappings; docs-open/makeSiteFull; docs/makeSite",
 )
+// Like `packageDocsWithExistingRelease` but reuses already-generated snippet JSON data (see
+// `docs-open/makeSiteFromExistingSnippets`). Used by the fan-in `build_docs` CI job after the
+// snippets have been generated in parallel by `build_docs_snippets`.
+addCommandAlias(
+  "packageDocsFromExistingSnippets",
+  "; licenseFileMappings; docs-open/makeSiteFromExistingSnippets; docs/makeSite",
+)
 addCommandAlias("packageDocs", "; package; packageDocsWithExistingRelease")
 addCommandAlias("packRelease", "; bundle")
 addCommandAlias("package", "; packRelease; unidoc")
@@ -266,8 +273,25 @@ lazy val `docs-open` = project
         )
       )
       .value,
+    // Same as `makeSiteFull` but reuses already-generated snippet JSON data instead of running the
+    // (expensive) snippet generation tests. This lets CI fan out snippet generation across parallel
+    // containers (`build_docs_snippets`) and then build the site once from the collected output.
+    docsBuild.makeSiteFromExistingSnippets := docsBuild.checkDocErrors
+      .dependsOn(makeSite)
+      .dependsOn(
+        Def.sequential(
+          docsBuild.resetExceptSnippets,
+          docsBuild.generateIncludes,
+          docsBuild.resolve,
+        )
+      )
+      .value,
     docsBuild.reset := {
       docsBuild.resetGeneratedSnippets().value
+      docsBuild.resetGeneratedIncludes().value
+      docsBuild.resetPreprocessed().value
+    },
+    docsBuild.resetExceptSnippets := {
       docsBuild.resetGeneratedIncludes().value
       docsBuild.resetPreprocessed().value
     },

@@ -26,6 +26,8 @@ import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
   Reassignment,
   ReassignmentInfo,
+  SynchronizerIndex,
+  SynchronizerUpdate,
   TestAcsChangeFactory,
   TransactionMeta,
   Update,
@@ -38,9 +40,10 @@ import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
 import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.*
+import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.OffsetGen.offset
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.{
   AchsStateCache,
   ContractStateCaches,
@@ -124,8 +127,22 @@ class InMemoryStateUpdaterSpec
       )
     )
     cacheUpdates should contain theSameElementsInOrderAs Seq(
-      result(someLedgerEnd),
-      result(secondLedgerEnd),
+      result(
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(
+            synchronizerId1 -> update1._2.synchronizerIndex,
+            synchronizerIdWithoutNum -> metadataChangedUpdate._2.synchronizerIndex,
+          )
+        )
+      ),
+      result(
+        secondLedgerEnd.copy(synchronizerIndices =
+          Map(
+            defaultSynchronizer -> update3._2.synchronizerIndex,
+            defaultSynchronizer -> update4._2.synchronizerIndex,
+          )
+        )
+      ),
     )
   }
 
@@ -133,11 +150,14 @@ class InMemoryStateUpdaterSpec
     val secondLedgerEnd = someLedgerEnd.copy(
       lastOffset = Offset.tryFromLong(12),
       lastEventSeqId = 12L,
+      synchronizerIndices = Map(defaultSynchronizer -> update3._2.synchronizerIndex),
     )
     val thirdLedgerEnd = someLedgerEnd.copy(
       lastOffset = Offset.tryFromLong(14),
       lastEventSeqId = 14L,
       lastPublicationTime = CantonTimestamp.assertFromLong(15L),
+      synchronizerIndices =
+        Map(synchronizerIdWithoutNum -> anotherMetadataChangedUpdate._2.synchronizerIndex),
     )
     runFlow(
       Seq(
@@ -149,8 +169,16 @@ class InMemoryStateUpdaterSpec
     )
 
     cacheUpdates should contain theSameElementsInOrderAs Seq(
-      result(secondLedgerEnd),
-      result(thirdLedgerEnd),
+      result(
+        secondLedgerEnd.copy(synchronizerIndices =
+          Map(defaultSynchronizer -> update3._2.synchronizerIndex)
+        )
+      ),
+      result(
+        thirdLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerIdWithoutNum -> anotherMetadataChangedUpdate._2.synchronizerIndex)
+        )
+      ),
       // Results in empty batch after processing
     )
   }
@@ -165,10 +193,18 @@ class InMemoryStateUpdaterSpec
 
   "prepare" should "prepare a batch of a single update" in new Scope {
     InMemoryStateUpdater.prepare(
-      makeBatch(Vector(update1), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(update1),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerIdWithoutNum -> update1._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     ) shouldBe PrepareResult(
       Vector(txLogUpdate1),
-      someLedgerEnd,
+      someLedgerEnd.copy(synchronizerIndices =
+        Map(synchronizerIdWithoutNum -> update1._2.synchronizerIndex)
+      ),
       update1._2.traceContext,
       traceContext,
       contractStateEvents = Vector.empty,
@@ -179,25 +215,66 @@ class InMemoryStateUpdaterSpec
     val externalTransactionHash =
       Hash.digest(HashPurpose.PreparedSubmission, ByteString.copyFrom("mock_hash".getBytes), Sha256)
     val updateWithTransactionHash = offset(11L) -> transactionAccepted(
-      t = 0L,
+      t = 3L,
       synchronizerId = synchronizerId1,
       externalTransactionHash = Some(externalTransactionHash),
     )
 
     val preparedWithHashResult = InMemoryStateUpdater.prepare(
-      makeBatch(Vector(updateWithTransactionHash), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(updateWithTransactionHash),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> updateWithTransactionHash._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     )
     inside(preparedWithHashResult.updates.loneElement) {
       case transactionAccepted: TransactionAccepted =>
-        transactionAccepted.externalTransactionHash shouldBe Some(externalTransactionHash)
+        transactionAccepted.transactionHash shouldBe Some(externalTransactionHash)
     }
 
     val preparedWithoutHashResult = InMemoryStateUpdater.prepare(
-      makeBatch(Vector(update1), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(update1),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> update1._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     )
     inside(preparedWithoutHashResult.updates.loneElement) {
       case transactionAccepted: TransactionAccepted =>
-        transactionAccepted.externalTransactionHash shouldBe None
+        transactionAccepted.transactionHash shouldBe None
+    }
+
+    val rejectedWithHash = offset(12L) -> commandRejected(
+      t = 5,
+      synchronizerId = synchronizerId1,
+      transactionHash = Some(externalTransactionHash),
+    )
+    val preparedRejectedWithHashResult = InMemoryStateUpdater.prepare(
+      makeBatch(Vector(rejectedWithHash), someLedgerEnd, traceContext)
+    )
+    inside(preparedRejectedWithHashResult.updates.loneElement) {
+      case transactionRejected: TransactionRejected =>
+        val completion = transactionRejected.completionStreamResponse.completionResponse.completion
+        completion.value.transactionHash shouldBe Some(
+          externalTransactionHash.unwrap
+        )
+    }
+
+    val rejectedWithoutHash = offset(13L) -> commandRejected(
+      t = 6,
+      synchronizerId = synchronizerId1,
+    )
+    val preparedRejectedWithoutHashResult = InMemoryStateUpdater.prepare(
+      makeBatch(Vector(rejectedWithoutHash), someLedgerEnd, traceContext)
+    )
+    inside(preparedRejectedWithoutHashResult.updates.loneElement) {
+      case transactionRejected: TransactionRejected =>
+        val completion = transactionRejected.completionStreamResponse.completionResponse.completion
+        completion.value.transactionHash shouldBe None
     }
   }
 
@@ -214,13 +291,19 @@ class InMemoryStateUpdaterSpec
       )
     )
     val accepted = offset(11L) -> transactionAccepted(
-      t = 0L,
+      t = 4L,
       synchronizerId = synchronizerId1,
       completionInfoO = completionInfo,
     )
 
     val preparedWithTrafficCostResult = InMemoryStateUpdater.prepare(
-      makeBatch(Vector(accepted), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(accepted),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> accepted._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     )
     inside(preparedWithTrafficCostResult.updates.loneElement) {
       case transactionAccepted: TransactionAccepted =>
@@ -239,7 +322,13 @@ class InMemoryStateUpdaterSpec
       actAs = List(party1),
     )
     val preparedRejectedWithTrafficCostResult = InMemoryStateUpdater.prepare(
-      makeBatch(Vector(rejected), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(rejected),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> rejected._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     )
     inside(preparedRejectedWithTrafficCostResult.updates.loneElement) {
       case transactionRejected: TransactionRejected =>
@@ -258,7 +347,13 @@ class InMemoryStateUpdaterSpec
       completionInfo = completionInfo,
     )
     val prepareAssign = InMemoryStateUpdater.prepare(
-      makeBatch(Vector(assign), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(assign),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> assign._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     )
     inside(prepareAssign.updates.loneElement) { case reassignmentAccepted: ReassignmentAccepted =>
       // Submitting party filter should return the cost
@@ -276,7 +371,13 @@ class InMemoryStateUpdaterSpec
       completionInfo = completionInfo,
     )
     val prepareUnassign = InMemoryStateUpdater.prepare(
-      makeBatch(Vector(unassign), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(unassign),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> unassign._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     )
     inside(prepareUnassign.updates.loneElement) { case reassignmentAccepted: ReassignmentAccepted =>
       // Submitting party filter should return the cost
@@ -290,10 +391,24 @@ class InMemoryStateUpdaterSpec
 
   "prepare" should "prepare a batch with reassignments" in new Scope {
     InMemoryStateUpdater.prepare(
-      makeBatch(Vector(update1, update7, update8), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(update1, update7, update8),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(
+            synchronizerId1 -> update1._2.synchronizerIndex,
+            synchronizerId2 -> update8._2.synchronizerIndex,
+          )
+        ),
+        traceContext,
+      )
     ) shouldBe PrepareResult(
       Vector(txLogUpdate1, assignLogUpdate, unassignLogUpdate),
-      someLedgerEnd,
+      someLedgerEnd.copy(synchronizerIndices =
+        Map(
+          synchronizerId1 -> update1._2.synchronizerIndex,
+          synchronizerId2 -> update8._2.synchronizerIndex,
+        )
+      ),
       update1._2.traceContext,
       traceContext,
       contractStateEvents = Vector.empty,
@@ -302,10 +417,18 @@ class InMemoryStateUpdaterSpec
 
   "prepare" should "prepare a batch with topology transaction" in new Scope {
     InMemoryStateUpdater.prepare(
-      makeBatch(Vector(update1, update9), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(update1, update9),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> update1._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
     ) shouldBe PrepareResult(
       Vector(txLogUpdate1, topologyTransactionLogUpdate),
-      someLedgerEnd,
+      someLedgerEnd.copy(synchronizerIndices =
+        Map(synchronizerId1 -> update1._2.synchronizerIndex)
+      ),
       update1._2.traceContext,
       traceContext,
       contractStateEvents = Vector.empty,
@@ -314,10 +437,24 @@ class InMemoryStateUpdaterSpec
 
   "prepare" should "set last offset and eventSequentialId to last element" in new Scope {
     InMemoryStateUpdater.prepare(
-      makeBatch(Vector(update1, metadataChangedUpdate), someLedgerEnd, traceContext)
+      makeBatch(
+        Vector(update1, metadataChangedUpdate),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(
+            synchronizerId1 -> update1._2.synchronizerIndex,
+            defaultSynchronizer -> metadataChangedUpdate._2.synchronizerIndex,
+          )
+        ),
+        traceContext,
+      )
     ) shouldBe PrepareResult(
       Vector(txLogUpdate1),
-      someLedgerEnd,
+      someLedgerEnd.copy(synchronizerIndices =
+        Map(
+          synchronizerId1 -> update1._2.synchronizerIndex,
+          defaultSynchronizer -> metadataChangedUpdate._2.synchronizerIndex,
+        )
+      ),
       metadataChangedUpdate._2.traceContext,
       traceContext,
       contractStateEvents = Vector.empty,
@@ -355,7 +492,13 @@ class InMemoryStateUpdaterSpec
       private val events =
         InMemoryStateUpdater
           .prepare(
-            makeBatch(Vector(update), someLedgerEnd, traceContext)
+            makeBatch(
+              Vector(update),
+              someLedgerEnd.copy(synchronizerIndices =
+                Map(synchronizerId1 -> update._2.synchronizerIndex)
+              ),
+              traceContext,
+            )
           )
           .updates
           .collect { case txAccepted: TransactionLogUpdate.TransactionAccepted => txAccepted }
@@ -402,7 +545,11 @@ class InMemoryStateUpdaterSpec
 
     inOrder
       .verify(ledgerEndCache)
-      .set(Some(lastLedgerEnd))
+      .update(
+        lastLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId1 -> SynchronizerIndex(None, None, CantonTimestamp.assertFromLong(1L)))
+        )
+      )
     inOrder.verify(dispatcher).signalNewHead(lastOffset)
     inOrder
       .verify(transactionSubmissionTracker)
@@ -435,7 +582,11 @@ class InMemoryStateUpdaterSpec
       .push(any[NonEmptyVector[ContractStateEvent]], any[Long])(any[TraceContext])
     inOrder
       .verify(ledgerEndCache)
-      .set(Some(lastLedgerEnd))
+      .update(
+        lastLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerId2 -> SynchronizerIndex(None, None, CantonTimestamp.Epoch))
+        )
+      )
     inOrder.verify(dispatcher).signalNewHead(lastOffset)
     inOrder.verifyNoMoreInteractions()
   }
@@ -496,7 +647,15 @@ class InMemoryStateUpdaterSpec
 
     inOrder
       .verify(ledgerEndCache)
-      .set(Some(lastLedgerEnd.copy(lastOffset = tx_accepted_withoutFlatEventWitnesses.offset)))
+      .update(
+        lastLedgerEnd
+          .copy(lastOffset = tx_accepted_withoutFlatEventWitnesses.offset)
+          .copy(synchronizerIndices =
+            Map(
+              synchronizerId1 -> SynchronizerIndex(None, None, CantonTimestamp.assertFromLong(1L))
+            )
+          )
+      )
     inOrder.verify(dispatcher).signalNewHead(tx_accepted_withoutFlatEventWitnesses.offset)
     inOrder.verifyNoMoreInteractions()
   }
@@ -697,6 +856,8 @@ object InMemoryStateUpdaterSpec {
 
   private val synchronizerId1 = SynchronizerId.tryFromString("x::synchronizerID1")
   private val synchronizerId2 = SynchronizerId.tryFromString("x::synchronizerID2")
+  private val defaultSynchronizer: SynchronizerId = SynchronizerId.tryFromString("da::default")
+  private val synchronizerIdWithoutNum = SynchronizerId.tryFromString("x::synchronizer")
 
   private val party1 = Ref.Party.assertFromString("someparty1")
   private val party2 = Ref.Party.assertFromString("someparty2")
@@ -737,8 +898,8 @@ object InMemoryStateUpdaterSpec {
         events = Vector(),
         completionStreamResponseO = None,
         synchronizerId = synchronizerId1.toProtoPrimitive,
-        recordTime = Timestamp.Epoch,
-        externalTransactionHash = None,
+        recordTime = Timestamp.Epoch.addMicros(1),
+        transactionHash = None,
       )(emptyTraceContext)
 
     val assignLogUpdate =
@@ -933,7 +1094,7 @@ object InMemoryStateUpdaterSpec {
         completionStreamResponseO = Some(tx_accepted_completionStreamResponse),
         synchronizerId = synchronizerId1.toProtoPrimitive,
         recordTime = Timestamp(1),
-        externalTransactionHash = None,
+        transactionHash = None,
       )(emptyTraceContext)
 
     val tx_accepted_withoutCompletionStreamResponse: TransactionLogUpdate.TransactionAccepted =
@@ -985,6 +1146,7 @@ object InMemoryStateUpdaterSpec {
       lastEventSeqId = lastEventSeqId,
       lastStringInterningId = lastStringInterningId,
       lastPublicationTime = lastPublicationTime,
+      synchronizerIndices = Map(),
     )
     val updates: Vector[TransactionLogUpdate] =
       Vector(
@@ -1005,14 +1167,18 @@ object InMemoryStateUpdaterSpec {
       }
     val prepareResult: PrepareResult = PrepareResult(
       updates = updates,
-      ledgerEnd = lastLedgerEnd,
+      ledgerEndUpdate = lastLedgerEnd.copy(synchronizerIndices =
+        Map(synchronizerId1 -> SynchronizerIndex(None, None, CantonTimestamp.assertFromLong(1L)))
+      ),
       emptyTraceContext,
       traceContext,
       contractStateEvents = updatesContractStateEvents,
     )
     val prepareResultOnlyReassignment: PrepareResult = PrepareResult(
       updates = Vector(assignLogUpdate),
-      ledgerEnd = lastLedgerEnd,
+      ledgerEndUpdate = lastLedgerEnd.copy(synchronizerIndices =
+        Map(synchronizerId2 -> SynchronizerIndex(None, None, CantonTimestamp.Epoch))
+      ),
       emptyTraceContext,
       traceContext,
       contractStateEvents = Vector(
@@ -1030,7 +1196,11 @@ object InMemoryStateUpdaterSpec {
     )
     val prepareResultWithEmptyFlatEventWitnesses: PrepareResult = PrepareResult(
       updates = emptyFlatWitnessUpdates,
-      ledgerEnd = lastLedgerEnd.copy(lastOffset = tx_accepted_withoutFlatEventWitnesses.offset),
+      ledgerEndUpdate = lastLedgerEnd.copy(
+        lastOffset = tx_accepted_withoutFlatEventWitnesses.offset,
+        synchronizerIndices =
+          Map(synchronizerId1 -> SynchronizerIndex(None, None, CantonTimestamp.assertFromLong(1L))),
+      ),
       emptyTraceContext,
       traceContext,
       contractStateEvents = Vector(
@@ -1043,7 +1213,9 @@ object InMemoryStateUpdaterSpec {
       ),
     )
 
-    def result(ledgerEnd: LedgerEnd): PrepareResult =
+    def result(
+        ledgerEnd: LedgerEnd
+    ): PrepareResult =
       PrepareResult(
         Vector.empty,
         ledgerEnd,
@@ -1057,7 +1229,14 @@ object InMemoryStateUpdaterSpec {
     )(implicit mat: Materializer): Done =
       Source(input.map { case (updates, ledgerEnd, tc) =>
         Batch(
-          ledgerEnd = ledgerEnd,
+          ledgerEnd = ledgerEnd.copy(
+            synchronizerIndices = ParallelIndexerSubscription.ledgerEndSynchronizerIndexFrom(
+              updates.view
+                .collect { case (_, u: SynchronizerUpdate) =>
+                  u.synchronizerId -> u.synchronizerIndex
+                }
+            )
+          ),
           batch = (),
           batchSize = updates.size,
           offsetsUpdates = updates,
@@ -1158,11 +1337,11 @@ object InMemoryStateUpdaterSpec {
     optByKeyNodes = None,
   )
 
-  private val update1 = offset(11L) -> transactionAccepted(t = 0L, synchronizerId = synchronizerId1)
+  private val update1 = offset(11L) -> transactionAccepted(t = 1L, synchronizerId = synchronizerId1)
   private def rawMetadataChangedUpdate(offset: Offset, recordTime: Timestamp) =
     offset ->
       Update.SequencerIndexMoved(
-        synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
+        synchronizerId = synchronizerIdWithoutNum,
         recordTime = CantonTimestamp(recordTime),
       )
 
@@ -1174,14 +1353,14 @@ object InMemoryStateUpdaterSpec {
       transactionInfo =
         Update.TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
       updateId = txId2,
-      synchronizerId = SynchronizerId.tryFromString("da::default"),
-      recordTime = CantonTimestamp.MinValue,
+      synchronizerId = defaultSynchronizer,
+      recordTime = CantonTimestamp.assertFromLong(3L),
       acsChangeFactory = TestAcsChangeFactory(),
       contractInfos = Map.empty,
     )
 
   private val update4 = offset(14L) ->
-    commandRejected(t = 1337L, synchronizerId = SynchronizerId.tryFromString("da::default"))
+    commandRejected(t = 1337L, synchronizerId = defaultSynchronizer)
 
   private val update7 = offset(17L) ->
     assignmentAccepted(t = 0, source = synchronizerId1, target = synchronizerId2)
@@ -1298,7 +1477,26 @@ object InMemoryStateUpdaterSpec {
     val output = sourceSomes
       .map(updates =>
         Batch(
-          ledgerEnd = someLedgerEnd,
+          ledgerEnd = someLedgerEnd.copy(synchronizerIndices =
+            updates.view
+              .collect { case (_, u: SynchronizerUpdate) => u }
+              .groupBy(_.synchronizerId)
+              .map { case (s, updates) =>
+                (
+                  s,
+                  updates
+                    .drop(1)
+                    .foldLeft(
+                      updates.headOption
+                        .getOrElse(throw new IllegalStateException())
+                        .synchronizerIndex
+                    )((u1, u2) =>
+                      if (u1.recordTime > u2.synchronizerIndex.recordTime) u1
+                      else u2.synchronizerIndex
+                    ),
+                )
+              }
+          ),
           batch = (),
           batchSize = updates.size,
           offsetsUpdates = updates,
@@ -1344,7 +1542,7 @@ object InMemoryStateUpdaterSpec {
       updateId = txId1,
       synchronizerId = synchronizerId,
       recordTime = CantonTimestamp(Timestamp(t)),
-      externalTransactionHash = externalTransactionHash,
+      transactionHash = externalTransactionHash,
       acsChangeFactory = TestAcsChangeFactory(contractActivenessChanged),
       contractInfos = contracts.zipWithIndex.map { case (c, idx) =>
         c.contractId -> ContractInfo(
@@ -1428,6 +1626,7 @@ object InMemoryStateUpdaterSpec {
       synchronizerId: SynchronizerId,
       trafficCost: NonNegativeLong = NonNegativeLong.zero,
       actAs: List[Ref.Party] = List.empty,
+      transactionHash: Option[Hash] = None,
   ): Update.CommandRejected =
     Update.SequencedCommandRejected(
       completionInfo = CompletionInfo(
@@ -1442,6 +1641,7 @@ object InMemoryStateUpdaterSpec {
       synchronizerId = synchronizerId,
       recordTime = CantonTimestamp.assertFromLong(t),
       isTransaction = true,
+      transactionHash = transactionHash,
     )
 
   private def sequencerIndexMoved(
@@ -1470,11 +1670,13 @@ object InMemoryStateUpdaterSpec {
       ),
     )
 
-  private val someLedgerEnd = LedgerEnd(
-    lastOffset = Offset.tryFromLong(10L),
-    lastEventSeqId = 10L,
-    lastStringInterningId = 10,
-    lastPublicationTime = CantonTimestamp.assertFromLong(10L),
-  )
+  private val someLedgerEnd =
+    LedgerEnd(
+      lastOffset = Offset.tryFromLong(10L),
+      lastEventSeqId = 10L,
+      lastStringInterningId = 10,
+      lastPublicationTime = CantonTimestamp.assertFromLong(10L),
+      synchronizerIndices = Map(),
+    )
 
 }

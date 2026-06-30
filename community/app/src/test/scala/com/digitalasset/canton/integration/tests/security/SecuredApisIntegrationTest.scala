@@ -35,9 +35,9 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.participant.config.RemoteParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
+import com.digitalasset.canton.user.store.UserManagementStore
 import monocle.macros.syntax.lens.*
 
 import java.time.{Duration, Instant}

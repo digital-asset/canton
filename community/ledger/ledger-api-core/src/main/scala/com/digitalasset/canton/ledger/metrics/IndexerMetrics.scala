@@ -46,7 +46,7 @@ class IndexerHistograms(val prefix: MetricName)(implicit
     qualification = MetricQualification.Debug,
   )
 
-  private[metrics] val ingestionBlockeByPruningDuration: Item = Item(
+  private[metrics] val ingestionBlockedByPruningDuration: Item = Item(
     prefix :+ "ingestion_blocked_by_pruning" :+ "duration",
     summary = "The duration of ingestions DB execution is blocked by pruning.",
     description =
@@ -120,8 +120,8 @@ class IndexerMetrics(
     )
   )
 
-  val ingestionBlockeByPruningDuration: Timer =
-    factory.timer(histograms.ingestionBlockeByPruningDuration.info)
+  val ingestionBlockedByPruningDuration: Timer =
+    factory.timer(histograms.ingestionBlockedByPruningDuration.info)
 
   // Input mapping stage
   // Translating state updates to data objects corresponding to individual SQL insert statements
@@ -233,38 +233,41 @@ class IndexerMetrics(
       0L,
     )
 
-  val indexerQueueBlocked: MetricHandle.Meter = factory.meter(
+  val indexerQueueBlocked: Gauge[Int] = factory.gauge(
     MetricInfo(
       prefix :+ "indexer_queue_blocked",
       summary = "The amount of blocked enqueue operations for the indexer queue.",
       description =
         """Indexer queue exerts backpressure by blocking asynchronous enqueue operations.
-          |This meter measures the amount of such blocked operations, signalling backpressure
+          |This gauge measures the amount of such blocked operations, signalling backpressure
           |materializing from downstream.""",
       qualification = MetricQualification.Debug,
-    )
+    ),
+    0,
   )
 
-  val indexerQueueBuffered: MetricHandle.Meter = factory.meter(
+  val indexerQueueBuffered: Gauge[Int] = factory.gauge(
     MetricInfo(
       prefix :+ "indexer_queue_buffered",
       summary = "The size of the buffer before the indexer.",
       description =
-        """This buffer is located before the indexer, increasing amount signals backpressure mounting.""",
+        """This gauge is located before the indexer, increasing amount signals backpressure mounting.""",
       qualification = MetricQualification.Debug,
-    )
+    ),
+    0,
   )
 
-  val indexerQueueUncommitted: MetricHandle.Meter = factory.meter(
+  val indexerQueueUncommitted: Gauge[Int] = factory.gauge(
     MetricInfo(
       prefix :+ "indexer_queue_uncommitted",
       summary = "The amount of entries which are uncommitted for the indexer.",
       description =
         """Uncommitted entries contain all blocked, buffered and submitted, but not yet committed entries.
           |This amount signals the momentum of stream processing, and has a theoretical maximum defined by all
-          |the queue perameters.""".stripMargin,
+          |the queue parameters.""".stripMargin,
       qualification = MetricQualification.Debug,
-    )
+    ),
+    0,
   )
 
   val ledgerEndSequentialId: Gauge[Long] =
@@ -293,6 +296,7 @@ class IndexerMetrics(
         """Represents the number of individual ledger events constituting a transaction.""",
       qualification = MetricQualification.Debug,
       labelsWithDescription = Map(
+        // TODO(#33779): participant_id is not populated
         "participant_id" -> "The id of the participant.",
         "user_id" -> "The user generating the events.",
       ),
@@ -308,6 +312,7 @@ class IndexerMetrics(
           "Represents the total number of ledger events processed (transactions, reassignments, party allocations).",
         qualification = MetricQualification.Debug,
         labelsWithDescription = Map(
+          // TODO(#33779): participant_id is not populated
           "participant_id" -> "The id of the participant.",
           "user_id" -> "The user generating the events.",
           "event_type" -> "The type of ledger event processed (transaction, reassignment, party_allocation).",

@@ -126,16 +126,13 @@ trait SchemaVisitor:
   /** Type Application */
   def application(value: Type, typeParams: Seq[TypeVarName], args: Seq[Type]): Type
 
-  /** Unknown Type. A template can reference `ContractId U` where U is unknown because
-    * non-serializable. This type cannot be used for decoding payloads.
-    *
-    * @param id
-    *   The type or type constructor identifier
-    * @param args
-    *   The type arguments or empty if id is not a type constructor. This cannot be modeled as an
-    *   application because the type param names are unknown.
+  /** Unknown type body. A template can reference `ContractId U` where U is unknown because
+    * non-serializable. U is represented as a constructor of unknown value/body definition:
+    * ```
+    * constructor(id, Seq.empty, unknown)
+    * ```
     */
-  def unknown(id: Identifier, args: Seq[Type]): Type
+  def unknown: Type
 end SchemaVisitor
 
 object SchemaVisitor:
@@ -193,8 +190,7 @@ object SchemaVisitor:
       (left.variant(leftCases), right.variant(rightCases))
     override def enumeration(cases: Seq[EnumConName]): Type =
       (left.enumeration(cases), right.enumeration(cases))
-    override def unknown(id: Identifier, args: Seq[Type]): Type =
-      (left.unknown(id, args.map(_._1)), right.unknown(id, args.map(_._2)))
+    override def unknown: Type = (left.unknown, right.unknown)
     override def list(elem: Type): Type = (left.list(elem._1), right.list(elem._2))
     override def optional(elem: Type): Type = (left.optional(elem._1), right.optional(elem._2))
     override def textMap(value: Type): Type = (left.textMap(value._1), right.textMap(value._2))
@@ -252,7 +248,7 @@ object SchemaVisitor:
     ): Type = {}
     override def variable(name: TypeVarName): Type = {}
     override def application(value: Type, typeParams: Seq[TypeVarName], args: Seq[Type]): Type = {}
-    override def unknown(id: Identifier, args: Seq[scala.Unit]): Type = ()
+    override def unknown: Type = ()
   end Unit
 
   trait Delegate[T <: SchemaVisitor, R](protected val delegate: T)(
@@ -285,7 +281,7 @@ object SchemaVisitor:
       delegate.constructor(id, typeParams, value)
     def application(value: Type, typeParams: Seq[TypeVarName], args: Seq[Type]): Type =
       delegate.application(value, typeParams, args)
-    def unknown(id: Identifier, args: Seq[Type]): Type = delegate.unknown(id, args)
+    def unknown: Type = delegate.unknown
 
   trait WithResult[R] extends SchemaVisitor:
     final type Result = R

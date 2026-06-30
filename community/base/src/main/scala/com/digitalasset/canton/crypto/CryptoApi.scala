@@ -115,7 +115,7 @@ sealed trait BaseCrypto extends NamedLogging {
   */
 class Crypto private[crypto] (
     override val pureCrypto: CryptoPureApi,
-    override val privateCrypto: CryptoPrivateApi,
+    override val privateCrypto: CryptoPrivateApi & CloseableHealthComponent,
     override val cryptoPrivateStore: CryptoPrivateStore,
     override val cryptoPublicStore: CryptoPublicStore,
     override val cryptoMetrics: CryptoMetrics,
@@ -160,8 +160,6 @@ final case class SynchronizerCrypto(
       crypto.privateCrypto,
       crypto.cryptoMetrics.signingMetrics,
       crypto.cryptoMetrics.decryptionMetrics,
-      crypto.timeouts,
-      crypto.loggerFactory,
     )
 
   override val cryptoPrivateStore: CryptoPrivateStore = crypto.cryptoPrivateStore
@@ -188,17 +186,11 @@ object CryptoPureApiError {
   }
 }
 
-trait CryptoPrivateApi
-    extends EncryptionPrivateOps
-    with SigningPrivateOps
-    with CloseableHealthComponent {
-
-  private[crypto] def getInitialHealthState: ComponentHealthState
-
-}
+trait CryptoPrivateApi extends EncryptionPrivateOps with SigningPrivateOps
 
 trait CryptoPrivateStoreApi
     extends CryptoPrivateApi
+    with CloseableHealthComponent
     with EncryptionPrivateStoreOps
     with SigningPrivateStoreOps
 

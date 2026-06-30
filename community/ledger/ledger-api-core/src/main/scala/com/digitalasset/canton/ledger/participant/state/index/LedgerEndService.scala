@@ -3,12 +3,10 @@
 
 package com.digitalasset.canton.ledger.participant.state.index
 
-import com.digitalasset.canton.data.Offset
-
-import scala.concurrent.Future
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 
 /** Serves as a backend to implement ledger end related API calls.
   */
 trait LedgerEndService {
-  def currentLedgerEnd(): Future[Option[Offset]]
+  def currentLedgerEnd(): Option[LedgerEnd]
 }

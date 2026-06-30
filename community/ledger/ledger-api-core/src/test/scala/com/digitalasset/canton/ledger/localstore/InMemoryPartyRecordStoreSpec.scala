@@ -4,9 +4,9 @@
 package com.digitalasset.canton.ledger.localstore
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ledger.api.IdentityProviderConfig
 import com.digitalasset.canton.ledger.localstore.InMemoryPartyRecordStore
 import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
+import com.digitalasset.canton.user.IdentityProviderConfig
 import org.scalatest.freespec.AsyncFreeSpec
 
 import scala.concurrent.Future

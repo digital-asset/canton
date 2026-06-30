@@ -175,9 +175,9 @@ final class ApiParticipantPruningService private (
       pruneUpTo: Offset
   )(implicit
       errorLogger: ErrorLoggingContext
-  ): Future[Offset] =
+  ): Future[Offset] = {
+    val ledgerEnd = readBackend.currentLedgerEnd().map(_.lastOffset)
     for {
-      ledgerEnd <- readBackend.currentLedgerEnd()
       _ <-
         if (Option(pruneUpTo) < ledgerEnd) Future.unit
         else
@@ -189,6 +189,7 @@ final class ApiParticipantPruningService private (
               .asGrpcError
           )
     } yield pruneUpTo
+  }
 
   // Fast-path check to reject early if pruning is already in progress.
   // The actual serialization guard lives in JdbcLedgerDao.ensurePruningIsNotInProgress.

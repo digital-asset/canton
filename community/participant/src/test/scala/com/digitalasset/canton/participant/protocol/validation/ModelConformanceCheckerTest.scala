@@ -286,7 +286,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -330,7 +330,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -350,7 +350,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.subviewsUnsafe)
@@ -375,7 +375,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.subviewsUnsafe)
@@ -398,7 +398,7 @@ class ModelConformanceCheckerTest
     "reject if an extra subview is added" in {
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.subviewsUnsafe)
@@ -415,7 +415,7 @@ class ModelConformanceCheckerTest
     "reject if reinterpretation fails" in {
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -443,7 +443,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -451,12 +451,16 @@ class ModelConformanceCheckerTest
           .andThen(ViewParticipantData.Optics.coreInputsUnsafe)
           .modify(input => input.filterNot(_._1 == missingCid))
 
-      // When constructing the ViewParticipantData the population of the rootAction field results
-      // in a `InvalidViewParticipantData` exception being thrown. If an attacker was to
-      // pass a proto message mutated as above an exception would be thrown at proto deserialization time.
-      intercept[ViewParticipantData.InvalidViewParticipantData] {
-        checkExample(underTest, example, mutation)
-      }.getMessage should include(s"the Exercise root action is not declared as core input")
+      // The mutated ViewParticipantData violates an object invariant: the Exercise root action's
+      // input contract is no longer a core input. Construction via Optics does not check object
+      // invariants, so the inconsistency surfaces only when the
+      // lazy `rootAction` field is forced during re-interpretation, throwing
+      // `InvalidViewParticipantData`. An attacker passing such a proto message would instead be
+      // rejected at deserialization time, where `ViewParticipantData.validated` runs.
+      inside(checkExample(underTest, example, mutation)) {
+        case ExceptionDuringProcessing(ex: ViewParticipantData.InvalidViewParticipantData) =>
+          ex.getMessage should include("the Exercise root action is not declared as core input")
+      }
 
     }
 
@@ -470,7 +474,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -503,7 +507,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -556,7 +560,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -582,7 +586,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -601,7 +605,7 @@ class ModelConformanceCheckerTest
     "reject wrong discriminator of created contract" in {
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -636,7 +640,7 @@ class ModelConformanceCheckerTest
 
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -666,7 +670,7 @@ class ModelConformanceCheckerTest
     "reject wrong authentication data for created contract" in {
       val mutation: FullTransactionViewTree => FullTransactionViewTree =
         FullTransactionViewTree.Optics.tree
-          .andThen(GenTransactionTree.rootViewsUnsafe)
+          .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
           .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
           .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
           .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -768,6 +772,7 @@ class ModelConformanceCheckerTest
       deduplicationPeriod = DeduplicationPeriod.DeduplicationOffset(None),
       submissionId = None,
       externallySignedSubmission = None,
+      transactionHash = None,
     )
 
     val contractOfId

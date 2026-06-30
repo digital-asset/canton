@@ -3,19 +3,15 @@
 
 package com.digitalasset.daml.lf.data
 
-import scalaz.{Applicative, Equal, Order, Traverse}
-
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.hashing.MurmurHash3
-
-import ScalazEqual.{equalBy, orderBy, toIterableForScalazInstances}
 
 /** A stack which allows to cons, prepend, and pop in constant time, and generate an ImmArray in
   * linear time. Very useful when needing to traverse stuff in topological order or similar
   * situations.
   */
-final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
+final class FrontStack[+A] private (protected val fq: FrontStack.FQ[A], val length: Int) {
 
   import FrontStack.*
 
@@ -87,6 +83,18 @@ final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
   /** O(n) */
   def map[B](f: A => B): FrontStack[B] = from(toImmArray.map(f))
 
+  def foldLeft[B](z: B)(f: (B, A) => B): B = {
+    @tailrec
+    def go(acc: B, fq: FQ[A]): B = fq match {
+      case FQEmpty => acc
+      case FQCons(head, tail) => go(f(acc, head), tail)
+      case FQPrepend(head, tail) =>
+        val newAcc = head.foldLeft(acc)(f)
+        go(newAcc, tail)
+    }
+    go(z, fq)
+  }
+
   /** O(1) */
   def isEmpty: Boolean = length == 0
 
@@ -126,18 +134,15 @@ final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
   /** O(n) */
   def foreach(f: A => Unit): Unit = this.iterator.foreach(f)
 
-  /** O(1) */
-  def canEqual(that: Any) = that.isInstanceOf[FrontStack[?]]
-
   /** O(n) */
-  override def equals(that: Any) = that match {
+  override def equals(that: Any): Boolean = that match {
     case thatQueue: FrontStack[?] =>
       this.length == thatQueue.length && this.iterator.sameElements[Any](thatQueue.iterator)
     case _ => false
   }
 
   override def hashCode(): Int =
-    MurmurHash3.orderedHash(toIterableForScalazInstances(iterator))
+    MurmurHash3.orderedHash(iterator)
 
   /** O(n) */
   override def toString: String = "FrontStack(" + iterator.map(_.toString).mkString(",") + ")"
@@ -158,46 +163,46 @@ object FrontStack extends scala.collection.IterableFactory[FrontStack] {
 
   override def newBuilder[A]: mutable.Builder[A, FrontStack[A]] =
     ImmArray.newBuilder.mapResult(arr => FrontStack.from(arr))
-  implicit def equalInstance[A: Equal]: Equal[FrontStack[A]] = {
-    import scalaz.std.iterable.*
-    equalBy(fs => toIterableForScalazInstances(fs.iterator), true)
-  }
 
-  implicit val `FrontStack covariant`: Traverse[FrontStack] = new Traverse[FrontStack] {
-    override def traverseImpl[G[_]: Applicative, A, B](
-        fa: FrontStack[A]
-    )(f: A => G[B]): G[FrontStack[B]] = {
-      import scalaz.syntax.applicative.*, scalaz.syntax.traverse.*
-      fa.toBackStack.bqFoldRight(FrontStack.empty[B].pure[G])(
-        (a, z) => ^(f(a), z)(_ +: _),
-        (iaa, z) => ^(iaa traverse f, z)(_ ++: _),
-      )
-    }
-
-    override def map[A, B](fa: FrontStack[A])(f: A => B) = fa map f
-
-    override def foldLeft[A, B](fa: FrontStack[A], z: B)(f: (B, A) => B) =
-      fa.iterator.foldLeft(z)(f)
-
-    override def foldRight[A, B](fa: FrontStack[A], z: => B)(f: (A, => B) => B) =
-      fa.toBackStack.bqFoldRight(z)(
-        (a, z) => f(a, z),
-        (iaa, z) => iaa.foldRight(z)(f(_, _)),
-      )
-
-    override def length[A](fa: FrontStack[A]) = fa.length
-  }
-
-  implicit def `FrontStack Order`[A: Order]: Order[FrontStack[A]] = {
-    import scalaz.std.iterable.*
-    orderBy(fs => toIterableForScalazInstances(fs.iterator), true)
-  }
-
-  private sealed trait FQ[+A]
-  private case object FQEmpty extends FQ[Nothing]
-  private final case class FQCons[A](head: A, tail: FQ[A]) extends FQ[A]
+  protected sealed trait FQ[+A]
+  protected case object FQEmpty extends FQ[Nothing]
+  protected final case class FQCons[A](head: A, tail: FQ[A]) extends FQ[A]
   // INVARIANT: head is non-empty
   private final case class FQPrepend[A](head: ImmArray[A], tail: FQ[A]) extends FQ[A]
+
+  implicit val traverseInstances: cats.Traverse[FrontStack] = new cats.Traverse[FrontStack] {
+    override def traverse[G[_], A, B](fa: FrontStack[A])(f: A => G[B])(implicit
+        G: cats.Applicative[G]
+    ): G[FrontStack[B]] = {
+      val accumulated =
+        foldRight(fa, cats.Eval.now(G.pure(List.empty[B])))((a, acc) =>
+          G.map2Eval(f(a), acc)(_ :: _)
+        )
+      G.map(accumulated.value) { elems =>
+        val builder = newBuilder[B]
+        builder.sizeHint(fa.length)
+        builder.addAll(elems).result()
+      }
+    }
+
+    override def foldLeft[A, B](fa: FrontStack[A], b: B)(f: (B, A) => B): B =
+      fa.foldLeft(b)(f)
+
+    override def foldRight[A, B](fa: FrontStack[A], lb: cats.Eval[B])(
+        f: (A, cats.Eval[B]) => cats.Eval[B]
+    ): cats.Eval[B] = {
+      def loop(st: FQ[A], lb: cats.Eval[B]): cats.Eval[B] =
+        st match {
+          case FQCons(head, tail) =>
+            f(head, cats.Eval.defer(loop(tail, lb)))
+          case FQPrepend(head, tail) =>
+            ImmArray.traverseInstance.foldRight(head, cats.Eval.defer(loop(tail, lb)))(f)
+          case FQEmpty =>
+            lb
+        }
+      loop(fa.fq, lb)
+    }
+  }
 }
 
 object FrontStackCons {

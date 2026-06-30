@@ -57,8 +57,6 @@ class JcePrivateCrypto(
     extends CryptoPrivateStoreApi
     with NamedLogging {
 
-  override private[crypto] def getInitialHealthState: ComponentHealthState = this.initialHealthState
-
   override protected val signingOps: SigningOps = pureCrypto
   override protected val encryptionOps: EncryptionOps = pureCrypto
 

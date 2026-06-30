@@ -70,8 +70,9 @@ private[reassignment] object ReassignmentValidationResult {
   private[reassignment] trait ReassigningParticipantValidationResult {
     def errors: Seq[ReassignmentValidationError]
 
-    /** Subset of [[errors]] representing abstain instead of reject
+    /** Whether the [[errors]] lead to an abstain rather than a reject verdict. A reassigning
+      * participant validation result is entirely abstaining or entirely rejecting.
       */
-    def abstainErrors: Seq[ReassignmentValidationError] = Seq.empty
+    def isAbstain: Boolean = false
   }
 }

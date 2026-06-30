@@ -3,13 +3,6 @@
 
 package com.digitalasset.daml.lf.data
 
-import scalaz.std.string.*
-import scalaz.std.tuple.*
-import scalaz.syntax.traverse.*
-import scalaz.{Applicative, Equal, Order, Traverse}
-
-import ScalazEqual.{equalBy, orderBy}
-
 /** We use this container to pass around Daml-LF text maps as flat lists in various parts of the
   * codebase.
   */
@@ -46,7 +39,7 @@ final class SortedLookupList[+X] private (entries: ImmArray[(String, X)]) extend
     s"SortedLookupList(${entries.map { case (k, v) => k -> v }.toSeq.mkString(",")})"
 }
 
-object SortedLookupList extends SortedLookupListInstances {
+object SortedLookupList {
 
   private[this] val EntryOrdering: Ordering[(String, ?)] = { case ((key1, _), (key2, _)) =>
     Utf8.Ordering.compare(key1, key2)
@@ -76,20 +69,23 @@ object SortedLookupList extends SortedLookupListInstances {
 
   def Empty: SortedLookupList[Nothing] = new SortedLookupList(ImmArray.Empty)
 
-  implicit def `SLL Order instance`[X: Order]: Order[SortedLookupList[X]] =
-    orderBy(_.toImmArray, true)
+  implicit val traverseInstance: cats.Traverse[SortedLookupList] =
+    new cats.Traverse[SortedLookupList] {
+      override def traverse[G[_], A, B](fa: SortedLookupList[A])(f: A => G[B])(implicit
+          G: cats.Applicative[G]
+      ): G[SortedLookupList[B]] = {
+        import cats.implicits.*
+        fa.toImmArray
+          .traverse { case (k, v) => f(v).map(k -> _) }
+          .map(xs => assertRight(SortedLookupList.fromOrderedImmArray(xs)))
+      }
 
-  implicit val `SLL covariant instance`: Traverse[SortedLookupList] =
-    new Traverse[SortedLookupList] {
-      override def traverseImpl[G[_]: Applicative, A, B](fa: SortedLookupList[A])(
-          f: A => G[B]
-      ): G[SortedLookupList[B]] =
-        fa.toImmArray traverse (_ traverse f) map (new SortedLookupList(_))
+      override def foldLeft[A, B](fa: SortedLookupList[A], b: B)(f: (B, A) => B): B =
+        fa.toImmArray.foldLeft(b)((acc, entry) => f(acc, entry._2))
+
+      override def foldRight[A, B](fa: SortedLookupList[A], lb: cats.Eval[B])(
+          f: (A, cats.Eval[B]) => cats.Eval[B]
+      ): cats.Eval[B] =
+        fa.toImmArray.foldRight(lb)((entry, acc) => f(entry._2, acc))
     }
-
-}
-
-sealed abstract class SortedLookupListInstances {
-  implicit def `SLL Equal instance`[X: Equal]: Equal[SortedLookupList[X]] =
-    equalBy(_.toImmArray, true)
 }

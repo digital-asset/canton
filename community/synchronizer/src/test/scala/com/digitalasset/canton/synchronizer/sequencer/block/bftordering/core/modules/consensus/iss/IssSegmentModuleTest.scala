@@ -2249,6 +2249,7 @@ class IssSegmentModuleTest
       metrics,
       timeouts,
       loggerFactory,
+      traceContext,
     )
   }
 

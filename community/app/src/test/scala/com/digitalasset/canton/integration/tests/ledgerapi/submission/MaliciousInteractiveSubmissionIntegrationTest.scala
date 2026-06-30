@@ -15,7 +15,7 @@ import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWi
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
-import com.digitalasset.canton.platform.apiserver.SeedService.WeakRandom
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.MalformedRequest
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
@@ -141,12 +141,14 @@ final class MaliciousInteractiveSubmissionIntegrationTest
     val preparationTime = Time.Timestamp(preparedTx.getMetadata.preparationTime)
     val transactionUUID = UUID.fromString(preparedTx.getMetadata.transactionUuid)
 
+    // does not matter as node seeds are re-written
+    val submissionSeed = SubmissionSeed.generate(cpn.crypto.pureCrypto)
     val commandsWithMetadata = CommandsWithMetadata(
       commands = Seq(cycle).map(c =>
         com.daml.ledger.api.v2.commands.Command.fromJavaProto(c.toProtoCommand)
       ),
       actAs = Seq(aliceE),
-      submissionSeed = WeakRandom.nextSeed(), // does not matter as node seeds are re-written
+      submissionSeed = submissionSeed,
       ledgerTime = Time.Timestamp(preparedTx.getMetadata.preparationTime),
       commandId = preparedTx.getMetadata.getSubmitterInfo.commandId,
       transactionUuid = transactionUUID,

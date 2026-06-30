@@ -5,4 +5,4 @@ package com.digitalasset.transcode
 
 class MissingFieldsException(
     val missingFields: Set[String]
-) extends Exception(s"Missing field: $missingFields") {}
+) extends Exception(s"Missing field: $missingFields")

@@ -116,4 +116,4 @@ object ReassignmentTag {
   * // f(Source(1), Source("One"))  // This will compile, as both parameters are of the same reassignment type `Source`.
   * }}}
   */
-trait SameReassignmentType[T[_]] {}
+trait SameReassignmentType[T[_]]

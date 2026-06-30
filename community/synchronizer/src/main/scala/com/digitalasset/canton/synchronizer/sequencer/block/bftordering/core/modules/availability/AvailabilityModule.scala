@@ -1485,7 +1485,7 @@ final class AvailabilityModule[E <: Env[E]](
       disseminationProtocolState.disseminationProgress.size
     if (atMost > 0) {
       logger.debug(s"$actingOnMessageType: requesting at most $atMost batches from local mempool")
-      dependencies.mempool.asyncSendNoTrace(Mempool.CreateLocalBatches(atMost.toShort))
+      dependencies.mempool.asyncSend(Mempool.CreateLocalBatches(atMost.toShort))
     }
   }
 

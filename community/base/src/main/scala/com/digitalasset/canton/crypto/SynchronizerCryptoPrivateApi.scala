@@ -6,10 +6,7 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.serialization.DeserializationError
@@ -23,21 +20,18 @@ import scala.concurrent.ExecutionContext
   * crucial because a malicious counter participant could potentially use a downgraded scheme. For
   * other methods, such as key generation, or signing by this (honest) participant, we rely on the
   * synchronizer handshake to ensure that only supported schemes within the synchronizer are used.
+  *
+  * Stateless decorator: it owns no resources and delegates everything to `privateCrypto` (whose
+  * lifecycle its owner manages), so it is intentionally not a `FlagCloseable`.
   */
 final class SynchronizerCryptoPrivateApi(
     override val staticSynchronizerParameters: StaticSynchronizerParameters,
     privateCrypto: CryptoPrivateApi,
     override val signingMetrics: SigningMetrics,
     override val decryptionMetrics: DecryptionMetrics,
-    override protected val timeouts: ProcessingTimeout,
-    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends CryptoPrivateApi
-    with SynchronizerCryptoValidation
-    with NamedLogging {
-
-  override private[crypto] def getInitialHealthState: ComponentHealthState =
-    privateCrypto.getInitialHealthState
+    with SynchronizerCryptoValidation {
 
   override private[crypto] def decryptInternal[M](
       encrypted: AsymmetricEncrypted[M]
@@ -63,10 +57,6 @@ final class SynchronizerCryptoPrivateApi(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, EncryptionKeyGenerationError, EncryptionPublicKey] =
     privateCrypto.generateEncryptionKey(keySpec)
-
-  override def name: String = privateCrypto.name
-
-  override protected def initialHealthState: ComponentHealthState = getInitialHealthState
 
   override def signingSchemes: SigningCryptoSchemes = privateCrypto.signingSchemes
 

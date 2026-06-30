@@ -64,7 +64,7 @@ import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.platform.store.LedgerApiContractStoreImpl
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.scheduler.{Cron, CronWindowSchedule, Schedulers, SchedulersImpl}
@@ -217,10 +217,9 @@ class ParticipantNodeBootstrap(
         .map(_.syncPersistentStateManager.getAllLogical.view.mapValues(_.reassignmentStore).toMap)
         .getOrElse(Map.empty)
 
-    def ledgerEnd(): FutureUnlessShutdown[Option[ParameterStorageBackend.LedgerEnd]] =
+    def ledgerEnd(): Option[LedgerEnd] =
       cantonSyncService.get
-        .traverse(_.ledgerApiIndexer.asEval.value.ledgerApiStore.value.ledgerEnd)
-        .map(_.flatten)
+        .flatMap(_.ledgerApiIndexer.asEval.value.ledgerApiStore.value.ledgerEnd)
     val topologyManager = new AuthorizedTopologyManager(
       nodeId,
       clock,

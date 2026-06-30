@@ -145,7 +145,7 @@ object TransportType {
   case object HttpWs extends TransportType
 }
 
-sealed trait ResponseKind {}
+sealed trait ResponseKind
 
 object ResponseKind {
   case object OK extends ResponseKind

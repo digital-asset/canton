@@ -9,9 +9,8 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.PruningOffsetService
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawAcsCommitment
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.{EventStorageBackend, LedgerEnd}
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.AcsCommitmentsStreamReader.AcsCommitmentsStreamQueryParams
@@ -168,5 +167,6 @@ object AcsCommitmentsStreamReaderSpec {
       lastEventSeqId = seqId,
       lastStringInterningId = 0,
       lastPublicationTime = CantonTimestamp.MinValue,
+      synchronizerIndices = Map(),
     )
 }

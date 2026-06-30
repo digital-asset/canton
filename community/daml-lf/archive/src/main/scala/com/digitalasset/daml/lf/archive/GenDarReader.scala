@@ -3,11 +3,11 @@
 
 package com.digitalasset.daml.lf.archive
 
+import cats.instances.either.*
+import cats.instances.list.*
+import cats.syntax.traverse.*
 import com.daml.nameof.NameOf
 import com.digitalasset.daml.lf.data.Bytes
-import scalaz.std.either.*
-import scalaz.std.list.*
-import scalaz.syntax.traverse.*
 
 import java.io.{File, FileInputStream, IOException}
 import java.util.zip.ZipInputStream

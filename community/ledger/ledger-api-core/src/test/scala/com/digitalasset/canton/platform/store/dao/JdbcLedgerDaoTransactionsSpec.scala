@@ -40,7 +40,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
 
   import JdbcLedgerDaoTransactionsSpec.*
 
-  behavior of "JdbcLedgerDao (lookupUpdateById, lookupUpdateByOffset)"
+  behavior of "JdbcLedgerDao (lookupUpdateById, lookupUpdateByOffset, lookupUpdateByHash)"
 
   it should "return nothing for a mismatching update id" in {
     for {
@@ -61,6 +61,20 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result <- ledgerDao.updateReader
         .lookupUpdateBy(
           lookupKey = LookupKey.ByOffset(Offset.tryFromLong(12345678L)),
+          internalUpdateFormat = updateFormatForWildcardParties(tx.actAs.toSet),
+        )
+    } yield {
+      result shouldBe None
+    }
+  }
+
+  it should "return nothing for a mismatching hash" in {
+    val missingHash = preparedSubmissionHash("missing-transaction-hash")
+    for {
+      (_, tx) <- store(singleCreate)
+      result <- ledgerDao.updateReader
+        .lookupUpdateBy(
+          lookupKey = LookupKey.ByHash(missingHash.unwrap),
           internalUpdateFormat = updateFormatForWildcardParties(tx.actAs.toSet),
         )
     } yield {
@@ -97,6 +111,11 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         )
       resultByOffset <- ledgerDao.updateReader
         .lookupUpdateBy(LookupKey.ByOffset(offset), updateFormatForWildcardParties(tx.actAs.toSet))
+      resultByHash <- ledgerDao.updateReader
+        .lookupUpdateBy(
+          LookupKey.ByHash(tx.transactionHash.value.unwrap),
+          updateFormatForWildcardParties(tx.actAs.toSet),
+        )
     } yield {
       inside(resultById.value.update.transaction) { case Some(transaction) =>
         transaction.commandId shouldBe tx.commandId.value
@@ -122,6 +141,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
           }
         }
       }
+      resultByHash.value.update.transaction.value.transactionHash shouldBe Some(
+        tx.transactionHash.value.unwrap
+      )
+      resultByHash shouldBe resultById
       resultByOffset shouldBe resultById
     }
   }

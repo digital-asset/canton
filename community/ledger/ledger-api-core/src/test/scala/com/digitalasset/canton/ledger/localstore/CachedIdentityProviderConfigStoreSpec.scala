@@ -5,20 +5,18 @@ package com.digitalasset.canton.ledger.localstore
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.ledger.localstore.api.IdentityProviderConfigStore.{
-  IdentityProviderConfigByIssuerNotFound,
-  IdentityProviderConfigNotFound,
-}
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  IdentityProviderConfigUpdate,
-}
 import com.digitalasset.canton.ledger.localstore.{
   CachedIdentityProviderConfigStore,
   InMemoryIdentityProviderConfigStore,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.user.IdentityProviderConfigUpdate
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore.{
+  IdentityProviderConfigByIssuerNotFound,
+  IdentityProviderConfigNotFound,
+}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.freespec.AsyncFreeSpec
 

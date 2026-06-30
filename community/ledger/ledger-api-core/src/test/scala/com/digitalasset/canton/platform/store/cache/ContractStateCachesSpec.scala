@@ -8,7 +8,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.ContractStateCaches.{
   applyContractStateEvent,
   computeKeyStateChange,
@@ -225,6 +225,7 @@ class ContractStateCachesSpec
         lastEventSeqId = 125,
         lastStringInterningId = 0,
         lastPublicationTime = CantonTimestamp.MinValue,
+        synchronizerIndices = Map.empty,
       )
     )
 

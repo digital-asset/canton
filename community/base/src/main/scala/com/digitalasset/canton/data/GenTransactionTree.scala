@@ -72,9 +72,9 @@ final case class GenTransactionTree private (
     go(this)
   }
 
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
-  // Private, because it does not check object invariants and is therefore unsafe.
-  private[data] def copy(
+  def copy(
       submitterMetadata: MerkleTree[SubmitterMetadata] = this.submitterMetadata,
       commonMetadata: MerkleTree[CommonMetadata] = this.commonMetadata,
       participantMetadata: MerkleTree[ParticipantMetadata] = this.participantMetadata,
@@ -284,12 +284,14 @@ object GenTransactionTree {
     ).validated
 
   /** Indicates an attempt to create an invalid [[GenTransactionTree]]. */
-  final case class InvalidGenTransactionTree(message: String) extends RuntimeException(message) {}
+  final case class InvalidGenTransactionTree(message: String) extends RuntimeException(message)
 
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
-  val rootViewsUnsafe: Lens[GenTransactionTree, MerkleSeq[TransactionView]] =
-    GenLens[GenTransactionTree](_.rootViews)
+  object Optics {
+    val rootViewsUnsafe: Lens[GenTransactionTree, MerkleSeq[TransactionView]] =
+      GenLens[GenTransactionTree](_.rootViews)
+  }
 
   def fromProtoV30(
       context: (HashOps, ProtocolVersion),

@@ -344,11 +344,36 @@ object GrpcStreamingUtils {
             result
         }
       }
-
+      // use transformWith for a safe shutdown that intercepts both the consumer and producer lifecycles
+      // instead of flatMap (which short-circuits on failure and abandons the consumer thread and thus)
+      // can lead to race conditions between .onError and .onNext.
       val processingResult = producerF
-        .flatMap(_ => consumerF)
+        .transformWith {
+
+          // happy path: If the producer successfully completes, chain directly to the consumer
+          // future and wait for it to finish pushing the remaining chunks to the network.
+          case Success(_) => consumerF
+
+          // failure Path (e.g., Missing Onboarding Flag error in producer): Catch the error before it propagates
+          // to the gRPC layer, ensuring we don't let the main thread panic.
+          case Failure(ex) =>
+            // Trigger the listener to close the pipes by cancelling the context.
+            // This unblocks the consumer thread's read loop with a "Pipe Closed" IOException,
+            // forcing it to cleanly stop and exit before the gRPC buffers are modified.
+            context.cancel(new io.grpc.StatusRuntimeException(io.grpc.Status.CANCELLED))
+
+            // force the combined future to wait until the consumer thread completely dies.
+            // while preserving the original onboarding application error.
+            consumerF.transform(_ => Failure(ex))
+        }
+        // Unconditionally close the input pipe when the processing
+        // future completes. This prevents thread leaks and frees JVM resources.
         .thereafter(_ => closeQuietly(pipedInput))
 
+      // Hand the future over to finishStream. Because processingResult strictly
+      // waits for the consumer thread to die, finishStream's Await block will pause. It will only
+      // call responseObserver.onError after the background thread is completely buried, preventing
+      // concurrent access and exceptions from MessageFramer.
       finishStream(context, responseObserver)(processingResult, processingTimeout)
     }
   }
@@ -516,7 +541,9 @@ object GrpcStreamingUtils {
       scso.setOnReadyHandler(() => triggerWorker().discard)
       scso.setOnCancelHandler { () =>
         Try(inputStream.close()).discard
-        allBytesWrittenPromise.trySuccess(()).discard
+        if (!isWorkerRunning.get()) {
+          allBytesWrittenPromise.trySuccess(()).discard
+        }
       }
 
       triggerWorker().discard

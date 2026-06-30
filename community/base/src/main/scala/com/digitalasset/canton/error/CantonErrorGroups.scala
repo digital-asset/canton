@@ -70,6 +70,6 @@ object CantonErrorGroups {
 
   abstract class StorageErrorGroup extends ErrorGroup()
 
-  abstract class ClockErrorGroup extends ErrorGroup() {}
+  abstract class ClockErrorGroup extends ErrorGroup()
 
 }

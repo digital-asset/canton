@@ -7,7 +7,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.PruningOffsetService
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.localstore.{
   IdentityProviderStorageBackend,
@@ -51,6 +50,7 @@ trait StorageBackendProvider {
         ledgerEndSequentialId,
         0,
         ledgerEndPublicationTime,
+        Map.empty,
       )
     )(
       connection
@@ -58,13 +58,23 @@ trait StorageBackendProvider {
     updateLedgerEndCache(connection)
   }
 
-  protected final def updateLedgerEnd(ledgerEnd: LedgerEnd)(connection: Connection): Unit = {
-    backend.parameter.updateLedgerEnd(ledgerEnd)(connection)
+  protected final def updateLedgerEnd(
+      ledgerEnd: LedgerEnd
+  )(connection: Connection): Unit = {
+    backend.parameter.updateLedgerEnd(
+      ledgerEnd
+    )(
+      connection
+    )
     updateLedgerEndCache(connection)
   }
 
-  protected final def updateLedgerEndCache(connection: Connection): Unit =
-    backend.ledgerEndCache.set(backend.parameter.ledgerEnd(connection))
+  protected final def updateLedgerEndCache(
+      connection: Connection
+  ): Unit =
+    backend.ledgerEndCache.set(
+      backend.parameter.ledgerEnd(connection)
+    )
 }
 
 trait StorageBackendProviderPostgres

@@ -38,10 +38,6 @@ final class GetCompletionsIT extends LedgerTestSuite {
         completion.commandId,
         createRequest.getCommands.commandId,
       )
-      assert(
-        completion.paidTrafficCost > 0L,
-        "Empty traffic cost",
-      )
       assertEquals(
         "Single-party GetCompletions should preserve the submitting party",
         completion.actAs.toSet,

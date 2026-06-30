@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.bootstrap
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -15,8 +15,6 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.logging.LogEntry
-import scalaz.concurrent.Task.Try
 
 class NetworkBootstrapperIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
@@ -57,19 +55,10 @@ class NetworkBootstrapperIntegrationTest extends CommunityIntegrationTest with S
       // Should succeed (idempotency)
       new NetworkBootstrapper(network).bootstrap()
 
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        Try {
-          new NetworkBootstrapper(inconsistentNetwork).bootstrap()
-        }.toEither.left.value,
-        LogEntry.assertLogSeq(
-          Seq(
-            (
-              _.errorMessage should include(
-                s"The synchronizer cannot be bootstrapped: ${sequencer1.id} has already been initialized for synchronizer $daId"
-              ),
-              "error",
-            )
-          )
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        new NetworkBootstrapper(inconsistentNetwork).bootstrap(),
+        _.errorMessage should include(
+          s"The synchronizer cannot be bootstrapped: ${sequencer1.id} has already been initialized for synchronizer $daId"
         ),
       )
 

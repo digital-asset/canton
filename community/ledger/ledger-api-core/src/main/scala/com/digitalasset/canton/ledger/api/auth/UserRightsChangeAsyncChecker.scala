@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.ledger.api.auth
 
-import com.digitalasset.canton.auth.ClaimSet
-import com.digitalasset.canton.ledger.api.auth.interceptor.UserBasedClaimResolver
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, User, UserRight}
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
+import cats.syntax.either.*
+import cats.syntax.traverse.*
+import com.digitalasset.canton.auth.{ClaimSet, UserBasedClaimResolver}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
+import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.actor.Scheduler
 
@@ -22,6 +23,7 @@ private[auth] final class UserRightsChangeAsyncChecker(
     originalClaims: ClaimSet.Claims,
     nowF: () => Instant,
     userManagementStore: UserManagementStore,
+    identityProviderConfigStore: IdentityProviderConfigStore,
     userRightsCheckIntervalInSeconds: Int,
     pekkoScheduler: Scheduler,
 )(implicit ec: ExecutionContext) {
@@ -51,24 +53,34 @@ private[auth] final class UserRightsChangeAsyncChecker(
     val cancellable =
       pekkoScheduler.scheduleWithFixedDelay(initialDelay = delay, delay = delay) { () =>
         val idpId = IdentityProviderId.fromOptionalLedgerString(identityProviderId)
-        val userState: Future[Either[UserManagementStore.Error, (User, Set[UserRight])]] =
+        val userState: Future[
+          Either[String, (User, Set[UserRight], Option[IdentityProviderConfig])]
+        ] =
           for {
             userRightsResult <- userManagementStore.listUserRights(userId, idpId)
             userResult <- userManagementStore.getUser(userId, idpId)
+            idpConfigOResult <- idpId.toDb.traverse(id =>
+              identityProviderConfigStore.getIdentityProviderConfig(id)
+            )
           } yield {
             for {
-              userRights <- userRightsResult
-              user <- userResult
-            } yield (user, userRights)
+              userRights <- userRightsResult.leftMap(_.toString)
+              user <- userResult.leftMap(_.toString)
+              idpConfigO <- idpConfigOResult.sequence.leftMap(_.toString)
+            } yield (user, userRights, idpConfigO)
           }
         userState
           .onComplete {
             case Failure(_) | Success(Left(_)) =>
               userClaimsMismatchCallback()
-            case Success(Right((user, userRights))) =>
+            case Success(Right((user, userRights, idpConfig))) =>
               val updatedClaims =
                 UserBasedClaimResolver.convertUserRightsToClaims(userRights)
-              if (updatedClaims.toSet != originalClaims.claims.toSet || user.isDeactivated) {
+              if (
+                idpConfig.exists(_.isDeactivated) ||
+                user.isDeactivated ||
+                updatedClaims.toSet != originalClaims.claims.toSet
+              ) {
                 userClaimsMismatchCallback()
               }
               lastUserRightsCheckTime.set(nowF())

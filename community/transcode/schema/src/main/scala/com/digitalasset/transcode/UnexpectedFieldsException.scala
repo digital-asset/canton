@@ -4,4 +4,4 @@
 package com.digitalasset.transcode
 
 class UnexpectedFieldsException(val unexpectedFields: Set[String])
-    extends Exception(s"Unexpected fields: $unexpectedFields") {}
+    extends Exception(s"Unexpected fields: $unexpectedFields")

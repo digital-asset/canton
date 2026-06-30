@@ -5,12 +5,13 @@ package com.digitalasset.canton.ledger.localstore
 
 import cats.syntax.either.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  IdentityProviderConfigUpdate,
-}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore
+import com.digitalasset.canton.user.{
+  IdentityProviderConfig,
+  IdentityProviderConfigUpdate,
+  IdentityProviderId,
+}
 import com.digitalasset.canton.util.Mutex
 
 import scala.collection.concurrent.TrieMap

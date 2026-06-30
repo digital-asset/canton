@@ -33,7 +33,6 @@ package compiler
 import com.digitalasset.daml.lf.speedy.Compiler.CompilationError
 import com.digitalasset.daml.lf.speedy.SExpr as target
 import com.digitalasset.daml.lf.speedy.compiler.SExpr1 as source
-import scalaz.{@@, Tag}
 
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
@@ -50,26 +49,12 @@ private[compiler] object Anf {
   }
 
   /** `DepthE` tracks the stack-depth of the original expression being traversed */
-  private sealed trait DepthETag
-
-  private type DepthE = Int @@ DepthETag
-  private val DepthE = Tag.of[DepthETag]
-
-  private implicit class OpsDepthE[T](val x: DepthE) extends AnyVal {
-    def n: Int = Tag.unwrap(x)
-
+  case class DepthE(n: Int) extends AnyVal {
     def incr(m: Int): DepthE = DepthE(m + n)
   }
 
   /** `DepthA` tracks the stack-depth of the ANF expression being constructed */
-  private sealed trait DepthATag
-
-  private type DepthA = Int @@ DepthATag
-  private val DepthA = Tag.of[DepthATag]
-
-  private implicit class OpsDepthA[T](val x: DepthA) extends AnyVal {
-    def n: Int = Tag.unwrap(x)
-
+  case class DepthA(n: Int) extends AnyVal {
     def incr(m: Int): DepthA = DepthA(m + n)
   }
 

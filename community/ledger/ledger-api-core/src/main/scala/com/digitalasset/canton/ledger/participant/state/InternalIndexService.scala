@@ -86,7 +86,7 @@ trait InternalIndexService {
       synchronizerId: SynchronizerId,
       activeAt: Offset,
       party: Option[Party],
-  ): Source[LfPartyId, NotUsed]
+  )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed]
 }
 
 object InternalIndexService {

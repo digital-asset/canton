@@ -1671,6 +1671,7 @@ class IndexServiceImplSpec
           recordTime = Some(Timestamp.defaultInstance),
           externalTransactionHash = None,
           paidTrafficCost = None,
+          transactionHash = None,
         )
       )
     )

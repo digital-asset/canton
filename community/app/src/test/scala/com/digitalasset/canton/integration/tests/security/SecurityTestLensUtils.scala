@@ -117,7 +117,7 @@ trait SecurityTestLensUtils {
     )
 
   def firstViewCommonData: Lens[GenTransactionTree, ViewCommonData] =
-    GenTransactionTree.rootViewsUnsafe
+    GenTransactionTree.Optics.rootViewsUnsafe
       .andThen(firstElement[TransactionView])
       .andThen(TransactionView.Optics.viewCommonDataUnsafe)
       .andThen(MerkleTree.tryUnwrap[ViewCommonData])

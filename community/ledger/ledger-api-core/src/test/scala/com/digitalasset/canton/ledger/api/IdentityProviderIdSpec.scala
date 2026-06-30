@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api
 
+import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.daml.lf.data.Ref.LedgerString
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -73,4 +74,4 @@ class IdentityProviderIdSpec extends AnyWordSpec with Matchers {
   }
 }
 
-object IdentityProviderIdSpec {}
+object IdentityProviderIdSpec

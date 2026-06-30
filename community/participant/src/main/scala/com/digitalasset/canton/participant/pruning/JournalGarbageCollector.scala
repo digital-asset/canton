@@ -30,7 +30,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   */
 private[participant] class JournalGarbageCollector(
     requestJournalStore: RequestJournalStore,
-    synchronizerIndexF: TraceContext => FutureUnlessShutdown[Option[SynchronizerIndex]],
+    synchronizerIndexF: () => Option[SynchronizerIndex],
     sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
     acsCommitmentStore: AcsCommitmentStore,
     acs: ActiveContractStore,
@@ -50,11 +50,10 @@ private[participant] class JournalGarbageCollector(
   override protected def run()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     synchronizeWithClosing(functionFullName) {
       for {
-        synchronizerIndex <- synchronizerIndexF(implicitly)
         safeToPruneTsO <-
           PruningProcessor.latestSafeToPruneTick(
             requestJournalStore,
-            synchronizerIndex,
+            synchronizerIndexF(),
             sortedReconciliationIntervalsProvider,
             acsCommitmentStore,
             inFlightSubmissionStore.value,

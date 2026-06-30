@@ -143,7 +143,7 @@ class AchsIndexComponentTest
       archiveResultPayloadLengthFromTo = (10, 20),
     )
 
-    val start = index.currentLedgerEnd().futureValue.fold(0L)(_.unwrap)
+    val start = index.currentLedgerEnd().fold(0L)(_.lastOffset.unwrap)
 
     ingestUpdates(allUpdates*)
 
@@ -174,11 +174,11 @@ class AchsIndexComponentTest
       )
     }
 
-    val start = index.currentLedgerEnd().futureValue.fold(0L)(_.unwrap)
+    val start = index.currentLedgerEnd().fold(0L)(_.lastOffset.unwrap)
 
     ingestUpdates(allUpdates*)
 
-    val ledgerEnd = index.currentLedgerEnd().futureValue
+    val ledgerEnd = index.currentLedgerEnd().map(_.lastOffset)
 
     val contractsAtLedgerEnd = activeContractIds(ledgerEnd.value.unwrap).filter(_._2 > start)
 
@@ -357,7 +357,7 @@ class AchsIndexComponentTest
 
     verifyAchsConsistency(expectedLastEventSeqId)
 
-    val ledgerEnd = index.currentLedgerEnd().futureValue.value.unwrap
+    val ledgerEnd = index.currentLedgerEnd().value.lastOffset.unwrap
 
     // fetch ACS using the ACHS-enabled index service (ACHS should be used)
     val achsContracts = activeContractIds(ledgerEnd)
@@ -483,7 +483,7 @@ class AchsIndexComponentTest
     achsSizeBefore should be > 0L
 
     // prune up to the ledger end (all deactivations are in range, their activations should be pruned)
-    val ledgerEnd = index.currentLedgerEnd().futureValue.value
+    val ledgerEnd = index.currentLedgerEnd().value.lastOffset
 
     index
       .prune(

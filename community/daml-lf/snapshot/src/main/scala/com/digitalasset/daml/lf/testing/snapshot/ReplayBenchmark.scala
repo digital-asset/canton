@@ -42,7 +42,7 @@ class ReplayBenchmark {
   // the contract ID version to use for locally created contracts
   var contractIdVersion: String = _
 
-  @Param(Array())
+  @Param(Array(""))
   var commit: String = sys.env.getOrElse("CIRCLE_SHA1", "unknown")
 
   private var benchmark: TransactionSnapshot = _

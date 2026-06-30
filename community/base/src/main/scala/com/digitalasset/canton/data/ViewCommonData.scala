@@ -71,6 +71,7 @@ final case class ViewCommonData private (
     param("salt", _.salt),
   )
 
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
   def copy(
       viewConfirmationParameters: ViewConfirmationParameters = this.viewConfirmationParameters,

@@ -5,20 +5,18 @@ package com.digitalasset.canton.ledger.localstore
 
 import cats.syntax.either.*
 import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.ledger.api.{
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.store.UserManagementStore.*
+import com.digitalasset.canton.user.{
   IdentityProviderConfig,
   IdentityProviderId,
   ObjectMeta,
+  ObjectMetaUpdate,
   User,
   UserRight,
-}
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore.*
-import com.digitalasset.canton.ledger.localstore.api.{
-  ObjectMetaUpdate,
-  UserManagementStore,
   UserUpdate,
 }
-import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{LedgerString, Party, UserId}
 import org.scalatest.freespec.AsyncFreeSpec

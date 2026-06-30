@@ -19,7 +19,12 @@ import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
-import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApiParticipantProvider}
+import com.digitalasset.canton.crypto.{
+  CryptoPureApi,
+  HashOps,
+  RandomOps,
+  SyncCryptoApiParticipantProvider,
+}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Offset,
@@ -1795,6 +1800,8 @@ class CantonSyncService(
     } yield estimatedTrafficCost
 
   override def hashOps: HashOps = this.syncCrypto.pureCrypto
+
+  override def randomOps: RandomOps = this.syncCrypto.pureCrypto
 
 }
 

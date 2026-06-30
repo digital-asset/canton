@@ -8,14 +8,11 @@ import com.daml.nameof.NameOf.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.canton.ledger.localstore.PersistentUserManagementStore.{
   ConcurrentUserUpdateDetectedRuntimeException,
   MaxAnnotationsSizeExceededException,
   TooManyUserRightsRuntimeException,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore.*
-import com.digitalasset.canton.ledger.localstore.api.{UserManagementStore, UserUpdate}
 import com.digitalasset.canton.ledger.localstore.utils.LocalAnnotationsUtils
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -29,6 +26,9 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.backend.localstore.UserManagementStorageBackend
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.store.UserManagementStore.*
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, User, UserRight, UserUpdate}
 import com.digitalasset.canton.util.retry.ErrorKind.{FatalErrorKind, TransientErrorKind}
 import com.digitalasset.canton.util.retry.{Backoff, ErrorKind, ExceptionRetryPolicy, Success}
 import com.digitalasset.daml.lf.data.Ref

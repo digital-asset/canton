@@ -202,9 +202,12 @@ object Arbitraries {
     val arb = ArbitraryDerivation[lapi.transaction.Transaction]
     Arbitrary {
       arb.arbitrary.retryUntil(v => v.effectiveAt.isDefined && v.recordTime.isDefined).map { tx =>
-        val hash32Bytes =
-          ByteString.copyFrom(Array.fill(32)(scala.util.Random.nextInt(256).toByte))
-        tx.copy(externalTransactionHash = Some(hash32Bytes))
+        val transactionHash32Bytes = ByteString.copyFrom(scala.util.Random.nextBytes(32))
+        val externalTransactionHash32Bytes = ByteString.copyFrom(scala.util.Random.nextBytes(32))
+        tx.copy(
+          externalTransactionHash = Some(externalTransactionHash32Bytes),
+          transactionHash = Some(transactionHash32Bytes),
+        )
       }
     }
   }

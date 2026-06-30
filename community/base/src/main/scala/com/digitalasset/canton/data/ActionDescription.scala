@@ -361,8 +361,9 @@ object ActionDescription {
       paramIfTrue("failed", _.failed),
     )
 
+    /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
     @VisibleForTesting
-    private[data] def copy(
+    def copy(
         inputContractId: LfContractId = this.inputContractId,
         templateId: LfTemplateId = this.templateId,
         choice: LfChoiceName = this.choice,

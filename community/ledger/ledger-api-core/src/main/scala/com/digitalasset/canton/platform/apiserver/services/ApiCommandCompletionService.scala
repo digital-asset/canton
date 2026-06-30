@@ -54,10 +54,13 @@ final class ApiCommandCompletionService(
         loggingContextWithTrace.traceContext,
       )
       logger.debug(s"Received new completion request $request.")
-      Source.future(completionsService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
+      Source.single(completionsService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
         CompletionServiceRequestValidator
           .validateGrpcCompletionStreamRequest(request)
-          .flatMap(CompletionServiceRequestValidator.validateCompletionStreamRequest(_, ledgerEnd))
+          .flatMap(
+            CompletionServiceRequestValidator
+              .validateCompletionStreamRequest(_, ledgerEnd.map(_.lastOffset))
+          )
           .fold(
             t =>
               Source.failed[CompletionStreamResponse](
@@ -99,10 +102,10 @@ final class ApiCommandCompletionService(
         ErrorLoggingContext(logger, loggingContextWithTrace)
       logger.debug(s"Received new GetCompletions request $request.")
       Source
-        .future(completionsService.currentLedgerEnd())
+        .single(completionsService.currentLedgerEnd())
         .flatMapConcat { ledgerEnd =>
           CompletionServiceRequestValidator
-            .validateGetCompletionsRequest(request, ledgerEnd)
+            .validateGetCompletionsRequest(request, ledgerEnd.map(_.lastOffset))
             .fold(
               t =>
                 Source.failed[CompletionStreamResponse](

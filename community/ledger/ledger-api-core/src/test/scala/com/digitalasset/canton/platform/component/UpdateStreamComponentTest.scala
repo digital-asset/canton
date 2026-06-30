@@ -30,7 +30,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
 
   "update stream in reverse order" should {
     "stream create transactions" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val createContracts =
         Vector.tabulate(10)(_ => creates(nextRecordTime, 10)(1))
       val rangeEnd = ingestUpdates(createContracts*)
@@ -53,7 +53,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     }
 
     "preserve order of events inside a transaction" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val createContracts =
         Vector.tabulate(10)(_ => creates(nextRecordTime, 10)(5))
       val rangeEnd = ingestUpdates(createContracts*)
@@ -76,7 +76,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     }
 
     "properly order topology events interleaved with create events" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val createContractsFirst =
         Vector.tabulate(3)(_ => creates(nextRecordTime, 10)(1))
       ingestUpdates(createContractsFirst*)
@@ -110,7 +110,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     }
 
     "property order create events interleaved with reassignments" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val create1 = creates(nextRecordTime, 10)(1)
       val create2 = creates(nextRecordTime, 10)(1)
 
@@ -174,7 +174,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     }
 
     "preserve order of 2 creates, 2 topology events and 2 reassignments interleaved" in {
-      val rangeStart = index.currentLedgerEnd().futureValue
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val create1 = creates(nextRecordTime, 10)(1)
 
       ingestUpdates(create1)
@@ -198,8 +198,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       )
       ingestUpdateSync(reassignment2)
 
-      val rangeEnd = index.currentLedgerEnd().futureValue.value
-
+      val rangeEnd = index.currentLedgerEnd().value.lastOffset
       val updatesStream = index.updates(
         begin = rangeStart,
         endAt = Some(rangeEnd),

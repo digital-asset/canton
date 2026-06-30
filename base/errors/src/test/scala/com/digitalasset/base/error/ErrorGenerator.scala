@@ -23,7 +23,7 @@ object ErrorGenerator {
       )(errorCode, new NoBaseLogging(loggingProperties, correlationId, traceId))
 
   private final case class TestErrorCode(override val id: String, errorCategory: ErrorCategory)
-      extends ErrorCode(id, errorCategory)(ErrorClass.root()) {}
+      extends ErrorCode(id, errorCategory)(ErrorClass.root())
 
   private[error] def asciiPrintableStrOfN(maxSize: Int) = for {
     chars <- Gen.listOfN(maxSize, Gen.alphaNumChar)

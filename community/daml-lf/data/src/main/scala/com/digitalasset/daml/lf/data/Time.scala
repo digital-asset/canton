@@ -4,10 +4,6 @@
 package com.digitalasset.daml.lf
 package data
 
-import scalaz.std.anyVal.*
-import scalaz.syntax.order.*
-import scalaz.{Order, Ordering}
-
 import java.math.{BigDecimal, RoundingMode}
 import java.time.format.DateTimeFormatter
 import java.time.temporal.{ChronoField, ChronoUnit}
@@ -74,14 +70,6 @@ object Time {
 
     def assertFromDaysSinceEpoch(days: Int): Date =
       assertRight(fromDaysSinceEpoch(days))
-
-    implicit val `Time.Date Order`: Order[Date] = new Order[Date] {
-      override def equalIsNatural = true
-
-      override def equal(x: Date, y: Date): Boolean = x == y
-
-      override def order(x: Date, y: Date): Ordering = x.days ?|? y.days
-    }
 
   }
 
@@ -189,20 +177,15 @@ object Time {
 
     def now(): Timestamp = assertFromInstant(Instant.now(), DefaultRounding)
 
-    implicit val `Time.Timestamp Order`: Order[Timestamp] = new Order[Timestamp] {
-      override def equalIsNatural = true
-
-      override def equal(x: Timestamp, y: Timestamp): Boolean = x == y
-
-      override def order(x: Timestamp, y: Timestamp): Ordering = x.micros ?|? y.micros
-    }
   }
 
   case class Range(min: Timestamp, max: Timestamp) {
     assert(min <= max)
 
-    def intersect(that: Range): Range =
+    def intersect(that: Range): Range = {
+      import Ordering.Implicits.*
       Range(min max that.min, max min that.max)
+    }
   }
 
   object Range {

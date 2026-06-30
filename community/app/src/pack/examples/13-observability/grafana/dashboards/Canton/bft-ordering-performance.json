@@ -792,8 +792,8 @@
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_p2p_send_grpc_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
-              "legendFormat": "{{namespace}}.{{node}}",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, source_sequencer) (rate(daml_sequencer_bftordering_p2p_send_grpc_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{source_sequencer}}",
               "range": true,
               "refId": "A"
             }

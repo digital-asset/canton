@@ -782,7 +782,7 @@ final class PartyReplicator(
                       // corresponding event does not appear in the ledger api store.
                       val currentCounter = retryCounter.get()
                       // Only begin additional debug logging once sufficiently many retries have not helped.
-                      if (currentCounter <= 10 || !logger.underlying.isDebugEnabled()) Future.unit
+                      if (currentCounter <= 3 || !logger.underlying.isDebugEnabled()) Future.unit
                       else {
                         syncService.participantNodePersistentState.value.ledgerApiStore
                           .topologyPartyEventBatch(SequentialIdBatch.IdRange(0L, 1000000L))

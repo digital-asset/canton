@@ -5,18 +5,19 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin.identity_provider_config_service as proto
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.error.groups.IdentityProviderConfigServiceErrors
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  IdentityProviderConfigUpdate,
-}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiIdentityProviderConfigService.toProto
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.IdentityProviderConfigUpdateMapper
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore
+import com.digitalasset.canton.user.{
+  IdentityProviderConfig,
+  IdentityProviderConfigUpdate,
+  IdentityProviderId,
+}
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}

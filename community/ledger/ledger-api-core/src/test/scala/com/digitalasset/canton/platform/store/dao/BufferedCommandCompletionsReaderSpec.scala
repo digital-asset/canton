@@ -143,7 +143,7 @@ class BufferedCommandCompletionsReaderSpec
       completionStreamResponseO = Some(completionResponse(commandId, actAs)),
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Timestamp.Epoch,
-      externalTransactionHash = None,
+      transactionHash = None,
     )(TraceContext.empty)
 
   private def rejectedUpdate(

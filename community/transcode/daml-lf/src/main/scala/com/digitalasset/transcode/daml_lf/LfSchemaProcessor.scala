@@ -109,7 +109,12 @@ private class LfSchemaProcessor[R](
             visitor.constructor(id, Seq.empty, lazyBody())
           },
         )
-      case TUnknown(id, args) => visitor.unknown(id, args.map(fromType))
+      case TUnknown(id, args) =>
+        val typeParams = 1.to(args.size).map(i => TypeVarName(s"X$i")) // synthetic type params
+        val ctor =
+          tpeCache.getOrElseUpdate(id, visitor.constructor(id, typeParams, visitor.unknown))
+        if args.nonEmpty then visitor.application(ctor, typeParams, args.map(fromType))
+        else ctor
       case TTyConApp(id, cons, params, args) =>
         val ctor = tpeCache.getOrElseUpdate(
           id, {

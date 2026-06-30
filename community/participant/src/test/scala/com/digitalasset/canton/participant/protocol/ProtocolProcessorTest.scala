@@ -461,6 +461,7 @@ class ProtocolProcessorTest
         ),
         TransactionSubmissionTrackingData.TimeoutCause,
         psid,
+        transactionHash = None,
       ),
     ),
     TraceContext.empty,

@@ -6,16 +6,19 @@ package com.digitalasset.canton.ledger.localstore
 import cats.syntax.either.*
 import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
-import com.digitalasset.canton.ledger.localstore.api.IdentityProviderConfigStore.{
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.user.store.IdentityProviderConfigStore.{
   IdentityProviderConfigByIssuerNotFound,
   IdentityProviderConfigExists,
   IdentityProviderConfigNotFound,
   IdentityProviderConfigWithIssuerExists,
   TooManyIdentityProviderConfigs,
 }
-import com.digitalasset.canton.ledger.localstore.api.IdentityProviderConfigUpdate
-import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.user.{
+  IdentityProviderConfig,
+  IdentityProviderConfigUpdate,
+  IdentityProviderId,
+}
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.freespec.AsyncFreeSpec
 

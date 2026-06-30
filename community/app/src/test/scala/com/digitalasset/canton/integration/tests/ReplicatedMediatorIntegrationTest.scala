@@ -55,8 +55,6 @@ trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
           InstanceName.tryCreate(mediator2Name) -> mkReplicatedMediatorNodeConfig,
         )
       )
-      .focus(_.parameters.nonStandardConfig)
-      .replace(testedProtocolVersion.isAlpha)
   }
 
   protected def preNetworkBootstrapSetup(env: TestConsoleEnvironment): Unit = {

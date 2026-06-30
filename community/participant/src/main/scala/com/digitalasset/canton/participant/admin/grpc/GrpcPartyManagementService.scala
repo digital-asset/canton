@@ -32,7 +32,7 @@ import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration

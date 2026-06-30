@@ -255,7 +255,6 @@ abstract class LsuRollForwardIntegrationTest
   )(implicit env: TestConsoleEnvironment): SynchronizerIndex =
     p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
       .cleanSynchronizerIndex(env.daId.logical)
-      .futureValueUS
       .value
 
   "LSU should allow roll forward" should {

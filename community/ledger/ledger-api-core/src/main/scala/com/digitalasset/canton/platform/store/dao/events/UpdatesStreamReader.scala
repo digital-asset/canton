@@ -129,8 +129,10 @@ class UpdatesStreamReader(
               Spans.addEventToSpan(event, span)
             case _ => ()
           }
-        // TODO(#33238) verify whether we need trace identifiers for acs commitment updates
-        case (_, UpdateResponse.AcsCommitment(_)) => ()
+        case (_, UpdateResponse.AcsCommitment(commitment)) =>
+          val event =
+            tracing.Event("update", TraceIdentifiers.fromAcsCommitment(commitment))
+          Spans.addEventToSpan(event, span)
         case (_, UpdateResponse.AcsChange(_)) => ()
       })
       .watchTermination()(endSpanOnTermination(span))

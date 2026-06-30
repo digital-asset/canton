@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.localstore
 
-import com.digitalasset.canton.ledger.api.IdentityProviderConfig
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.localstore.{
   PersistentIdentityProviderConfigStore,
@@ -11,6 +10,7 @@ import com.digitalasset.canton.ledger.localstore.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.StorageBackendProvider
+import com.digitalasset.canton.user.IdentityProviderConfig
 import org.scalatest.freespec.AsyncFreeSpec
 
 import scala.concurrent.Future

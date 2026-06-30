@@ -49,18 +49,40 @@ class AuthInterceptor(
         case Success(claimSet) => Success(claimSet)
       }
 
-  private val deny = Future.successful(ClaimSet.Unauthenticated: ClaimSet)
+  private val deny: Future[(Vector[String], ClaimSet)] =
+    Future.successful(Vector.empty[String] -> (ClaimSet.Unauthenticated: ClaimSet))
 
   def headerToClaims(
       authToken: Option[String],
       serviceName: String,
   )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[ClaimSet] =
     authServices
+      // Try each AuthService in turn while still unauthenticated, accumulating the reason each one
+      // gives for not verifying a present token. Once a service authenticates, short-circuit and
+      // carry the accumulated reasons forward (they are dropped, since authentication succeeded).
       .foldLeft(deny) { case (acc, elem) =>
         acc.flatMap {
-          case ClaimSet.Unauthenticated => elem.decodeToken(authToken, serviceName)
+          case (reasons, ClaimSet.Unauthenticated) =>
+            elem.decodeToken(authToken, serviceName).map { result =>
+              val serviceName = elem.getClass.getSimpleName
+              val taggedWarning = result.deferredWarning.map(w => s"[$serviceName] $w")
+              (reasons ++ taggedWarning, result.claimSet)
+            }
           case authenticated => Future.successful(authenticated)
         }
+      }
+      .map {
+        // No service authenticated a token that was actually presented: log the reasons once.
+        case (reasons, ClaimSet.Unauthenticated) if reasons.nonEmpty =>
+          val indexedReasons =
+            reasons.zipWithIndex.map { case (reason, idx) => s"(${idx + 1}) $reason" }
+          logger.warn(
+            "Authorization failed: the provided token was not verified by any configured " +
+              s"authentication service: ${indexedReasons.mkString("; ")}"
+          )
+          ClaimSet.Unauthenticated
+        // Authenticated, or no token presented at all: stay silent.
+        case (_, claimSet) => claimSet
       }
 }
 

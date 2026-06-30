@@ -4,17 +4,10 @@
 package com.digitalasset.daml.lf
 package data
 
-import scalaz.std.iterable.*
-import scalaz.std.tuple.*
-import scalaz.syntax.order.*
-import scalaz.{Equal, Order}
-
 import scala.annotation.tailrec
 import scala.collection.immutable.*
 
-import IdString.`Name order instance`
 import Ref.Name
-import ScalazEqual.*
 
 final class Struct[+X] private (protected val sortedFields: ArraySeq[(Ref.Name, X)])
     extends AnyVal {
@@ -109,15 +102,5 @@ object Struct {
   val Empty: Struct[Nothing] = new Struct(ArraySeq.empty)
 
   private[this] val rightEmpty = Right(Empty)
-
-  implicit def structEqualInstance[X: Equal]: Equal[Struct[X]] =
-    _.sortedFields === _.sortedFields
-
-  implicit def structOrderInstance[X: Order]: Order[Struct[X]] =
-    // following daml-lf specification, this considers first names, then values.
-    orderBy(
-      s => (toIterableForScalazInstances(s.names), toIterableForScalazInstances(s.values)),
-      true,
-    )
 
 }

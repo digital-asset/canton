@@ -1424,7 +1424,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -1491,7 +1491,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -1559,7 +1559,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -1617,7 +1617,7 @@ private[backend] trait StorageBackendTestsEvents
           recordTime = Timestamp.assertFromLong(100L),
           trafficCost = Some(8465L),
         ),
-        externalTransactionHash = Some(someExternalTransactionHashBinary),
+        transactionHash = Some(someExternalTransactionHashBinaryByteString),
       ),
       thinCreatedEventProperties = ThinCreatedEventProperties(
         representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -1692,7 +1692,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -1770,7 +1770,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -1848,7 +1848,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -1875,7 +1875,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -1912,7 +1912,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -2009,7 +2009,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -2048,7 +2048,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -2077,7 +2077,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -2114,7 +2114,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -2143,7 +2143,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = Some(8465L),
           ),
-          externalTransactionHash = Some(someExternalTransactionHashBinary),
+          transactionHash = Some(someExternalTransactionHashBinaryByteString),
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -2341,7 +2341,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = None,
           ),
-          externalTransactionHash = None,
+          transactionHash = None,
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -2407,7 +2407,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = None,
           ),
-          externalTransactionHash = None,
+          transactionHash = None,
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -2474,7 +2474,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = None,
           ),
-          externalTransactionHash = None,
+          transactionHash = None,
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -2542,7 +2542,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = None,
           ),
-          externalTransactionHash = None,
+          transactionHash = None,
         ),
         contractId = hashCid("c1"),
         templateId = Identifier
@@ -2619,7 +2619,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = None,
           ),
-          externalTransactionHash = None,
+          transactionHash = None,
         ),
         thinCreatedEventProperties = ThinCreatedEventProperties(
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
@@ -2646,7 +2646,7 @@ private[backend] trait StorageBackendTestsEvents
             recordTime = Timestamp.assertFromLong(100L),
             trafficCost = None,
           ),
-          externalTransactionHash = None,
+          transactionHash = None,
         ),
         contractId = hashCid("c1"),
         templateId = Identifier

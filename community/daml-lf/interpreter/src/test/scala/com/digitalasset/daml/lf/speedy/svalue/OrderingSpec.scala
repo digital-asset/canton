@@ -10,29 +10,28 @@ import com.digitalasset.daml.lf.interpretation.Error.ContractIdComparability
 import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.test.ValueGenerators.comparableCoidsGen
-import org.scalacheck.{Arbitrary, Gen}
+import org.scalacheck.Gen
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.prop.TableFor2
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.{
   Checkers,
   ScalaCheckDrivenPropertyChecks,
   ScalaCheckPropertyChecks,
 }
-import scalaz.Order
-import scalaz.scalacheck.ScalazProperties as SzP
 
 import scala.language.implicitConversions
 import scala.util.{Failure, Try}
 
 class OrderingSpec
     extends AnyWordSpec
+    with Checkers
     with Inside
     with Matchers
-    with Checkers
     with ScalaCheckDrivenPropertyChecks
-    with ScalaCheckPropertyChecks {
+    with ScalaCheckPropertyChecks
+    with TableDrivenPropertyChecks {
 
   private val pkgId = Ref.PackageId.assertFromString("pkgId")
 
@@ -42,31 +41,38 @@ class OrderingSpec
   implicit def toName(s: String): Ref.Name =
     Ref.Name.assertFromString(s)
 
-  private val randomComparableValues: TableFor2[String, Gen[SValue]] = {
+  // Each generator produces values from a single universe of mutually-comparable SValues.
+  // Values from different universes are not comparable, so the ordering laws only hold within one.
+  private val comparableSValueGens: Seq[Gen[SValue]] = {
     import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
-    def r(name: String, va: VA)(sv: va.Inj => SValue) =
-      (name, va.injarb.arbitrary map sv)
-    Table(
-      ("comparable value subset", "generator"),
-      Seq(
-        r("Int64", VA.int64)(SInt64.apply),
-        r("Text", VA.text)(SText.apply),
-        r("Int64 Option List", VA.list(VA.optional(VA.int64))) { loi =>
-          SList(loi.map(oi => SOptional(oi map SInt64.apply)).to(FrontStack))
-        },
-      ) ++
-        comparableCoidsGen.zipWithIndex.map { case (g, ix) =>
-          (s"ContractId $ix", g map SContractId.apply)
-        }: _*
-    )
+    def g(va: VA)(sv: va.Inj => SValue): Gen[SValue] = va.injarb.arbitrary.map(sv)
+    Seq(
+      g(VA.int64)(SInt64.apply),
+      g(VA.text)(SText.apply),
+      g(VA.list(VA.optional(VA.int64))) { loi =>
+        SList(loi.map(oi => SOptional(oi map SInt64.apply)).to(FrontStack))
+      },
+    ) ++ comparableCoidsGen.map(_.map(SContractId.apply))
   }
 
-  "Order.compare" should {
-    "be lawful on each subset" in forEvery(randomComparableValues) { (_, svGen) =>
-      implicit val svalueOrd: Order[SValue] = Order fromScalaOrdering Ordering
-      implicit val svalueArb: Arbitrary[SValue] = Arbitrary(svGen)
-      forEvery(Table(("law", "prop"), SzP.order.laws[SValue].properties.toSeq*)) { (_, p) =>
-        check(p, minSuccessful(50))
+  "Ordering.compare" should {
+    "be a lawful total order within each comparable subset" in {
+      // Draw all three values from the same universe so that they are mutually comparable.
+      val triples =
+        for {
+          gen <- Gen.oneOf(comparableSValueGens)
+          a <- gen
+          b <- gen
+          c <- gen
+        } yield (a, b, c)
+      forAll(triples, minSuccessful(500)) { case (a, b, c) =>
+        // reflexivity
+        Ordering.compare(a, a) should ===(0)
+        // antisymmetry
+        Integer.signum(Ordering.compare(a, b)) should ===(-Integer.signum(Ordering.compare(b, a)))
+        // transitivity
+        if (Ordering.compare(a, b) <= 0 && Ordering.compare(b, c) <= 0)
+          Ordering.compare(a, c) should be <= 0
       }
     }
   }
@@ -75,13 +81,18 @@ class OrderingSpec
   // in Value.orderInstance or TypedValueGenerators, rather than to svalue.Ordering.
   // The tests are here as this is difficult to test outside daml-lf/interpreter.
   "txn Value Ordering" should {
-    import Value.ContractId as Cid
-    implicit val svalueOrd: Order[SValue] = Order fromScalaOrdering Ordering
-    implicit val cidOrd: Order[Cid] = svalueOrd contramap SContractId.apply
-
-    "match global ContractId ordering" in forEvery(Table("gen", comparableCoidsGen*)) { coidGen =>
-      forAll(coidGen, coidGen, minSuccessful(50)) { (a, b) =>
-        Cid.`Cid Order`.order(a, b) should ===(cidOrd.order(a, b))
+    "match global ContractId ordering" in {
+      // Draw both contract IDs from the same universe so that they are mutually comparable.
+      val pairs =
+        for {
+          gen <- Gen.oneOf(comparableCoidsGen)
+          a <- gen
+          b <- gen
+        } yield (a, b)
+      forAll(pairs, minSuccessful(150)) { case (a, b) =>
+        Integer.signum(Value.ContractId.`Cid Ordering`.compare(a, b)) should ===(
+          Integer.signum(Ordering.compare(SContractId(a), SContractId(b)))
+        )
       }
     }
 

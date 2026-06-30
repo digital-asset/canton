@@ -6,7 +6,7 @@ package com.digitalasset.canton.ledger.participant.state
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.crypto.{Hash, Signature}
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
@@ -41,6 +41,16 @@ import java.util.UUID
   * @param externallySignedSubmission
   *   If this is provided then the authorization for all acting parties will be provided by the
   *   enclosed signatures.
+  * @param transactionHash
+  *   The transaction hash from the phase 1 execute request of an interactive submission. This is
+  *   the hash the external party signs to authorize the transaction. It is distinct from the
+  *   transaction hash recomputed by the participant during phase 3 validation (see
+  *   `TransactionValidationResult.validatedExternalTransactionHash`). Currently only populated for
+  *   interactive submissions (where `externallySignedSubmission.isDefined`), but as the
+  *   transaction-hash design progresses this will be set for all transactions and will no longer be
+  *   optional. Note that submissions rejected before phase-3 reinterpretation may carry no hash on
+  *   their completion (rare topology-change races, e.g. acting parties reassigned between prepare
+  *   and submission, or a mediator disabled mid-submission), so lookup-by-hash is best-effort.
   */
 final case class SubmitterInfo(
     actAs: List[Ref.Party],
@@ -50,6 +60,7 @@ final case class SubmitterInfo(
     deduplicationPeriod: DeduplicationPeriod,
     submissionId: Option[Ref.SubmissionId],
     externallySignedSubmission: Option[ExternallySignedSubmission],
+    transactionHash: Option[Hash],
 ) {
 
   /** The ID for the ledger change */
@@ -96,6 +107,7 @@ object SubmitterInfo {
           deduplicationPeriod,
           submissionId,
           externallySignedSubmission,
+          transactionHash,
         ) =>
       LoggingValue.Nested.fromEntries(
         "actAs " -> actAs,
@@ -105,6 +117,7 @@ object SubmitterInfo {
         "deduplicationPeriod " -> deduplicationPeriod,
         "submissionId" -> submissionId,
         "externallySignedSubmission" -> externallySignedSubmission,
+        "transactionHash" -> transactionHash.map(_.toHexString),
       )
   }
 

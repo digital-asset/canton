@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.cache
 
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 
 import java.util.concurrent.atomic.AtomicReference
 
@@ -13,6 +14,9 @@ trait LedgerEndCache {
 
 trait MutableLedgerEndCache extends LedgerEndCache {
   def set(ledgerEnd: Option[LedgerEnd]): Unit
+  def update(
+      ledgerEnd: LedgerEnd
+  ): Unit
 }
 
 object MutableLedgerEndCache {
@@ -26,5 +30,12 @@ object MutableLedgerEndCache {
 
       override def apply(): Option[LedgerEnd] =
         ledgerEnd.get()
+
+      override def update(
+          ledgerEndUpdate: LedgerEnd
+      ): Unit =
+        this.ledgerEnd
+          .updateAndGet(old => Some(LedgerEnd.update(old, ledgerEndUpdate)))
+          .discard
     }
 }
