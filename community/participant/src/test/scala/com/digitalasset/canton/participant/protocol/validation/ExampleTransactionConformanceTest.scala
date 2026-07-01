@@ -113,7 +113,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
-          externalCallReplayData: () => FutureUnlessShutdown[DAMLe.ExternalCallReplayData],
+          externalCallReplayData: () => DAMLe.ExternalCallReplayData,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -161,7 +161,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
-          externalCallReplayData: () => FutureUnlessShutdown[DAMLe.ExternalCallReplayData],
+          externalCallReplayData: () => DAMLe.ExternalCallReplayData,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -547,30 +547,29 @@ class ExampleTransactionConformanceTest
                 packageResolution: Map[PackageName, PackageId],
                 expectFailure: Boolean,
                 getEngineAbortStatus: GetEngineAbortStatus,
-                externalCallReplayData: () => FutureUnlessShutdown[DAMLe.ExternalCallReplayData],
+                externalCallReplayData: () => DAMLe.ExternalCallReplayData,
             )(implicit traceContext: TraceContext): EitherT[
               FutureUnlessShutdown,
               DAMLe.ReinterpretationError,
               ReInterpretationResult,
-            ] =
-              EitherT.right[DAMLe.ReinterpretationError](externalCallReplayData()).flatMap {
-                replayData =>
-                  observed.set(Some(replayData))
-                  reinterpretTransaction(example, transaction).reinterpret(
-                    contracts,
-                    contractAuthenticator,
-                    submitters,
-                    command,
-                    topologySnapshot,
-                    ledgerTime,
-                    preparationTime,
-                    rootSeed,
-                    packageResolution,
-                    expectFailure,
-                    getEngineAbortStatus,
-                    () => FutureUnlessShutdown.pure(replayData),
-                  )
-              }
+            ] = {
+              val replayData = externalCallReplayData()
+              observed.set(Some(replayData))
+              reinterpretTransaction(example, transaction).reinterpret(
+                contracts,
+                contractAuthenticator,
+                submitters,
+                command,
+                topologySnapshot,
+                ledgerTime,
+                preparationTime,
+                rootSeed,
+                packageResolution,
+                expectFailure,
+                getEngineAbortStatus,
+                () => replayData,
+              )
+            }
           }
 
           val viewTree = treeWithCheckingParties(fullTree, checkingParties)

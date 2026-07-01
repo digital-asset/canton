@@ -138,8 +138,7 @@ final class DAMLeExternalCallTest
         packageResolution = Map(packageName -> packageId),
         expectFailure = false,
         getEngineAbortStatus = () => EngineAbortStatus.notAborted,
-        externalCallReplayData = () =>
-          FutureUnlessShutdown.pure(replayData),
+        externalCallReplayData = () => replayData,
       )
       .value
 
