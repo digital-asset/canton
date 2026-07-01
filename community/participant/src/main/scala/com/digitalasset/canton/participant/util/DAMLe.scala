@@ -199,10 +199,10 @@ object DAMLe {
       )
   }
 
-  /** Stored external call results for replay during reinterpretation. Multiple outputs for one
+  /** External-call replay data: recorded outputs indexed by semantic key. Multiple outputs for one
     * semantic key are preserved so replay can report a recorded-result disagreement.
     */
-  final case class StoredExternalCallResults private (
+  final case class ExternalCallReplayData private (
       outputsByKey: Map[ExternalCallKey, Set[LfBytes]]
   ) {
     def size: Int = outputsByKey.size
@@ -217,26 +217,17 @@ object DAMLe {
       }
   }
 
-  object StoredExternalCallResults {
-    val empty: StoredExternalCallResults = StoredExternalCallResults(Map.empty)
+  object ExternalCallReplayData {
+    val empty: ExternalCallReplayData = ExternalCallReplayData(Map.empty)
 
-    def fromResults(results: Iterable[ExternalCallResult]): StoredExternalCallResults =
-      StoredExternalCallResults(
+    def fromResults(results: Iterable[ExternalCallResult]): ExternalCallReplayData =
+      ExternalCallReplayData(
         results
           .groupMap(ExternalCallKey.fromResult)(_.output)
           .view
           .mapValues(_.toSet)
           .toMap
       )
-  }
-
-  final case class ExternalCallReplayData(
-      storedExternalCallResults: StoredExternalCallResults
-  )
-
-  object ExternalCallReplayData {
-    val empty: ExternalCallReplayData =
-      ExternalCallReplayData(StoredExternalCallResults.empty)
   }
 
   trait HasReinterpret {
@@ -484,7 +475,7 @@ class DAMLe(
       }
 
       replayDataF.flatMap { replayData =>
-        replayData.storedExternalCallResults.outputFor(externalCallKey) match {
+        replayData.outputFor(externalCallKey) match {
           case Left(disagreement) =>
             failExternalCall(disagreement)
 

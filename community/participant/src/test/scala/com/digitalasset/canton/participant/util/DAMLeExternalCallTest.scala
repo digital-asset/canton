@@ -77,8 +77,8 @@ final class DAMLeExternalCallTest
     input = Bytes.assertFromString("c0ff"),
     output = Bytes.assertFromString("beef"),
   )
-  private val storedExternalCallResults =
-    DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult))
+  private val defaultReplayData =
+    DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult))
   private val externalCallKey = DAMLe.ExternalCallKey.fromResult(externalCallResult)
 
   private val packageResolver = new PackageResolver {
@@ -114,8 +114,8 @@ final class DAMLeExternalCallTest
   private val contracts = new ReplayContractLookup(Map(contract.contractId -> contract), Map.empty)
 
   private def runReinterpret(
-      storedExternalCallResultsForReplay: DAMLe.StoredExternalCallResults =
-        storedExternalCallResults
+      replayData: DAMLe.ExternalCallReplayData =
+        defaultReplayData
   ): Either[DAMLe.ReinterpretationError, DAMLe.ReInterpretationResult] = {
     val damle = new DAMLe(
       participantId = DefaultTestIdentities.participant1,
@@ -139,11 +139,7 @@ final class DAMLeExternalCallTest
         expectFailure = false,
         getEngineAbortStatus = () => EngineAbortStatus.notAborted,
         externalCallReplayData = () =>
-          FutureUnlessShutdown.pure(
-            DAMLe.ExternalCallReplayData(
-              storedExternalCallResults = storedExternalCallResultsForReplay
-            )
-          ),
+          FutureUnlessShutdown.pure(replayData),
       )
       .value
 
@@ -154,7 +150,7 @@ final class DAMLeExternalCallTest
     "reject external calls without recorded output" in {
       inside(
         runReinterpret(
-          storedExternalCallResultsForReplay = DAMLe.StoredExternalCallResults.empty
+          replayData = DAMLe.ExternalCallReplayData.empty
         )
       ) { case Left(error: DAMLe.ExternalCallReplayMissing) =>
         error.key shouldBe externalCallKey
@@ -173,12 +169,12 @@ final class DAMLeExternalCallTest
 
     "reject conflicting semantic outputs without leaking their payloads" in {
       val conflictingOutput = externalCallResult.copy(output = Bytes.assertFromString("cafe"))
-      val storedResults =
-        DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult, conflictingOutput))
+      val conflictingReplayData =
+        DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult, conflictingOutput))
 
       inside(
         runReinterpret(
-          storedExternalCallResultsForReplay = storedResults
+          replayData = conflictingReplayData
         )
       ) { case Left(disagreement: DAMLe.ExternalCallRecordedResultDisagreement) =>
         disagreement.toString should not include externalCallResult.output.toHexString
@@ -191,7 +187,7 @@ final class DAMLeExternalCallTest
     "not leak external-call payloads for replay errors" in {
       inside(
         runReinterpret(
-          storedExternalCallResultsForReplay = DAMLe.StoredExternalCallResults.empty
+          replayData = DAMLe.ExternalCallReplayData.empty
         )
       ) { case Left(error: DAMLe.ExternalCallReplayMissing) =>
         error.key shouldBe externalCallKey

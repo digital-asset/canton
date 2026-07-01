@@ -292,14 +292,13 @@ class ModelConformanceChecker(
 
     if (externalCallResults.isEmpty) ExternalCallReplayData.empty
     else {
-      val storedExternalCallResults =
-        StoredExternalCallResults.fromResults(externalCallResults.map(_.result))
+      val replayData = ExternalCallReplayData.fromResults(externalCallResults.map(_.result))
 
       logger.debug(
-        s"reInterpret: Aggregated ${storedExternalCallResults.size} external call result keys"
+        s"reInterpret: Aggregated ${replayData.size} external call result keys"
       )
 
-      ExternalCallReplayData(storedExternalCallResults)
+      replayData
     }
   }
 
