@@ -145,10 +145,10 @@ class NodeHashTest extends BaseTest with AnyWordSpecLike with Matchers with Hash
       Seq(
         HashingSchemeVersion.V2 -> SerializationVersion.V1,
         HashingSchemeVersion.V3 -> SerializationVersion.V2,
-      ).foreach { case (schemeVersion, lfVersion) =>
+      ).foreach { case (schemeVersion, serializationVersion) =>
         a[NodeHashingError.UnsupportedFeature] should be thrownBy
           tryHashNodeWithVersion(
-            node = exerciseNode(ImmArray(externalCallResult1)).copy(version = lfVersion),
+            node = exerciseNode(ImmArray(externalCallResult1)).copy(version = serializationVersion),
             hashingSchemeVersion = schemeVersion,
             nodeSeed = Some(nodeSeed),
             hashTracer = HashTracer.NoOp,
