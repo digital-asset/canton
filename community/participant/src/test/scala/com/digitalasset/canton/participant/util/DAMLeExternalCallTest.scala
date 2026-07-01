@@ -171,7 +171,7 @@ final class DAMLeExternalCallTest
       }
     }
 
-    "reject duplicate semantic outputs without choosing one" in {
+    "reject conflicting semantic outputs without leaking their payloads" in {
       val conflictingOutput = externalCallResult.copy(output = Bytes.assertFromString("cafe"))
       val storedResults =
         DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult, conflictingOutput))
