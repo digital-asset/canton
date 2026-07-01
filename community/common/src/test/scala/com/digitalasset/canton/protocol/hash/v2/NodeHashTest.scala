@@ -219,7 +219,7 @@ class NodeHashTest extends BaseNodeHashTest {
 
       error.getMessage shouldBe
         "Cannot hash node with LF serialization version V2 using hashing scheme V2." +
-          " Does the transaction use contract keys? Please use hashing scheme V3 or higher."
+        " Does the transaction use contract keys? Please use hashing scheme V3 or higher."
     }
 
     "fail global keys" in {
