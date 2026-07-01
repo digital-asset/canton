@@ -41,6 +41,10 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
         choice Call (self) (arg: Unit) : Text,
           controllers Cons @Party [M:T {party} this] (Nil @Party)
           to EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff";
+
+        choice CallEmptyPayloads (self) (arg: Unit) : Text,
+          controllers Cons @Party [M:T {party} this] (Nil @Party)
+          to EXTERNAL_CALL "ext" "fun" "" "";
       };
     }
   """
@@ -51,11 +55,11 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
     engine
   }
 
-  def submit(engine: Engine) =
+  def submit(engine: Engine, choiceName: String = "Call") =
     engine.submit(
       submitters = Set(alice),
       readAs = Set.empty,
-      cmds = ApiCommands(ImmArray(command), let, "external-call-engine-test"),
+      cmds = ApiCommands(ImmArray(command(choiceName)), let, "external-call-engine-test"),
       participantId = participantId,
       submissionSeed = submissionSeed,
       contractIdVersion = ContractIdVersion.V1,
@@ -68,10 +72,10 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
   private val submissionSeed = Hash.hashPrivateKey("ExternalCallEngineTest")
   private val let = Time.Timestamp.now()
   private val templateId = Ref.Identifier(pkgId, Ref.QualifiedName.assertFromString("M:T"))
-  private val command = ApiCommand.CreateAndExercise(
+  private def command(choiceName: String) = ApiCommand.CreateAndExercise(
     templateId.toRef,
     Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
-    Ref.ChoiceName.assertFromString("Call"),
+    Ref.ChoiceName.assertFromString(choiceName),
     Value.ValueUnit,
   )
 
@@ -96,6 +100,32 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
                 config = data.Bytes.assertFromString("0a0b"),
                 input = data.Bytes.assertFromString("c0ff"),
                 output = data.Bytes.assertFromString("beef"),
+              )
+            )
+          }
+      }
+    }
+
+    "accept empty config, input, and output hex payloads" in {
+      val result = submit(newEngine(), "CallEmptyPayloads")
+
+      inside(result) {
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          extensionId shouldBe "ext"
+          functionId shouldBe "fun"
+          configHash shouldBe ""
+          input shouldBe ""
+
+          inside(resume(Right("")).consume()) { case Right((tx, _)) =>
+            val exerciseNodes = tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+            exerciseNodes should have size 1
+            exerciseNodes.head.externalCallResults shouldBe ImmArray(
+              ExternalCallResult(
+                extensionId = "ext",
+                functionId = "fun",
+                config = data.Bytes.assertFromString(""),
+                input = data.Bytes.assertFromString(""),
+                output = data.Bytes.assertFromString(""),
               )
             )
           }
