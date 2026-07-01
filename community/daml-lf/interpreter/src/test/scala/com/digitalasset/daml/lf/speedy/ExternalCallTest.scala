@@ -219,91 +219,49 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
     )
 
   "SBExternalCall" should {
-    "resume through NeedExternalCall and record the result on the exercise node" in {
-      val machine = Speedy.Machine.fromUpdateSExpr(
-        pkgs,
-        transactionSeed,
-        SEApp(pkgs.compiler.unsafeCompile(e"M:run"), ArraySeq(SParty(alice))),
-        Set(alice),
-        MachineLogger(),
-      )
+    Seq(
+      ("populated", e"M:run", "0a0b", "c0ff", "beef"),
+      ("empty", e"M:runEmptyPayloads", "", "", ""),
+    ).foreach { case (label, expr, expectedConfig, expectedInput, expectedOutput) =>
+      s"resume NeedExternalCall and record the result on the exercise node ($label payloads)" in {
+        val machine = machineForRun(pkgs.compiler.unsafeCompile(expr))
 
-      var questions = 0
-      val result = SpeedyTestLib.runTxQ[Question.Update](
-        {
-          case Question.Update
-                .NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
-            questions += 1
-            extensionId shouldBe "ext"
-            functionId shouldBe "fun"
-            configHash shouldBe "0a0b"
-            input shouldBe "c0ff"
-            callback(Right("beef"))
-          case other =>
-            fail(s"Unexpected question: $other")
-        },
-        machine,
-      )
-
-      result shouldBe Right(SText("beef"))
-      questions shouldBe 1
-
-      inside(machine.finish) { case Right(commit) =>
-        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) =>
-          exercise
-        }
-        exerciseNodes should have size 1
-        exerciseNodes.head.version shouldBe SerializationVersion.minExternalCallResults
-        exerciseNodes.head.externalCallResults shouldBe ImmArray(
-          ExternalCallResult(
-            extensionId = "ext",
-            functionId = "fun",
-            config = Bytes.assertFromString("0a0b"),
-            input = Bytes.assertFromString("c0ff"),
-            output = Bytes.assertFromString("beef"),
-          )
+        var questions = 0
+        val result = SpeedyTestLib.runTxQ[Question.Update](
+          {
+            case Question.Update
+                  .NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
+              questions += 1
+              extensionId shouldBe "ext"
+              functionId shouldBe "fun"
+              configHash shouldBe expectedConfig
+              input shouldBe expectedInput
+              callback(Right(expectedOutput))
+            case other =>
+              fail(s"Unexpected question: $other")
+          },
+          machine,
         )
-      }
-    }
 
-    "accept empty config, input, and output hex payloads" in {
-      val machine = machineForRun(pkgs.compiler.unsafeCompile(e"M:runEmptyPayloads"))
+        result shouldBe Right(SText(expectedOutput))
+        questions shouldBe 1
 
-      var questions = 0
-      val result = SpeedyTestLib.runTxQ[Question.Update](
-        {
-          case Question.Update
-                .NeedExternalCall(extensionId, functionId, configHash, input, callback) =>
-            questions += 1
-            extensionId shouldBe "ext"
-            functionId shouldBe "fun"
-            configHash shouldBe ""
-            input shouldBe ""
-            callback(Right(""))
-          case other =>
-            fail(s"Unexpected question: $other")
-        },
-        machine,
-      )
-
-      result shouldBe Right(SText(""))
-      questions shouldBe 1
-
-      inside(machine.finish) { case Right(commit) =>
-        val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) =>
-          exercise
-        }
-        exerciseNodes should have size 1
-        exerciseNodes.head.version shouldBe SerializationVersion.minExternalCallResults
-        exerciseNodes.head.externalCallResults shouldBe ImmArray(
-          ExternalCallResult(
-            extensionId = "ext",
-            functionId = "fun",
-            config = Bytes.assertFromString(""),
-            input = Bytes.assertFromString(""),
-            output = Bytes.assertFromString(""),
+        inside(machine.finish) { case Right(commit) =>
+          val exerciseNodes = commit.tx.nodes.collect { case (_, exercise: Node.Exercise) =>
+            exercise
+          }
+          exerciseNodes should have size 1
+          exerciseNodes.head.version shouldBe SerializationVersion.minExternalCallResults
+          exerciseNodes.head.externalCallResults shouldBe ImmArray(
+            ExternalCallResult(
+              extensionId = "ext",
+              functionId = "fun",
+              config = Bytes.assertFromString(expectedConfig),
+              input = Bytes.assertFromString(expectedInput),
+              output = Bytes.assertFromString(expectedOutput),
+            )
           )
-        )
+        }
       }
     }
 
