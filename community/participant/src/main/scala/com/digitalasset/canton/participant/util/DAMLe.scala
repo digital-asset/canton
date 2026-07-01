@@ -243,7 +243,7 @@ object DAMLe {
         packageResolution: Map[Ref.PackageName, Ref.PackageId],
         expectFailure: Boolean,
         getEngineAbortStatus: GetEngineAbortStatus,
-        externalCallReplayData: () => FutureUnlessShutdown[ExternalCallReplayData],
+        externalCallReplayData: () => ExternalCallReplayData,
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       ReinterpretationError,
@@ -332,7 +332,7 @@ class DAMLe(
       packageResolution: Map[PackageName, PackageId],
       expectFailure: Boolean,
       getEngineAbortStatus: GetEngineAbortStatus,
-      externalCallReplayData: () => FutureUnlessShutdown[ExternalCallReplayData],
+      externalCallReplayData: () => ExternalCallReplayData,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     ReinterpretationError,
@@ -436,7 +436,7 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
-      externalCallReplayData: () => FutureUnlessShutdown[ExternalCallReplayData],
+      externalCallReplayData: () => ExternalCallReplayData,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
@@ -469,27 +469,22 @@ class DAMLe(
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
         replayDataO: Option[ExternalCallReplayData],
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-      val replayDataF = replayDataO match {
-        case Some(replayData) => FutureUnlessShutdown.pure(replayData)
-        case None => externalCallReplayData()
-      }
+      val replayData = replayDataO.getOrElse(externalCallReplayData())
 
-      replayDataF.flatMap { replayData =>
-        replayData.outputFor(externalCallKey) match {
-          case Left(disagreement) =>
-            failExternalCall(disagreement)
+      replayData.outputFor(externalCallKey) match {
+        case Left(disagreement) =>
+          failExternalCall(disagreement)
 
-          case Right(None) =>
-            failExternalCall(ExternalCallReplayMissing(externalCallKey))
+        case Right(None) =>
+          failExternalCall(ExternalCallReplayMissing(externalCallKey))
 
-          case Right(Some(storedOutput)) =>
-            replayStoredExternalCallOutput(
-              externalCallKey,
-              storedOutput,
-              resume,
-              Some(replayData),
-            )
-        }
+        case Right(Some(storedOutput)) =>
+          replayStoredExternalCallOutput(
+            externalCallKey,
+            storedOutput,
+            resume,
+            Some(replayData),
+          )
       }
     }
 
