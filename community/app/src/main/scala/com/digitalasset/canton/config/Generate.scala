@@ -21,7 +21,7 @@ object Generate {
       )
   }
 
-  def process(command: Command.Generate.Target, config: CantonConfig): Unit =
+  def process(command: Command.Generate.Target, config: SharedCantonConfig[?]): Unit =
     command match {
       case Command.Generate.RemoteConfig =>
         val writers = new CantonConfig.ConfigWriters(confidential = false)

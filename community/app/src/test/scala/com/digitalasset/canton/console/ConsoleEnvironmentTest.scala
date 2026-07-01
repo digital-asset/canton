@@ -7,7 +7,7 @@ import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
-import com.digitalasset.canton.environment.Environment
+import com.digitalasset.canton.environment.CantonEnvironment
 import com.digitalasset.canton.logging.{NamedEventCapturingLogger, SuppressingLogger}
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.tracing.TracerProvider
@@ -36,9 +36,9 @@ class ConsoleEnvironmentTest extends AnyWordSpec with BaseTest {
     val testConsoleOutput: TestConsoleOutput = new TestConsoleOutput(capturingLoggerFactory)
 
     // Setup environment to inject capturing loggerFactory
-    val environment = mock[Environment]
+    val environment = mock[CantonEnvironment]
     when(environment.loggerFactory).thenReturn(capturingLoggerFactory)
-    when(environment.config).thenReturn(CantonConfig())
+    doReturn(CantonConfig()).when(environment).config
     when(environment.tracerProvider).thenReturn(mock[TracerProvider])
     when(environment.configuredOpenTelemetry).thenReturn(
       ConfiguredOpenTelemetry(
@@ -49,7 +49,7 @@ class ConsoleEnvironmentTest extends AnyWordSpec with BaseTest {
     )
 
     // The ConsoleEnvironment to be tested
-    val consoleEnvironment: ConsoleEnvironment = new ConsoleEnvironment(
+    val consoleEnvironment: CantonConsoleEnvironment = new CantonConsoleEnvironment(
       environment,
       consoleOutput = testConsoleOutput,
     )

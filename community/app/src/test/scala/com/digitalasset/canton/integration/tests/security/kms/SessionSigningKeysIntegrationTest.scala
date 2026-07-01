@@ -38,7 +38,7 @@ trait SessionSigningKeysIntegrationTest
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.setSigningKeysIfPV35OrHigher(
-      SessionSigningKeysConfig.default,
+      SessionSigningKeysConfig.enabled,
       nodeFilter = name => !nodesWithSessionSigningKeysDisabled.contains(name),
     )
   )
@@ -48,13 +48,14 @@ trait SessionSigningKeysIntegrationTest
   ): Map[MetricsContext, Long] = {
     val kmsMetrics = node match {
       case p: LocalParticipantReference =>
-        p.underlying.value.metrics.kmsMetrics
+        p.underlying.value.metrics.cryptoMetrics.kmsMetricsO.valueOrFail("no KMS metrics")
 
       case m: LocalMediatorReference =>
-        m.underlying.value.replicaManager.mediatorRuntime.value.mediator.metrics.kmsMetrics
+        m.underlying.value.replicaManager.mediatorRuntime.value.mediator.metrics.cryptoMetrics.kmsMetricsO
+          .valueOrFail("no KMS metrics")
 
       case s: LocalSequencerReference =>
-        s.underlying.value.sequencer.metrics.kmsMetrics
+        s.underlying.value.sequencer.metrics.cryptoMetrics.kmsMetricsO.valueOrFail("no KMS metrics")
 
       case _ => fail("unexpected node")
     }
@@ -69,7 +70,7 @@ trait SessionSigningKeysIntegrationTest
         if (nodesWithSessionSigningKeysDisabled.contains(node.name))
           node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.disabled
         else
-          node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.default
+          node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.enabled
       }
 
       assertPingSucceeds(participant1, participant2)

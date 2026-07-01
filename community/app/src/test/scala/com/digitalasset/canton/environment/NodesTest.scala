@@ -31,6 +31,7 @@ import com.digitalasset.canton.lifecycle.{LifeCycle, ShutdownFailedException}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
   CommonMockMetrics,
+  CryptoMetrics,
   DbStorageMetrics,
   DeclarativeApiMetrics,
   LedgerApiServerMetrics,
@@ -126,6 +127,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
         (LedgerApiServerMetrics.ForTesting.grpc, LedgerApiServerMetrics.ForTesting.requests),
       healthMetrics: HealthMetrics = LedgerApiServerMetrics.ForTesting.health,
       storageMetrics: DbStorageMetrics = CommonMockMetrics.dbStorage,
+      cryptoMetrics: CryptoMetrics = CommonMockMetrics.cryptoMetrics,
   ) extends BaseMetrics {
 
     override val declarativeApiMetrics: DeclarativeApiMetrics =

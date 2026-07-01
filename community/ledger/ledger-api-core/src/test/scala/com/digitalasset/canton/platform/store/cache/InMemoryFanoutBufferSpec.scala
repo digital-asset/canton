@@ -9,6 +9,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.ReassignmentInfo
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.BufferSlice.LastBufferChunkSuffix
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
@@ -638,11 +639,6 @@ class InMemoryFanoutBufferSpec
       elems.foreach { case (_, event) => buffer.push(event) }
       test(buffer)
     }
-  }
-
-  private def offset(idx: Long): Offset = {
-    val base = 1000000000L
-    Offset.tryFromLong(base + idx)
   }
 
   private def succ(offset: Offset): Offset = offset.increment

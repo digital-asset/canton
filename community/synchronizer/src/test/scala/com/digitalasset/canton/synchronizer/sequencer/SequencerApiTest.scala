@@ -673,6 +673,11 @@ abstract class SequencerApiTest
                 include(s"The aggregatable request with aggregation ID") and
                   include("was previously delivered at")
               )
+            case SequencerErrors.AggregateSubmissionAlreadySentV2(reason) =>
+              reason should (
+                include(s"The aggregatable request with aggregation ID") and
+                  include("was previously delivered at")
+              )
           }
         }
       }

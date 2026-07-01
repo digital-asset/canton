@@ -7,7 +7,11 @@ import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.error.CantonBaseError
-import com.digitalasset.canton.health.{AtomicHealthElement, CloseableHealthQuasiComponent}
+import com.digitalasset.canton.health.{
+  AtomicHealthElement,
+  CloseableHealthQuasiComponent,
+  HealthComponent,
+}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLogging}
 import com.digitalasset.canton.resource.Storage
@@ -99,6 +103,10 @@ trait Sequencer
 
   @VisibleForTesting
   private[canton] def orderer: Option[BlockOrderer]
+
+  /** Health of the sequencer's background writer, if any.
+    */
+  private[sequencer] def backgroundWriterHealth: Option[HealthComponent] = None
 
   /** True if member is registered in sequencer persistent state / storage (i.e. database).
     */

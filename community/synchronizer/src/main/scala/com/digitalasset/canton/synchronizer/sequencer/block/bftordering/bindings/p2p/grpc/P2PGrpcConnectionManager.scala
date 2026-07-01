@@ -413,7 +413,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
                 s"P2P endpoint $p2pEndpointId successfully connected and authenticated " +
                   s"as ${sequencerId.toProtoPrimitive}"
               )
-              tryAddPeerEndpoint(
+              tryAddPeerEndpointAndSender(
                 sequencerId,
                 peerSender,
                 Some(p2pEndpoint),
@@ -447,7 +447,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
       }
   }
 
-  private def tryAddPeerEndpoint(
+  private def tryAddPeerEndpointAndSender(
       sequencerId: SequencerId,
       peerSender: PeerSender,
       // It may be None if the peer is connecting to us and did not communicate its endpoint
@@ -461,16 +461,35 @@ private[bftordering] final class P2PGrpcConnectionManager(
     maybeP2PEndpointId.map(
       p2pGrpcConnectionState.associateP2PEndpointIdToBftNodeId(_, bftNodeId)
     ) match {
+
       case None | Some(Right(())) =>
-        if (p2pGrpcConnectionState.addSenderIfMissing(bftNodeId, peerSender)) {
-          p2pConnectionEventListener.onSequencerId(bftNodeId, maybeP2PEndpoint)
-        } else {
+        if (!p2pGrpcConnectionState.addSenderIfMissing(bftNodeId, peerSender)) {
           logger.info(
             s"Completing peer sender $peerSender for $bftNodeId <-> $maybeP2PEndpointId " +
               "because one already exists"
           )
           completeGrpcStreamObserver(peerSender, logger)
         }
+        // Prevents a stuck "sender present, network ref missing" state by ensuring a network ref is
+        //  (re)asserted regardless of whether this connection "wins" the race.
+        //
+        //  This state is generally possible because, even though the sender and the network ref
+        //  are both gated on successful authentication, they are created and registered asynchronously and
+        //  independently, with potentially different failure reasons and modes.
+        //
+        //  A "sender present, ref missing" state would be a deadlocked connection-establishment state between two
+        //  nodes, requiring manual intervention (restart, or admin remove/re-add), because:
+        //
+        //  - A registered sender prevents the establishment of a new connection to the same peer.
+        //  - The network ref is needed to send messages.
+        //  - A registered sender belonging to a failed stream that wasn't cleaned up by remote
+        //    completion (e.g. the network dropping the peer's onError) can currently only be cleaned
+        //    up by gRPC failing to send, which the missing network ref prevents.
+        //
+        //  Re-asserting here is safe and idempotent: `addNetworkRefIfMissing` doesn't touch the state
+        //  when a ref exists.
+        p2pConnectionEventListener.onSequencerId(bftNodeId, maybeP2PEndpoint)
+
       case Some(Left(error)) =>
         error match {
           case Error.CannotAssociateP2PEndpointIdsToSelf(p2pEndpointId, thisBftNodeId) =>
@@ -1059,7 +1078,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
           //  by the connection state and shut down.
           //  This also protects against potentially malicious peers that try to establish more than one connection.
           sequencerIdPromiseUS.futureUS
-            .map(tryAddPeerEndpoint(_, peerSender, maybeCommunicatedEndpoint))
+            .map(tryAddPeerEndpointAndSender(_, peerSender, maybeCommunicatedEndpoint))
             .transform(
               identity,
               { exception =>

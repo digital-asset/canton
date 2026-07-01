@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.DEROctetString
@@ -45,6 +46,8 @@ class JcePrivateCrypto(
     override val signingSchemes: SigningCryptoSchemes,
     override val encryptionSchemes: EncryptionCryptoSchemes,
     override protected val store: CryptoPrivateStoreExtended,
+    override val signingMetrics: SigningMetrics,
+    override val decryptionMetrics: DecryptionMetrics,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override implicit val ec: ExecutionContext)

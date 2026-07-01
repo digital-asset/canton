@@ -126,6 +126,26 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     ) shouldBe Nil
   }
 
+  behavior of "readAsForAllPartiesOrAnyPartyIfEmpty"
+
+  it should "delegate to readAsForAllParties for non-empty input" in {
+    RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[String](
+      Seq("a", "b", "c")
+    ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ReadAs("a"),
+      RequiredClaim.ReadAs("b"),
+      RequiredClaim.ReadAs("c"),
+    )
+  }
+
+  it should "require CanReadAsAnyParty when input is empty" in {
+    RequiredClaims.readAsForAllPartiesOrAnyPartyIfEmpty[String](
+      Nil
+    ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ReadAsAnyParty()
+    )
+  }
+
   behavior of "eventFormatClaims"
 
   it should "compute the correct claims in the happy path" in {

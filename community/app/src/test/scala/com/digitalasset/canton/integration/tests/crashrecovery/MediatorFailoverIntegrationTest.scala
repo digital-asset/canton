@@ -21,9 +21,9 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.*
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   EnvironmentDefinition,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -34,7 +34,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClient
 trait MediatorFailoverIntegrationTest
     extends ReliabilityTestSuite
     with ReplicatedMediatorTestSetup {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected def startAndGet(external: UseExternalProcess)(
       mediatorName: String

@@ -35,7 +35,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          tx.userId.value,
+          Some(tx.userId.value),
           tx.actAs.toSet,
         )
         .runWith(Sink.head)
@@ -60,7 +60,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          tx.userId.value,
+          Some(tx.userId.value),
           tx.actAs.toSet,
         )
         .runWith(Sink.head)
@@ -69,7 +69,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          tx.userId.value,
+          Some(tx.userId.value),
           Set(tx.actAs.head),
         )
         .runWith(Sink.head)
@@ -78,7 +78,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          tx.userId.value,
+          Some(tx.userId.value),
           tx.actAs.toSet + "UNRELATED",
         )
         .runWith(Sink.head)
@@ -103,7 +103,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           parties,
         )
         .runWith(Sink.head)
@@ -133,7 +133,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           parties,
         )
         .runWith(Sink.head)
@@ -142,7 +142,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           Set(parties.head),
         )
         .runWith(Sink.head)
@@ -151,7 +151,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           parties + "UNRELATED",
         )
         .runWith(Sink.head)
@@ -174,7 +174,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId = Ref.UserId.assertFromString("WRONG"),
+          userId = Some(Ref.UserId.assertFromString("WRONG")),
           parties,
         )
         .runWith(Sink.seq)
@@ -195,7 +195,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           Set("WRONG"),
         )
         .runWith(Sink.seq)
@@ -203,7 +203,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           Set("WRONG1", "WRONG2", "WRONG3"),
         )
         .runWith(Sink.seq)
@@ -225,7 +225,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           Set("WRONG"),
         )
         .runWith(Sink.seq)
@@ -233,7 +233,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           Set("WRONG1", "WRONG2", "WRONG3"),
         )
         .runWith(Sink.seq)
@@ -255,7 +255,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
         .getCommandCompletions(
           from.fold(firstOffset)(_.lastOffset.increment),
           to.value.lastOffset,
-          userId,
+          Some(userId),
           Set("WRONG"),
         )
         .runWith(Sink.seq)

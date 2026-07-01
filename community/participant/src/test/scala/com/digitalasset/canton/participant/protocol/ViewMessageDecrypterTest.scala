@@ -32,6 +32,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.DecryptedViews
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
@@ -125,6 +126,7 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
           CacheConfig(PositiveNumeric.tryCreate(1)),
           new InMemoryCryptoPrivateStore(testedReleaseProtocolVersion, loggerFactory),
           new InMemoryCryptoPublicStore(loggerFactory),
+          CommonMockMetrics.cryptoMetrics,
           timeouts,
           loggerFactory,
         )

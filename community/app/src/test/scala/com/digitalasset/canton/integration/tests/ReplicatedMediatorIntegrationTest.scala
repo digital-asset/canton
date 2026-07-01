@@ -14,11 +14,11 @@ import com.digitalasset.canton.integration.bootstrap.{
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres, UseSharedStorage}
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   ConfigTransform,
   ConfigTransforms,
   EnvironmentDefinition,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -31,7 +31,7 @@ import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
-  self: CommunityIntegrationTest & EnvironmentSetup =>
+  self: CommunityIntegrationTest & CantonEnvironmentSetup =>
   protected lazy val mediator1Name = "mediatorReplicated1"
   protected lazy val mediator2Name = "mediatorReplicated2"
 

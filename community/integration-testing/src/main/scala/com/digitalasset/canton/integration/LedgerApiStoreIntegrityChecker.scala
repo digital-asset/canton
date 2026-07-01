@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration
 
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.config.StorageConfig
+import com.digitalasset.canton.config.{SharedCantonConfig, StorageConfig}
 import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.integration.plugins.UseExternalProcess
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -24,8 +24,8 @@ class LedgerApiStoreIntegrityChecker(
     with NoTracing {
 
   def verifyParticipantLapiIntegrity(
-      env: TestConsoleEnvironment,
-      plugins: Seq[EnvironmentSetupPlugin],
+      env: AnyTestConsoleEnvironment,
+      plugins: Seq[BaseEnvironmentSetupPlugin[? <: SharedCantonConfig[?], ?]],
   ): Unit = {
     import env.*
 

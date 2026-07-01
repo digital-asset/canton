@@ -26,6 +26,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequest
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
+  SequencerClient,
   SequencerClientSend,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, Recipients}
@@ -133,6 +134,7 @@ abstract class AbstractMessageProcessor(
             ),
             messageId = messageId.getOrElse(MessageId.randomMessageId()),
             callback = SendCallback.log(s"Response message for request [$requestId]", logger),
+            trafficCostValidator = SequencerClient.TrafficCostValidator.NoTrafficCostValidation,
             amplify = true,
             // We want to use a shorter patience for the confirmation responses
             useConfirmationResponseAmplificationParameters = true,

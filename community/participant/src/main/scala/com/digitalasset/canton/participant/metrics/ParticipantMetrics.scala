@@ -37,6 +37,8 @@ class ParticipantHistograms(val parent: MetricName)(implicit
 
   private[metrics] val dbStorage: DbStorageHistograms =
     new DbStorageHistograms(parent)
+  private[metrics] val signing: SigningHistograms = new SigningHistograms(parent)
+  private[metrics] val decryption: DecryptionHistograms = new DecryptionHistograms(parent)
   private[metrics] val sequencerClient: SequencerClientHistograms = new SequencerClientHistograms(
     parent
   )
@@ -91,8 +93,19 @@ class ParticipantMetrics(
   override def grpcMetrics: GrpcServerMetricsX = (ledgerApiServer.grpc, ledgerApiServer.requests)
   override def healthMetrics: HealthMetrics = ledgerApiServer.health
   override def storageMetrics: DbStorageMetrics = dbStorage
-  val dbStorage = new DbStorageMetrics(inventory.dbStorage, openTelemetryMetricsFactory)
-  val kmsMetrics: KmsMetrics = new KmsMetrics(prefix, openTelemetryMetricsFactory)
+
+  val dbStorage: DbStorageMetrics =
+    new DbStorageMetrics(inventory.dbStorage, openTelemetryMetricsFactory)
+
+  override def cryptoMetrics: CryptoMetrics = crypto
+
+  val crypto: CryptoMetrics =
+    new CryptoMetrics(
+      new SigningMetrics(inventory.signing, openTelemetryMetricsFactory),
+      new DecryptionMetrics(inventory.decryption, openTelemetryMetricsFactory),
+      Some(new KmsMetrics(prefix, openTelemetryMetricsFactory)),
+    )
+
   val phase: Timer = openTelemetryMetricsFactory.timer(inventory.phase.info)
 
   // Private constructor to avoid being instantiated multiple times by accident

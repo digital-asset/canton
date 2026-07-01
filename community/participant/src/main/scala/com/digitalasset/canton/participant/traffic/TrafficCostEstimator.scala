@@ -472,7 +472,7 @@ object TrafficCostEstimator {
             // compute its cost.
             SignatureDelegationValidityPeriod(
               approximateTimestampForSigning.getOrElse(topologySnapshot.timestamp),
-              SessionSigningKeysConfig.default.keyValidityDuration,
+              SessionSigningKeysConfig.enabled.keyValidityDuration,
             ),
             signature,
           )

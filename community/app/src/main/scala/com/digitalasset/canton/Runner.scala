@@ -19,10 +19,10 @@ import scala.util.control.NonFatal
   */
 trait Runner extends NamedLogging {
 
-  def run(environment: Environment): Unit
+  def run(environment: Environment[?]): Unit
 
   // TODO(#24954): Convert to using declarative api, when it becomes available
-  def uploadDar(environment: Environment)(darPath: String): Unit = {
+  def uploadDar(environment: Environment[?])(darPath: String): Unit = {
     val consoleEnvironment = environment.createConsole()
     consoleEnvironment.participants.local
       .flatMap(_.underlying)
@@ -48,7 +48,7 @@ class ServerRunner(
 ) extends Runner
     with NoTracing {
 
-  def run(environment: Environment): Unit =
+  def run(environment: Environment[?]): Unit =
     try {
       def start(): Unit =
         environment
@@ -86,7 +86,7 @@ class ConsoleInteractiveRunner(
     override val loggerFactory: NamedLoggerFactory,
     dars: Seq[String] = Seq.empty,
 ) extends Runner {
-  def run(environment: Environment): Unit = {
+  def run(environment: Environment[?]): Unit = {
     val success =
       try {
         val consoleEnvironment = environment.createConsole()
@@ -113,7 +113,7 @@ class ConsoleScriptRunner(
   private val Ok = 0
   private val Error = 1
 
-  override def run(environment: Environment): Unit = {
+  override def run(environment: Environment[?]): Unit = {
     val exitCode =
       ConsoleScriptRunner.run(environment, scriptPath, logger) match {
         case Right(_unit) =>
@@ -187,14 +187,14 @@ object ConsoleScriptRunner extends NoTracing {
     new ConsoleScriptRunner(CantonScriptFromFile(scriptPath), loggerFactory)
 
   def run(
-      environment: Environment,
+      environment: Environment[?],
       scriptPath: File,
       logger: TracedLogger,
   ): Either[HeadlessConsole.HeadlessConsoleError, Unit] =
     run(environment, CantonScriptFromFile(scriptPath), logger)
 
   def run(
-      environment: Environment,
+      environment: Environment[?],
       cantonScript: CantonScript,
       logger: TracedLogger,
   ): Either[HeadlessConsole.HeadlessConsoleError, Unit] = {

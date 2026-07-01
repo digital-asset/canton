@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{CommonMockMetrics, DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -109,4 +110,9 @@ class SymbolicPrivateCrypto(
   override def name: String = "symbolic-private-crypto"
 
   override protected def initialHealthState: ComponentHealthState = ComponentHealthState.Ok()
+
+  private val cryptoMetrics = CommonMockMetrics.cryptoMetrics
+
+  override def signingMetrics: SigningMetrics = cryptoMetrics.signingMetrics
+  override def decryptionMetrics: DecryptionMetrics = cryptoMetrics.decryptionMetrics
 }

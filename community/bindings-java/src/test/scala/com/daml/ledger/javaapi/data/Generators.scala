@@ -806,6 +806,20 @@ object Generators {
     }
   }
 
+  def getCompletionsRequestGen: Gen[v2.CommandCompletionServiceOuterClass.GetCompletionsRequest] = {
+    import v2.CommandCompletionServiceOuterClass.GetCompletionsRequest as Request
+    for {
+      parties <- Gen.listOf(Arbitrary.arbString.arbitrary)
+      beginExclusive <- Gen.option(Arbitrary.arbLong.arbitrary)
+    } yield {
+      val builder = Request
+        .newBuilder()
+        .addAllParties(parties.asJava)
+      beginExclusive.foreach(builder.setBeginExclusive)
+      builder.build()
+    }
+  }
+
   def completionGen: Gen[v2.CompletionOuterClass.Completion] = {
     import v2.CompletionOuterClass.Completion
     for {

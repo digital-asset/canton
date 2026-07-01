@@ -12,9 +12,9 @@ import com.digitalasset.canton.integration.plugins.toxiproxy.UseToxiproxy.Toxipr
 import com.digitalasset.canton.integration.plugins.toxiproxy.{ParticipantToPostgres, UseToxiproxy}
 import com.digitalasset.canton.integration.tests.toxiproxy.ToxiproxyHelpers
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   EnvironmentDefinition,
-  EnvironmentSetup,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
@@ -43,7 +43,7 @@ import scala.annotation.nowarn
 import scala.concurrent.duration.*
 
 trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest {
-  this: EnvironmentSetup =>
+  this: CantonEnvironmentSetup =>
   protected def runValidation(
       topoStoreIdx: Int,
       txs: GenericStoredTopologyTransactions,

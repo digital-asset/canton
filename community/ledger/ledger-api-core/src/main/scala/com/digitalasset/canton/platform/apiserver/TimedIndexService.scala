@@ -40,7 +40,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
 
   override def getCompletions(
       begin: Option[Offset],
-      userId: Ref.UserId,
+      userId: Option[Ref.UserId],
       parties: Set[Ref.Party],
   )(implicit loggingContext: LoggingContextWithTrace): Source[CompletionStreamResponse, NotUsed] =
     Timed.source(

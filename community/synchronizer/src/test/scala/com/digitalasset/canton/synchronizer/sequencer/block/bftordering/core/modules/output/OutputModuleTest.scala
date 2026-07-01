@@ -408,6 +408,7 @@ class OutputModuleTest
           }
 
           val store = mock[OutputMetadataStore[ProgrammableUnitTestEnv]]
+          when(store.getLowerBound()(traceContext)).thenReturn(() => None)
           when(store.getEpoch(EpochNumber.First)(traceContext)).thenReturn(() =>
             Some(OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = true))
           )
@@ -500,6 +501,7 @@ class OutputModuleTest
         new ProgrammableUnitTestContext(resolveAwaits = true)
 
       val store = mock[OutputMetadataStore[ProgrammableUnitTestEnv]]
+      when(store.getLowerBound()(traceContext)).thenReturn(() => None)
       val lastStoredCompletedBlock = secondBlockNumber
       when(store.getEpoch(EpochNumber.First)(traceContext)).thenReturn(() =>
         Some(OutputEpochMetadata(EpochNumber.First, couldAlterOrderingTopology = false))
@@ -625,6 +627,7 @@ class OutputModuleTest
           new ProgrammableUnitTestContext(resolveAwaits = true)
 
         val store = mock[OutputMetadataStore[ProgrammableUnitTestEnv]]
+        when(store.getLowerBound()(traceContext)).thenReturn(() => None)
         val lastStoredCompletedBlock = fourthBlockNumber
         when(store.getEpoch(secondEpochNumber)(traceContext)).thenReturn(() =>
           Some(OutputEpochMetadata(secondEpochNumber, couldAlterOrderingTopology = true))
@@ -765,6 +768,7 @@ class OutputModuleTest
       implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
         new ProgrammableUnitTestContext(resolveAwaits = true)
       val store = mock[OutputMetadataStore[ProgrammableUnitTestEnv]]
+      when(store.getLowerBound()(traceContext)).thenReturn(() => None)
       val epochStoreReader = mock[EpochStoreReader[ProgrammableUnitTestEnv]]
       val orderingTopologyProvider = mock[OrderingTopologyProvider[ProgrammableUnitTestEnv]]
       val leaderSelectionInitializer = mock[LeaderSelectionInitializer[ProgrammableUnitTestEnv]]

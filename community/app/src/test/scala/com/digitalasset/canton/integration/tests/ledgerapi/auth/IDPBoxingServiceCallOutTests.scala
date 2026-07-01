@@ -141,6 +141,46 @@ trait IDPBoxingServiceCallOutTests
       }
     }
 
+    "IDP admin granting rights that transcend IDP boundaries" should {
+      for (
+        (description, kind) <- List[(String, uproto.Right.Kind)](
+          (
+            "read as any party",
+            uproto.Right.Kind.CanReadAsAnyParty(uproto.Right.CanReadAsAnyParty()),
+          ),
+          (
+            "execute as any party",
+            uproto.Right.Kind.CanExecuteAsAnyParty(uproto.Right.CanExecuteAsAnyParty()),
+          ),
+          (
+            "participant admin",
+            uproto.Right.Kind.ParticipantAdmin(uproto.Right.ParticipantAdmin()),
+          ),
+        )
+      ) {
+        s"deny granting $description rights" taggedAs adminSecurityAsset
+          .setAttack(
+            attackUnknownResource(threat = s"Grant $description rights")
+          ) in { implicit env =>
+          import env.*
+          loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+            expectPermissionDenied {
+              val suffix = UUID.randomUUID().toString
+              for {
+                (_, idpAdminContext, _) <- createIDPBundle(canBeAnAdmin, suffix)
+
+                _ <- boxedCall(
+                  "user-" + suffix,
+                  idpAdminContext,
+                  Vector(uproto.Right(kind)),
+                )
+              } yield ()
+            }
+          }
+        }
+      }
+    }
+
     "allow Admin granting permissions to parties which do not exist" taggedAs adminSecurityAsset
       .setHappyCase(
         "Grant rights to non existing parties"

@@ -50,12 +50,15 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
-import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImpl
 import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImpl.{
   UpdateServices,
   validateRequestTimeout,
 }
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.ExternalTransactionProcessor
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  CommandServiceImpl,
+  TrafficEnforcementBackend,
+}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
 import com.digitalasset.canton.platform.apiserver.services.tracking.{
   CompletionResponse,
@@ -92,6 +95,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
       packagePreferenceBackend: PackagePreferenceBackend,
       transactionSubmissionTracker: SubmissionTracker,
       defaultTrackingTimeout: NonNegativeFiniteDuration,
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -109,6 +113,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
     packagePreferenceBackend,
     transactionSubmissionTracker,
     defaultTrackingTimeout,
+    trafficEnforcementBackendO,
     loggerFactory,
   )
 
@@ -127,6 +132,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     packagePreferenceService: PackagePreferenceBackend,
     transactionSubmissionTracker: SubmissionTracker,
     defaultTrackingTimeout: NonNegativeFiniteDuration,
+    trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends InteractiveSubmissionService
@@ -277,6 +283,17 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           .leftMap(InteractiveSubmissionPreparationError.Reject(_))
           .leftWiden[RpcError]
       }
+
+      _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
+        EitherT.right[RpcError](
+          trafficEnforcementBackend
+            .validateTraffic(
+              actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs,
+              trafficCost =
+                costEstimation.map(_.confirmationRequestTrafficCostEstimation).getOrElse(0L),
+            )
+        )
+      )
     } yield proto.PrepareSubmissionResponse(
       preparedTransaction = Some(prepareResult.transaction),
       preparedTransactionHash = prepareResult.hash.unwrap,

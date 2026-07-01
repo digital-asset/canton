@@ -8,10 +8,10 @@ import com.digitalasset.canton.config.{AuthServiceConfig, PositiveDurationSecond
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.tests.ledgerapi.auth.SandboxRequiringAuthorizationFuns
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  EnvironmentSetup,
   IsolatedEnvironments,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -47,7 +47,7 @@ trait CantonFixtureIsolated
 trait CantonFixtureAbstract
     extends CommunityIntegrationTest
     with SandboxRequiringAuthorizationFuns {
-  this: EnvironmentSetup =>
+  this: CantonEnvironmentSetup =>
 
   protected def darFile = new File(CantonTestsPath)
 

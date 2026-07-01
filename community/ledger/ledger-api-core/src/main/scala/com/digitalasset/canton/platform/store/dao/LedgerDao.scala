@@ -53,7 +53,7 @@ private[platform] trait LedgerDaoCommandCompletionsReader {
   def getCommandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
   )(implicit
       loggingContext: LoggingContextWithTrace

@@ -14,7 +14,7 @@ import com.digitalasset.canton.console.{
   HealthDumpGenerator,
   InstanceReference,
 }
-import com.digitalasset.canton.environment.{Environment, EnvironmentFactory}
+import com.digitalasset.canton.environment.{CantonEnvironment, CantonEnvironmentFactory}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseExternalProcess,
@@ -334,13 +334,13 @@ class NegativeRemoteDumpIntegrationTest
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   // Customize the environment factory to tweak the health dump generation
-  override protected val environmentFactory: EnvironmentFactory =
+  override protected val environmentFactory: CantonEnvironmentFactory =
     (
         config: CantonConfig,
         loggerFactory: NamedLoggerFactory,
         testingConfigInternal: TestingConfigInternal,
     ) =>
-      new Environment(
+      new CantonEnvironment(
         config,
         testingConfigInternal,
         ParticipantNodeBootstrapFactoryImpl,

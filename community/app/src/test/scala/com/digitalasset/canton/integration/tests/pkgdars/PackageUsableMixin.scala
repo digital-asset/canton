@@ -7,14 +7,14 @@ import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.config
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.damltests.java.conflicttest.Many
-import com.digitalasset.canton.integration.BaseIntegrationTest
+import com.digitalasset.canton.integration.CantonBaseIntegrationTest
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import org.scalatest.Assertion
 
 import scala.jdk.CollectionConverters.*
 
 trait PackageUsableMixin {
-  this: BaseIntegrationTest =>
+  this: CantonBaseIntegrationTest =>
 
   protected def submitCommand(
       submittingParticipant: ParticipantReference,

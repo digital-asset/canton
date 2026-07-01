@@ -19,6 +19,7 @@ import com.digitalasset.canton.config.{
   ClientConfig,
   ConsoleCommandTimeout,
   NonNegativeDuration,
+  SharedCantonConfig,
 }
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.lifecycle.OnShutdownRunner
@@ -178,7 +179,7 @@ class GrpcAdminCommandRunner(
 
 object GrpcAdminCommandRunner {
   def apply(
-      environment: Environment,
+      environment: Environment[? <: SharedCantonConfig[?]],
       apiName: String,
   ): GrpcAdminCommandRunner =
     new GrpcAdminCommandRunner(

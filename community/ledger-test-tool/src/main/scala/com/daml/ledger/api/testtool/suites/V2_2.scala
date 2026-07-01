@@ -22,6 +22,7 @@ class V2_2(override val testDars: TestDars) extends AvailableTests {
       new CommandDeduplicationParallelIT,
       new CommandDeduplicationPeriodValidationIT(testDars),
       new CommandServiceIT(testDars),
+      new GetCompletionsIT,
       new CommandSubmissionCompletionIT(testDars),
       new CompletionDeduplicationInfoIT(CompletionDeduplicationInfoIT.CommandService),
       new CompletionDeduplicationInfoIT(CompletionDeduplicationInfoIT.CommandSubmissionService),

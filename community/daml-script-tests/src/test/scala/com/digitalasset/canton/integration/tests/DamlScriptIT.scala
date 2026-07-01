@@ -9,11 +9,11 @@ import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   ConfigTransform,
   ConfigTransforms,
   EnvironmentDefinition,
-  EnvironmentSetup,
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
@@ -32,7 +32,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
     extends CommunityIntegrationTest
     with SharedEnvironment
     with BeforeAndAfterAll {
-  self: EnvironmentSetup =>
+  self: CantonEnvironmentSetup =>
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 

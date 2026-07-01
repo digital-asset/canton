@@ -9,6 +9,7 @@ import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.tea.TrafficEnforcementService.{
+  InvalidArgument,
   NotEnoughTraffic,
   TrafficEnforcementServiceError,
 }
@@ -70,6 +71,12 @@ class TrafficEnforcementServiceGrpc(
           .withDescription(
             s"Not enough traffic for account $account: balance $balance is below cost $cost"
           )
+          .asRuntimeException()
+      case InvalidArgument(provided, error) =>
+        val message = s"Invalid argument '$provided': $error"
+        logger.debug(message)
+        Status.INVALID_ARGUMENT
+          .withDescription(message)
           .asRuntimeException()
     }
 

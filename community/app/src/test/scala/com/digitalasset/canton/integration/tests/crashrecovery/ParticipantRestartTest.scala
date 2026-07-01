@@ -84,6 +84,7 @@ import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.SubmissionAlreadyInFlight
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
@@ -391,6 +392,7 @@ abstract class ParticipantRestartTest
             testedReleaseProtocolVersion,
             futureSupervisor,
             wallClock,
+            CommonMockMetrics.cryptoMetrics,
             executionContext,
             timeouts,
             BatchingConfig(),

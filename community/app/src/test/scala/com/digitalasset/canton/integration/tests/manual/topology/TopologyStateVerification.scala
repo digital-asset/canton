@@ -281,6 +281,7 @@ class TopologyStateVerification(
             ReleaseProtocolVersion(BaseTest.testedProtocolVersion),
             futureSupervisor,
             clock,
+            CommonMockMetrics.cryptoMetrics,
             executionContext,
             timeouts,
             BatchingConfig(),

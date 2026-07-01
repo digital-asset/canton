@@ -24,7 +24,7 @@ import com.digitalasset.canton.console.commands.GlobalSecretKeyAdministration
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.environment.Environment
+import com.digitalasset.canton.environment.{CantonEnvironment, Environment}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -62,15 +62,12 @@ object NodeReferences {
     NodeReferences[ParticipantReference, RemoteParticipantReference, LocalParticipantReference]
 }
 
-/** The environment in which console commands are evaluated.
-  */
-@SuppressWarnings(Array("org.wartremover.warts.Any")) // required for `Binding[_]` usage
-class ConsoleEnvironment(
-    val environment: Environment,
-    val consoleOutput: ConsoleOutput = StandardConsoleOutput,
-) extends NamedLogging
-    with FlagCloseable
-    with NoTracing {
+trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing {
+  type Config <: SharedCantonConfig[Config]
+
+  val environment: Environment[Config]
+
+  val consoleOutput: ConsoleOutput
 
   override protected val loggerFactory: NamedLoggerFactory = environment.loggerFactory
 
@@ -522,6 +519,20 @@ class ConsoleEnvironment(
   def startAll(): Unit = runE(environment.startAll())
 
   def stopAll(): Unit = runE(environment.stopAll())
+}
+
+/** The environment in which console commands are evaluated.
+  */
+@SuppressWarnings(Array("org.wartremover.warts.Any")) // required for `Binding[_]` usage
+class CantonConsoleEnvironment(
+    override val environment: CantonEnvironment,
+    val consoleOutput: ConsoleOutput = StandardConsoleOutput,
+) extends ConsoleEnvironment
+    with NamedLogging
+    with FlagCloseable
+    with NoTracing {
+
+  override type Config = CantonConfig
 
 }
 
