@@ -220,6 +220,8 @@ message PrepareSubmissionRequest {
 
   // The hashing scheme version to be used when building the hash.
   // Defaults to HASHING_SCHEME_VERSION_V2.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Optional
   optional HashingSchemeVersion hashing_scheme_version = 17;
@@ -259,7 +261,9 @@ message PrepareSubmissionResponse {
   // Required: must be non-empty
   bytes prepared_transaction_hash = 2;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 3;
@@ -341,7 +345,9 @@ message ExecuteSubmissionRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -399,7 +405,9 @@ message ExecuteSubmissionAndWaitRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -468,7 +476,9 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
