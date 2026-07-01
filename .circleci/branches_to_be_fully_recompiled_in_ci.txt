@@ -1,5 +1,0 @@
-^main$
-zenith-network:angelol/external-call-06-split-pr1-foundation
-fork/zenith-network/angelol/external-call-06-split-pr1-foundation
-zenith-network/angelol/external-call-06-split-pr1-foundation
-pull/549/head
