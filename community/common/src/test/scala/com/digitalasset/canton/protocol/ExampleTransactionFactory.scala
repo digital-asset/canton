@@ -817,7 +817,7 @@ class ExampleTransactionFactory(
       actionDescription = actionDescription,
       rollbackContext = rollbackContextFactory.empty,
       salt = participantDataSalt(viewIndex),
-      externalCallResults = ImmArray.Empty,
+      externalCallResults = Seq.empty,
       protocolVersion = protocolVersion,
     )
 

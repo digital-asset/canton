@@ -43,12 +43,13 @@ The hashing algorithm is tied to the protocol version of the synchronizer used t
 Specifically, each hashing scheme version is supported on one or several protocol versions.
 Implementations must use a hashing scheme version supported on the synchronizer on which the transaction is submitted.
 
-==================  =========================
-Protocol Version    Supported Hashing Schemes
-==================  =========================
-v34                 V2
-v35                 V2, V3
-==================  =========================
+====================  =========================
+Protocol Version      Supported Hashing Schemes
+====================  =========================
+v34                   V2
+v35                   V2, V3
+dev                   V2, V3, V4
+====================  =========================
 
 Transaction Nodes
 -----------------
@@ -64,13 +65,27 @@ versioned to accommodate those future changes. In practice, every new Daml langu
     :caption: Versioned Daml Transaction Node
     :dedent: 4
 
+V4
+==
+
+General approach
+----------------
+
+V4 follows the same general hashing approach as V3. The V3 section below defines the common encoding used by V4 unless a V4-specific difference is stated.
+
+Changes from V3
+---------------
+
+- Exercise nodes with version dev include ``external_call_results`` in the prepared transaction hash.
+  This binds the recorded external-call result payloads shown in prepared transaction review to the external party's signature.
+
 V3
 ==
 
 General approach
 ----------------
 
-The hash of the ``PreparedTransaction`` is computed by encoding every protobuf field of the messages to byte arrays,
+The hash of the ``PreparedTransaction`` is computed by encoding the fields specified by this section to byte arrays,
 and feeding those encoded values into a ``SHA-256`` hash builder. The rest of this section details how to deterministically encode
 every proto message into a byte array. Sometimes during the process, partially encoded results are hashed with SHA-256, and the resulting hash value serves as the encoding in messages further up.
 This is explicit when necessary.
@@ -104,7 +119,7 @@ Changes from V1
 
     V3 introduces support for contract keys. Usage of contract keys in externally signed transactions
     requires usage of V3. Contract keys will not work on V2.
-    Also note that V3 is only :ref:`supported <hashing_scheme_version>` on protocol version 35.
+    Also note that V3 is :ref:`supported <hashing_scheme_version>` from protocol version 35 onwards.
 
 
 Notation and Utility Functions
@@ -628,26 +643,56 @@ Create
 Exercise
 ^^^^^^^^
 
-.. code-block::
+.. tabs::
 
-    fn encode_node(exercise):
-        0x01 || # Node encoding version
-        encode(exercise.lf_version) || # Node LF version
-        0x01 || # Exercise node tag
-        encode_seed(find_seed(node.node_id).get) ||
-        encode(exercise.contract_id) ||
-        encode(exercise.package_name) ||
-        encode(exercise.template_id) ||
-        encode(exercise.signatories) ||
-        encode(exercise.stakeholders) ||
-        encode(exercise.acting_parties) ||
-        encode(exercise.interface_id) ||
-        encode(exercise.choice_id) ||
-        encode(exercise.chosen_value) ||
-        encode(exercise.consuming) ||
-        encode(exercise.exercise_result) ||
-        encode(exercise.choice_observers) ||
-        encode(exercise.children)
+   .. tab:: V4
+
+      .. code-block::
+
+          fn encode_node(exercise):
+              encode(exercise.lf_version) || # Node LF version
+              0x01 || # Exercise node tag
+              encode_seed(find_seed(node.node_id).get) ||
+              encode(exercise.contract_id) ||
+              encode(exercise.package_name) ||
+              encode(exercise.template_id) ||
+              encode(exercise.signatories) ||
+              encode(exercise.stakeholders) ||
+              encode(exercise.acting_parties) ||
+              encode(exercise.interface_id) ||
+              encode(exercise.choice_id) ||
+              encode(exercise.chosen_value) ||
+              encode(exercise.consuming) ||
+              encode(exercise.exercise_result) ||
+              encode(exercise.choice_observers) ||
+              encode(exercise.by_key) ||
+              encode(exercise.key) ||
+              encode(exercise.external_call_results) || # new in V4
+              encode(exercise.children)
+
+   .. tab:: V3
+
+      .. code-block::
+
+          fn encode_node(exercise):
+              encode(exercise.lf_version) || # Node LF version
+              0x01 || # Exercise node tag
+              encode_seed(find_seed(node.node_id).get) ||
+              encode(exercise.contract_id) ||
+              encode(exercise.package_name) ||
+              encode(exercise.template_id) ||
+              encode(exercise.signatories) ||
+              encode(exercise.stakeholders) ||
+              encode(exercise.acting_parties) ||
+              encode(exercise.interface_id) ||
+              encode(exercise.choice_id) ||
+              encode(exercise.chosen_value) ||
+              encode(exercise.consuming) ||
+              encode(exercise.exercise_result) ||
+              encode(exercise.choice_observers) ||
+              encode(exercise.by_key) ||
+              encode(exercise.key) ||
+              encode(exercise.children)
 
 .. important::
 
@@ -655,9 +700,19 @@ Exercise
     ``.get`` in ``find_seed(node.node_id).get``. If the seed of an exercise node cannot be found in the list of ``node_seeds``, encoding must be stopped
     and it should be reported as a bug.
 
-.. note::
+External call result
+^^^^^^^^^^^^^^^^^^^^
 
-    The last encoded value of the exercise node is its ``children`` field. This recursively traverses the transaction tree.
+When V4 encodes an ``external_call_results`` element, the element is encoded as follows:
+
+.. code-block::
+
+    fn encode_external_call_result(result):
+        return encode(result.extension_id) ||
+            encode(result.function_id) ||
+            encode(result.config) ||
+            encode(result.input) ||
+            encode(result.output)
 
 .. _fetch_node_encoding:
 
@@ -763,7 +818,7 @@ Finally, compute the hash that needs to be signed to commit to the ledger change
 
     fn encode(prepared_transaction):
         0x00000030 || # Hash purpose
-        0x03 || # Hashing Scheme Version
+        hashing_scheme_version_byte || # e.g. 0x03 for V3, 0x04 for V4
         hash(transaction) ||
         hash(metadata)
 
@@ -797,4 +852,3 @@ Both versions make use of the following common code:
 .. toggle::
 
     .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_common.py
-
