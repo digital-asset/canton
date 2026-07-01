@@ -80,55 +80,34 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
   )
 
   "Engine.submit" should {
-    "emit ResultNeedExternalCall with the expected payload and continuation" in {
-      val result = submit(newEngine())
+    Seq(
+      ("populated", "Call", "0a0b", "c0ff", "beef"),
+      ("empty", "CallEmptyPayloads", "", "", ""),
+    ).foreach { case (label, choice, expectedConfig, expectedInput, expectedOutput) =>
+      s"emit ResultNeedExternalCall and record the result for $label payloads" in {
+        val result = submit(newEngine(), choice)
 
-      inside(result) {
-        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-          extensionId shouldBe "ext"
-          functionId shouldBe "fun"
-          configHash shouldBe "0a0b"
-          input shouldBe "c0ff"
+        inside(result) {
+          case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+            extensionId shouldBe "ext"
+            functionId shouldBe "fun"
+            configHash shouldBe expectedConfig
+            input shouldBe expectedInput
 
-          inside(resume(Right("beef")).consume()) { case Right((tx, _)) =>
-            val exerciseNodes = tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
-            exerciseNodes should have size 1
-            exerciseNodes.head.externalCallResults shouldBe ImmArray(
-              ExternalCallResult(
-                extensionId = "ext",
-                functionId = "fun",
-                config = data.Bytes.assertFromString("0a0b"),
-                input = data.Bytes.assertFromString("c0ff"),
-                output = data.Bytes.assertFromString("beef"),
+            inside(resume(Right(expectedOutput)).consume()) { case Right((tx, _)) =>
+              val exerciseNodes = tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+              exerciseNodes should have size 1
+              exerciseNodes.head.externalCallResults shouldBe ImmArray(
+                ExternalCallResult(
+                  extensionId = "ext",
+                  functionId = "fun",
+                  config = data.Bytes.assertFromString(expectedConfig),
+                  input = data.Bytes.assertFromString(expectedInput),
+                  output = data.Bytes.assertFromString(expectedOutput),
+                )
               )
-            )
-          }
-      }
-    }
-
-    "accept empty config, input, and output hex payloads" in {
-      val result = submit(newEngine(), "CallEmptyPayloads")
-
-      inside(result) {
-        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-          extensionId shouldBe "ext"
-          functionId shouldBe "fun"
-          configHash shouldBe ""
-          input shouldBe ""
-
-          inside(resume(Right("")).consume()) { case Right((tx, _)) =>
-            val exerciseNodes = tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
-            exerciseNodes should have size 1
-            exerciseNodes.head.externalCallResults shouldBe ImmArray(
-              ExternalCallResult(
-                extensionId = "ext",
-                functionId = "fun",
-                config = data.Bytes.assertFromString(""),
-                input = data.Bytes.assertFromString(""),
-                output = data.Bytes.assertFromString(""),
-              )
-            )
-          }
+            }
+        }
       }
     }
 
