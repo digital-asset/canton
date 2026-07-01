@@ -8,7 +8,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.transports.ServerSubscriptionCloseReason
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -43,6 +43,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends FlagCloseable
+    with HasCloseContext
     with NamedLogging {
 
   // as the subscriptions are mutable, any access or modifications to this pool are expected to be synchronized
@@ -124,7 +125,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
           // schedule expiring the subscription
           // this could potentially happen immediately if the expiration has already passed
           subscription.expireAt.foreach(ts =>
-            clock.scheduleAt(
+            clock.scheduleAtCancelledOnShutdown(
               _ => {
                 // if the subscription still exists, it will be returned here
                 removeSubscription(member, subscription).foreach { subscription =>
@@ -139,6 +140,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
                   )
                 }
               },
+              s"${getClass.getName}: creating subscription pool",
               ts,
             )
           )

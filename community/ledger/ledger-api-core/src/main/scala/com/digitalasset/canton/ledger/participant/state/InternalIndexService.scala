@@ -223,7 +223,7 @@ object InternalIndexService {
         .toSet
   }
 
-  sealed trait AcsUpdate
+  sealed trait AcsUpdate extends Product with Serializable
   object AcsUpdate {
     final case class AcsCommitment(payload: ByteString) extends AcsUpdate
     final case class EffectivePartyToParticipantMappings(

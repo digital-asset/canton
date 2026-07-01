@@ -216,7 +216,7 @@ object PingService {
 
   private[admin] trait Impl {
 
-    this: AdminWorkflowService & NamedLogging & FlagCloseable & PromiseUnlessShutdownFactory & Spanning =>
+    this: AdminWorkflowService & NamedLogging & FlagCloseable & HasCloseContext & PromiseUnlessShutdownFactory & Spanning =>
 
     protected def adminPartyId: PartyId
     protected def maxLevelSupported: NonNegativeInt
@@ -425,11 +425,12 @@ object PingService {
       }
       FutureUtil.doNotAwait(
         clock
-          .scheduleAt(
+          .scheduleAtCancelledOnShutdown(
             _ => {
               // vacuum created contracts
               created.foreach(_.vacuum())
             },
+            s"${getClass.getName}: processing created contracts",
             cleanup.plus(CleanupPingsTime.duration),
           )
           .onShutdown(()),

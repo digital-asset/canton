@@ -161,8 +161,9 @@ final class DbStorageMulti private (
     val nextCheckTime = now.add(checkPeriod.unwrap)
     logger.trace(s"Scheduling the next health check at $nextCheckTime")
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      clock.scheduleAt(
+      clock.scheduleAtCancelledOnShutdown(
         checkHealth,
+        s"${getClass.getName}: scheduling health check",
         nextCheckTime,
       ),
       "failed to schedule next health check",

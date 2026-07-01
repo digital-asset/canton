@@ -381,10 +381,11 @@ class DriverKms(
     val nextCheckTime = now.add(checkPeriod.unwrap)
     logger.debug(s"Scheduling the next health check at $nextCheckTime")
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      clock.scheduleAt(
+      clock.scheduleAtCancelledOnShutdown(
         checkHealth,
+        s"${getClass.getName}: scheduling health check",
         nextCheckTime,
-      ),
+      )(executionContext, closeContext),
       "failed to schedule next health check",
       closeContext = Some(closeContext),
     )

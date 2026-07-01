@@ -400,7 +400,13 @@ class SequencerWriter(
 
       val onlineP = Promise[Unit]()
       FutureUtil.doNotAwait(
-        clock.scheduleAt(_ => onlineP.success(()), onlineTimestamp).unwrap,
+        clock
+          .scheduleAtCancelledOnShutdown(
+            _ => onlineP.success(()),
+            s"${getClass.getName}: completing online promise",
+            onlineTimestamp,
+          )
+          .unwrap,
         s"wait for becoming online at $onlineTimestamp",
       )
       onlineP.future

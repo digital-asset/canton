@@ -5,8 +5,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.data.OptionT
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, DbStore, Storage}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
@@ -19,8 +21,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.{FailureMode, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.GetResult
+import slick.jdbc.PostgresProfile.api.SimpleDBIO
 
 import scala.concurrent.ExecutionContext
 
@@ -183,6 +187,15 @@ object PartitionManager {
       partitionNumberMap.getOrElse(batchesTable, -1),
     )
 
+    val vacuumQueue = new SimpleExecutionQueue(
+      name = s"partition-creator-vacuum",
+      futureSupervisor = FutureSupervisor.Noop,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+      logTaskTiming = true,
+      failureMode = FailureMode.ContinueAfterFailure,
+    )
+
     override def createPartitionsIfNeeded(newEpochNumber: EpochNumber)(implicit
         traceContext: TraceContext
     ): PekkoFutureUnlessShutdown[Int] = {
@@ -191,7 +204,22 @@ object PartitionManager {
 
       def createPartitionDbIo(partition: Partition) = partition match {
         case Partition(partitionName, tableName, newPartitionFrom, newPartitionTo) =>
-          sqlu"""create table if not exists #$partitionName partition of #$tableName for values from (#$newPartitionFrom) to (#$newPartitionTo);"""
+          for {
+            _ <-
+              sqlu"""create table if not exists #$partitionName partition of #$tableName for values from (#$newPartitionFrom) to (#$newPartitionTo);"""
+            _ <-
+              sqlu"""alter table #$partitionName set (
+                    -- avoid that inserts trigger vacuuming in a hot partition
+                    autovacuum_vacuum_insert_threshold = 1000000000,
+                    autovacuum_vacuum_insert_scale_factor = 0,
+                    -- avoid that a few deletes trigger vacuuming (which is only useful really to the batches table)
+                    autovacuum_vacuum_threshold = 10000,
+                    autovacuum_vacuum_scale_factor = 0.01,
+                    -- if autovacuum gets triggered at some point, spread out the work a bit
+                    autovacuum_vacuum_cost_limit = 500,
+                    autovacuum_vacuum_cost_delay = 10
+                  )"""
+          } yield ()
       }
 
       PekkoFutureUnlessShutdown(
@@ -214,6 +242,7 @@ object PartitionManager {
                   }
               } else FutureUnlessShutdown.pure(0)
             _ <- maybeCreateExclusionConstraint(newEpochNumber)
+            _ = maybeKickOffManualVacuuming(newEpochNumber)
           } yield partitionsCreated,
         orderingStage = Some(functionFullName),
       )
@@ -259,6 +288,74 @@ object PartitionManager {
           .getOrElse(FutureUnlessShutdown.unit)
       } yield ()
 
+    // if this is the last epoch in the partition, it means we are not supposed to ever add more data to this partition,
+    // i.e. it goes from being a hot to a cold partition. that is a good time to kick off manual vacuum operation,
+    // in a sequential manner, asynchronously, and using setting values that will make this a gentle, spread out, operation,
+    // that will affect all rows of the cold partition, such that it shouldn't affect performance of other db operations
+    // happening (especially inserts) and if autovacuum ever gets triggered again in the future for these partitions,
+    // it will mostly skip doing any work here.
+    private def maybeKickOffManualVacuuming(
+        newEpochNumber: EpochNumber
+    )(implicit traceContext: TraceContext): Unit = {
+      val currentEpochPartitionNumber = newEpochNumber / partitionSize
+      val lastEpochNumber = EpochNumber((currentEpochPartitionNumber + 1) * partitionSize - 1)
+      if (newEpochNumber == lastEpochNumber) {
+        val partitionNames = (batchesTable +: epochPartitionedTables).map(tableName =>
+          s"${tableName}_p$currentEpochPartitionNumber"
+        )
+        val _ = partitionNames.map(partitionName =>
+          vacuumQueue.executeUS(
+            manualVacuumPartition(partitionName),
+            s"manual vacuum $partitionName",
+          )
+        )
+      }
+    }
+    private def manualVacuumPartition(
+        partitionName: String
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+      logger.info(s"Starting manual vacuum on recently completed partition $partitionName")
+      val manualVacuumAction = SimpleDBIO[Unit] { session =>
+        val conn = session.connection
+        val originalAutoCommit = conn.getAutoCommit
+        val stmt = conn.createStatement()
+        try {
+          // VACUUM cannot execute inside a transaction block.
+          // slick normally executes statements with autocommit disabled, meaning they
+          // run inside a transaction. Temporarily enabling autocommit causes each
+          // statement below to execute independently, allowing the VACUUM command to
+          // run successfully.
+          conn.setAutoCommit(true)
+          // spread out the vacuuming work a bit
+          stmt.execute("set vacuum_cost_limit = 500").discard
+          stmt.execute("set vacuum_cost_delay = 10").discard
+          // immediately freeze all rows, including very recent ones
+          stmt.execute("set vacuum_freeze_min_age = 0").discard
+          stmt.execute("set vacuum_freeze_table_age = 0").discard
+          stmt.execute(s"vacuum (freeze, analyze) $partitionName").discard
+          ()
+        } finally {
+          try {
+            // restore the session settings before returning the connection to the pool so future users of this connection see the defaults
+            stmt.execute("reset vacuum_cost_limit").discard
+            stmt.execute("reset vacuum_cost_delay").discard
+            stmt.execute("reset vacuum_freeze_min_age").discard
+            stmt.execute("reset vacuum_freeze_table_age").discard
+          } finally {
+            try {
+              stmt.close()
+            } finally {
+              // restore the original autocommit mode before releasing the connection back to slick
+              conn.setAutoCommit(originalAutoCommit)
+            }
+          }
+        }
+      }
+      storage
+        .queryAndUpdate(manualVacuumAction, functionFullName)
+        .map(_ => logger.info(s"Completed manual vacuum of partition $partitionName"))
+    }
+
     private def computeExclusionConstraint(newEpochNumber: EpochNumber)(implicit
         traceContext: TraceContext
     ): PekkoFutureUnlessShutdown[Option[OutputBlockPartitionExclusionConstraint]] = {
@@ -276,6 +373,9 @@ object PartitionManager {
           .map(_.map(block => UpperBoundExclusionConstraint(block, currentEpochPartitionNumber)))
       } else PekkoFutureUnlessShutdown.pure(None)
     }
+
+    override def onClosed(): Unit = LifeCycle.close(vacuumQueue)(logger)
+
   }
 
   private[pruning] final case class HighestPrunedPartitionNumbers(

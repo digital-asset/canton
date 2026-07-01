@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.platform.store.interning.StringInterningView
+import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{InternedPartyId, LfPartyId}
@@ -323,12 +323,12 @@ object AcsDigestStore {
   type PartyAcsDigest[+Party] = AcsDigest[PartyAndOrder[Party], RawDigest]
   object PartyAcsDigest {
     def internalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: PartyAcsDigest[LfPartyId],
     ): PartyAcsDigest[InternedPartyId] = pad.map(_.map(stringInterning.party.internalize))
 
     def externalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: PartyAcsDigest[InternedPartyId],
     ): PartyAcsDigest[LfPartyId] = pad.map(_.map(stringInterning.party.externalize))
   }
@@ -336,13 +336,13 @@ object AcsDigestStore {
   type PartyAcsDigestUpdate[+Party] = AcsDigestUpdate[PartyAndOrder[Party], RawDigest]
   object PartyAcsDigestUpdate {
     def internalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: PartyAcsDigestUpdate[LfPartyId],
     ): PartyAcsDigestUpdate[InternedPartyId] =
       pad.map(_.map(stringInterning.party.internalize))
 
     def externalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: PartyAcsDigestUpdate[InternedPartyId],
     ): PartyAcsDigestUpdate[LfPartyId] =
       pad.map(_.map(stringInterning.party.externalize))
@@ -367,13 +367,13 @@ object AcsDigestStore {
   type ParticipantAcsDigest[+Participant] = AcsDigest[Participant, (RawDigest, HashedDigest)]
   object ParticipantAcsDigest {
     def internalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: ParticipantAcsDigest[ParticipantId],
     ): ParticipantAcsDigest[InternedParticipantId] =
       pad.map(stringInterning.participantId.internalize)
 
     def externalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: ParticipantAcsDigest[InternedParticipantId],
     ): ParticipantAcsDigest[ParticipantId] = pad.map(stringInterning.participantId.externalize)
   }
@@ -382,13 +382,13 @@ object AcsDigestStore {
     AcsDigestUpdate[Participant, (RawDigest, HashedDigest)]
   object ParticipantAcsDigestUpdate {
     def internalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: ParticipantAcsDigestUpdate[ParticipantId],
     ): ParticipantAcsDigestUpdate[InternedParticipantId] =
       pad.map(stringInterning.participantId.internalize)
 
     def externalize(
-        stringInterning: StringInterningView,
+        stringInterning: StringInterning,
         pad: ParticipantAcsDigestUpdate[InternedParticipantId],
     ): ParticipantAcsDigestUpdate[ParticipantId] =
       pad.map(stringInterning.participantId.externalize)

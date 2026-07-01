@@ -14,34 +14,18 @@ import scala.collection.immutable
 import scala.collection.immutable.SortedMap
 import scala.math.Ordered.orderingToOrdered
 
-final case class SupportedProtoVersions[
-    ValueClass,
-    Context,
-    DeserializedValueClass,
-    Comp,
-    Dependency,
-] private (
+final case class SupportedProtoVersions[F[
+    _
+], ValueClass, Context, DeserializedValueClass, Comp, Dependency] private (
     // Sorted with descending order
     converters: NonEmpty[immutable.SortedMap[
       ProtoVersion,
-      ProtoCodec[
-        ValueClass,
-        Context,
-        DeserializedValueClass,
-        Comp,
-        Dependency,
-      ],
+      ProtoCodec[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency],
     ]],
     name: String,
 ) {
 
-  type Codec = ProtoCodec[
-    ValueClass,
-    Context,
-    DeserializedValueClass,
-    Comp,
-    Dependency,
-  ]
+  type Codec = ProtoCodec[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency]
 
   val (higherProtoVersion, higherConverter) = converters.head1
 
@@ -102,43 +86,17 @@ final case class SupportedProtoVersions[
 
 object SupportedProtoVersions {
 
-  def apply[
-      ValueClass,
-      Context,
-      DeserializedValueClass,
-      Comp,
-      Dependency,
-  ](name: String)(
+  def apply[F[_], ValueClass, Context, DeserializedValueClass, Comp, Dependency](name: String)(
       head: (
           ProtoVersion,
-          ProtoCodec[
-            ValueClass,
-            Context,
-            DeserializedValueClass,
-            Comp,
-            Dependency,
-          ],
+          ProtoCodec[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency],
       ),
       tail: (
           ProtoVersion,
-          ProtoCodec[
-            ValueClass,
-            Context,
-            DeserializedValueClass,
-            Comp,
-            Dependency,
-          ],
+          ProtoCodec[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency],
       )*
-  ): SupportedProtoVersions[
-    ValueClass,
-    Context,
-    DeserializedValueClass,
-    Comp,
-    Dependency,
-  ] =
-    SupportedProtoVersions.fromNonEmpty(name)(
-      NonEmpty.mk(Seq, head, tail*)
-    )
+  ): SupportedProtoVersions[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency] =
+    SupportedProtoVersions.fromNonEmpty(name)(NonEmpty.mk(Seq, head, tail*))
 
   /*
    Throws an error if a protocol version or a protobuf version is used twice.
@@ -146,8 +104,8 @@ object SupportedProtoVersions {
    - Each protobuf version should appear only once.
    - Each protobuf version should use a different minimum protocol version.
    */
-  private def ensureNoDuplicates(
-      converters: NonEmpty[Seq[(ProtoVersion, ProtoCodec[?, ?, ?, ?, ?])]],
+  private def ensureNoDuplicates[F[_]](
+      converters: NonEmpty[Seq[(ProtoVersion, ProtoCodec[F, ?, ?, ?, ?, ?])]],
       name: String,
   ): Unit = {
 
@@ -187,41 +145,22 @@ object SupportedProtoVersions {
     }.discard
   }
 
-  private[version] def fromNonEmpty[
-      ValueClass,
-      Context,
-      DeserializedValueClass,
-      Comp,
-      Dependency,
-  ](name: String)(
+  private[version] def fromNonEmpty[F[
+      _
+  ], ValueClass, Context, DeserializedValueClass, Comp, Dependency](name: String)(
       converters: NonEmpty[Seq[
         (
             ProtoVersion,
-            ProtoCodec[
-              ValueClass,
-              Context,
-              DeserializedValueClass,
-              Comp,
-              Dependency,
-            ],
+            ProtoCodec[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency],
         )
       ]]
-  ): SupportedProtoVersions[
-    ValueClass,
-    Context,
-    DeserializedValueClass,
-    Comp,
-    Dependency,
-  ] = {
+  ): SupportedProtoVersions[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency] = {
     ensureNoDuplicates(converters, name)
 
-    val sortedConverters: NonEmpty[SortedMap[ProtoVersion, ProtoCodec[
-      ValueClass,
-      Context,
-      DeserializedValueClass,
-      Comp,
-      Dependency,
-    ]]] = checked(
+    val sortedConverters: NonEmpty[SortedMap[
+      ProtoVersion,
+      ProtoCodec[F, ValueClass, Context, DeserializedValueClass, Comp, Dependency],
+    ]] = checked(
       NonEmptyUtil.fromUnsafe(
         immutable.SortedMap.from(converters)(implicitly[Ordering[ProtoVersion]].reverse)
       )

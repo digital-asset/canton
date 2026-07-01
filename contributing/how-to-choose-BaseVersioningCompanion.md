@@ -1,7 +1,7 @@
 How to: choose sub-trait of BaseVersioningCompanion
 ===================================================
 
-The goal of this page is to help you pick the correct sub-trait of `BaseVersioningCompanion` for your use case.
+The goal of this page is to help you pick the correct sub-trait of `BaseVersioningCompanionF` for your use case.
 The different sub-traits expose different behavior and signature of the `fromByteString` and
 `fromProtoVxy` methods.
 
@@ -10,6 +10,29 @@ you to pick the correct one.
 If you don't understand some of the concepts, refer to section [concepts](#concepts-around-versioning).
 
 # The naming scheme
+
+## Serialization return type
+In most of the cases, serialization (unlike deserialization) always succeeds. In some cases however, serialization
+can fail. This can be encoded in the return type of the serialization:
+
+|                | **toProtoVersioned**                          | **toByteString**             | **toByteArray**               |
+|----------------|-----------------------------------------------|------------------------------|-------------------------------|
+| **No failure** | `VersionedMessage[ValueClass]`                | `ByteString`                 | `Array[Byte]`                 |
+| **Can fail**   | `Either[String, VersionedMessage[ValueClass]] | `Either[String, ByteString]` | `Either[String, Array[Byte]]` |
+
+This can be done by encoding the return type as follows:
+
+| **toProtoVersioned**              | **toByteString** | **toByteArray**  |
+|-----------------------------------|------------------|------------------|
+| `F[VersionedMessage[ValueClass]]` | `F[ByteString]`  | `F[Array[Byte]]` |
+
+Where type constructor can be `Id` (no failure) or `Either[String, *]` (can fail).
+
+Hence, many of the traits around versioning follow the convention:
+
+- `F` suffix (e.g., `HasProtocolVersionedWrapperF`) for the generic trait,
+- `E` suffix for the versions that can fail (e.g., `HasProtocolVersionedWrapperE`),
+- no suffix for the no failure version (`HasProtocolVersionedWrapper`).
 
 ## Basic use cases
 We present first the basic use cases.

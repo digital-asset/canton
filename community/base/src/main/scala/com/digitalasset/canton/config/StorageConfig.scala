@@ -70,7 +70,6 @@ final case class DbParametersConfig(
     unsafeCleanOnValidationError: Boolean = false,
     unsafeBaselineOnMigrate: Boolean = false,
     migrateAndStart: Boolean = false,
-
     // Make the default settings a part of repeatable migrations
     repeatableMigrationsPaths: Seq[String] = Seq.empty,
     partitions: PartitionConfig = PartitionConfig(),

@@ -157,14 +157,38 @@ class PartitionManagerDatabaseTest
     storage.query(explain, "explain")
   }
 
+  def getPartitionSettings(partitionName: String) = {
+    import storage.api.*
+    storage.query(
+      sql"""select c.reloptions from pg_class c where c.oid = '#$partitionName'::regclass;"""
+        .as[String](GetResult(_.nextString()))
+        .map(_.headOption.getOrElse("")),
+      "get settings",
+    )
+  }
+
+  def getVacuumStats(partitionName: String) = {
+    import storage.api.*
+    storage.query(
+      sql"""select vacuum_count, autovacuum_count from pg_stat_user_tables where relid = '#$partitionName'::regclass;"""
+        .as[(Long, Long)](
+          GetResult(r => (r.nextLong(), r.nextLong()))
+        )
+        .map(_.headOption.getOrElse(fail())),
+      "get manual vacuum stats",
+    )
+  }
+
   "PartitionManagerDatabase" should {
+    lazy val createPartitionManagement = create().futureUnlessShutdown()
+
     "prune and creation of partitions does not error" in {
       val initStore = new PruningManagerInitStore(storage, timeouts, loggerFactory)
       def getMinMaxPartitionNumbers =
         initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
 
       (for {
-        case Some((creator, pruner)) <- create().futureUnlessShutdown()
+        case Some((creator, pruner)) <- createPartitionManagement
 
         partitionSizeEntry <- initStore.latestPartitionSizeEntry
         _ = partitionSizeEntry shouldBe PartitionManager.PartitionSizeEntry(EpochNumber(0), 0, 100)
@@ -198,6 +222,11 @@ class PartitionManagerDatabaseTest
           forAll((maxMap3 - PartitionManager.batchesTable).values)(_ shouldBe (2))
         }
 
+        // checking that custom autovacuum settings are applied to a new partition
+        opts <- getPartitionSettings(s"${PartitionManager.consensusInProgressTable}_p2")
+        _ =
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=\d+,autovacuum_vacuum_insert_scale_factor=\d+,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\.01,autovacuum_vacuum_cost_limit=\d+,autovacuum_vacuum_cost_delay=\d+\}".r
+
         _ <- creator
           .createPartitionsIfNeeded(EpochNumber(200))
           .futureUnlessShutdown()
@@ -214,7 +243,7 @@ class PartitionManagerDatabaseTest
       val outputStore = new DbOutputMetadataStore(storage, timeouts, loggerFactory)
 
       (for {
-        case Some((creator, _)) <- create().futureUnlessShutdown()
+        case Some((creator, _)) <- createPartitionManagement
 
         // we create 100 partitions
         _ <- creator
@@ -272,6 +301,25 @@ class PartitionManagerDatabaseTest
         result7 <- howManyPartitionsAreSearched(BlockNumber(100))
         _ = result7 shouldBe 1
 
+      } yield succeed).onShutdown(fail())
+    }
+
+    "autovacuum" in {
+      val partitionName = s"${PartitionManager.consensusInProgressTable}_p2"
+      (for {
+        case Some((creator, _)) <- createPartitionManagement
+
+        // checking that custom autovacuum settings are applied to a new partition
+        opts <- getPartitionSettings(partitionName)
+        _ =
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=\d+,autovacuum_vacuum_insert_scale_factor=\d+,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\.01,autovacuum_vacuum_cost_limit=\d+,autovacuum_vacuum_cost_delay=\d+\}".r
+
+        _ = eventually() {
+          // we should see that manual vacuum took place (twice instead of once because of how unit tests run everything twice)
+          // and autovacuum does not run
+          getVacuumStats(partitionName).onShutdown(fail()).futureValue shouldBe (2, 0)
+        }
+        _ = creator.close()
       } yield succeed).onShutdown(fail())
     }
   }
