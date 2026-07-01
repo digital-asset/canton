@@ -1103,13 +1103,8 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
 
       private def externalCallResources(
           err: LfInterpretationError.ExternalCall.ExecutionFailed
-      ): Seq[(ErrorResource, String)] = {
-        val message = err.error match {
-          case LfInterpretationError.ExternalCall.ExecutionFailed.CallFailed(message) => message
-          case LfInterpretationError.ExternalCall.ExecutionFailed.InvalidOutput(message) => message
-        }
-        externalCallResources(err.extensionId, err.functionId, message)
-      }
+      ): Seq[(ErrorResource, String)] =
+        externalCallResources(err.extensionId, err.functionId, err.error.message)
 
       @Explanation(
         "External-call preparation failed before the participant issued the external call."
