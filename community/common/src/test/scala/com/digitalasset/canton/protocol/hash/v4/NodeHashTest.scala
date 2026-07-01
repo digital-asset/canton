@@ -118,8 +118,7 @@ class NodeHashTest extends BaseTest with AnyWordSpecLike with Matchers with Hash
       ) should not be hash
       hashExerciseNode(
         exerciseNode(ImmArray(externalCallResult1, externalCallResult1))
-      ) should not be hash
-      hashExerciseNode(exerciseNode(ImmArray(externalCallResult1))) should not be hash
+      ) should not be hashExerciseNode(exerciseNode(ImmArray(externalCallResult1)))
     }
 
     "include all external-call result fields" in {
