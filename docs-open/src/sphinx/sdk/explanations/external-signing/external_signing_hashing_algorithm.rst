@@ -814,27 +814,13 @@ Final Hash
 
 Finally, compute the hash that needs to be signed to commit to the ledger changes.
 
-.. tabs::
+.. code-block::
 
-   .. tab:: V4
-
-      .. code-block::
-
-          fn encode(prepared_transaction):
-              0x00000030 || # Hash purpose
-              0x04 || # Hashing Scheme Version
-              hash(transaction) ||
-              hash(metadata)
-
-   .. tab:: V3
-
-      .. code-block::
-
-          fn encode(prepared_transaction):
-              0x00000030 || # Hash purpose
-              0x03 || # Hashing Scheme Version
-              hash(transaction) ||
-              hash(metadata)
+    fn encode(prepared_transaction):
+        0x00000030 || # Hash purpose
+        hashing_scheme_version_byte || # e.g. 0x03 for V3, 0x04 for V4
+        hash(transaction) ||
+        hash(metadata)
 
 .. code-block::
 
