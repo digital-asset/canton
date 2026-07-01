@@ -52,6 +52,7 @@ import software.amazon.awssdk.utils.AttributeMap
 import java.net.URI
 import java.util.concurrent.CompletionException
 import scala.concurrent.ExecutionContext
+import scala.jdk.CollectionConverters.*
 import scala.jdk.FutureConverters.*
 
 /** Stands for Amazon Web Services - Key Management Service and is an internal KMS implementation
@@ -78,6 +79,14 @@ class AwsKms(
       "Unable to execute HTTP request: connection timed out",
       "Unable to execute HTTP request: BetterFixedChannelPooled was closed",
     )
+
+  private val keyCreationTags: java.util.Collection[Tag] =
+    (config.customTags + ("CreatedBy" -> "Canton"))
+      .map { case (key, value) =>
+        Tag.builder().tagKey(key).tagValue(value).build()
+      }
+      .toSeq
+      .asJava
 
   private def errorHandler(
       err: Throwable,
@@ -131,7 +140,7 @@ class AwsKms(
               .multiRegion(config.multiRegionKey)
               .keySpec(keySpec)
               .keyUsage(keyUsage)
-              .tags(Tag.builder().tagKey("CreatedBy").tagValue("Canton").build())
+              .tags(keyCreationTags)
               .description(name.map(_.unwrap).getOrElse(""))
               .withTraceContext(_.overrideConfiguration)
               .build

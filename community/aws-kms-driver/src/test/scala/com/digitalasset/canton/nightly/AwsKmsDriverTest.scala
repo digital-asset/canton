@@ -126,7 +126,11 @@ class AwsKmsDriverFactoryTest extends KmsDriverFactoryTest {
 
   override protected lazy val config: AwsKmsDriverFactory#ConfigType = {
     val aws = KmsConfig.Aws.defaultTestConfig
-    AwsKmsDriverConfig(region = aws.region, multiRegionKey = aws.multiRegionKey)
+    AwsKmsDriverConfig(
+      region = aws.region,
+      multiRegionKey = aws.multiRegionKey,
+      customTags = Map("environment" -> "test"),
+    )
   }
 
   "AWS KMS Driver Factory" must {
