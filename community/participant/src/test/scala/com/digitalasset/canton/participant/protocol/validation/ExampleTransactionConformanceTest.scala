@@ -480,8 +480,8 @@ class ExampleTransactionConformanceTest
           input = Bytes.fromStringUtf8("input"),
           output = Bytes.fromStringUtf8("output"),
         )
-        val expectedStoredResults =
-          DAMLe.StoredExternalCallResults.fromResults(Seq(externalCallResult))
+        val expectedReplayData =
+          DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult))
         val example = devFactory.SingleExercise(devFactory.deriveNodeSeed(0))
         val transaction =
           withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult))
@@ -530,9 +530,9 @@ class ExampleTransactionConformanceTest
         def observedExternalCallArguments(
             fullTree: FullTransactionViewTree,
             checkingParties: Set[LfPartyId],
-        ): Future[DAMLe.StoredExternalCallResults] = {
+        ): Future[DAMLe.ExternalCallReplayData] = {
           val observed = new AtomicReference[
-            Option[DAMLe.StoredExternalCallResults]
+            Option[DAMLe.ExternalCallReplayData]
           ](None)
           val recordingReinterpreter = new HasReinterpret {
             override def reinterpret(
@@ -555,7 +555,7 @@ class ExampleTransactionConformanceTest
             ] =
               EitherT.right[DAMLe.ReinterpretationError](externalCallReplayData()).flatMap {
                 replayData =>
-                  observed.set(Some(replayData.storedExternalCallResults))
+                  observed.set(Some(replayData))
                   reinterpretTransaction(example, transaction).reinterpret(
                     contracts,
                     contractAuthenticator,
@@ -602,8 +602,8 @@ class ExampleTransactionConformanceTest
             Set(ExampleTransactionFactory.signatory),
           )
         } yield {
-          hostedPartyArguments shouldBe expectedStoredResults
-          unhostedPartyArguments shouldBe expectedStoredResults
+          hostedPartyArguments shouldBe expectedReplayData
+          unhostedPartyArguments shouldBe expectedReplayData
         }
       }
 
