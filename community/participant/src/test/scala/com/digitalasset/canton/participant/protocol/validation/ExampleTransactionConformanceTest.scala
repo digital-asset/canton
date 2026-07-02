@@ -273,15 +273,9 @@ class ExampleTransactionConformanceTest
     }
 
     def buildUnderTest(reinterpretCommand: HasReinterpret): ModelConformanceChecker =
-      buildUnderTestWithFactory(reinterpretCommand, transactionTreeFactory)
-
-    def buildUnderTestWithFactory(
-        reinterpretCommand: HasReinterpret,
-        treeFactory: TransactionTreeFactory,
-    ): ModelConformanceChecker =
       new ModelConformanceChecker(
         reinterpretCommand,
-        treeFactory,
+        transactionTreeFactory,
         submittingParticipant,
         ContractValidator.AllowAll,
         packageResolver,
@@ -460,19 +454,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "aggregate visible external-call results for replay" in {
-        val devFactory = new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))(
-          psid = factory.psid.copy(protocolVersion = ProtocolVersion.dev),
-          cantonContractIdVersion = contractIdVersion,
-        )
-        val devTreeFactory = TransactionTreeFactory(
-          ExampleTransactionFactory.submittingParticipant,
-          devFactory.psid,
-          devFactory.cantonContractIdVersion,
-          devFactory.cryptoOps,
-          TestContractHasher.Async,
-          loggerFactory,
-        )
+      "aggregate visible external-call results for replay" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
         val externalCallResult = ExternalCallResult(
           extensionId = "extension",
           functionId = "function",
@@ -482,7 +464,7 @@ class ExampleTransactionConformanceTest
         )
         val expectedReplayData =
           DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult))
-        val example = devFactory.SingleExercise(devFactory.deriveNodeSeed(0))
+        val example = factory.SingleExercise(factory.deriveNodeSeed(0))
         val transaction =
           withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult))
         val contractOfId: LfContractId => EitherT[
@@ -499,16 +481,16 @@ class ExampleTransactionConformanceTest
                 )
             )
 
-        val createTree = devTreeFactory.createTransactionTree(
+        val createTree = transactionTreeFactory.createTransactionTree(
           transaction = transaction,
           submitterInfo = DefaultParticipantStateValues.submitterInfo(List(submitter)),
           workflowId = None,
-          mediator = devFactory.mediatorGroup,
-          transactionSeed = devFactory.transactionSeed,
-          transactionUuid = devFactory.transactionUuid,
-          topologySnapshot = devFactory.topologySnapshot,
+          mediator = factory.mediatorGroup,
+          transactionSeed = factory.transactionSeed,
+          transactionUuid = factory.transactionUuid,
+          topologySnapshot = factory.topologySnapshot,
           contractOfId = contractOfId,
-          maxSequencingTime = devFactory.ledgerTime.plusSeconds(100),
+          maxSequencingTime = factory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
         )
 
@@ -519,7 +501,7 @@ class ExampleTransactionConformanceTest
           FullTransactionViewTree.Optics.tree
             .andThen(GenTransactionTree.Optics.rootViewsUnsafe)
             .andThen(
-              MerkleSeq.Optics.toSeq[TransactionView](devFactory.cryptoOps, ProtocolVersion.dev)
+              MerkleSeq.Optics.toSeq[TransactionView](factory.cryptoOps, testedProtocolVersion)
             )
             .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
             .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
@@ -573,13 +555,13 @@ class ExampleTransactionConformanceTest
           }
 
           val viewTree = treeWithCheckingParties(fullTree, checkingParties)
-          buildUnderTestWithFactory(recordingReinterpreter, devTreeFactory)
+          buildUnderTest(recordingReinterpreter)
             .reInterpret(
               view = viewTree.view,
               ledgerTime = viewTree.ledgerTime,
               preparationTime = viewTree.preparationTime,
               getEngineAbortStatus = () => EngineAbortStatus.notAborted,
-              topologySnapshot = devFactory.topologySnapshot,
+              topologySnapshot = factory.topologySnapshot,
             )
             .value
             .failOnShutdown
@@ -604,6 +586,63 @@ class ExampleTransactionConformanceTest
           hostedPartyArguments shouldBe expectedReplayData
           unhostedPartyArguments shouldBe expectedReplayData
         }
+      }
+
+      "observe empty external-call replay data" onlyRunWhen (testedProtocolVersion < ProtocolVersion.dev) in {
+        val example = factory.SingleExercise(factory.deriveNodeSeed(0))
+        val observed = new AtomicReference[Option[DAMLe.ExternalCallReplayData]](None)
+        val recordingReinterpreter = new HasReinterpret {
+          override def reinterpret(
+              contracts: ReplayContractLookup,
+              contractAuthenticator: ContractAuthenticatorFn,
+              submitters: Set[LfPartyId],
+              command: LfCommand,
+              topologySnapshot: TopologySnapshot,
+              ledgerTime: CantonTimestamp,
+              preparationTime: CantonTimestamp,
+              rootSeed: Option[LfHash],
+              packageResolution: Map[PackageName, PackageId],
+              expectFailure: Boolean,
+              getEngineAbortStatus: GetEngineAbortStatus,
+              externalCallReplayData: () => DAMLe.ExternalCallReplayData,
+          )(implicit traceContext: TraceContext): EitherT[
+            FutureUnlessShutdown,
+            DAMLe.ReinterpretationError,
+            ReInterpretationResult,
+          ] = {
+            observed.set(Some(externalCallReplayData()))
+            reinterpretExample(example).reinterpret(
+              contracts,
+              contractAuthenticator,
+              submitters,
+              command,
+              topologySnapshot,
+              ledgerTime,
+              preparationTime,
+              rootSeed,
+              packageResolution,
+              expectFailure,
+              getEngineAbortStatus,
+              externalCallReplayData,
+            )
+          }
+        }
+
+        val viewTree = example.rootTransactionViewTrees.loneElement
+        buildUnderTest(recordingReinterpreter)
+          .reInterpret(
+            view = viewTree.view,
+            ledgerTime = viewTree.ledgerTime,
+            preparationTime = viewTree.preparationTime,
+            getEngineAbortStatus = () => EngineAbortStatus.notAborted,
+            topologySnapshot = factory.topologySnapshot,
+          )
+          .value
+          .failOnShutdown
+          .map { result =>
+            inside(result) { case Right(_) => succeed }
+            observed.get() shouldBe Some(DAMLe.ExternalCallReplayData.empty)
+          }
       }
 
     }
