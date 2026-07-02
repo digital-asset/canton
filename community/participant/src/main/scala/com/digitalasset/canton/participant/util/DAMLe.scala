@@ -434,25 +434,6 @@ class DAMLe(
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
       FutureUnlessShutdown.pure(Left(error))
 
-    def resumeWithExternalCallOutput(
-        output: String,
-        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
-        replayDataO: Option[ExternalCallReplayData],
-    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
-      handleResultInternal(resume(Right(output)), replayDataO)
-
-    def replayStoredExternalCallOutput(
-        externalCallKey: ExternalCallKey,
-        storedOutput: LfBytes,
-        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
-        replayDataO: Option[ExternalCallReplayData],
-    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-      logger.debug(
-        s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
-      )
-      resumeWithExternalCallOutput(storedOutput.toHexString, resume, replayDataO)
-    }
-
     def handleExternalCall(
         externalCallKey: ExternalCallKey,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
@@ -468,12 +449,10 @@ class DAMLe(
           failExternalCall(ExternalCallReplayMissing(externalCallKey))
 
         case Right(Some(storedOutput)) =>
-          replayStoredExternalCallOutput(
-            externalCallKey,
-            storedOutput,
-            resume,
-            Some(replayData),
+          logger.debug(
+            s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
           )
+          handleResultInternal(resume(Right(storedOutput.toHexString)), Some(replayData))
       }
     }
 
