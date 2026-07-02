@@ -11,8 +11,9 @@ import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.config.ParticipantNodeConfig
+import com.digitalasset.canton.participant.config.{ExtensionServiceConfig, ParticipantNodeConfig}
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
@@ -83,6 +84,9 @@ object ConfigValidations extends NamedLogging {
       adminTokenConfigsMatchOnParticipants,
       topologyAwarePackageSelectionCheckParticipants,
       eitherUserListsOrPrivilegedTokensOnParticipants,
+      engineExtensionApiVersionPathSegmentsParticipants,
+      engineExtensionTargetPortsParticipants,
+      engineExtensionRetryDelaysParticipants,
       validateSelectedSchemes,
       sessionSigningKeysOnlyWithKmsAndSchemesAreSupported,
       sessionSigningKeysParamsValidation,
@@ -422,6 +426,60 @@ object ConfigValidations extends NamedLogging {
         participantConfig.parameters.engine.enableAdditionalConsistencyChecks && !config.parameters.nonStandardConfig
       )(
         s"Enabling additional consistency checks on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
+      )
+    }
+    toValidated(errors)
+  }
+
+  private def engineExtensionErrors(
+      config: CantonConfig
+  )(
+      validate: (InstanceName, String, ExtensionServiceConfig) => Option[String]
+  ): Seq[String] =
+    config.participants.toSeq.flatMap { case (name, participantConfig) =>
+      participantConfig.parameters.engine.extensions.toSeq.mapFilter {
+        case (extensionId, extensionConfig) => validate(name, extensionId, extensionConfig)
+      }
+    }
+
+  private def engineExtensionApiVersionPathSegmentsParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val errors = engineExtensionErrors(config) { case (name, extensionId, extensionConfig) =>
+      Option.when(
+        extensionConfig.version == "." ||
+          extensionConfig.version == ".." ||
+          !extensionConfig.version.matches("[A-Za-z0-9._~-]+")
+      )(
+        s"For participant ${name.unwrap}, engine.extensions.$extensionId.version must be " +
+          "a non-empty URI path segment containing only unreserved characters [A-Za-z0-9._~-], " +
+          s"excluding '.' and '..', but found '${extensionConfig.version}'"
+      )
+    }
+    toValidated(errors)
+  }
+
+  private def engineExtensionTargetPortsParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val errors = engineExtensionErrors(config) { case (name, extensionId, extensionConfig) =>
+      Option.when(extensionConfig.port == Port.Dynamic)(
+        s"For participant ${name.unwrap}, engine.extensions.$extensionId.port must be " +
+          s"between 1 and ${Port.maxValidPort}, but found '${extensionConfig.port}'"
+      )
+    }
+    toValidated(errors)
+  }
+
+  private def engineExtensionRetryDelaysParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val errors = engineExtensionErrors(config) { case (name, extensionId, extensionConfig) =>
+      Option.when(
+        extensionConfig.retryInitialDelay.underlying > extensionConfig.retryMaxDelay.underlying
+      )(
+        s"For participant ${name.unwrap}, engine.extensions.$extensionId retry delays must satisfy retry-initial-delay <= retry-max-delay; " +
+          s"respective values are (${extensionConfig.retryInitialDelay.underlying}, ${extensionConfig.retryMaxDelay.underlying})"
       )
     }
     toValidated(errors)

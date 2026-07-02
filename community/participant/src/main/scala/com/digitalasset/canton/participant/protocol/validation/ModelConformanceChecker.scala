@@ -273,6 +273,35 @@ class ModelConformanceChecker(
       } yield nameBindings
     })
 
+  private def externalCallReplayDataFor(
+      view: TransactionView,
+      viewParticipantData: ViewParticipantData,
+  )(implicit
+      traceContext: TraceContext
+  ): ExternalCallReplayData = {
+    val externalCallResults =
+      if (!viewParticipantData.supportsExternalCallResults)
+        Seq.empty[ViewParticipantData.ViewExternalCallResult]
+      else
+        view.flatten.flatMap { currentView =>
+          currentView.viewParticipantData.unwrap match {
+            case Right(vpd) => vpd.externalCallResults
+            case _ => Seq.empty
+          }
+        }
+
+    if (externalCallResults.isEmpty) ExternalCallReplayData.empty
+    else {
+      val replayData = ExternalCallReplayData.fromResults(externalCallResults.map(_.result))
+
+      logger.debug(
+        s"reInterpret: Aggregated ${replayData.size} external call result keys"
+      )
+
+      replayData
+    }
+  }
+
   def reInterpret(
       view: TransactionView,
       ledgerTime: CantonTimestamp,
@@ -296,6 +325,9 @@ class ModelConformanceChecker(
       view.viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.contracts),
     )
 
+    lazy val externalCallReplayData: ExternalCallReplayData =
+      externalCallReplayDataFor(view, viewParticipantData)
+
     for {
 
       packagePreference <- buildPackageNameMap(packageIdPreference, topologySnapshot, ledgerTime)
@@ -313,6 +345,7 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
+          () => externalCallReplayData,
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]
