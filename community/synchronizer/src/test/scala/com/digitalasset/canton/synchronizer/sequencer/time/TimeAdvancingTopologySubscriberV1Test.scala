@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   TopologyTransactionsBroadcast,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -106,6 +107,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = eqTo(SendCallback.empty),
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -175,6 +177,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = eqTo(expectedAggregationRule),
           callback = eqTo(SendCallback.empty),
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -261,6 +264,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
+          any[TrafficCostValidator],
           amplify = any[Boolean],
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -324,6 +328,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])

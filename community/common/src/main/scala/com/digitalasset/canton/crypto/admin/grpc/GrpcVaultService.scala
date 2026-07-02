@@ -116,6 +116,7 @@ class GrpcVaultService(
     val result = for {
       keys <- EitherT.right(crypto.cryptoPublicStore.publicKeysWithName)
       publicKeys <-
+        // TODO(#33650) - replace with unboundedFilterA; safe because number of PKs in store is bounded "naturally"
         keys.toList.parFilterA(pk =>
           crypto.cryptoPrivateStore
             .existsPrivateKey(pk.publicKey.id, pk.publicKey.purpose)
@@ -129,6 +130,8 @@ class GrpcVaultService(
       keysMetadata <-
         crypto.cryptoPrivateStore.toExtended match {
           case Some(extended) =>
+            // TODO(#33650) - replace with unboundedTraverse; safe because number of filtered PKs is bounded "naturally
+            //  encrypted is not implemented as a single query; given a low number this should be fine
             filteredPublicKeys.parTraverse { pk =>
               for {
                 encrypted <- extended
@@ -141,6 +144,8 @@ class GrpcVaultService(
               } yield PrivateKeyMetadata(pk, encrypted, None).toProtoV30
             }
           case None =>
+            // TODO(#33650) - replace with unboundedTraverse; safe because number of filtered PKs bounded "naturally";
+            //  queryKmsKeyId is in-memory
             filteredPublicKeys.parTraverse { pk =>
               crypto.cryptoPrivateStore
                 .queryKmsKeyId(pk.id)

@@ -11,6 +11,7 @@ import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data
 import com.daml.ledger.javaapi.data.codegen.{Contract, ContractCompanion}
 import com.daml.ledger.javaapi.data.{Unit as _, *}
+import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.MultiRootNodeSubmission
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.damltests.upgrade.v1.java as v1
 import com.digitalasset.canton.damltests.upgrade.v2.java as v2
@@ -20,10 +21,9 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
-  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.macros.syntax.lens.*
@@ -42,11 +42,10 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
   private val byPackageNameIdentifier: Identifier =
     Identifier.fromJavaProto(v1.upgrade.Upgrading.TEMPLATE_ID.toProto)
 
-  private def party(name: String)(implicit env: TestConsoleEnvironment): PartyId =
-    env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
-
-  private var alice3: PartyId = _
-  private var bob3: PartyId = _
+  private var alice1: Party = _
+  private var bob1: Party = _
+  private var alice3: Party = _
+  private var bob3: Party = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1.withSetup { implicit env =>
@@ -56,8 +55,8 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
       participant2.synchronizers.connect_local(sequencer1, alias = daName)
       participant3.synchronizers.connect_local(sequencer1, alias = daName)
 
-      participant1.parties.enable("alice1")
-      participant1.parties.enable("bob1")
+      alice1 = participant1.parties.testing.enable("alice1")
+      bob1 = participant1.parties.testing.enable("bob1")
 
       // Participant 1 and 2 have both versions
 
@@ -69,8 +68,8 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
 
       // Participant 3 initially has just V1
 
-      alice3 = participant3.parties.enable("alice3")
-      bob3 = participant3.parties.enable("bob3")
+      alice3 = participant3.parties.testing.enable("alice3")
+      bob3 = participant3.parties.testing.enable("bob3")
       participant3.dars.upload(UpgradingBaseTest.UpgradeV1)
     }
 
@@ -108,8 +107,8 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
       "override with user package preference" in { implicit env =>
         // Upload the upgraded template version
 
-        val alice = party("alice1")
-        val bob = party("bob1")
+        val alice = alice1
+        val bob = bob1
 
         val templateCon =
           new v1.upgrade.Upgrading(alice.toProtoPrimitive, alice.toProtoPrimitive, 0)
@@ -233,8 +232,8 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
   }
 
   private def testExplicitDisclosureUpDowngrading(
-      discloser: PartyId,
-      disclosee: PartyId,
+      discloser: Party,
+      disclosee: Party,
       sourceTemplate: Template,
       sourceTemplateId: data.Identifier,
       exerciseFetchOnTargetVersion: String => util.List[data.Command],
@@ -290,7 +289,7 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
       templateCon: I,
       exercise: TCOut => Seq[javaapi.data.Command],
       createAndExercise: Seq[javaapi.data.Command],
-      queryingParty: PartyId,
+      queryingParty: Party,
       userPackagePreference: Option[Ref.PackageId] = None,
       participantOverride: Option[LocalParticipantReference] = None,
   )(tc: ContractCompanion[TCOut, ?, ?])(implicit env: FixtureParam): Assertion = {
@@ -310,22 +309,11 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
         .pipe(JavaDecodeUtil.decodeAllCreated(tc))
         .pipe(inside(_) { case Seq(contract) => contract })
 
-    // Exercise command on the previously created contract
+    // Exercise command on the previously created contract.
+    // Use ledger-effects shape so this works for both local and external parties: an external
+    // party auto-routes to the ISS submit path, which always returns ledger-effects transactions
+    // (ExercisedEvent instead of ArchivedEvent), so the consuming exercise must be read as an ExercisedEvent.
     exercise(createUpgrading_byPackageName)
-      .map(_.withPackageName)
-      .pipe(
-        participant.ledger_api.javaapi.commands.submit(
-          Seq(queryingParty),
-          _,
-          userPackageSelectionPreference = userPackagePreference.toList,
-        )
-      )
-      .pipe(JavaDecodeUtil.decodeAllArchived(tc))
-      .pipe(inside(_) { case Seq(cId) => cId shouldBe createUpgrading_byPackageName.id })
-
-    // TODO(#15114): Test ExerciseByKey
-    // CreateAndExercise command
-    createAndExercise
       .map(_.withPackageName)
       .pipe(
         participant.ledger_api.javaapi.commands.submit(
@@ -335,13 +323,33 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
           transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
         )
       )
-      .pipe { tx =>
-        inside(JavaDecodeUtil.decodeAllCreated(tc)(tx)) { contracts =>
-          val cid = JavaDecodeUtil.decodeAllArchivedLedgerEffectsEvents(tc)(tx).loneElement
+      .pipe(JavaDecodeUtil.decodeAllArchivedLedgerEffectsEvents(tc))
+      .pipe(inside(_) { case Seq(cId) => cId shouldBe createUpgrading_byPackageName.id })
 
-          contracts.map(_.id) should contain(cid)
+    // TODO(#15114): Test ExerciseByKey
+    // CreateAndExercise command.
+    // A CreateAndExercise compiles to a Create plus an Exercise, i.e. a transaction with multiple
+    // root nodes, which the external-party ISS execute path rejects. Run this step only for local
+    // parties; create and exercise above already exercise the external path.
+    if (onlyLocalParty(MultiRootNodeSubmission)) {
+      createAndExercise
+        .map(_.withPackageName)
+        .pipe(
+          participant.ledger_api.javaapi.commands.submit(
+            Seq(queryingParty),
+            _,
+            userPackageSelectionPreference = userPackagePreference.toList,
+            transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+          )
+        )
+        .pipe { tx =>
+          inside(JavaDecodeUtil.decodeAllCreated(tc)(tx)) { contracts =>
+            val cid = JavaDecodeUtil.decodeAllArchivedLedgerEffectsEvents(tc)(tx).loneElement
+
+            contracts.map(_.id) should contain(cid)
+          }
         }
-      }
+    } else succeed
   }
 
   private implicit class CommandWithoutPackageId(commandJava: javaapi.data.Command) {

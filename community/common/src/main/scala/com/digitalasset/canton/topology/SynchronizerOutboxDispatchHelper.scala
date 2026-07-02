@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
-import cats.syntax.parallel.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.TopologyConfig
@@ -38,14 +37,6 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
   protected def crypto: SynchronizerCrypto
 
   protected def topologyConfig: TopologyConfig
-
-  protected def filterTransactions(
-      transactions: Seq[GenericSignedTopologyTransaction],
-      predicate: GenericSignedTopologyTransaction => FutureUnlessShutdown[Boolean],
-  )(implicit
-      executionContext: ExecutionContext
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    transactions.parFilterA(tx => predicate(tx))
 
   protected def topologyTransaction(
       tx: GenericSignedTopologyTransaction
@@ -89,13 +80,9 @@ trait SynchronizerOutboxDispatch extends NamedLogging with FlagCloseable {
   protected def notAlreadyPresent(
       transactions: Seq[GenericSignedTopologyTransaction]
   )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = {
-    val doesNotAlreadyExistPredicate = (tx: GenericSignedTopologyTransaction) =>
-      targetStore.providesAdditionalSignatures(tx)
-    filterTransactions(transactions, doesNotAlreadyExistPredicate)
-  }
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
+    targetStore.filterProvidesAdditionalSignatures(transactions)
 
   protected def dispatch(
       synchronizerAlias: SynchronizerAlias,

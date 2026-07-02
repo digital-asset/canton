@@ -245,6 +245,11 @@ private[canton] class DummyCopyTopologyStore(
       materializer: Materializer,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Hash] = ???
+  override def filterProvidesAdditionalSignatures(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = ???
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,
       synchronizerId: SynchronizerId,

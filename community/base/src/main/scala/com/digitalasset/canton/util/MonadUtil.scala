@@ -8,7 +8,6 @@ import cats.{Monad, Monoid, Parallel}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.nonempty.NonEmpty
 
-import scala.annotation.tailrec
 import scala.collection.{IterableOps, immutable}
 
 object MonadUtil {
@@ -60,21 +59,6 @@ object MonadUtil {
   ): M[Unit] =
     foldLeftM((), xs)((_, x) => monad.void(step(x)))
 
-  /** Repeatedly apply the same function to a monadic value `m`. This can be used to retry until the
-    * limit `counter` is reached or the monad `m` aborts.
-    */
-  @tailrec
-  def repeatFlatmap[M[_], A](m: M[A], f: A => M[A], counter: Int)(implicit
-      monad: Monad[M]
-  ): M[A] =
-    counter match {
-      case 0 => m
-      case n =>
-        require(n > 0, s"Trying to repeat with negative counter: $n")
-        val next = monad.flatMap(m)(f)
-        repeatFlatmap(next, f, counter - 1)
-    }
-
   /** Monadic version of cats.Applicative.unlessA.
     *
     * The effect `falseM` is only executed if `condM` evaluates to false within the effect `M`.
@@ -95,12 +79,12 @@ object MonadUtil {
   def sequentialTraverse[X, M[_], S](
       xs: Iterator[X]
   )(f: X => M[S])(implicit monad: Monad[M]): M[Seq[S]] = {
-    val result = foldLeftM(Seq.empty: Seq[S], xs)((ys, x) => monad.map(f(x))(y => y +: ys))
+    val result = foldLeftM(List.empty: Seq[S], xs)((ys, x) => monad.map(f(x))(y => y +: ys))
     monad.map(result)(seq => seq.reverse)
   }
 
   def sequentialTraverse[X, M[_], S](
-      xs: Seq[X]
+      xs: immutable.Iterable[X]
   )(f: X => M[S])(implicit monad: Monad[M]): M[Seq[S]] =
     sequentialTraverse(xs.iterator)(f)
 
@@ -165,21 +149,23 @@ object MonadUtil {
   /** Parallel traverse with limited parallelism
     */
   def parTraverseWithLimit[X, M[_], S](parallelism: PositiveInt)(
-      xs: Seq[X]
+      xs: immutable.Iterable[X]
   )(processElement: X => M[S])(implicit M: Parallel[M]): M[Seq[S]] =
     M.monad.map(
       sequentialTraverse(xs.grouped(parallelism.value))(
-        _.parTraverse(processElement)
+        _.toSeq.parTraverse(processElement)
       )(M.monad)
     )(_.flatten)
 
   def parTraverseWithLimit_[X, M[_], S](parallelism: PositiveInt)(
-      xs: Seq[X]
+      xs: immutable.Iterable[X]
   )(processElement: X => M[S])(implicit M: Parallel[M]): M[Unit] =
-    sequentialTraverse_(xs.grouped(parallelism.value))(_.parTraverse_(processElement))(M.monad)
+    sequentialTraverse_(xs.grouped(parallelism.value))(_.toSeq.parTraverse_(processElement))(
+      M.monad
+    )
 
   def parTraverseFilterWithLimit[X, M[_], S](parallelism: PositiveInt)(
-      xs: Seq[X]
+      xs: immutable.Iterable[X]
   )(processElement: X => M[Option[S]])(implicit M: Parallel[M]): M[Seq[S]] =
     M.monad.map(
       parTraverseWithLimit(parallelism)(xs)(processElement)
@@ -188,7 +174,7 @@ object MonadUtil {
   /** Equivalent to sequential `traverseFilter`
     */
   def sequentialTraverseFilter[M[_], A, B](
-      xs: Seq[A]
+      xs: immutable.Iterable[A]
   )(step: A => M[Option[B]])(implicit monad: Monad[M]): M[Seq[B]] = {
     val r = foldLeftM[M, Seq[B], A](Seq.empty: Seq[B], xs) { case (acc, x) =>
       monad.map(step(x)) {
@@ -215,4 +201,5 @@ object MonadUtil {
     foldLeftM[M, B, A](monoid.empty, xs) { (acc, x) =>
       monad.map(step(x))(monoid.combine(acc, _))
     }
+
 }

@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
@@ -32,9 +32,9 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  private var bank: PartyId = _
-  private var alice: PartyId = _
-  private var bob: PartyId = _
+  private var bank: Party = _
+  private var alice: Party = _
+  private var bob: Party = _
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -47,9 +47,9 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
         participant1.dars.upload(UpgradingBaseTest.NonConformingV1)
         participant1.dars.upload(UpgradingBaseTest.NonConformingV2)
 
-        bank = participant1.parties.enable("bank")
-        alice = participant1.parties.enable("alice")
-        bob = participant1.parties.enable("bob")
+        bank = participant1.parties.testing.enable("bank")
+        alice = participant1.parties.testing.enable("alice")
+        bob = participant1.parties.testing.enable("bob")
       }
 
   /** Upgrading depends on ExerciseActionDescription containing the templateId that can be different
@@ -58,7 +58,7 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
 
   private def getVersion(
       participant: LocalParticipantReference,
-      issuer: PartyId,
+      issuer: Party,
       exercise: javaapi.data.ExerciseCommand,
       expectException: Boolean = false,
   ): Option[String] =
@@ -74,7 +74,7 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
 
   private def callGetVersion(
       participant: LocalParticipantReference,
-      issuer: PartyId,
+      issuer: Party,
       exerciseJava: javaapi.data.ExerciseCommand,
   ): String = {
     val exercise = ExerciseCommand.fromJavaProto(exerciseJava.toProto)
@@ -99,7 +99,7 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
   private def checkVersionV1(
       cidV1: v1.nonconforming.NonConforming.ContractId,
       participant: LocalParticipantReference,
-      issuer: PartyId,
+      issuer: Party,
   ): Unit =
     clue(s"checkVersionV1") {
       getVersion(
@@ -119,7 +119,7 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
   private def checkVersionV2(
       cidV2: v2.nonconforming.NonConforming.ContractId,
       participant: LocalParticipantReference,
-      issuer: PartyId,
+      issuer: Party,
       expectException: Boolean,
   ): Unit = {
     val expected = if (expectException) None else Some("V2")
@@ -143,7 +143,7 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
   private def checkVersionCkV1(
       cidV1: v1.nonconforming.NonConformingCK.ContractId,
       participant: LocalParticipantReference,
-      issuer: PartyId,
+      issuer: Party,
   ): Unit =
     clue(s"checkCkVersionV1") {
       getVersion(
@@ -163,7 +163,7 @@ class NonConformingUpgradeIntegrationTest extends CommunityIntegrationTest with 
   private def checkVersionCkV2(
       cidV2: v2.nonconforming.NonConformingCK.ContractId,
       participant: LocalParticipantReference,
-      issuer: PartyId,
+      issuer: Party,
       expectException: Boolean,
   ): Unit =
     clue(s"checkCkVersionV2") {

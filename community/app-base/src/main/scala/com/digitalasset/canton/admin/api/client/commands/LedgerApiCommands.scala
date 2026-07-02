@@ -191,6 +191,14 @@ import com.digitalasset.canton.participant.admin.party.PartyParticipantPermissio
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
+import com.digitalasset.canton.tea.v1.{
+  GetAccountRequest,
+  GetAccountResponse,
+  TrafficServiceGrpc,
+  UpdateAccountRequest,
+  UpdateAccountResponse,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{ParticipantId, Party, PartyId, SynchronizerId}
@@ -1921,6 +1929,7 @@ object LedgerApiCommands {
         minLedgerTimeAbs: Option[Instant],
         deduplicationPeriod: Option[DeduplicationPeriod],
         hashingSchemeVersion: HashingSchemeVersion,
+        optTimeout: Option[config.NonNegativeDuration],
     ) extends BaseCommand[
           ExecuteSubmissionAndWaitRequest,
           ExecuteSubmissionAndWaitResponse,
@@ -1950,7 +1959,8 @@ object LedgerApiCommands {
       ): Either[String, ExecuteSubmissionAndWaitResponse] =
         Right(response)
 
-      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+      override def timeoutType: TimeoutType =
+        optTimeout.map(CustomClientTimeout(_)).getOrElse(DefaultUnboundedTimeout)
     }
 
     final case class ExecuteAndWaitForTransactionCommand(
@@ -1964,6 +1974,7 @@ object LedgerApiCommands {
         transactionShape: Option[TransactionShape],
         includeCreatedEventBlob: Boolean,
         customEventFormat: Option[EventFormat],
+        optTimeout: Option[config.NonNegativeDuration],
     ) extends BaseCommand[
           ExecuteSubmissionAndWaitForTransactionRequest,
           ExecuteSubmissionAndWaitForTransactionResponse,
@@ -2025,7 +2036,8 @@ object LedgerApiCommands {
       ): Either[String, ExecuteSubmissionAndWaitForTransactionResponse] =
         Right(response)
 
-      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+      override def timeoutType: TimeoutType =
+        optTimeout.map(CustomClientTimeout(_)).getOrElse(DefaultUnboundedTimeout)
     }
 
     final case class PreferredPackageVersion(
@@ -2622,6 +2634,47 @@ object LedgerApiCommands {
           request: GetEventsByContractIdRequest,
       ): Future[GetEventsByContractIdResponse] = service.getEventsByContractId(request)
 
+    }
+  }
+  object Traffic {
+
+    abstract class BaseCommand[Req, Res] extends GrpcAdminCommand[Req, Res, Res] {
+      override type Svc = TrafficServiceStub
+
+      override def createService(channel: ManagedChannel): TrafficServiceStub =
+        TrafficServiceGrpc.stub(channel)
+
+      override protected def handleResponse(response: Res): Either[String, Res] = Right(response)
+    }
+
+    final case class GetAccount(accountId: String)
+        extends BaseCommand[
+          GetAccountRequest,
+          GetAccountResponse,
+        ] {
+      override protected def createRequest(): Either[String, GetAccountRequest] =
+        Right(GetAccountRequest(accountId))
+
+      override protected def submitRequest(
+          service: TrafficServiceStub,
+          request: GetAccountRequest,
+      ): Future[GetAccountResponse] =
+        service.getAccount(request)
+    }
+
+    final case class UpdateAccount(accountId: String, balance: Option[Long])
+        extends BaseCommand[
+          UpdateAccountRequest,
+          UpdateAccountResponse,
+        ] {
+      override protected def createRequest(): Either[String, UpdateAccountRequest] =
+        Right(UpdateAccountRequest(accountId, balance))
+
+      override protected def submitRequest(
+          service: TrafficServiceStub,
+          request: UpdateAccountRequest,
+      ): Future[UpdateAccountResponse] =
+        service.updateAccount(request)
     }
   }
 }

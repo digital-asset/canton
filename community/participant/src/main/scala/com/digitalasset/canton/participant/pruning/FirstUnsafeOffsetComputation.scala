@@ -190,6 +190,7 @@ class FirstUnsafeOffsetComputation(
       }
 
       // Other checks
+      // TODO(#33650) – replace with unboundedTraverseFilter; safe because logicalPersistentStates are realistically bounded low-digit
       unsafeIncompleteReassignmentOffsets <- logicalPersistentStates.values.toSeq.parTraverseFilter(
         FirstUnsafeOffsetComputation.firstUnsafeReassignmentEventFor(
           _,
@@ -236,6 +237,7 @@ class FirstUnsafeOffsetComputation(
   ]] =
     for {
       pruningCandidatePersistentStates <- EitherT
+        // TODO(#33650) – replace with unboundedFilterA; safe because lsids are realistically bounded low-digit
         .right[LedgerPruningError](lsids.parFilterA { lsid =>
           participantNodePersistentState.value.ledgerApiStore
             .lastSynchronizerOffsetBeforeOrAt(lsid, pruneUptoInclusive)

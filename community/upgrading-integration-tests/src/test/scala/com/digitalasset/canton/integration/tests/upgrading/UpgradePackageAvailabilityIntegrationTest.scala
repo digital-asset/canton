@@ -16,7 +16,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.daml.lf.data.Ref
 
 import java.util.Optional
@@ -28,10 +28,10 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
 
-  private var alice: PartyId = _
-  private var bob: PartyId = _
-  private var charlie: PartyId = _
-  private var dan: PartyId = _
+  private var alice: Party = _
+  private var bob: Party = _
+  private var charlie: Party = _
+  private var dan: Party = _
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1.withSetup { implicit env =>
@@ -39,13 +39,13 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
 
       participants.all.synchronizers.connect_local(sequencer1, alias = daName)
 
-      alice = participant1.parties.enable("alice")
+      alice = participant1.parties.testing.enable("alice")
 
-      bob = participant2.parties.enable("bob")
+      bob = participant2.parties.testing.enable("bob")
 
-      charlie = participant3.parties.enable("charlie")
+      charlie = participant3.parties.testing.enable("charlie")
 
-      dan = participant4.parties.enable("dan")
+      dan = participant4.parties.testing.enable("dan")
 
       // Participant 1 (alice) has V1 and V2 loaded
       participant1.dars.upload(UpgradingBaseTest.UpgradeV1)
@@ -69,7 +69,7 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
 
   private def discloseQuote(
       value: Long,
-      observer: Option[PartyId] = None,
+      observer: Option[Party] = None,
   )(implicit env: FixtureParam): (v2.upgrade.Quote.ContractId, DisclosedContract) = {
 
     import env.*

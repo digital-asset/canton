@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrading
 
 import com.daml.ledger.api.v2.commands.Command
+import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.UsesMaliciousNode
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.damltests.upgrade.v1.java.upgrade.{
@@ -30,12 +31,11 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
-  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.daml.lf.data.Ref
 import monocle.macros.GenLens
@@ -55,11 +55,10 @@ class InvalidPackagePreferenceIntegrationTest
   private lazy val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()
   override def pureCrypto: CryptoPureApi = pureCryptoRef.get()
 
+  @volatile var alice: Party = _
+
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
-
-  private def party(name: String)(implicit env: TestConsoleEnvironment): PartyId =
-    env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
 
   "setup the stage" in { implicit env =>
     import env.*
@@ -67,7 +66,7 @@ class InvalidPackagePreferenceIntegrationTest
     participant1.synchronizers.connect_local(sequencer1, alias = daName)
     participant1.dars.upload(UpgradingBaseTest.UpgradeV1)
     participant1.dars.upload(UpgradingBaseTest.UpgradeV2)
-    participant1.parties.enable("alice")
+    alice = participant1.parties.testing.enable("alice")
   }
 
   val upgradePackageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] =
@@ -77,11 +76,9 @@ class InvalidPackagePreferenceIntegrationTest
 
   "interface resolution" should {
 
-    def setupInterface(implicit env: FixtureParam): (PartyId, UpgradeItInterface.ContractId) = {
+    def setupInterface(implicit env: FixtureParam): (Party, UpgradeItInterface.ContractId) = {
 
       import env.participant1
-
-      val alice = party("alice")
 
       val templateTx = participant1.ledger_api.javaapi.commands.submit(
         Seq(alice),
@@ -168,7 +165,7 @@ class InvalidPackagePreferenceIntegrationTest
               .submitCommand(
                 command = CommandsWithMetadata(
                   Seq(Command.fromJavaProto(cmd.toProtoCommand)),
-                  Seq(alice),
+                  Seq(alice.partyId),
                   packagePreferenceOverride = Some(Set(preferred)),
                   packageMapOverride = Some(upgradePackageMap),
                 ),
@@ -214,7 +211,8 @@ class InvalidPackagePreferenceIntegrationTest
 
     }
 
-    "handle the malicious situation where the package preference is missing" in { implicit env =>
+    "handle the malicious situation where the package preference is missing"
+      .onlyRunWithLocalParty(UsesMaliciousNode) in { implicit env =>
       maliciousPackagePreferenceManipulation(
         packagePreference = Set.empty,
         expectedWarning =
@@ -222,7 +220,8 @@ class InvalidPackagePreferenceIntegrationTest
       )
     }
 
-    "handle the malicious situation where the package preference is wrong" in { implicit env =>
+    "handle the malicious situation where the package preference is wrong"
+      .onlyRunWithLocalParty(UsesMaliciousNode) in { implicit env =>
       maliciousPackagePreferenceManipulation(
         packagePreference = Set(LfPackageId.assertFromString(UpgradeItTemplateV2.PACKAGE_ID)),
         expectedWarning =
@@ -230,7 +229,8 @@ class InvalidPackagePreferenceIntegrationTest
       )
     }
 
-    "handle the malicious situation where the package preference is ambiguous" in { implicit env =>
+    "handle the malicious situation where the package preference is ambiguous"
+      .onlyRunWithLocalParty(UsesMaliciousNode) in { implicit env =>
       maliciousPackagePreferenceManipulation(
         packagePreference = Set(UpgradeItTemplateV1.PACKAGE_ID, UpgradeItTemplateV2.PACKAGE_ID)
           .map(LfPackageId.assertFromString),
@@ -239,7 +239,8 @@ class InvalidPackagePreferenceIntegrationTest
       )
     }
 
-    "handle the malicious situation where the package preference is unknown" in { implicit env =>
+    "handle the malicious situation where the package preference is unknown"
+      .onlyRunWithLocalParty(UsesMaliciousNode) in { implicit env =>
       val madeUpPkg = "MadeUpPkg"
       maliciousPackagePreferenceManipulation(
         packagePreference = Set(LfPackageId.assertFromString(madeUpPkg)),

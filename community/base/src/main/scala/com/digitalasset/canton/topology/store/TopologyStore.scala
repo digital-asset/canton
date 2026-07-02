@@ -516,15 +516,23 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       transaction: GenericSignedTopologyTransaction
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     findStored(CantonTimestamp.MaxValue, transaction).map(_.forall { inStore =>
-      // check whether source still could provide an additional signature
-      transaction.signatures
-        .map(_.authorizingLongTermKey)
-        .diff(inStore.transaction.signatures.map(_.authorizingLongTermKey))
-        .nonEmpty &&
-      // but only if the transaction in the target store is a valid proposal
-      inStore.transaction.isProposal &&
-      inStore.validUntil.isEmpty
+      TopologyStore.providesAdditionalSignatures(transaction, inStore)
     })
+
+  /** Filters a sequence of topology transactions, returning only those that provide additional
+    * signatures not yet present in the store for unexpired proposals.
+    *
+    * @note
+    *   Callers (e.g., the queue-based outbox) typically pre-batch transactions based on network
+    *   broadcast limits (e.g., `topologyConfig.broadcastBatchSize`). I/O implementations of this
+    *   method (e.g., database) should independently ensure safety (e.g., via
+    *   `batchingConfig.maxItemsInBatch`).
+    */
+  def filterProvidesAdditionalSignatures(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]]
 
   /** Returns initial set of onboarding transactions that should be dispatched to the synchronizer.
     * Includes:
@@ -839,6 +847,20 @@ object TopologyStore {
       param("cutoff", _.validUntilCutoff.value),
     )
   }
+
+  /** Shared predicate to determine if an incoming transaction provides fresh signatures compared to
+    * the currently stored transaction.
+    */
+  def providesAdditionalSignatures(
+      incomingTx: GenericSignedTopologyTransaction,
+      inStoreTx: StoredTopologyTransaction[TopologyChangeOp, TopologyMapping],
+  ): Boolean =
+    incomingTx.signatures
+      .map(_.authorizingLongTermKey)
+      .diff(inStoreTx.transaction.signatures.map(_.authorizingLongTermKey))
+      .nonEmpty &&
+      inStoreTx.transaction.isProposal &&
+      inStoreTx.validUntil.isEmpty
 
 }
 

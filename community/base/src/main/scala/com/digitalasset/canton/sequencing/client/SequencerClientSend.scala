@@ -8,6 +8,8 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator.NoTrafficCostValidation
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId}
 import com.digitalasset.canton.time.Clock
@@ -71,6 +73,10 @@ trait SequencerClientSend {
     *   independent of the configuration.
     * @param timestamps
     *   Aggregated timestamps needed for sending a request.
+    * @param trafficCostValidator
+    *   Validate the traffic cost of the submission batch against the local traffic state of the
+    *   member, only if traffic control is enabled for the sequencer. If validation fails, the
+    *   submission request is not sent to the sequencer and an error is returned.
     */
   def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
@@ -78,6 +84,7 @@ trait SequencerClientSend {
       messageId: MessageId = generateMessageId,
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
+      trafficCostValidator: TrafficCostValidator,
       amplify: Boolean = false,
       useConfirmationResponseAmplificationParameters: Boolean = false,
   )(implicit
@@ -95,6 +102,7 @@ trait SequencerClientSend {
       messageId: MessageId = generateMessageId,
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
+      trafficCostValidator: TrafficCostValidator = NoTrafficCostValidation,
       amplify: Boolean = false,
       useConfirmationResponseAmplificationParameters: Boolean = false,
   )(implicit
@@ -106,6 +114,7 @@ trait SequencerClientSend {
     messageId = messageId,
     aggregationRule = aggregationRule,
     callback = callback,
+    trafficCostValidator = trafficCostValidator,
     amplify = amplify,
     useConfirmationResponseAmplificationParameters = useConfirmationResponseAmplificationParameters,
   ).value.flatMap(identity)

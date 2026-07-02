@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.parallel.*
+import cats.implicits.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,7 +17,6 @@ import com.digitalasset.canton.participant.admin.PackageService.{
 import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonExamples
 import com.digitalasset.canton.participant.store.DamlPackageStore.readPackageId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, InUS, LfPackageId}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -256,8 +255,14 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
 
       }
 
+      def repeatTest(remaining: Int): FutureUnlessShutdown[Assertion] =
+        remaining.tailRecM { counter =>
+          if (counter <= 1) runTest.map(Right(_))
+          else runTest.map(_ => Left(counter - 1))
+        }
+
       // Run 10 times to increase the chance of observing a concurrency bug
-      MonadUtil.repeatFlatmap(FutureUnlessShutdown.pure(succeed), _ => runTest, 10)
+      repeatTest(10)
     }
 
     "save and retrieve one Daml Package" inUS {

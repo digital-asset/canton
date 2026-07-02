@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.replica
 
-import cats.syntax.traverse.*
+import cats.implicits.toTraverseOps
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -72,6 +72,14 @@ class ParticipantReplicaManager(
           )
           _ <- participantServices.ledgerApiIndexerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Indexer started")
+          _ <- participantServices.trafficEnforcementBackendContainerO.traverse(
+            _.initializeNext().map(_ =>
+              logger.info(
+                "Participant replica is becoming active: Traffic enforcement backend started"
+              )
+            )
+          )
+
           _ <- participantServices.cantonSyncService.refreshCaches()
           _ = logger.info(
             "Participant replica is becoming active: CantonSyncService caches refreshed"
@@ -147,6 +155,13 @@ class ParticipantReplicaManager(
           _ = logger.info(
             "Participant replica is becoming passive: CantonSyncService caches cleared"
           )
+          _ = participantServices.trafficEnforcementBackendContainerO.foreach {
+            trafficEnforcementBackend =>
+              trafficEnforcementBackend.closeCurrent()
+              logger.info(
+                "Participant replica is becoming passive: Traffic enforcement backend stopped"
+              )
+          }
         } yield ()
 
       case None =>

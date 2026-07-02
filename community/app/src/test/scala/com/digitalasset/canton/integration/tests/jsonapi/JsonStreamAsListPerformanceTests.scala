@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
+import cats.implicits.*
 import com.daml.ledger.api.v2.command_service.SubmitAndWaitResponse
 import com.daml.ledger.api.v2.{state_service, transaction_filter}
 import com.daml.ledger.test.java.model.iou.Iou
@@ -11,7 +12,6 @@ import com.digitalasset.canton.http.json.v2.JsCommandServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsStateServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.{JsCommand, JsCommands, JsGetActiveContractsResponse}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
-import com.digitalasset.canton.util.MonadUtil
 import io.circe.parser.decode
 import io.circe.syntax.*
 import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
@@ -29,6 +29,7 @@ class JsonStreamAsListPerformanceTests
 
   private val numberOfRepeatedCalls: Int = 5
   private val maxAverageTimeForCall: Long = 1000
+
   "active contract" should {
     "give answer in a reasonable time" in httpTestFixture { fixture =>
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
@@ -85,6 +86,12 @@ class JsonStreamAsListPerformanceTests
               decode[Seq[JsGetActiveContractsResponse]](result.toString()).value.size should be(1)
             }
 
+        def repeatAcsCalls(remaining: Int, offset: Long): Future[Unit] =
+          remaining.tailRecM { counter =>
+            if (counter <= 0) Future.successful(Either.unit)
+            else acsCall(offset).map(_ => Left(counter - 1))
+          }
+
         for {
           completionOffset <- postJsonRequest(
             uri = fixture.uri.withPath(Uri.Path("/v2/commands/submit-and-wait")),
@@ -95,12 +102,7 @@ class JsonStreamAsListPerformanceTests
             decode[SubmitAndWaitResponse](result.toString()).value.completionOffset
           }
           startTime = System.currentTimeMillis()
-          _ <- MonadUtil
-            .repeatFlatmap(
-              Future.unit,
-              (_: Unit) => acsCall(completionOffset),
-              numberOfRepeatedCalls,
-            )
+          _ <- repeatAcsCalls(numberOfRepeatedCalls, completionOffset)
         } yield {
           val endTime = System.currentTimeMillis()
           val totalTime: Long = endTime - startTime

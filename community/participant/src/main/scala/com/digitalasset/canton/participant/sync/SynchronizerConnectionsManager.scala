@@ -64,6 +64,7 @@ import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.DbExceptionRetryPolicy
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
@@ -130,6 +131,7 @@ private[sync] class SynchronizerConnectionsManager(
     engine: Engine,
     commandProgressTracker: CommandProgressTracker,
     syncEphemeralStateFactory: SyncEphemeralStateFactory,
+    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     clock: Clock,
     resourceManagementService: ResourceManagementService,
     parameters: ParticipantNodeParameters,
@@ -1206,6 +1208,7 @@ private[sync] class SynchronizerConnectionsManager(
               reassignmentCoordination,
               commandProgressTracker,
               clock,
+              trafficEnforcementBackendO,
               promiseUSFactory,
               connectedSynchronizerMetrics,
               futureSupervisor,

@@ -18,7 +18,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.util.SetupPackageVetting
 import com.digitalasset.daml.lf.data.Ref
@@ -32,7 +32,7 @@ class CreationPackageUnvettingUpgradingIntegrationTest
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  @volatile private var signatory, nonStakeholder, observer: PartyId = _
+  @volatile private var signatory, nonStakeholder, observer: Party = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
@@ -47,7 +47,7 @@ class CreationPackageUnvettingUpgradingIntegrationTest
             "observer" -> participant3,
           )
         inside(
-          PartiesAllocator(allocations.values.toSet)(
+          PartiesAllocator(allocations.values.toSet, enableExternalParties = true)(
             allocations.view.mapValues(_.id).toSeq,
             allocations.view
               .mapValues(participantRef =>
@@ -92,7 +92,7 @@ class CreationPackageUnvettingUpgradingIntegrationTest
         val contractId: SigStakeInfV2.ContractId = createContract(participant1)
 
         val disclosedContract = ledger_api_utils
-          .fetchContractsAsDisclosed(participant1, signatory, SigStakeInfV1.TEMPLATE_ID)
+          .fetchContractsAsDisclosed(participant1, signatory.partyId, SigStakeInfV1.TEMPLATE_ID)
           .view
           .values
           .loneElement

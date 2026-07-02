@@ -6,7 +6,8 @@ import scala.sys.process._
 import scala.util.matching.Regex
 import scala.util.Try
 
-/**  This script depends on `gh` (github cli) and awk
+/**  This script depends on `gh` (github cli), awk, and python3 (for the shared
+  *  exclude set in scripts/ci/todo_refs.py)
   *
   *  Current limitations of the TODO checker:
   *    - For `.rst` files, TODO blocks are considered to be the range from each instance of `todo::` to the next blank
@@ -318,44 +319,33 @@ println(s"Found ${openDamlIssues.size} open Daml issues: ${openDamlIssues.mkStri
 
 val projectRoot = "." // CI scripts are called from the project root
 
-val scalaStyleExcludeDirectories =
-  Seq(
-    "todo-script",
-    "lib",
-    "log",
-    "todo-out",
-    "theory",
-    "docs",
-    "docs-open",
-    ".git",
-    ".github",
-    ".direnv",
-    ".idea",
-    "target",
-    "3rdparty",
-    "build",
-    "contributing",
-    "daml",
+// The exclude set (directories and file globs) is owned by the shared
+// scripts/ci/todo_refs.py, so this todo checker, the issue-close workflow, and
+// the stale-flake closer cannot drift apart. `--format=grep` emits the
+// --exclude-dir/--exclude flags this grep call needs.
+val sharedExcludeArgs: Seq[String] =
+  Try("python3 scripts/ci/todo_refs.py excludes --format=grep".!!).fold(
+    err => {
+      System.err.println(
+        "Failed to obtain the shared TODO exclude set. This checker now requires python3 on " +
+          "PATH (provided by the nix shell); run it via '.ci/nix-exec amm ...'. Underlying error: " +
+          err.getMessage
+      )
+      sys.exit(1)
+    },
+    _.linesIterator.filter(_.nonEmpty).toSeq,
   )
+
+// Gate-only excludes: .github and .direnv are deliberately NOT in the shared exclude set (the
+// issue-close workflow and stale-flake closer scan .github to catch workflow TODOs). The PR gate
+// excludes them because .github/actions/build/todo_checker/action.yml has descriptive "TODO/FIXME"
+// text with no issue reference that would otherwise be flagged here as an ownerless TODO.
+val gateOnlyExcludeArgs = Seq("--exclude-dir=.github", "--exclude-dir=.direnv")
 
 // Different versions of grep (e.g. on Mac and Ubuntu) behave differently. This grep call should be tested for both
 // platforms if it is to be run locally. Right now it's only tested for Ubuntu because the CI uses Ubuntu.
-def grepForPattern(pattern: String): Seq[String] = {
-  val excludeDirectories = scalaStyleExcludeDirectories ++ Seq("release-notes")
-
-  Seq("grep", "-r") ++ excludeDirectories.map(dir => s"--exclude-dir=$dir") ++ Seq(
-    "-I", // Ignore binary files
-    "--exclude=*.png",
-    "--exclude=*checkTodos.sc",
-    "--exclude=*UNRELEASED.md",
-    "--exclude=*check_todos_on_issue_close.yml",
-    "--exclude=*close_stale_flake_issues.yml",
-    "--exclude=*close_stale_flake_issues.py",
-    "--exclude=*todo-exclude-globs.txt",
-    pattern,
-    projectRoot,
-  )
-}
+def grepForPattern(pattern: String): Seq[String] =
+  Seq("grep", "-r", "-I") ++ sharedExcludeArgs ++ gateOnlyExcludeArgs ++ Seq(pattern, projectRoot) // -I ignores binary files
 
 object ErrorCollector extends ProcessLogger {
   private val allErrors = ListBuffer[String]()
