@@ -114,8 +114,7 @@ final class DAMLeExternalCallTest
   private val contracts = new ReplayContractLookup(Map(contract.contractId -> contract), Map.empty)
 
   private def runReinterpret(
-      replayData: DAMLe.ExternalCallReplayData =
-        defaultReplayData
+      replayData: DAMLe.ExternalCallReplayData = defaultReplayData
   ): Either[DAMLe.ReinterpretationError, DAMLe.ReInterpretationResult] = {
     val damle = new DAMLe(
       participantId = DefaultTestIdentities.participant1,
