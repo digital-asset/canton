@@ -7,7 +7,6 @@ import cats.Monoid
 import cats.data.EitherT
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.Alarm
 import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -30,6 +29,7 @@ import com.digitalasset.canton.sequencing.traffic.TrafficControlProcessor.Traffi
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext

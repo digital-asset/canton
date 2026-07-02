@@ -3,11 +3,14 @@
 
 package com.digitalasset.canton.logging.pretty
 
+import cats.Show.ContravariantShow
 import com.digitalasset.canton.util.ShowUtil
+
+sealed trait CanPrettyPrint
 
 /** Extend this trait to directly enable pretty printing via supertype.
   */
-trait PrettyPrinting extends ShowUtil with PrettyUtil {
+trait PrettyPrinting extends ShowUtil with PrettyUtil with CanPrettyPrint {
 
   /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
     * implement this method.
@@ -25,4 +28,30 @@ trait PrettyPrinting extends ShowUtil with PrettyUtil {
   override final def toString: String =
     // Special construction here to fail gracefully if this is a mocked instance.
     Pretty.PrettyOps[this.type](this)(pretty).toPrettyString()
+}
+
+/** Extend this trait to directly enable pretty printing via companion object.
+  */
+trait PrettyPrintingFromCompanion extends CanPrettyPrint {
+  def prettyCompanion: PrettyPrintingCompanion[this.type]
+
+  final def show: String = prettyCompanion.contravariantShow.show(this)
+
+  /** Yields a readable string representation based on
+    * [[com.digitalasset.canton.logging.pretty.Pretty.DefaultPprinter]]. `Final` to avoid accidental
+    * overwriting.
+    */
+  // Do not cache the toString representation because it could be outdated in classes with mutable state
+  override final def toString: String =
+    // Special construction here to fail gracefully if this is a mocked instance.
+    Pretty.PrettyOps[this.type](this)(prettyCompanion.pretty).toPrettyString()
+}
+
+trait PrettyPrintingCompanion[-T] extends ShowUtil with PrettyUtil {
+
+  /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
+    * implement this method.
+    */
+  protected[pretty] val pretty: Pretty[T]
+  implicit lazy val contravariantShow: ContravariantShow[T] = showPretty(pretty)
 }

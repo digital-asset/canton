@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.{
@@ -17,6 +16,7 @@ import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import java.net.URI

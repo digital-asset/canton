@@ -466,6 +466,13 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
     module.receive(msg)(this, traceContext)
   }
 
+  def runDelayedMessages(
+      module: Module[ProgrammableUnitTestEnv, MessageT]
+  )(filter: MessageT => Boolean)(implicit traceContext: TraceContext): Unit = {
+    val msgs = delayedQueue.dequeueAll(filter)
+    msgs.foreach(module.receive(_)(this, traceContext))
+  }
+
   def selfMessages: Seq[MessageT] = selfQueue.toSeq.map(_._1)
 
   def extractSelfMessages(): Seq[MessageT] = {

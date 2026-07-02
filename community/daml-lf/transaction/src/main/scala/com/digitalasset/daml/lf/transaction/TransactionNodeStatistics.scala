@@ -159,7 +159,7 @@ object TransactionNodeStatistics {
               fetchesByKeyIdx
             else
               fetchesIdx
-          case _: Node.LookupByKey =>
+          case _: Node.QueryByKey =>
             lookupsByKeyIdx
         }
         incr(idx)

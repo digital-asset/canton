@@ -36,6 +36,12 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
         "canton.participants.participant1.parameters.engine.contract-state-mode"
       )
     ),
+    (3, 5, 8) -> Transforms(
+      Seq(
+        // TODO(#33681): Remove this transform once the traffic enforcement configs have been ported to main
+        "canton.participants.participant1.traffic-enforcement"
+      )
+    ),
   )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking
@@ -90,7 +96,7 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
                     |   A recent patch release (e.g., 3.5.x) introduced a new config key and published its dump to S3, but your branch is missing the corresponding Scala case classes.
                     |   - If the forward-port has been merged: Pull the latest `main` and rebase your branch.
                     |   - If `main` is also failing this test: The forward-port PR from the release branch hasn't been merged yet.
-                    |   
+                    |
                     |2. IF YOU ARE ACTIVELY REMOVING OR RENAMING A CONFIG KEY:
                     |   FIX: Add a deprecation or transform step!
                     |   - Add a `DeprecatedConfigPath` mapping to `DeprecatedFieldsFor` in `CantonConfig.scala`.

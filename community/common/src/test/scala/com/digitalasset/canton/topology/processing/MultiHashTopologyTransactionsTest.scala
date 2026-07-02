@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{Fingerprint, Signature, SignatureFormat, TestHash}
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.transaction.{
@@ -12,6 +11,7 @@ import com.digitalasset.canton.topology.transaction.{
   SingleTransactionSignature,
 }
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 

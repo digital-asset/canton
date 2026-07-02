@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.util
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.util.BestFittingBatcher.{CapacityLeft, Sized}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.IterableOps

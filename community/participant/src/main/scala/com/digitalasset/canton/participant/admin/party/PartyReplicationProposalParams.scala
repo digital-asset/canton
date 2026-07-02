@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.party
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
@@ -17,6 +16,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
   UniqueIdentifier,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.jdk.CollectionConverters.*
 

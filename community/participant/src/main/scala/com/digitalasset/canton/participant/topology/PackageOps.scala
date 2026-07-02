@@ -10,8 +10,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -27,7 +25,7 @@ import com.digitalasset.canton.ledger.api.{
   SinglePackageTargetVetting,
   UpdateVettedPackagesForceFlags,
 }
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
@@ -46,6 +44,8 @@ import com.digitalasset.canton.util.{FailureMode, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import scala.concurrent.ExecutionContext
 
@@ -134,6 +134,9 @@ class PackageOpsImpl(
     logTaskTiming = false,
     failureMode = FailureMode.ContinueAfterFailure,
   )
+
+  override protected def onClosed(): Unit =
+    LifeCycle.close(vettingExecutionQueue)(logger)
 
   override def checkPackageUnused(packageId: PackageId)(implicit
       tc: TraceContext

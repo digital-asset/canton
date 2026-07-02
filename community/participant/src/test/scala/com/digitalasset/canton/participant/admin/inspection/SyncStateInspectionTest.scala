@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.inspection
 
 import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
@@ -51,6 +50,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 

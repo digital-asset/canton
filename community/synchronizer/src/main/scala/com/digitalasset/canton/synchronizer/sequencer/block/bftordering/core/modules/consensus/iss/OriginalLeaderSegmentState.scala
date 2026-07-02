@@ -91,6 +91,7 @@ class OriginalLeaderSegmentState(
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var waitingForAvailabilityResponse = false
 
+  def waitingResponseFromAvailability: Boolean = waitingForAvailabilityResponse
   def receivedResponseFromAvailability(): Unit = waitingForAvailabilityResponse = false
   def startWaitingForAvailabilityResponse(): Unit = waitingForAvailabilityResponse = true
 
@@ -122,10 +123,16 @@ class OriginalLeaderSegmentState(
         segment.slotNumbers(nextRelativeBlockToPropose - 1)
       )) // we finished processing the current slot
 
-  def reasonForNoProposal: Option[String] =
+  def reasonForNotAcceptingProposals: Option[String] =
     if (!segmentIsInProgress)
       Some(
-        s"End of segment reached: nextRelativeBlockToPropose $nextRelativeBlockToPropose is beyond segment size ${segment.slotNumbers.sizeIs}"
+        s"End of segment reached: nextRelativeBlockToPropose $nextRelativeBlockToPropose " +
+          s"is beyond segment size ${segment.slotNumbers.sizeIs}"
+      )
+    else if (waitingForAvailabilityResponse)
+      Some(
+        s"Waiting for availability proposal for relative block $nextRelativeBlockToPropose (absolute block ${segment
+            .slotNumbers(nextRelativeBlockToPropose)})"
       )
     else if (viewChangeOccurred)
       Some(s"ViewChangeOccurred! view = ${state.currentView}")
@@ -141,6 +148,8 @@ class OriginalLeaderSegmentState(
       Some(
         s"Previous relative block ${segment.slotNumbers(nextRelativeBlockToPropose - 1)} is still in progress"
       )
+    else if (!canReceiveProposals)
+      Some(s"Unknown (likely a new case, please align the reason computation logic)")
     else
       None
 

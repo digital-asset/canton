@@ -390,11 +390,12 @@ private[lf] object CostModel {
           costOfBoolean(byKey) +
           costOfOption(interfaceId) +
           costOfSerializationVersion(version)
-      case Node.LookupByKey(packageName, templateId, key, result, version) =>
+      case Node.QueryByKey(packageName, templateId, exhaustive, key, result, version) =>
         1 + costOfString(packageName) +
           costOfIdentifier(templateId) +
           costOfGlobalKeyWithMaintainers(key) +
-          costOfOption(result) +
+          costOfSeq(result) +
+          costOfBoolean(exhaustive) +
           costOfSerializationVersion(version)
       case Node.Exercise(
             targetCoid,

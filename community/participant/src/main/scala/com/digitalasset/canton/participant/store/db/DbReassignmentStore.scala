@@ -9,14 +9,13 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.UnassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData.InternalIncompleteReassignmentData
 import com.digitalasset.canton.participant.protocol.reassignment.{
@@ -36,6 +35,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.SingletonTraverse.syntax.SingletonTraverseOps
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import slick.jdbc.GetResult.GetInt
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
@@ -146,6 +146,9 @@ class DbReassignmentStore(
     loggerFactory,
     crashOnFailure = exitOnFatalFailures,
   )
+
+  override def onClosed(): Unit =
+    LifeCycle.close(sequentialQueue)(logger)
 
   override def addUnassignmentData(
       unassignmentData: UnassignmentData

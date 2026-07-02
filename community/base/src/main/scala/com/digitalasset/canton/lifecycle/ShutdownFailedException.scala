@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.lifecycle
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 
 class ShutdownFailedException(instances: NonEmpty[Seq[String]])
     extends RuntimeException(show"Unable to close ${instances.map(_.singleQuoted)}.")

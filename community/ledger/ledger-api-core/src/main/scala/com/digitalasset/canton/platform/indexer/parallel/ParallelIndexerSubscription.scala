@@ -7,7 +7,6 @@ import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -62,6 +61,7 @@ import com.digitalasset.canton.util.PekkoUtil.{Commit, FutureQueue, PekkoSourceQ
 import com.digitalasset.canton.util.{BatchN, ErrorUtil}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitches, Materializer, OverflowStrategy}
@@ -934,9 +934,13 @@ object ParallelIndexerSubscription {
             )
             .toVector
         lastActivationsWithInternalContractIds <-
-          dbDispatcher.executeSql(metrics.index.db.lookupLastActivationsDbMetrics)(
-            lastActivations(missingActivationsWithInternalContractIds)
-          )
+          if (missingActivationsWithInternalContractIds.isEmpty) {
+            Future.successful(Map.empty[(SynchronizerId, Long), Long])
+          } else {
+            dbDispatcher.executeSql(metrics.index.db.lookupLastActivationsDbMetrics)(
+              lastActivations(missingActivationsWithInternalContractIds)
+            )
+          }
         updatedMissingDeactivatedActivations =
           missingActivations.view
             .map(synCon =>

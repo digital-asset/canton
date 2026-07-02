@@ -6,7 +6,6 @@ package com.digitalasset.canton.protocol.messages
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext

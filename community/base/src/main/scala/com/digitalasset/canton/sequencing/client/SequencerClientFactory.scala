@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
@@ -34,6 +33,7 @@ import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level

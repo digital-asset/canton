@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.admin.party_management_service.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{
@@ -22,6 +21,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, PartyId, UniqueIdentifier}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import java.security.KeyPairGenerator

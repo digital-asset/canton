@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.synchronizer
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.catsinstances.`cats nonempty traverse`
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.participant.v30

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{Signature, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
@@ -51,6 +50,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   config,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration

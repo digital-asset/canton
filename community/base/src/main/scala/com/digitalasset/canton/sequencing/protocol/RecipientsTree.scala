@@ -5,13 +5,12 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.reducible.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.nonempty.NonEmpty
 
 /** A tree representation of the recipients for a batch. Each member receiving the batch should see
   * only subtrees of recipients from a node containing the member. If a member is present in a

@@ -6,7 +6,6 @@ package com.digitalasset.canton.performance.util
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, TopologyAdminCommands}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
@@ -110,6 +109,7 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.version.ParticipantProtocolFeatureFlags
 import com.digitalasset.canton.{SynchronizerAlias, config as cfg}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.OptionValues
 import org.slf4j.event.Level
 

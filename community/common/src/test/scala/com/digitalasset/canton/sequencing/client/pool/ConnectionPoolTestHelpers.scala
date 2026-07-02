@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
@@ -71,6 +70,7 @@ import com.digitalasset.canton.version.{
   ReleaseVersion,
 }
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.StreamObserver
 import io.grpc.{CallOptions, Channel, Status}
 import org.apache.pekko.actor.ActorSystem

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxEither
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.connection.v30
@@ -35,6 +34,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Channel, ClientInterceptors}
 import org.apache.pekko.stream.Materializer
 

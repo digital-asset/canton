@@ -568,7 +568,7 @@ class GrpcSequencerService(
         override def onCompleted(): Unit = queue.complete()
 
         override def onNext(elem: T): FutureUnlessShutdown[Unit] =
-          if (!isClosing)
+          if (!isClosing && !isCancelled)
             FutureUnlessShutdown
               .outcomeF(queue.offer(elem))
               .recover { case ex: StreamDetachedException =>

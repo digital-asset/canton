@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.data.OptionT
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.{ViewPosition, ViewTree}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.collection.IterableUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext

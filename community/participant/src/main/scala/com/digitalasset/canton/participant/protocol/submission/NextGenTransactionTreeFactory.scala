@@ -32,6 +32,7 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.CreationTime
 import io.scalaland.chimney.dsl.*
@@ -333,9 +334,10 @@ class NextGenTransactionTreeFactory(
       case _ => false
     }
     val subviewIndex = TransactionSubviews.indices(nbSubViews).iterator
-    def viewExternalCallResultsFromCollected(): Seq[ViewParticipantData.ViewExternalCallResult] =
-      if (collectExternalCallResults) externalCallResultsBuilder.result()
-      else Seq.empty
+    def viewExternalCallResultsFromCollected()
+        : ImmArray[ViewParticipantData.ViewExternalCallResult] =
+      if (collectExternalCallResults) ImmArray.from(externalCallResultsBuilder.result())
+      else ImmArray.Empty
 
     for {
       // Compute salts
@@ -642,7 +644,7 @@ class NextGenTransactionTreeFactory(
       salt: Salt,
       contractOfId: ContractInstanceOfId,
       rbContextCore: RollbackContext,
-      externalCallResults: Seq[ViewParticipantData.ViewExternalCallResult],
+      externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult],
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, ViewParticipantData] = {
 
     val consumedInCore =

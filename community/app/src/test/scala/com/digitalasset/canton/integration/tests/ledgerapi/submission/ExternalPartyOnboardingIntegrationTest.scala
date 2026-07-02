@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.submission
 
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
@@ -50,6 +49,7 @@ import com.digitalasset.canton.topology.{
   PartyId,
   TopologyManagerError,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 import scala.concurrent.Future

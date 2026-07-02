@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.NamedLogging
@@ -11,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.KillSwitches
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, SinkQueueWithCancel, Source}

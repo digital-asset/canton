@@ -5,7 +5,6 @@ package com.digitalasset.canton.store.packagemeta
 
 import cats.kernel.Semigroup
 import cats.syntax.semigroup.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.{
   InterfacesImplementedBy,
   PackageResolution,
@@ -13,6 +12,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata.{
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.util.PackageInfo
 import com.digitalasset.daml.lf.language.{Ast, Util as LfUtil}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 

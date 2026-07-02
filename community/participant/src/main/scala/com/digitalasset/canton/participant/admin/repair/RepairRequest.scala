@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.admin.repair
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
@@ -11,6 +10,7 @@ import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.nonempty.NonEmpty
 
 private[repair] final case class RepairRequest(
     synchronizer: RepairRequest.SynchronizerData,

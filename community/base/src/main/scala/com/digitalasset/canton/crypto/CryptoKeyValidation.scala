@@ -4,12 +4,12 @@
 package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs}
 import com.digitalasset.canton.crypto.CryptoPureApiError.KeyParseAndValidateError
 import com.digitalasset.canton.crypto.SigningKeyUsage.compatibleUsageForSignAndVerify
 import com.digitalasset.canton.crypto.provider.jce.{JceJavaKeyConverter, JceSecurityProvider}
 import com.digitalasset.canton.util.{EitherUtil, ThrowableUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString

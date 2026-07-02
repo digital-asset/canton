@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.docs.snippet
 
 import better.files.File
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.scalalogging.LazyLogging
 
 final case class SnippetScenario(name: String, steps: Seq[Seq[SnippetStep]])

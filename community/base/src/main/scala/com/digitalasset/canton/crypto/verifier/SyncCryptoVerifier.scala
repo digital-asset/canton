@@ -8,7 +8,6 @@ import cats.implicits.{catsSyntaxAlternativeSeparate, catsSyntaxValidatedId}
 import cats.syntax.either.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CacheConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.RsaOaepSha256
@@ -47,6 +46,7 @@ import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 
 import scala.concurrent.ExecutionContext
@@ -187,7 +187,7 @@ class SyncCryptoVerifier(
       signerStr: String,
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, SigningPublicKey] =
     (for {
-      _ <- Either.cond(
+      _ <- Either.cond[SignatureCheckError, Unit](
         validKeys.nonEmpty,
         (),
         SignerHasNoValidKeys(

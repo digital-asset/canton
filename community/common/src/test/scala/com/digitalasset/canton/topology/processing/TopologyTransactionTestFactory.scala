@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SigningPublicKey
@@ -17,6 +16,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

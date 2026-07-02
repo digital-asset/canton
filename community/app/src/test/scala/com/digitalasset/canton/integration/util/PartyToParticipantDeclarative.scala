@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.util
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
@@ -27,6 +26,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertions.fail
 
 import scala.concurrent.duration.DurationInt

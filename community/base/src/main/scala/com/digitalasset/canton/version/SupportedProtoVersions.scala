@@ -4,11 +4,11 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.functor.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.ProtoDeserializationError.UnknownProtoVersion
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 import scala.collection.immutable
 import scala.collection.immutable.SortedMap

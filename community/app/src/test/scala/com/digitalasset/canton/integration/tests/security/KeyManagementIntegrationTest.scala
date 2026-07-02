@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.security
 
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.*
@@ -19,6 +18,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.Assertion
 
 trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {

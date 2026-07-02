@@ -4,12 +4,12 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.FullTransactionViewTree
 import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.ErrorWithInternalConsistencyCheck
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.nonempty.NonEmptyUtil
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.ExecutionContext

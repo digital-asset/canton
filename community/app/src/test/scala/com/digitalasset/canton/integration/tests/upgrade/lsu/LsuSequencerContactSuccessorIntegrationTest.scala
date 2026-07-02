@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.UniquePortGenerator
+import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
@@ -19,6 +20,7 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import monocle.macros.syntax.lens.*
+import org.scalatest.Assertion
 import org.slf4j.event.Level
 
 import java.time.Duration
@@ -78,6 +80,21 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
   private lazy val handshakeFailureWarn =
     s"Unable to perform handshake with ${fixture.newPsid}"
 
+  /**   - Sometimes, we expect one warning per participant.
+    *   - Depending on the order of logs, if we don't assert on the logger name, then the tooling
+    *     thinks that one suppression rule is a duplicate of the other. As a result, we leave the
+    *     suppressing block before capturing everything.
+    *   - Asserting on the logger name allows to avoid this problem.
+    */
+  private def assertLogEntry(
+      entry: LogEntry,
+      p: LocalParticipantReference,
+      message: String,
+  ): Assertion = {
+    entry.loggerName should include(p.name)
+    entry.warningMessage should include(message)
+  }
+
   "Sequencers" should {
     "have contact metrics set to 0 initially" in { implicit env =>
       import env.*
@@ -101,6 +118,9 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
     "not update the metric if psid is incorrect" in { implicit env =>
       import env.*
 
+      val connectionInvalidSynchronizer =
+        "Connection internal-sequencer-connection-sequencer1-0: Invalid synchronizer"
+
       // Incorrect announcement of the successor: wrong psid
       loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
         sequencer1.topology.lsu.sequencer_successors.propose_successor(
@@ -118,24 +138,20 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
               "warning on sequencer",
             ),
             (
-              _.warningMessage should include(
-                "Connection internal-sequencer-connection-sequencer1-0: Invalid synchronizer"
-              ),
-              "connection pool warn on p1",
+              assertLogEntry(_, participant1, connectionInvalidSynchronizer),
+              "connection pool warn on participant1",
             ),
             (
-              _.warningMessage should include(
-                "Connection internal-sequencer-connection-sequencer1-0: Invalid synchronizer"
-              ),
-              "connection pool warn on p2",
+              assertLogEntry(_, participant2, connectionInvalidSynchronizer),
+              "connection pool warn on participant2",
             ),
             (
-              _.warningMessage should include(handshakeFailureWarn),
-              "handshake failure on p1",
+              assertLogEntry(_, participant1, handshakeFailureWarn),
+              "handshake failure on participant1",
             ),
             (
-              _.warningMessage should include(handshakeFailureWarn),
-              "handshake failure on p2",
+              assertLogEntry(_, participant2, handshakeFailureWarn),
+              "handshake failure on participant2",
             ),
           )
         ),
@@ -147,6 +163,8 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
 
     "not update the metric if sequencer id is incorrect" in { implicit env =>
       import env.*
+
+      val connectionInvalidSequencer = "Validation failure: Connection is not on expected sequencer"
 
       // Incorrect announcement of the successor: wrong sequencer id
       loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
@@ -165,24 +183,20 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
               "warning on sequencer",
             ),
             (
-              _.warningMessage should include(
-                "Validation failure: Connection is not on expected sequencer"
-              ),
-              "connection pool warn on p1",
+              assertLogEntry(_, participant1, connectionInvalidSequencer),
+              "connection pool warn on participant1",
             ),
             (
-              _.warningMessage should include(
-                "Validation failure: Connection is not on expected sequencer"
-              ),
-              "connection pool warn on p2",
+              assertLogEntry(_, participant2, connectionInvalidSequencer),
+              "connection pool warn on participant2",
             ),
             (
-              _.warningMessage should include(handshakeFailureWarn),
-              "handshake failure on p1",
+              assertLogEntry(_, participant1, handshakeFailureWarn),
+              "handshake failure on participant1",
             ),
             (
-              _.warningMessage should include(handshakeFailureWarn),
-              "handshake failure on p2",
+              assertLogEntry(_, participant2, handshakeFailureWarn),
+              "handshake failure on participant2",
             ),
           )
         ),

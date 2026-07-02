@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands.Write.GenerateTransactions.Proposal
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -19,6 +18,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.scalatest.{EitherValues, LoneElement, OptionValues}
 

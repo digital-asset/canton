@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
@@ -18,6 +17,7 @@ import com.digitalasset.canton.topology.transaction.{TopologyChangeOp, TopologyM
 import com.digitalasset.canton.topology.{Namespace, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.{Assertion, Suite}
 
 private[store] trait TopologyStoreTestBase extends BaseTest with HasExecutionContext {

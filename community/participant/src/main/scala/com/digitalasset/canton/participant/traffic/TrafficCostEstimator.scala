@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.traffic
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, SessionSigningKeysConfig}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
@@ -83,6 +82,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchro
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HashingSchemeVersion.V2
 import com.digitalasset.canton.{LedgerSubmissionId, WorkflowId}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import java.security.{GeneralSecurityException, KeyPairGenerator}

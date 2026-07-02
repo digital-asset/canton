@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail.{
   Add,
@@ -13,6 +12,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessC
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 

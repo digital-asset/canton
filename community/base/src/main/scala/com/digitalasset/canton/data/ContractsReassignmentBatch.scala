@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, Stakeholders}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.{LfPackageId, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Ref.{PackageName, TypeConId}
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 final case class ContractReassignment(
     contract: ContractInstance,

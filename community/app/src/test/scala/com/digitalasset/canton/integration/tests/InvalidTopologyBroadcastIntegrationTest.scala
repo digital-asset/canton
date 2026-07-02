@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests
 
 import cats.syntax.bifunctor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.admin.api.client.data.topology.{
   ListNamespaceDelegationResult,
@@ -49,6 +48,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Remove, Re
 import com.digitalasset.canton.topology.{Member, PartyId, QueueBasedSynchronizerOutbox}
 import com.digitalasset.canton.util.{ErrorUtil, MaliciousParticipantNode, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.slf4j.event.Level
 import org.slf4j.event.Level.WARN

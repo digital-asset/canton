@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Functor
 import cats.data.EitherT
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
@@ -33,6 +32,7 @@ import com.digitalasset.canton.version.{
   VersionedProtoCodec,
   VersioningCompanionMemoization2,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext

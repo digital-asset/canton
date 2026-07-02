@@ -139,10 +139,11 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
   private val someLookups: Seq[Node] =
     for {
       version <- Seq(samVersion1, samVersion2)
-      result <- Seq(None, Some(samContractId1))
-    } yield Node.LookupByKey(
+      result <- Seq(Vector.empty, Vector(samContractId1))
+    } yield Node.QueryByKey(
       templateId = samTemplateId1,
       packageName = somePkgName,
+      exhaustive = result.isEmpty,
       result = result,
       key = samKWM3,
       version = version,
@@ -343,16 +344,16 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
 
   // --[LookupByKey node tweaks]--
 
-  private val tweakLookupTemplateId = Tweak.single[Node] { case nl: Node.LookupByKey =>
+  private val tweakLookupTemplateId = Tweak.single[Node] { case nl: Node.QueryByKey =>
     nl.copy(templateId = changeTemplateId(nl.templateId))
   }
-  private val tweakLookupKey = Tweak[Node] { case nl: Node.LookupByKey =>
+  private val tweakLookupKey = Tweak[Node] { case nl: Node.QueryByKey =>
     tweakKeyMaintainers.run(nl.key).map(x => nl.copy(key = x))
   }
-  private val tweakLookupResult = Tweak[Node] { case nl: Node.LookupByKey =>
+  private val tweakLookupResult = Tweak[Node] { case nl: Node.QueryByKey =>
     tweakOptContractId.run(nl.result.asCidOption).map(x => nl.copy(result = x.asCidVector))
   }
-  private val tweakLookupVersion = Tweak.single[Node] { case nl: Node.LookupByKey =>
+  private val tweakLookupVersion = Tweak.single[Node] { case nl: Node.QueryByKey =>
     nl.copy(version = changeVersion(nl.version))
   }
 

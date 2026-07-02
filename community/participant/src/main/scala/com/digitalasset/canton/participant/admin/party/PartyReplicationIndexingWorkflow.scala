@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.party
 import cats.Eval
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
@@ -39,6 +38,7 @@ import com.digitalasset.canton.util.{
   ReassignmentTag,
 }
 import com.digitalasset.canton.{ReassignmentCounter, RepairCounter, checked}
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext

@@ -125,8 +125,10 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
           (
             NoVettedInterfaceImplementationPackage,
             (_: String) should include regex
-              s"""No vetted package for rendering the interface view for package-name '${TokenV1.PACKAGE_NAME}'.*Reason: No synchronizer satisfies the vetting requirements.*No vetted package candidate satisfies the package-id filter 'Package-ids with interface instances for the requested interface'=${TokenV1.PACKAGE_NAME} -> ${TokenV2.PACKAGE_ID.toPackageId.show}.*
-                 |Candidates: ${TokenV1.PACKAGE_ID.toPackageId.show}.*""".stripMargin,
+              s"""No vetted package for rendering the interface view for package-name '${TokenV1.PACKAGE_NAME}'.*Reason: No synchronizer satisfies the vetting requirements.*No vetted package candidate satisfies the package-id filter 'Package-ids with interface instances for the requested interface'=${TokenV1.PACKAGE_NAME} -> ${toShow(
+                  TokenV2.PACKAGE_ID.toPackageId
+                ).show}.*
+                 |Candidates: ${toShow(TokenV1.PACKAGE_ID.toPackageId).show}.*""".stripMargin,
           )
         assertViews(createdEvent)(
           HoldingV1.TEMPLATE_ID_WITH_PACKAGE_ID -> Left(expectedFailure)

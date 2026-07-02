@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -36,6 +35,7 @@ import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.IterableUtil.Ops
 import com.digitalasset.canton.util.{ErrorUtil, Mutex}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec

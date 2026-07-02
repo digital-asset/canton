@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
@@ -21,6 +20,7 @@ import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 
 import java.time.temporal.ChronoUnit
 import scala.concurrent.ExecutionContext

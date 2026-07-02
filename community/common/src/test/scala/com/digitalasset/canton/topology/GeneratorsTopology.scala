@@ -40,8 +40,8 @@ final class GeneratorsTopology(protocolVersion: ProtocolVersion) {
       partyId <- Arbitrary.arbitrary[PartyId]
       signingFingerprints <- nonEmptyListGen[Fingerprint]
       keyThreshold <- Arbitrary.arbitrary[PositiveInt]
-      version <- Gen.oneOf(
-        HashingSchemeVersion.getHashingSchemeVersionsForProtocolVersion(protocolVersion)
+      version <- Gen.oneOf[HashingSchemeVersion](
+        Seq(HashingSchemeVersion.V2, HashingSchemeVersion.V3)
       )
     } yield ExternalParty(partyId, signingFingerprints, keyThreshold, version)
   )

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.block
 
 import cats.data.{Chain, EitherT}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.TestHash
@@ -32,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficCons
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.FixtureAsyncWordSpecLike
 import org.scalatest.{Assertion, FutureOutcome}
 

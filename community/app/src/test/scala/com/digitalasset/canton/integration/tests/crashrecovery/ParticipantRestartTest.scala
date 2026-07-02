@@ -25,7 +25,6 @@ import com.daml.ledger.javaapi as javab
 import com.daml.ledger.javaapi.data.{Command, Transaction}
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.{
   AdverseScenario,
@@ -146,6 +145,7 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
   config,
 }
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import monocle.macros.syntax.lens.*
 import org.scalactic.source.Position

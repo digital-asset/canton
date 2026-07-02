@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.pruning
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.*
@@ -16,6 +15,7 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil.*
+import com.digitalasset.nonempty.NonEmpty
 
 import java.security.InvalidParameterException
 import java.util.concurrent.atomic.AtomicReference

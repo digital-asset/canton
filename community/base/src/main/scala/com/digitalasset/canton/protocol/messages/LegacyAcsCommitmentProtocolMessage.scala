@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -18,6 +17,7 @@ import com.digitalasset.canton.version.{
   VersionedProtoCodec,
   VersioningCompanionContext,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 /** INTERNAL protocol message type used for ACS commitments in transit starting with PV35. Do NOT
   * USE this message outside of envelope transit (e.g.,

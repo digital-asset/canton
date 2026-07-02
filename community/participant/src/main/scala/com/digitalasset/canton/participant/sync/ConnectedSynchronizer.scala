@@ -9,7 +9,6 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.{Eval, Monad}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -125,6 +124,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
 }
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import monocle.macros.syntax.lens.*

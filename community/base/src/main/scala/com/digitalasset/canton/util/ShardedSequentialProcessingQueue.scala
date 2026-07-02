@@ -11,6 +11,7 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  LifeCycle,
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -170,5 +171,6 @@ class NonGarbageCollectedShardedSequentialProcessingQueue[Ident: Pretty](
     )
 
   override protected def onClosed(): Unit =
-    processingQueues.readOnlySnapshot().values.foreach(_.onClosed())
+    // close() (not onClosed()) so each shard queue flushes and runs its close hooks
+    LifeCycle.close(processingQueues.readOnlySnapshot().values.toSeq*)(logger)
 }

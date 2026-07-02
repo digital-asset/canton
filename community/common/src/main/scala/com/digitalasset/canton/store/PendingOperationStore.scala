@@ -64,7 +64,7 @@ object PendingOperationMetadata {
     }
 }
 
-trait GenericPendingOperationStore {
+trait GenericPendingOperationStore extends AutoCloseable {
 
   def isInMemoryStore(): Boolean
 
@@ -131,8 +131,7 @@ object GenericPendingOperationStore {
   *   data for executing the pending operation.
   */
 trait PendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer]
-    extends AutoCloseable
-    with GenericPendingOperationStore {
+    extends GenericPendingOperationStore {
 
   protected def opCompanion: VersioningCompanion[Op]
 

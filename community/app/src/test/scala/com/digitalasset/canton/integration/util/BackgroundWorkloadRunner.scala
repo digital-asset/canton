@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.util
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
@@ -19,6 +18,7 @@ import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters.*

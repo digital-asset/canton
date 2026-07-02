@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.kms.gcp
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
@@ -24,6 +23,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.api.core.{ApiFunction, ApiFuture, ApiFutureCallback, ApiFutures}
 import com.google.api.gax.core.FixedCredentialsProvider
 import com.google.api.gax.rpc.{ApiException, ResourceExhaustedException}

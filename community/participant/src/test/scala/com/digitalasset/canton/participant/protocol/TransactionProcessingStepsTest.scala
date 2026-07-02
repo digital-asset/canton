@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.FullTransactionViewTree
 import com.digitalasset.canton.protocol.ExampleTransactionFactory
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.wordspec.AnyWordSpec
 
 class TransactionProcessingStepsTest extends AnyWordSpec with BaseTest with HasExecutionContext {

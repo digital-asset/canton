@@ -6,7 +6,6 @@ package com.digitalasset.canton.protocol
 import cats.instances.option.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -24,6 +23,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimit
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.Future
 

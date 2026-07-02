@@ -17,7 +17,7 @@ import scala.concurrent.ExecutionContext
 
 trait P2PEndpointsStore[E <: Env[E]] extends AutoCloseable {
 
-  def listEndpoints(implicit
+  def listEndpoints()(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Seq[P2PEndpoint]]
   protected final val listEndpointsActionName: String = "list BFT ordering P2P endpoints"

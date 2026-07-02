@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.offboarding
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
@@ -22,6 +21,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.nonempty.NonEmpty
 
 class SequencerOffboardingIntegrationTest
     extends CommunityIntegrationTest

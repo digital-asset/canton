@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.metrics.api.{MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
@@ -33,6 +32,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{FutureUtil, PekkoUtil}
 import com.digitalasset.canton.{LfPartyId, config}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.atomic.AtomicBoolean

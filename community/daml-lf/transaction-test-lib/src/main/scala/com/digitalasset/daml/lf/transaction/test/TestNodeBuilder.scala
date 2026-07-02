@@ -130,16 +130,17 @@ trait TestNodeBuilder {
       interfaceId = None,
     )
 
-  def lookupByKey(contract: Node.Create, found: Boolean = true): Node.LookupByKey =
-    Node.LookupByKey(
+  def lookupByKey(contract: Node.Create, found: Boolean = true): Node.QueryByKey =
+    Node.QueryByKey(
       packageName = contract.packageName,
       templateId = contract.templateId,
+      exhaustive = !found,
       key = contract.keyOpt.getOrElse(
         throw new IllegalArgumentException(
           "Cannot lookup by key a contract that does not have a key"
         )
       ),
-      result = if (found) Some(contract.coid) else None,
+      result = if (found) Vector(contract.coid) else Vector.empty,
       version = contractSerializationVersion(contract),
     )
 

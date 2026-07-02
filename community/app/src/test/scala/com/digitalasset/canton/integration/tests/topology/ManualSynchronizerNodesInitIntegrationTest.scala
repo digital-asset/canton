@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.crypto.SigningKeyUsage
@@ -16,6 +15,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
+import com.digitalasset.nonempty.NonEmpty
 
 /** Test to fully manually initialize synchronizer nodes with identity and topology keys. */
 trait ManualSynchronizerNodesInitIntegrationTest

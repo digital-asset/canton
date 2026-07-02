@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.party
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
@@ -62,6 +61,7 @@ import com.digitalasset.canton.util.{
   SingleUseCell,
   retry,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer

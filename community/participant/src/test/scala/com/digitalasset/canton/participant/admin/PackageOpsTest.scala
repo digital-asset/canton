@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin
 
 import cats.Eval
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -44,6 +43,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPackageId}
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentMatchersSugar
 import org.scalatest.wordspec.AsyncWordSpec
 

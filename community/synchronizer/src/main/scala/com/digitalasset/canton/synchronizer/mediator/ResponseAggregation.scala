@@ -8,7 +8,6 @@ import cats.data.OptionT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricHandle.Meter
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -37,6 +36,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmptyUtil
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.immutable.SortedSet

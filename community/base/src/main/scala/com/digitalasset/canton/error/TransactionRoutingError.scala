@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.error
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{
   ErrorCategory,
   ErrorCode,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.RoutingErrorGroup
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait TransactionRoutingError extends TransactionError with Product with Serializable
 sealed trait TransactionRoutingErrorWithSynchronizer extends TransactionRoutingError {

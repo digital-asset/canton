@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.lifecycle
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{ManagedChannel, Server}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer

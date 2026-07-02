@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{FailOnShutdown, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 abstract class TopologyTransactionProcessorTest

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.daml.nonempty
+package com.digitalasset.nonempty
 
 import com.digitalasset.canton.logging.pretty.Pretty
 import io.scalaland.chimney.Transformer
@@ -13,10 +13,10 @@ import pureconfig.{ConfigReader, ConfigWriter}
 import scala.collection.immutable
 import scala.reflect.ClassTag
 
-/** Additional methods for [[com.daml.nonempty.NonEmpty]].
+/** Additional methods for [[com.digitalasset.nonempty.NonEmpty]].
   *
-  * Cats instances for [[com.daml.nonempty.NonEmpty]] must be imported explicitly as `import
-  * `[[com.daml.nonempty.catsinstances]]`._` when necessary.
+  * Cats instances for [[com.digitalasset.nonempty.NonEmpty]] must be imported explicitly as `import
+  * `[[com.digitalasset.nonempty.catsinstances]]`._` when necessary.
   */
 object NonEmptyUtil {
 
@@ -27,7 +27,7 @@ object NonEmptyUtil {
     NonEmpty.from(xs).getOrElse(throw new NoSuchElementException)
 
   def lensToNEF[A, F[_], B](lens: Lens[A, NonEmpty[F[B]]]): Lens[A, NonEmptyF[F, B]] =
-    NonEmpty.equiv[F, B].subst(lens)
+    NonEmpty.equiv[F, B].substitute(lens)
 
   object instances {
 

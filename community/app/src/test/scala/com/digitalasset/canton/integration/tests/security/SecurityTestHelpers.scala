@@ -13,7 +13,6 @@ import com.daml.ledger.api.v2.transaction.Transaction.toJavaProto
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
   AssignedWrapper,
   ReassignmentWrapper,
@@ -54,6 +53,7 @@ import com.digitalasset.canton.topology.{Member, ParticipantId, PartyId, Physica
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code
 import io.grpc.stub.StreamObserver
 import monocle.macros.GenLens

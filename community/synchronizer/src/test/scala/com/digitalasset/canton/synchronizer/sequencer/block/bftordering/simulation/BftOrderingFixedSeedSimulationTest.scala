@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -24,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   TopologySettings,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.generateNodeOnboardingDelay
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.slf4j.event.Level
 

@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.mediator.store
 import cats.data.OptionT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
@@ -28,6 +27,7 @@ import com.digitalasset.canton.synchronizer.mediator.FinalizedResponse
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import java.util.concurrent.ConcurrentHashMap

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.scheduler
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
@@ -45,6 +44,7 @@ import com.digitalasset.canton.{
   SequencerAlias,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 import java.util.concurrent.LinkedBlockingQueue

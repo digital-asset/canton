@@ -5,7 +5,6 @@ package com.digitalasset.canton.util
 
 import better.files.File
 import cats.data.NonEmptyList
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.*
@@ -15,6 +14,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersionCompatibility,
   ReleaseVersion,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import java.nio.file.{Files, Paths}
 import scala.collection.concurrent.TrieMap

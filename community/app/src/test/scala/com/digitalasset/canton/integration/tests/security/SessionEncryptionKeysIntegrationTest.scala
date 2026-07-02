@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.security
 
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -49,6 +48,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId, SynchronizerId}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ledger.api.{
   ListVettedPackagesOpts,
@@ -22,6 +21,7 @@ import com.digitalasset.canton.topology.{ForceFlags, ParticipantId, PhysicalSync
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.decrypter
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{
   CacheConfig,
@@ -58,6 +57,7 @@ import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, WorkflowId}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 

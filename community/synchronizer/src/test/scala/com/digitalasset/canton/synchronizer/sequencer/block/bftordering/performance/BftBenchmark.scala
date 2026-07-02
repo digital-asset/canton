@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.perform
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBenchmark.{
   Separator,
@@ -23,6 +22,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performa
   successfulWriteMeters,
   writeNanosHistograms,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 import java.util.concurrent.{

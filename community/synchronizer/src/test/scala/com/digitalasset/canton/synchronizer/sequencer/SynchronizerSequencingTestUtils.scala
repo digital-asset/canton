@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
@@ -17,6 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
   SequencerMemberId,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.immutable.SortedSet
 

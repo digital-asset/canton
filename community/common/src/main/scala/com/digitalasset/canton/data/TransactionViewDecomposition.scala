@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 

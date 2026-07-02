@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
@@ -34,6 +33,7 @@ import com.digitalasset.canton.topology.transaction.{HostingParticipant, Partici
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier, transaction}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.*

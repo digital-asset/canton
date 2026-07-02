@@ -6,6 +6,7 @@ package lf
 package transaction
 
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.CidOptionOps
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.{
   ActiveLedgerState,
   KeyActive,
@@ -156,12 +157,13 @@ class LegacyContractStateMachineSpec
   def mkLookupByKey(
       key: String,
       contractId: Option[ContractId],
-  ): Node.LookupByKey =
-    Node.LookupByKey(
+  ): Node.QueryByKey =
+    Node.QueryByKey(
       packageName = pkgName,
       templateId = templateId,
+      exhaustive = contractId.isEmpty,
       key = toKeyWithMaintainers(templateId, key),
-      result = contractId,
+      result = contractId.asCidVector,
       version = txVersion,
     )
 
@@ -794,7 +796,7 @@ class LegacyContractStateMachineSpec
   }
 
   private def children(node: Node): ImmArray[NodeId] = node match {
-    case _: Node.Create | _: Node.Fetch | _: Node.LookupByKey => ImmArray.empty[NodeId]
+    case _: Node.Create | _: Node.Fetch | _: Node.QueryByKey => ImmArray.empty[NodeId]
     case exercise: Node.Exercise => exercise.children
     case rollback: Node.Rollback => rollback.children
   }
@@ -809,7 +811,7 @@ class LegacyContractStateMachineSpec
     *   - [[com.digitalasset.daml.lf.transaction.Node.Exercise]] calls
     *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleExercise]]
     *     before visiting the children
-    *   - [[com.digitalasset.daml.lf.transaction.Node.LookupByKey]] calls
+    *   - [[com.digitalasset.daml.lf.transaction.Node.QueryByKey]] calls
     *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleLookup]] in
     *     mode [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]] and
     *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleLookupWith]]
@@ -824,7 +826,7 @@ class LegacyContractStateMachineSpec
     * @param resolver
     *   The resolver used in modes
     *   [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]] for handling
-    *   [[com.digitalasset.daml.lf.transaction.Node.LookupByKey]]. Ignored in mode
+    *   [[com.digitalasset.daml.lf.transaction.Node.QueryByKey]]. Ignored in mode
     *   [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]].
     */
   private def visitSubtree(
@@ -935,7 +937,7 @@ object LegacyContractStateMachineSpec {
           case create: Node.Create => updateKey(s, create.gkeyOpt, KeyInactive)
           case fetch: Node.Fetch =>
             updateKey(s, fetch.gkeyOpt, KeyActive(fetch.coid))
-          case lookup: Node.LookupByKey =>
+          case lookup: Node.QueryByKey =>
             updateKey(s, Some(lookup.gkey), lookup.result.asCidOption)
         },
       rollbackBegin = (s, _, _) => s -> ChildrenRecursion.DoRecurse,

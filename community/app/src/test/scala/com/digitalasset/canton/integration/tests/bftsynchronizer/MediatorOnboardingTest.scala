@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.TemplateId
@@ -24,6 +23,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ForceFlag, PartyId, UniqueIdentifier}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.jdk.CollectionConverters.*
 

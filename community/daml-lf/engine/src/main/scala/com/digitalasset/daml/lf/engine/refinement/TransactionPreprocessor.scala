@@ -98,7 +98,7 @@ private[refinement] final class TransactionPreprocessor(
               acc :+ cmd
             case _: Node.Fetch =>
               invalidRootNode(id, s"Transaction contains a fetch root node $id")
-            case _: Node.LookupByKey =>
+            case _: Node.QueryByKey =>
               invalidRootNode(id, s"Transaction contains a lookup by key root node $id")
           }
         case Some(_: Node.Rollback) =>

@@ -5,13 +5,13 @@ package com.digitalasset.canton.scheduler
 
 import cats.syntax.either.*
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.scheduler.JobSchedule.NextRun
 import com.digitalasset.canton.scheduler.JobScheduler.*
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 /** Job schedule allows flexibly composing multiple administration job schedules.
   */

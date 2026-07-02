@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.implicits.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -50,6 +49,7 @@ import com.digitalasset.canton.{
   SequencerCounter,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level
 

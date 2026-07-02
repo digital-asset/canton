@@ -4,7 +4,6 @@
 package com.digitalasset.canton.crypto.store
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
@@ -20,6 +19,7 @@ import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

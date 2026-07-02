@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.CantonRequireTypes.String300
@@ -22,6 +21,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.Assertions.fail
 import org.scalatest.concurrent.ScalaFutures.convertScalaFuture
 

@@ -218,7 +218,7 @@ final class NextGenTransactionTreeFactoryTest
               val tree = result.value
               tree.rootViews.unblindedElements should have size 2
               val view1 = tree.rootViews.unblindedElements.drop(1).headOption.value
-              val records = view1.viewParticipantData.tryUnwrap.externalCallResults
+              val records = view1.viewParticipantData.tryUnwrap.externalCallResults.toSeq
 
               records.map(record =>
                 (record.result, record.exerciseIndex, record.callIndex, record.checkingParties)
@@ -261,7 +261,7 @@ final class NextGenTransactionTreeFactoryTest
             ).value.map { result =>
               val tree = result.value
               val view1 = tree.rootViews.unblindedElements.drop(1).headOption.value
-              val records = view1.viewParticipantData.tryUnwrap.externalCallResults
+              val records = view1.viewParticipantData.tryUnwrap.externalCallResults.toSeq
 
               records should have size 2
               records.map(_.result) shouldBe Seq(externalCallResult, externalCallResult)
@@ -291,9 +291,9 @@ final class NextGenTransactionTreeFactoryTest
               val parentView = tree.rootViews.unblindedElements.drop(1).headOption.value
               val childView = parentView.subviews.unblindedElements.headOption.value
 
-              parentView.viewParticipantData.tryUnwrap.externalCallResults shouldBe Seq.empty
+              parentView.viewParticipantData.tryUnwrap.externalCallResults shouldBe ImmArray.Empty
               val record =
-                childView.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+                childView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
 
               record.result shouldBe externalCallResult
               record.exerciseIndex shouldBe NonNegativeInt.zero
@@ -325,14 +325,14 @@ final class NextGenTransactionTreeFactoryTest
               val childView = parentView.subviews.unblindedElements.loneElement
 
               val parentRecord =
-                parentView.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+                parentView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
               parentRecord.result shouldBe externalCallResult
               parentRecord.exerciseIndex shouldBe NonNegativeInt.tryCreate(1)
               parentRecord.callIndex shouldBe NonNegativeInt.zero
               parentRecord.checkingParties shouldBe Set(ExampleTransactionFactory.submitter)
 
               val childRecord =
-                childView.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+                childView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
               childRecord.result shouldBe externalCallResult
               childRecord.exerciseIndex shouldBe NonNegativeInt.zero
               childRecord.callIndex shouldBe NonNegativeInt.zero
@@ -355,7 +355,7 @@ final class NextGenTransactionTreeFactoryTest
               val tree = result.value
               val view = tree.rootViews.unblindedElements.loneElement
               val record =
-                view.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+                view.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
 
               record.checkingParties shouldBe Set(
                 ExampleTransactionFactory.signatory,
@@ -406,7 +406,7 @@ final class NextGenTransactionTreeFactoryTest
                 .map { reconstruction =>
                   val (reconstructedView, _) = reconstruction.value
                   val record =
-                    reconstructedView.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+                    reconstructedView.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
 
                   reconstructedView shouldBe submittedView
                   record.exerciseIndex shouldBe NonNegativeInt.tryCreate(1)

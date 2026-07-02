@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.repair
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIdsFromJava
 import com.digitalasset.canton.admin.api.client.data.{
@@ -50,6 +49,7 @@ import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 import com.digitalasset.canton.topology.transaction.NamespaceDelegation
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags}
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference

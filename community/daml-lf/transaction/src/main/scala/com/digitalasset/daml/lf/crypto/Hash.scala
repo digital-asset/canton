@@ -534,7 +534,7 @@ object Hash {
         addExerciseNode(nodes, nodeSeed, nodeSeeds)(exercise)
       case (_: Node.Exercise, None) => missingNodeSeed(node)
       case (rollback: Node.Rollback, _) => addRollbackNode(nodes, nodeSeeds)(rollback)
-      case (_: Node.LookupByKey, _) =>
+      case (_: Node.QueryByKey, _) =>
         notSupported(s"LookupByKey node")
     }
 

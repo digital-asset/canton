@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.topology.ListOwnerToKeyMappingResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
@@ -32,6 +31,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PartyId, TopologyManagerError}
 import com.digitalasset.daml.lf.archive.DarParser
+import com.digitalasset.nonempty.NonEmpty
 
 import java.io.File
 import scala.annotation.nowarn

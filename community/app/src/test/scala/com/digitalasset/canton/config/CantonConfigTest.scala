@@ -4,7 +4,6 @@
 package com.digitalasset.canton.config
 
 import better.files.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.AuthServiceConfig.UnsafeJwtHmac256
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -22,6 +21,7 @@ import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec

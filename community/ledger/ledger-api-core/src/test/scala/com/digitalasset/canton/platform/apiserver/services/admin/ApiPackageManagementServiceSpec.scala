@@ -10,7 +10,6 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
   ValidateDarFileRequest,
   ValidateDarFileResponse,
 }
-import com.daml.nonempty.NonEmpty
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -59,6 +58,7 @@ import com.digitalasset.canton.{BaseTest, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, Party, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}

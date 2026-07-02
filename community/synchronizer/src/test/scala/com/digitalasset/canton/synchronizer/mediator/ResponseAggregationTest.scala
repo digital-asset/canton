@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.metrics.api.MetricHandle.Meter
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -32,6 +31,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confir
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, CommandId, LfPartyId, UserId}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.mockito.ArgumentCaptor
 import org.scalatest.funspec.PathAnyFunSpec
 

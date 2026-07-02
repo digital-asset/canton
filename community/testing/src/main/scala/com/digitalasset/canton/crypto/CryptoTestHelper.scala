@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.crypto
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.version.HasToByteString
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

@@ -7,7 +7,6 @@ import cats.data.{Chain, EitherT}
 import cats.implicits.catsSyntaxAlternativeSeparate
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ReassignmentRef
 import com.digitalasset.canton.error.TransactionRoutingError
@@ -25,6 +24,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.{ExecutionContext, Future}
 

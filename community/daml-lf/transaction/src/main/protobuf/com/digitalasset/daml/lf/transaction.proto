@@ -127,7 +127,7 @@ message KeyWithMaintainers {
 message ExternalCallResult {
   string extension_id = 1; // Extension service identifier (e.g., "oracle-price-feed")
   string function_id = 2; // Function identifier within the extension
-  bytes config = 3; // Extension configuration hash bytes
+  bytes config = 3; // Extension configuration (binary)
   bytes input = 4; // Input data sent to the extension (binary)
   bytes output = 5; // Output data returned by the extension (binary)
 }
