@@ -223,7 +223,7 @@ class ExternalTransactionProcessorSpec
       result.hashVersion shouldBe HashingSchemeVersion.V4
     }
 
-    "reject stable prepared transactions when the requested hashing scheme is V4" in {
+    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is stable" in {
       val transaction = VersionedTransaction(
         LfSerializationVersion.V2,
         Map.empty,
