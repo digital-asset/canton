@@ -437,11 +437,8 @@ class DAMLe(
     def handleExternalCall(
         externalCallKey: ExternalCallKey,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
-        replayDataO: Option[ExternalCallReplayData],
-    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-      val replayData = replayDataO.getOrElse(externalCallReplayData())
-
-      replayData.outputFor(externalCallKey) match {
+    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
+      externalCallReplayData().outputFor(externalCallKey) match {
         case Left(disagreement) =>
           failExternalCall(disagreement)
 
@@ -452,13 +449,11 @@ class DAMLe(
           logger.debug(
             s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
           )
-          handleResultInternal(resume(Right(storedOutput.toHexString)), Some(replayData))
+          handleResultInternal(resume(Right(storedOutput.toHexString)))
       }
-    }
 
     def handleResultInternal(
-        result: Result[A],
-        replayDataO: Option[ExternalCallReplayData],
+        result: Result[A]
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
 
       @tailrec
@@ -486,7 +481,7 @@ class DAMLe(
             )
             .transformWithHandledAborted {
               case Success(pkg) =>
-                handleResultInternal(resume(pkg), replayDataO)
+                handleResultInternal(resume(pkg))
               case Failure(ex) =>
                 logger.error(s"Package resolution failed for [$packageId]", ex)
                 FutureUnlessShutdown.failed(ex)
@@ -518,10 +513,7 @@ class DAMLe(
                     ResultNeedKey.Response.UnsupportedContractIdVersion(contract.contractId)
                 }
               }
-              handleResultInternal(
-                resume(ResultNeedKey.Response(entries, hasStarted)),
-                replayDataO,
-              )
+              handleResultInternal(resume(ResultNeedKey.Response(entries, hasStarted)))
             }
 
         case ResultNeedContract(acoid, resume) =>
@@ -542,7 +534,7 @@ class DAMLe(
             }
           FutureUnlessShutdown
             .pure(response)
-            .flatMap(r => handleResultInternal(resume(r), replayDataO))
+            .flatMap(r => handleResultInternal(resume(r)))
 
         case ResultError(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
         case ResultInterruption(continue, _) =>
@@ -550,11 +542,11 @@ class DAMLe(
           // Using a `Future` as a trampoline also makes the recursive call to `handleResult` stack safe.
           FutureUnlessShutdown.pure(iterateOverInterrupts(continue)).flatMap {
             case Left(abort) => FutureUnlessShutdown.pure(Left(abort))
-            case Right(result) => handleResultInternal(result, replayDataO)
+            case Right(result) => handleResultInternal(result)
           }
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
-          handleResultInternal(resume(), replayDataO)
+          handleResultInternal(resume())
         case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
           val externalCallKey = ExternalCallKey(
             extensionId,
@@ -562,15 +554,11 @@ class DAMLe(
             configHash,
             input,
           )
-          handleExternalCall(
-            externalCallKey,
-            resume,
-            replayDataO,
-          )
+          handleExternalCall(externalCallKey, resume)
       }
     }
 
-    handleResultInternal(result, None)
+    handleResultInternal(result)
   }
 
 }
