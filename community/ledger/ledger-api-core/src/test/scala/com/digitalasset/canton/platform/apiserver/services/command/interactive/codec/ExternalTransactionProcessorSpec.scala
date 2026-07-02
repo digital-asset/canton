@@ -206,7 +206,9 @@ class ExternalTransactionProcessorSpec
         ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v2-node")),
       ).value.failOnShutdown("prepare transaction").futureValue
 
-      result.left.value.reason should include("Cannot hash node with LF serialization version VDev")
+      result.left.value.reason shouldBe
+        "Cannot hash node with LF serialization version VDev using hashing scheme V2." +
+        " Please use hashing scheme V4 or higher."
     }
 
     "honor the requested hashing scheme for dev prepared transactions" in {
@@ -236,9 +238,10 @@ class ExternalTransactionProcessorSpec
         HashingSchemeVersion.V4,
       ).value.failOnShutdown("prepare transaction").futureValue
 
-      result.left.value.reason should include(
-        "Hashing scheme version V4 is not supported on protocol version"
-      )
+      result.left.value.reason shouldBe
+        "Hashing scheme version V4 is not supported on protocol version 35." +
+        " Minimum protocol version for hashing version V4: dev." +
+        " Supported hashing version on protocol version 35: V2, V3"
     }
   }
 }
