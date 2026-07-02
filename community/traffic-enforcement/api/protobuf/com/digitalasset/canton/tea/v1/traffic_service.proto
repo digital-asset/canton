@@ -8,7 +8,7 @@ package com.digitalasset.canton.tea.v1;
 // Service used for book-keeping and managing of traffic accounts for Ledger API users.
 service TrafficService {
   // Get account state for a given account ID.
-  // Permissioned only to the authenticated user requesting the information.
+  // Permissioned only to users having ActAs or ExecuteAs rights for the party ID associated with the account ID.
   rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
 
   // Update account state for a given account ID.

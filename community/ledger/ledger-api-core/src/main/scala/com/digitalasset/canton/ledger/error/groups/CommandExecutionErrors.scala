@@ -101,6 +101,22 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
   }
 
   @Explanation(
+    "This error occurs if a Ledger API command submission cannot debit from the given local traffic account."
+  )
+  @Resolution(
+    "Inspect the error details, adapt your Ledger API submission or contact the participant operator for adjusting your account details."
+  )
+  object TrafficAccountValidationFailed
+      extends ErrorCode(
+        id = "TRAFFIC_ACCOUNT_VALIDATION_FAILED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Reject(override val cause: String)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(cause = cause)
+  }
+
+  @Explanation(
     """This error occurs if the participant fails to determine the max ledger time of the used
       |contracts. Most likely, this means that one of the contracts is not active anymore which can
       |happen under contention. It can also happen with contract keys.

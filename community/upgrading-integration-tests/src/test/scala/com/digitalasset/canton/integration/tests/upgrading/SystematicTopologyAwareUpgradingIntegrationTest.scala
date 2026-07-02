@@ -47,7 +47,7 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.{
   Interpreter,
   PackageSelectionFailed,
 }
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
@@ -74,7 +74,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
 
   @volatile private var aliceParticipant, bobParticipant,
       charlieParticipant: LocalParticipantReference = _
-  @volatile private var alice, bob, charlie: PartyId = _
+  @volatile private var alice, bob, charlie: Party = _
   private val AllDars = Set(
     UpgradingBaseTest.IBaz,
     UpgradingBaseTest.IBar,
@@ -149,7 +149,10 @@ class SystematicTopologyAwareUpgradingIntegrationTest
 
         // Setup the party topology state
         inside(
-          PartiesAllocator(Set(aliceParticipant, bobParticipant, charlieParticipant))(
+          PartiesAllocator(
+            Set(aliceParticipant, bobParticipant, charlieParticipant),
+            enableExternalParties = true,
+          )(
             newParties = Seq(
               "alice" -> aliceParticipant,
               "bob" -> bobParticipant,
@@ -357,7 +360,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
             ),
             expectedErrorCode = LedgerApiErrors.NoPreferredPackagesFound,
             expectedErrorMessage =
-              s"Failed to compute package preferences. Reason: No synchronizer satisfies the vetting requirements. Discarded synchronizers:.*No package with package-name '${Baz.PACKAGE_NAME}' is consistently vetted by all hosting participants of party $bob.*",
+              s"Failed to compute package preferences. Reason: No synchronizer satisfies the vetting requirements. Discarded synchronizers:.*No package with package-name '${Baz.PACKAGE_NAME}' is consistently vetted by all hosting participants of party ${bob.partyId}.*",
           )
       }
     }
@@ -746,7 +749,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
   private def testError(
       expectedErrorCode: ErrorCode,
       expectedErrorMessage: String,
-      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[PartyId]]] = None,
+      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[Party]]] = None,
       tapsMaxPasses: Option[Int] = None,
   ): Unit = {
     val fooCid = createFoo()
@@ -767,7 +770,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
   private def test(
       bobSees: Option[String],
       expectedExerciseVersion: String,
-      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[PartyId]]] = None,
+      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[Party]]] = None,
       charlieSees: Option[String] = None,
       tapsMaxPasses: Option[Int] = None,
   ): Unit = {
@@ -851,13 +854,15 @@ class SystematicTopologyAwareUpgradingIntegrationTest
 
   private def exerciseFoo(
       fooCid: FooV4.ContractId,
-      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[PartyId]]],
+      vettingRequirementsForPreferencesInjection: Option[Map[LfPackageName, Set[Party]]],
       addCharlie: Boolean,
       tapsMaxPasses: Option[Int],
   ): Transaction = {
     val packagePreferencesO = vettingRequirementsForPreferencesInjection
       .map(vettingRequirements =>
-        aliceParticipant.ledger_api.interactive_submission.preferred_packages(vettingRequirements)
+        aliceParticipant.ledger_api.interactive_submission.preferred_packages(
+          vettingRequirements.view.mapValues(_.map(_.partyId)).toMap
+        )
       )
       .map(_.packageReferences.map(_.packageId.toPackageId))
     aliceParticipant.ledger_api.javaapi.commands

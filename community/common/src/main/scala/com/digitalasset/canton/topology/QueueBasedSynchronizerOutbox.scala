@@ -123,13 +123,9 @@ class QueueBasedSynchronizerOutbox(
   protected def notAlreadyPresent(
       transactions: Seq[GenericSignedTopologyTransaction]
   )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = {
-    val doesNotAlreadyExistPredicate = (tx: GenericSignedTopologyTransaction) =>
-      targetStore.providesAdditionalSignatures(tx)
-    filterTransactions(transactions, doesNotAlreadyExistPredicate)
-  }
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
+    targetStore.filterProvidesAdditionalSignatures(transactions)
 
   def startup()(implicit
       traceContext: TraceContext

@@ -7,6 +7,7 @@ import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.protocol.{
@@ -43,6 +44,7 @@ class TestSequencerClientSend(override protected[canton] val clock: Clock)(impli
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
+      trafficCostValidator: TrafficCostValidator,
       amplify: Boolean,
       useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit

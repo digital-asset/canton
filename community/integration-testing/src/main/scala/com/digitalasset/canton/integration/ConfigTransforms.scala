@@ -26,6 +26,7 @@ import com.digitalasset.canton.participant.config.{
   RemoteParticipantConfig,
   TestingTimeServiceConfig,
 }
+import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.sequencing.SequencerAggregatorTesting
@@ -938,4 +939,46 @@ object ConfigTransforms {
       .compose(updateAllSequencerConfigs_ {
         _.focus(_.sequencerClient.useNewAggregator).replace(value)
       })
+
+  def disableCache: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.ledgerApi.userManagementService.enabled)
+        .replace(true)
+        .focus(_.ledgerApi.userManagementService.maxCacheSize)
+        .replace(0)
+        .focus(_.ledgerApi.userManagementService.maxRightsPerUser)
+        .replace(100)
+        .focus(_.parameters.ledgerApiServer.contractIdSeeding)
+        .replace(SeedService.Seeding.Weak)
+        .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
+        .replace(0)
+        .focus(_.ledgerApi.indexService.maxContractStateCacheSize)
+        .replace(0)
+        .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
+        .replace(0)
+    )
+
+  def setTinyCache: ConfigTransform =
+    updateAllParticipantConfigs_ {
+      _.focus(_.ledgerApi.userManagementService.enabled)
+        .replace(true)
+        .focus(_.ledgerApi.userManagementService.maxCacheSize)
+        .replace(2)
+        .focus(_.parameters.ledgerApiServer.contractIdSeeding)
+        .replace(SeedService.Seeding.Weak)
+        .focus(_.ledgerApi.indexService.activeContractsServiceStreams.maxIdsPerIdPage)
+        .replace(2)
+        .focus(
+          _.ledgerApi.indexService.activeContractsServiceStreams.maxPayloadsPerPayloadsPage
+        )
+        .replace(2)
+        .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
+        .replace(2)
+        .focus(_.ledgerApi.indexService.maxContractStateCacheSize)
+        .replace(2)
+        .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
+        .replace(3)
+        .focus(_.ledgerApi.indexService.bufferedStreamsPageSize)
+        .replace(1)
+    }
 }

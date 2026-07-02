@@ -21,7 +21,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.SeqUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GeneratorsLf, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{CreationTime, ExternalCallResult}
 import com.digitalasset.daml.lf.value.Value.ValueInt64
 import magnolify.scalacheck.auto.*
@@ -160,8 +160,7 @@ final class GeneratorsData(
     )
   )
 
-  private val viewExternalCallResultsGen
-      : Gen[ImmArray[ViewParticipantData.ViewExternalCallResult]] =
+  private val viewExternalCallResultsGen: Gen[Seq[ViewParticipantData.ViewExternalCallResult]] =
     if (protocolVersion >= ProtocolVersion.dev) {
       boundedListGen {
         for {
@@ -184,17 +183,16 @@ final class GeneratorsData(
           checkingParties,
         )
       }.map(results =>
-        ImmArray.from(results.zipWithIndex.map {
-          case ((result, exerciseIndex, checkingParties), callIndex) =>
-            ViewParticipantData.ViewExternalCallResult(
-              result = result,
-              exerciseIndex = exerciseIndex,
-              callIndex = NonNegativeInt.tryCreate(callIndex),
-              checkingParties = checkingParties,
-            )
-        })
+        results.zipWithIndex.map { case ((result, exerciseIndex, checkingParties), callIndex) =>
+          ViewParticipantData.ViewExternalCallResult(
+            result = result,
+            exerciseIndex = exerciseIndex,
+            callIndex = NonNegativeInt.tryCreate(callIndex),
+            checkingParties = checkingParties,
+          )
+        }
       )
-    } else Gen.const(ImmArray.Empty)
+    } else Gen.const(Seq.empty)
 
   val createViewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
     for {
@@ -219,7 +217,7 @@ final class GeneratorsData(
       actionDescription = actionDescription,
       rollbackContext = rollbackContext,
       salt = salt,
-      externalCallResults = ImmArray.empty,
+      externalCallResults = Seq.empty,
       protocolVersion = protocolVersion,
     )
   )
@@ -369,7 +367,7 @@ final class GeneratorsData(
       actionDescription = actionDescription,
       rollbackContext = rollbackContext,
       salt = salt,
-      externalCallResults = ImmArray.empty,
+      externalCallResults = Seq.empty,
       protocolVersion = protocolVersion,
     )
   )

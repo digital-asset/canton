@@ -20,7 +20,7 @@ import com.digitalasset.canton.{
   ProtoDeserializationError,
   ProtocolVersionChecksAnyWordSpec,
 }
-import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
+import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.value.Value.VersionedValue
 import org.scalatest.wordspec.AnyWordSpec
@@ -402,7 +402,7 @@ class TransactionViewTest
         createdIds: Seq[LfContractId] = Seq(createdId),
         archivedInSubviews: Set[LfContractId] = Set.empty,
         keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]] = Map.empty,
-        externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult] = ImmArray.Empty,
+        externalCallResults: Seq[ViewParticipantData.ViewExternalCallResult] = Seq.empty,
     ): Either[String, ViewParticipantData] = {
 
       val created = createdIds.map { id =>
@@ -535,7 +535,7 @@ class TransactionViewTest
         create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
-          externalCallResults = ImmArray(
+          externalCallResults = Seq(
             viewExternalCallResult(exerciseIndex = 7, callIndex = 1),
             viewExternalCallResult(
               exerciseIndex = 7,
@@ -551,7 +551,7 @@ class TransactionViewTest
     "external call results on a non-exercise root action" must {
       "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
         create(
-          externalCallResults = ImmArray(viewExternalCallResult(exerciseIndex = 7))
+          externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7))
         ).left.value shouldBe "External call results require an exercise root action"
       }
     }
@@ -561,7 +561,7 @@ class TransactionViewTest
         create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
-          externalCallResults = ImmArray(viewExternalCallResult(exerciseIndex = 7)),
+          externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7)),
         ).left.value shouldBe
           s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards"
       }
@@ -624,7 +624,7 @@ class TransactionViewTest
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
-          externalCallResults = ImmArray(
+          externalCallResults = Seq(
             viewExternalCallResult(
               exerciseIndex = 7,
               callIndex = 1,
@@ -663,7 +663,7 @@ class TransactionViewTest
                 ),
               )
           ),
-          externalCallResults = ImmArray(
+          externalCallResults = Seq(
             viewExternalCallResult(
               exerciseIndex = 7,
               callIndex = 1,
@@ -683,7 +683,7 @@ class TransactionViewTest
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
-          externalCallResults = ImmArray(
+          externalCallResults = Seq(
             viewExternalCallResult(
               exerciseIndex = 7,
               callIndex = 1,
@@ -696,7 +696,7 @@ class TransactionViewTest
         ).value
 
         val reorderedVpd = vpd.copy(
-          externalCallResults = ImmArray(
+          externalCallResults = Seq(
             viewExternalCallResult(
               exerciseIndex = 7,
               callIndex = 1,

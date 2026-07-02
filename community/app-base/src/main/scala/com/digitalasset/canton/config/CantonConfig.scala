@@ -68,6 +68,8 @@ import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  TrafficEnforcementConfig,
+  TrafficEnforcementServerConfig,
   UpdateServiceConfig,
 }
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
@@ -113,10 +115,8 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.time.DisasterRecoverySequencingTimeUpperBound
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
-import com.digitalasset.canton.tea.TrafficEnforcementConfig
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
-import com.digitalasset.canton.version.ParticipantProtocolVersion
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
@@ -427,7 +427,7 @@ final case class CantonConfig(
 
   /** Names of local nodes in order: sequencers, mediators, participants. Order within each group
     * may be different between runs, but the list may serve as a single reference order in case we
-    * need to to do some actions in the same order.
+    * need to do some actions in the same order.
     */
   def nodeNamesInStartupOrder: Seq[InstanceName] =
     sequencers.keys.view ++ mediators.keys ++ participants.keys to List
@@ -741,7 +741,6 @@ private[canton] object CantonNodeParameterConverter {
 
 object CantonConfig {
   import DeprecatedConfigUtils.*
-
   import BaseCantonConfig.Readers.preventAllUnknownKeys
 
   import com.digitalasset.nonempty.NonEmptyUtil.instances.*
@@ -770,7 +769,7 @@ object CantonConfig {
 
   class ConfigReaders(implicit private val elc: ErrorLoggingContext) {
     import BaseCantonConfig.Readers.*
-    import ParticipantNodeConfig.DeprecatedImplicits.*
+    import CantonConfigDeprecations.*
 
     implicit val nonNegativeDurationReader: ConfigReader[config.NonNegativeDuration] =
       ConfigReader.fromString[config.NonNegativeDuration] { str =>
@@ -849,23 +848,9 @@ object CantonConfig {
         deriveReader[KmsConfig.Driver]
       implicit val kmsConfigReader: ConfigReader[KmsConfig] =
         deriveReader[KmsConfig]
-      implicit val cryptoReader: ConfigReader[CryptoConfig] = {
-
-        implicit val deprecatedFields: DeprecatedFieldsFor[CryptoConfig] =
-          new DeprecatedFieldsFor[CryptoConfig] {
-            override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-              DeprecatedConfigUtils.MovedConfigPath(
-                "kms.session-signing-keys",
-                since = "3.5.0",
-                to = Seq("session-signing-keys"),
-              )
-            )
-          }
-
+      implicit val cryptoReader: ConfigReader[CryptoConfig] =
         deriveReader[CryptoConfig].applyDeprecations
-      }
     }
-
     lazy implicit final val sequencerTestingInterceptorReader
         : ConfigReader[DatabaseSequencerConfig.TestingInterceptor] =
       (_: ConfigCursor) =>
@@ -951,19 +936,8 @@ object CantonConfig {
       deriveEnumerationReader[TracingConfig.Propagation]
     lazy implicit final val clientChannelParamsConfigReader: ConfigReader[ClientChannelParams] =
       deriveReader[ClientChannelParams]
-    lazy implicit final val fullClientConfigReader: ConfigReader[FullClientConfig] = {
-      implicit val deprecatedFields: DeprecatedFieldsFor[FullClientConfig] =
-        new DeprecatedFieldsFor[FullClientConfig] {
-          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-            DeprecatedConfigUtils.MovedConfigPath(
-              "keep-alive-client",
-              since = "3.5.0",
-              to = Seq("channel.keep-alive-client"),
-            )
-          )
-        }
+    lazy implicit final val fullClientConfigReader: ConfigReader[FullClientConfig] =
       deriveReader[FullClientConfig].applyDeprecations
-    }
 
     lazy implicit final val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] = {
       implicit val jsonClientConfigReader: ConfigReader[JsonClientConfig] =
@@ -974,16 +948,6 @@ object CantonConfig {
         : ConfigReader[SequencerApiClientConfig] = {
       implicit val tlsClientConfigOnlyTrustFileReader: ConfigReader[TlsClientConfigOnlyTrustFile] =
         deriveReader[TlsClientConfigOnlyTrustFile]
-      implicit val deprecatedFields: DeprecatedFieldsFor[SequencerApiClientConfig] =
-        new DeprecatedFieldsFor[SequencerApiClientConfig] {
-          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-            DeprecatedConfigUtils.MovedConfigPath(
-              "keep-alive-client",
-              since = "3.5.0",
-              to = Seq("channel.keep-alive-client"),
-            )
-          )
-        }
       deriveReader[SequencerApiClientConfig].applyDeprecations
     }
 
@@ -1065,19 +1029,6 @@ object CantonConfig {
           : ConfigReader[TopologyAwarePackageSelectionConfig] =
         deriveReader[TopologyAwarePackageSelectionConfig]
 
-      implicit val deprecatedFields: DeprecatedFieldsFor[LedgerApiServerConfig] =
-        new DeprecatedFieldsFor[LedgerApiServerConfig] {
-
-          override def deprecatePath: List[DeprecatedConfigPath[?]] =
-            List(
-              DeprecatedConfigPath(
-                "index-service.prepare-package-metadata-time-out-warning",
-                since = "3.5.0",
-                valueFilter = None: Option[NonNegativeFiniteDuration],
-              )
-            )
-        }
-
       deriveReader[LedgerApiServerConfig].applyDeprecations
     }
 
@@ -1095,28 +1046,8 @@ object CantonConfig {
       deriveReader[JsonApiConfig]
     }
 
-    lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] = {
-
-      implicit val deprecatedFields: DeprecatedFieldsFor[TopologyConfig] =
-        new DeprecatedFieldsFor[TopologyConfig] {
-
-          override def deprecatePath: List[DeprecatedConfigPath[?]] =
-            List(
-              DeprecatedConfigPath(
-                "use-new-processor",
-                since = "3.5.0",
-                valueFilter = Some(false),
-              ),
-              DeprecatedConfigPath(
-                "use-new-client",
-                since = "3.5.0",
-                valueFilter = Some(false),
-              ),
-            )
-        }
-
+    lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig].applyDeprecations
-    }
 
     lazy implicit val databaseSequencerExclusiveStorageConfigReader
         : ConfigReader[DatabaseSequencerExclusiveStorageConfig] =
@@ -1260,22 +1191,8 @@ object CantonConfig {
         } yield config
       }
 
-    lazy implicit final val asyncWriterConfigReader: ConfigReader[AsyncWriterConfig] = {
-      implicit val deprecatedFields: DeprecatedFieldsFor[AsyncWriterConfig] =
-        new DeprecatedFieldsFor[AsyncWriterConfig] {
-
-          override def deprecatePath: List[DeprecatedConfigPath[?]] =
-            List(
-              DeprecatedConfigPath(
-                "enabled",
-                since = "3.5.0",
-                valueFilter = Some(false),
-              )
-            )
-        }
-
+    lazy implicit final val asyncWriterConfigReader: ConfigReader[AsyncWriterConfig] =
       deriveReader[AsyncWriterConfig].applyDeprecations
-    }
 
     lazy implicit final val timeAdvancingTopologyConfigReader
         : ConfigReader[TimeAdvancingTopologyConfig] =
@@ -1290,20 +1207,8 @@ object CantonConfig {
       deriveReader[LsuSequencingBoundsOverride]
 
     lazy implicit final val sequencerNodeParametersConfigReader
-        : ConfigReader[SequencerNodeParameterConfig] = {
-      implicit val deprecatedFields: DeprecatedFieldsFor[SequencerNodeParameterConfig] =
-        new DeprecatedFieldsFor[SequencerNodeParameterConfig] {
-          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-            DeprecatedConfigUtils.MovedConfigPath(
-              "unsafe-enable-online-party-replication",
-              since = "3.5.0",
-              to = Seq("unsafe-sequencer-channel-support"),
-            )
-          )
-        }
-
+        : ConfigReader[SequencerNodeParameterConfig] =
       deriveReader[SequencerNodeParameterConfig].applyDeprecations
-    }
 
     lazy implicit final val SequencerHealthConfigReader: ConfigReader[SequencerHealthConfig] =
       deriveReader[SequencerHealthConfig]
@@ -1325,18 +1230,6 @@ object CantonConfig {
         deriveReader[MediatorPruningConfig]
       implicit val deduplicationStoreConfigReader: ConfigReader[DeduplicationStoreConfig] =
         deriveReader[DeduplicationStoreConfig]
-
-      implicit val deprecatedFields: DeprecatedFieldsFor[MediatorConfig] =
-        new DeprecatedFieldsFor[MediatorConfig] {
-
-          override def deprecatePath: List[DeprecatedConfigPath[?]] =
-            List(
-              DeprecatedConfigPath[Boolean](
-                "asynchronous-processing",
-                since = "3.5.1",
-              )
-            )
-        }
 
       deriveReader[MediatorConfig].applyDeprecations
     }
@@ -1442,13 +1335,6 @@ object CantonConfig {
       implicit val cacheConfigWithSizeOnlyReader: ConfigReader[CacheConfigWithSizeOnly] =
         deriveReader[CacheConfigWithSizeOnly]
 
-      implicit val deprecatedFields: DeprecatedFieldsFor[CachingConfigs] =
-        new DeprecatedFieldsFor[CachingConfigs] {
-          override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
-            DeprecatedConfigPath[CacheConfig]("package-dependency-cache", "3.5.0")
-          )
-        }
-
       deriveReader[CachingConfigs].applyDeprecations
     }
 
@@ -1491,45 +1377,6 @@ object CantonConfig {
     lazy implicit final val participantNodeParameterConfigReader
         : ConfigReader[ParticipantNodeParameterConfig] = {
 
-      implicit val deprecatedFields: DeprecatedFieldsFor[ParticipantNodeParameterConfig] =
-        new DeprecatedFieldsFor[ParticipantNodeParameterConfig] {
-          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-            DeprecatedConfigUtils.MovedConfigPath(
-              "automatically-perform-logical-synchronizer-upgrade",
-              since = "3.5.0",
-              to = Seq("automatically-perform-lsu"),
-            ),
-            DeprecatedConfigUtils.MovedConfigPath(
-              "automatically-perform-lsu",
-              since = "3.6.0",
-              to = Seq("lsu.automatically-perform-lsu"),
-            ),
-            DeprecatedConfigUtils.MovedConfigPath(
-              "automatically-perform-logical-synchronizer-upgrade",
-              since = "3.6.0",
-              to = Seq("lsu.automatically-perform-lsu"),
-            ),
-            DeprecatedConfigUtils.MovedConfigPath(
-              "unsafe-online-party-replication",
-              since = "3.5.0",
-              to = Seq("alpha-online-party-replication-support"),
-            ),
-            DeprecatedConfigUtils.MovedConfigPath(
-              "alpha-multi-synchronizer-support",
-              since = "3.5.4",
-              to = Seq("enable-all-ledger-api-reassignments"),
-            ),
-          )
-
-          override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
-            DeprecatedConfigUtils.DeprecatedConfigPath(
-              path = "initial-protocol-version",
-              since = "3.5.0",
-              valueFilter = None: Option[ParticipantProtocolVersion],
-            )
-          )
-        }
-
       implicit val cantonEngineConfigReader: ConfigReader[CantonEngineConfig] = {
         implicit val engineLoggingConfigReader: ConfigReader[EngineLoggingConfig] =
           deriveReader[EngineLoggingConfig]
@@ -1548,22 +1395,8 @@ object CantonConfig {
       implicit val commandProgressTrackerConfigReader: ConfigReader[CommandProgressTrackerConfig] =
         deriveReader[CommandProgressTrackerConfig]
 
-      implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] = {
-        implicit val deprecatedFields: DeprecatedFieldsFor[PackageMetadataViewConfig] =
-          new DeprecatedFieldsFor[PackageMetadataViewConfig] {
-
-            override def deprecatePath: List[DeprecatedConfigPath[?]] =
-              List(
-                DeprecatedConfigPath(
-                  "init-takes-too-long-interval",
-                  since = "3.5.0",
-                  valueFilter = None: Option[FiniteDuration],
-                )
-              )
-          }
-
+      implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
         deriveReader[PackageMetadataViewConfig].applyDeprecations
-      }
 
       implicit val partyReplicatorTestInterceptorReader
           : ConfigReader[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
@@ -1572,31 +1405,13 @@ object CantonConfig {
       implicit val alphaOnlinePartyReplicationConfig
           : ConfigReader[AlphaOnlinePartyReplicationConfig] =
         deriveReader[AlphaOnlinePartyReplicationConfig]
-      implicit val deprecatedReassignmentsFields: DeprecatedFieldsFor[ReassignmentsConfig] =
-        new DeprecatedFieldsFor[ReassignmentsConfig] {
-          override def deprecatePath: List[DeprecatedConfigPath[?]] =
-            List(
-              DeprecatedConfigPath[NonNegativeFiniteDuration](
-                "target-timestamp-forward-tolerance",
-                since = "3.6.0",
-              )
-            )
-        }
+
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
         deriveReader[ReassignmentsConfig].applyDeprecations
-      implicit val purgeReader: ConfigReader[PurgeConfig] = deriveReader[PurgeConfig]
-      implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
 
-      implicit val deprecatedFieldsLsuConfig: DeprecatedFieldsFor[LsuConfig] =
-        new DeprecatedFieldsFor[LsuConfig] {
-          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-            DeprecatedConfigUtils.MovedConfigPath(
-              "handshake-retry",
-              since = "3.5.1",
-              to = Seq("handshake.retry"),
-            )
-          )
-        }
+      implicit val purgeReader: ConfigReader[PurgeConfig] = deriveReader[PurgeConfig]
+
+      implicit val lsuHandshakeReader: ConfigReader[LsuHandshake] = deriveReader[LsuHandshake]
 
       implicit val lsuReader: ConfigReader[LsuConfig] = deriveReader[LsuConfig].applyDeprecations
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
@@ -1621,23 +1436,8 @@ object CantonConfig {
     lazy implicit val authTokenManagerExponentialBackoffJitterFullConfigReader
         : ConfigReader[AuthenticationTokenManagerExponentialBackoffJitterConfig.Full.type] =
       deriveReader[AuthenticationTokenManagerExponentialBackoffJitterConfig.Full.type]
-    lazy implicit final val sequencerClientConfigReader: ConfigReader[SequencerClientConfig] = {
-
-      implicit val deprecatedFields: DeprecatedFieldsFor[SequencerClientConfig] =
-        new DeprecatedFieldsFor[SequencerClientConfig] {
-
-          override def deprecatePath: List[DeprecatedConfigPath[?]] =
-            List(
-              DeprecatedConfigPath[Boolean](
-                "use-new-connection-pool",
-                since = "3.5.0",
-              )
-            )
-        }
-
+    lazy implicit final val sequencerClientConfigReader: ConfigReader[SequencerClientConfig] =
       deriveReader[SequencerClientConfig].applyDeprecations
-    }
-
     lazy implicit final val cantonParametersReader: ConfigReader[CantonParameters] = {
       implicit val ammoniteConfigReader: ConfigReader[AmmoniteConsoleConfig] =
         deriveReader[AmmoniteConsoleConfig]
@@ -1690,8 +1490,12 @@ object CantonConfig {
     }
 
     lazy implicit val trafficEnforcementConfigInternalReader
-        : ConfigReader[TrafficEnforcementConfig.Internal] =
-      deriveReader[TrafficEnforcementConfig.Internal]
+        : ConfigReader[TrafficEnforcementServerConfig.Internal] =
+      deriveReader[TrafficEnforcementServerConfig.Internal]
+
+    lazy implicit val TrafficEnforcementServerConfigReader
+        : ConfigReader[TrafficEnforcementServerConfig] =
+      deriveReader[TrafficEnforcementServerConfig]
 
     lazy implicit val trafficEnforcementConfigReader: ConfigReader[TrafficEnforcementConfig] =
       deriveReader[TrafficEnforcementConfig]
@@ -2404,8 +2208,12 @@ object CantonConfig {
     }
 
     lazy implicit val trafficEnforcementConfigInternalWriter
-        : ConfigWriter[TrafficEnforcementConfig.Internal] =
-      deriveWriter[TrafficEnforcementConfig.Internal]
+        : ConfigWriter[TrafficEnforcementServerConfig.Internal] =
+      deriveWriter[TrafficEnforcementServerConfig.Internal]
+
+    lazy implicit val trafficEnforcementServerConfigWriter
+        : ConfigWriter[TrafficEnforcementServerConfig] =
+      deriveWriter[TrafficEnforcementServerConfig]
 
     lazy implicit val trafficEnforcementConfigWriter: ConfigWriter[TrafficEnforcementConfig] =
       deriveWriter[TrafficEnforcementConfig]

@@ -10,6 +10,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.collection.mutable
 
 class MonadUtilTest extends AnyWordSpec with BaseTest {
+
   "sequential traverse" should {
 
     "return results in the order of the original seq" in {
@@ -20,9 +21,9 @@ class MonadUtilTest extends AnyWordSpec with BaseTest {
 
     "perform processing in the order of the original seq" in {
       val xs = List(1, 2, 3)
-      val seen = mutable.ArrayDeque[Int]()
+      val seen = mutable.ListBuffer.empty[Int]
       MonadUtil.sequentialTraverse(xs) { x =>
-        seen += x // Appends the seen element to the list
+        seen += x
         x: Id[Int]
       }
       seen.toList shouldEqual xs

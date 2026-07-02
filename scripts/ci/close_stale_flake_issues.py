@@ -2,12 +2,13 @@
 """Close flaky-test GitHub issues that have not recorded a failure in the last STALE_DAYS days."""
 
 import json
-import pathlib
 import re
 import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+
+from todo_refs import has_todo_reference
 
 REPO = "DACH-NY/canton"
 STALE_DAYS = 30
@@ -15,9 +16,6 @@ SKIP_LABELS = frozenset({"ignored", "disabled"})
 _TRANSIENT_HTTP_CODES = frozenset({"502", "503", "504"})
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 5
-
-# Shared with check_todos_on_issue_close.yml; both consumers must stay in sync.
-_TODO_EXCLUDES = (pathlib.Path(__file__).parent / "todo-exclude-globs.txt").read_text().splitlines()
 
 # Inline paginated variant of scripts/list-flaky-test-issues.graphql.
 # The original query is kept unchanged since other scripts depend on it.
@@ -82,32 +80,6 @@ def last_flake_date(body: str | None) -> datetime | None:
         return None
     parsed = [datetime.strptime(d, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) for d in dates]
     return max(parsed)
-
-
-def _repo_root() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
-    )
-    return result.stdout.strip()
-
-
-def has_todo_reference(number: int) -> bool:
-    """Return True if any TODO/XXX/FIXME in the codebase still references this issue number."""
-    pattern = (
-        f"(TODO|XXX|FIXME).*("
-        f"(https://github\\.com/)?DACH-NY/canton/issues/{number}([^0-9]|$)"
-        f"|#{number}([^0-9]|$)"
-        f"|[^a-zA-Z0-9]i{number}([^0-9]|$)"
-        f")"
-    )
-    result = subprocess.run(
-        ["rg", "--hidden", *_TODO_EXCLUDES, pattern, _repo_root()],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 2:
-        raise RuntimeError(f"rg error searching for TODO references: {result.stderr.strip()}")
-    return result.returncode == 0  # rg exits 0 when matches are found, 1 when none
 
 
 def close_issue(number: int, last_date: datetime, assignees: list[str], dry_run: bool) -> None:

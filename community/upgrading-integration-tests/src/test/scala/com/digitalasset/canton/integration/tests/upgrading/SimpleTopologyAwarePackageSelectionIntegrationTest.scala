@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import monocle.macros.syntax.lens.*
 
 import scala.jdk.CollectionConverters.CollectionHasAsScala
@@ -34,7 +34,7 @@ abstract class SimpleTopologyAwarePackageSelectionIntegrationTest
 
   @volatile var v2Hash: String = _
   @volatile var appInstallRequest: AppInstallRequest.Contract = _
-  @volatile var provider, user: PartyId = _
+  @volatile var provider, user: Party = _
   @volatile var providerParticipant, userParticipant: LocalParticipantReference = _
 
   def featureEnabled: Boolean
@@ -64,11 +64,11 @@ abstract class SimpleTopologyAwarePackageSelectionIntegrationTest
           vetAllPackages = false,
           synchronizeVetting = false,
         )
-        provider = providerParticipant.parties.enable(
+        provider = providerParticipant.parties.testing.enable(
           "provider",
           synchronizeParticipants = Seq(userParticipant),
         )
-        user = userParticipant.parties.enable(
+        user = userParticipant.parties.testing.enable(
           "user",
           synchronizeParticipants = Seq(providerParticipant),
         )

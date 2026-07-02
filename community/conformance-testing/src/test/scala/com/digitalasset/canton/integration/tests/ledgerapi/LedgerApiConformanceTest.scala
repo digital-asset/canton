@@ -43,15 +43,19 @@ trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
     )
   registerPlugin(ledgerApiTestToolPlugin)
 
-  def runShardedTests(shard: Int, numShards: Int)(
+  def runShardedTests(shard: Int, numShards: Int, concurrentTestRuns: Int = 4)(
       env: TestConsoleEnvironment
   ): Unit =
-    ledgerApiTestToolPlugin.runShardedSuites(
-      shard,
-      numShards,
-      exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion),
-      useJson = false,
-    )(env)
+    loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
+
+      ledgerApiTestToolPlugin.runShardedSuites(
+        shard = shard,
+        numShards = numShards,
+        exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion),
+        concurrentTestRuns = concurrentTestRuns,
+        useJson = false,
+      )(env)
+    }
 }
 
 trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnvironments {
@@ -250,9 +254,11 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
   "Ledger Api Test Tool" can {
     s"pass semantic tests block $shard" in { implicit env =>
       // suppress warnings for UserManagementServiceIT
-      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-        runShardedTests(shard, numShards)(env)
-      }
+      runShardedTests(
+        shard = shard,
+        numShards = numShards,
+      )(env)
+
     }
   }
 }

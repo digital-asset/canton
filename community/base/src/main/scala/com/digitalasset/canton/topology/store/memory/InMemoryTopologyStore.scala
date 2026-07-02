@@ -602,6 +602,29 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         .map(_.finish().hash)
     )
 
+  override def filterProvidesAdditionalSignatures(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
+    FutureUnlessShutdown.wrap {
+      lock.exclusive {
+        transactions.filter { tx =>
+          val inStoreOpt = topologyTransactionStore
+            .findLast { entry =>
+              entry.transaction.hash == tx.hash &&
+              entry.from.value < CantonTimestamp.MaxValue &&
+              entry.rejected.isEmpty
+            }
+            .map(_.toStoredTransaction)
+
+          inStoreOpt.forall { inStore =>
+            TopologyStore.providesAdditionalSignatures(tx, inStore)
+          }
+        }
+      }
+    }
+
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[TopologyStore.Change]] =

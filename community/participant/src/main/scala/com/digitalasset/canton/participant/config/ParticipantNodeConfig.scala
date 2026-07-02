@@ -7,7 +7,6 @@ import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.{ReplicationConfig, *}
 import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig}
@@ -28,6 +27,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  TrafficEnforcementConfig,
   UpdateServiceConfig,
   UserManagementServiceConfig,
 }
@@ -96,6 +96,7 @@ final case class ParticipantNodeConfig(
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig(),
     override val topology: TopologyConfig = TopologyConfig(),
     alphaDynamic: DeclarativeParticipantConfig = DeclarativeParticipantConfig(),
+    trafficEnforcement: TrafficEnforcementConfig = TrafficEnforcementConfig(),
 ) extends LocalNodeConfig
     with BaseParticipantConfig
     with ConfigDefaults[Option[DefaultPorts], ParticipantNodeConfig] {
@@ -127,33 +128,6 @@ final case class ParticipantNodeConfig(
       )
       .focus(_.replication)
       .modify(ReplicationConfig.withDefaultO(storage, _))
-}
-
-object ParticipantNodeConfig {
-  trait ParticipantNodeConfigDeprecationsImplicits {
-    implicit def deprecatedParticipantNodeConfig[X <: ParticipantNodeConfig]
-        : DeprecatedFieldsFor[X] = new DeprecatedFieldsFor[ParticipantNodeConfig] {
-      override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-        DeprecatedConfigUtils.MovedConfigPath(
-          "http-ledger-api.server",
-          since = "3.4.0",
-          to = Seq("http-ledger-api"),
-        ),
-        DeprecatedConfigUtils.MovedConfigPath(
-          "features.profileDir",
-          since = "3.5.0",
-          to = Seq("parameters.engine"),
-        ),
-        DeprecatedConfigUtils.MovedConfigPath(
-          "features.snapshotDir",
-          since = "3.5.0",
-          to = Seq("parameters.engine"),
-        ),
-      )
-    }
-  }
-
-  object DeprecatedImplicits extends ParticipantNodeConfigDeprecationsImplicits
 }
 
 /** Participant features configuration */

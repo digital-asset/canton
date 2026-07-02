@@ -2584,7 +2584,7 @@ object BuildCommon {
         "traffic-enforcement-api",
         file("community/traffic-enforcement/api"),
       )
-        .dependsOn(`util-observability`)
+        .dependsOn(`util-observability`, `community-base`)
         .settings(
           sharedCantonCommunitySettings,
           enablePublishLibrary,
@@ -3106,8 +3106,6 @@ object BuildCommon {
           scalacheck % Test,
           scalatest % Test,
           scalatestScalacheck % Test,
-          scalaz_core,
-          scalaz_scalacheck_binding % Test,
           shapeless % Test,
         ),
       )

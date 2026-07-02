@@ -135,7 +135,7 @@ class NonEmptySpec extends AnyWordSpec with Matchers with WordSpecCheckLaws {
       ((s.toNEF incl 2): NonEmpty[imm.Set[Int]]) should ===(imm.Set(1, 2))
     }
 
-    "allow access to Scalaz methods" in {
+    "allow access to cats methods" in {
       import cats.implicits.*
       @nowarn
       val NonEmpty(m) = imm.Map(1 -> 2)
@@ -365,9 +365,6 @@ class NonEmptySpec extends AnyWordSpec with Matchers with WordSpecCheckLaws {
   // merely checking that too much evidence doesn't result in ambiguous
   // lookup
   object UnambiguousResolutionTests {
-    import scalaz.{Foldable, Traverse}
-    def foldableTraverse[F[_]: Traverse]: Foldable[F] = Foldable[F]
-    def foldableNot1[F[_]: Foldable]: Foldable[F] = Foldable[F]
     def foldableReducible[F[_]: cats.Reducible] = cats.Foldable[NonEmptyF[F, *]]
     def foldableTraverse[F[_]: cats.Traverse] = cats.Foldable[NonEmptyF[F, *]]
     @annotation.nowarn("cat=unused&msg=evidence")

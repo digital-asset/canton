@@ -13,9 +13,8 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
-  TestConsoleEnvironment,
 }
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 
 import java.util.Optional
 import scala.jdk.CollectionConverters.{CollectionHasAsScala, SeqHasAsJava}
@@ -27,27 +26,24 @@ class ValueDecoderUpgradingGrpcIntegrationTest
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
+  @volatile private var alice: Party = _
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1.withSetup { implicit env =>
       import env.*
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
-      participant1.parties.enable("alice")
+      alice = participant1.parties.testing.enable("alice")
       participant1.dars.upload(UpgradeV1)
       participant1.dars.upload(UpgradeV2)
 
     }
 
-  private def party(name: String)(implicit env: TestConsoleEnvironment): PartyId =
-    env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
-
   "GRPC Client" should {
 
     "be able to decode Upgrade V2 GRPC payload into V1 with policy Ignore" in { implicit env =>
       import env.*
-
-      val alice = party("alice")
 
       val issuer = alice.toLf
       val owner = alice.toLf

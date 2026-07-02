@@ -69,6 +69,8 @@ trait SyncCryptoSigner extends NamedLogging with AutoCloseable {
     for {
       signingKeys <- EitherT.right(topologySnapshot.signingKeys(member, usage))
       existingKeys <- signingKeys.toList
+        // TODO(#33650) - replace with unboundedFilterA; safe because a member typically has a very small number of active keys (single digit)
+        // and `existsSigningKey` resolves against fast local caches or read-locks.
         .parFilterA(pk => cryptoPrivateStore.existsSigningKey(pk.fingerprint))
         .leftMap[SyncCryptoError](SyncCryptoError.StoreError.apply)
       kk <- NonEmpty

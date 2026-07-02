@@ -18,6 +18,8 @@ pkgs.mkShell {
     buf
     circleci-cli
     curl
+    docker
+    docker-compose
     dpm
     (flyway.override { jre_headless = jre; })
     gh
