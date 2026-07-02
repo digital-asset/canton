@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.{FullTransactionViewTree, PathRollbackContextFactory}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -20,6 +19,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 

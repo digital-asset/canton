@@ -9,7 +9,6 @@ import cats.implicits.{toFoldableOps, toFunctorOps}
 import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashOps, HmacOps, InteractiveSubmission}
 import com.digitalasset.canton.data.*
@@ -58,6 +57,7 @@ import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
 import com.digitalasset.daml.lf.value.GenValue
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext

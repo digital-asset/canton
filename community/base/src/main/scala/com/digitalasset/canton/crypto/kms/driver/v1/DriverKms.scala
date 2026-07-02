@@ -8,7 +8,6 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto
@@ -32,6 +31,7 @@ import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.opentelemetry.context.Context
 

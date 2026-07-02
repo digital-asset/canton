@@ -98,7 +98,7 @@ private[topology] trait NamespaceChaos extends TopologyOperations with Matchers 
           val (serial, initialNamespace) = getNamespaceDefinition(sequencerToConnectTo)
           val ownerNodesUpdated = getOwnerNodes(initialNamespace).appended(ownerToAdd)
           val modifiedOwners =
-            com.daml.nonempty.NonEmpty(
+            com.digitalasset.nonempty.NonEmpty(
               Set,
               ownerToAdd.namespace,
               initialNamespace.owners.toList*
@@ -192,7 +192,8 @@ private[topology] trait NamespaceChaos extends TopologyOperations with Matchers 
             .create(
               decentralizedNamespace = initialNamespace.namespace,
               threshold = Math.min(initialNamespace.threshold.value, modifiedOwners.size),
-              owners = com.daml.nonempty.NonEmpty(Set, modifiedOwners.head, modifiedOwners.tail*),
+              owners =
+                com.digitalasset.nonempty.NonEmpty(Set, modifiedOwners.head, modifiedOwners.tail*),
             )
             .value
 

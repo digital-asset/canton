@@ -6,7 +6,6 @@ package transaction
 
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.*
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.value.*
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -277,37 +276,6 @@ object Node {
     def informeesOfNode: Set[Party] = keyMaintainers
 
     def requiredAuthorizers: Set[Party] = keyMaintainers
-  }
-
-  type LookupByKey = QueryByKey
-
-  object LookupByKey {
-    def apply(
-        packageName: PackageName,
-        templateId: TypeConId,
-        key: GlobalKeyWithMaintainers,
-        result: Option[ContractId],
-        version: SerializationVersion,
-    ): LookupByKey =
-      QueryByKey(packageName, templateId, result.isEmpty, key, result.asCidVector, version)
-
-    def unapply(n: QueryByKey): Some[
-      (
-          PackageName,
-          TypeConId,
-          GlobalKeyWithMaintainers,
-          Option[ContractId],
-          SerializationVersion,
-      )
-    ] = Some(
-      (
-        n.packageName,
-        n.templateId,
-        n.key,
-        n.result.asCidOption,
-        n.version,
-      )
-    )
   }
 
   @deprecated("use GlobalKey", since = "2.6.0")

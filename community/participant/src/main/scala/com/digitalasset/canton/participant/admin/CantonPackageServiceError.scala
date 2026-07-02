@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{
   ContextualizedDamlError,
   ErrorCategory,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 
 object CantonPackageServiceError extends PackageServiceErrorGroup {

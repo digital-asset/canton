@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -27,6 +26,7 @@ import com.digitalasset.canton.util.PekkoUtil.noOpKillSwitch
 import com.digitalasset.canton.util.PekkoUtilTest.withNoOpKillSwitch
 import com.digitalasset.canton.util.{MaxBytesToDecompress, ResourceUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.scalatest.wordspec.FixtureAnyWordSpec

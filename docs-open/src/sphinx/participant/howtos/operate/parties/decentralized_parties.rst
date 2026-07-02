@@ -76,7 +76,7 @@ transaction, the decentralized namespace transaction shows up in the ``list``
 command:
 
 .. snippet:: decentralized_parties
-     .. success:: val namespaceDef = DecentralizedNamespaceDefinition.tryCreate(DecentralizedNamespaceDefinition.computeNamespace(Set(aliceNamespace, bobNamespace, charlieNamespace)), PositiveInt.tryCreate(2), com.daml.nonempty.NonEmpty(Set, aliceNamespace, bobNamespace, charlieNamespace))
+     .. success:: val namespaceDef = DecentralizedNamespaceDefinition.tryCreate(DecentralizedNamespaceDefinition.computeNamespace(Set(aliceNamespace, bobNamespace, charlieNamespace)), PositiveInt.tryCreate(2), com.digitalasset.nonempty.NonEmpty(Set, aliceNamespace, bobNamespace, charlieNamespace))
      .. success:: participant1.topology.decentralized_namespaces.propose(namespaceDef, store = synchronizerId)
      .. success:: participant2.topology.decentralized_namespaces.propose(namespaceDef, store = synchronizerId)
      .. success:: participant3.topology.decentralized_namespaces.propose(namespaceDef, store = synchronizerId)
@@ -106,7 +106,7 @@ separate keys here:
      .. success:: val aliceDamlKey = participant1.keys.secret.generate_signing_key("decentralized-party-daml-transactions", SigningKeyUsage.ProtocolOnly)
      .. success:: val bobDamlKey = participant2.keys.secret.generate_signing_key("decentralized-party-daml-transactions", SigningKeyUsage.ProtocolOnly)
      .. success:: val charlieDamlKey = participant3.keys.secret.generate_signing_key("decentralized-party-daml-transactions", SigningKeyUsage.ProtocolOnly)
-     .. success:: val partySigningKeysWithThreshold = Some(SigningKeysWithThreshold(com.daml.nonempty.NonEmpty(Set, aliceDamlKey, bobDamlKey, charlieDamlKey), PositiveInt.tryCreate(2)))
+     .. success:: val partySigningKeysWithThreshold = Some(SigningKeysWithThreshold(com.digitalasset.nonempty.NonEmpty(Set, aliceDamlKey, bobDamlKey, charlieDamlKey), PositiveInt.tryCreate(2)))
 
 Once all of them publish their transactions it becomes valid and shows up in ``list``:
 

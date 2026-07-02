@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client.pool
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.sequencing.protocol.HandshakeResponse
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContextExecutor

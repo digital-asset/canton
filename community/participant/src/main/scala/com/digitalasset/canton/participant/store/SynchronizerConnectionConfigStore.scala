@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.apply.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -40,6 +39,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.ExecutionContext

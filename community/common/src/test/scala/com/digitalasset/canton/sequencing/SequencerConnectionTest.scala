@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.sequencing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 

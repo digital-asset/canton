@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.catsinstances.`cats nonempty traverse`
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.ConsoleEnvironment

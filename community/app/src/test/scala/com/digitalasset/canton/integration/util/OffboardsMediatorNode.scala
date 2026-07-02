@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.util
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.{
   InstanceReference,
@@ -11,6 +10,7 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.nonempty.NonEmpty
 
 trait OffboardsMediatorNode {
   import org.scalatest.LoneElement.*

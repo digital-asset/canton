@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.Error.Transport
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 
 trait SequencerConnectServiceIntegrationTest
     extends CommunityIntegrationTest

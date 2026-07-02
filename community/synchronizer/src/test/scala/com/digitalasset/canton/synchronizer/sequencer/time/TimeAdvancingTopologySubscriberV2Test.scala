@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer.time
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
@@ -45,6 +44,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 

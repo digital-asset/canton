@@ -109,7 +109,7 @@ final class P2PNetworkOutModule[
     message match {
       case P2PNetworkOut.Start =>
         val p2pEndpoints =
-          context.blockingAwait(p2pEndpointsStore.listEndpoints, blockingDbReadTimeout)
+          context.blockingAwait(p2pEndpointsStore.listEndpoints(), blockingDbReadTimeout)
         connectInitialNodes(p2pEndpoints)
         startModulesIfNeeded()
 
@@ -219,6 +219,7 @@ final class P2PNetworkOutModule[
       admin: P2PNetworkOut.Admin
   )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit =
     admin match {
+
       case Admin.AddEndpoint(p2pEndpoint, callback) =>
         if (p2pConnectionState.isDefined(p2pEndpoint.id)) {
           logger.info(s"Operator requested adding P2P endpoint $p2pEndpoint but it already exists")
@@ -236,6 +237,7 @@ final class P2PNetworkOutModule[
               abort(s"Failed to P2P add endpoint $p2pEndpoint", exception)
           }
         }
+
       case Admin.RemoveEndpoint(p2pEndpointId, callback) =>
         if (p2pConnectionState.isDefined(p2pEndpointId)) {
           logger.info(s"Removing existing P2P endpoint $p2pEndpointId as requested by operator")
@@ -255,6 +257,16 @@ final class P2PNetworkOutModule[
           )
           callback(false)
         }
+
+      case Admin.ListConfiguredEndpoints(callback) =>
+        context.pipeToSelf(p2pEndpointsStore.listEndpoints()) {
+          case Success(endpoints) =>
+            callback(endpoints.sortBy(_.id)) // For output determinism and easier testing
+            None
+          case Failure(exception) =>
+            abort(s"Failed to list P2P endpoints", exception)
+        }
+
       case Admin.GetStatus(callback, p2pEndpointIds) =>
         logger.info(
           s"Operator requested P2P status for endpoints ${p2pEndpointIds.getOrElse("<all>")}"

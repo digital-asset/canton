@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Signature, SignatureCheckError, SyncCryptoApi}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -39,6 +38,7 @@ import com.digitalasset.canton.version.{
   VersioningCompanion,
 }
 import com.digitalasset.canton.{ProtoDeserializationError, checkedToByteString}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens

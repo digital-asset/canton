@@ -4,7 +4,6 @@
 package com.digitalasset.canton.crypto.provider.jce
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
@@ -31,6 +30,7 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherUtil, ShowUtil, ThrowableUtil}
 import com.digitalasset.canton.version.HasToByteString
+import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.Cache
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
@@ -19,6 +18,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId, LfTimestamp}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec

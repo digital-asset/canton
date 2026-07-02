@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeyUsage, SigningKeysWithThreshold}
@@ -25,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 

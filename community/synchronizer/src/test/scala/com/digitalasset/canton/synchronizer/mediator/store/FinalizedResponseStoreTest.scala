@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.mediator.store
 import cats.Monad
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs}
 import com.digitalasset.canton.crypto.*
@@ -26,6 +25,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, CommandId, LfPartyId, UserId}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 

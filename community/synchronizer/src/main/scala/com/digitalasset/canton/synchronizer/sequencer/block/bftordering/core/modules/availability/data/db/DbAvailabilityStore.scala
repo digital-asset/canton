@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.caching.{CaffeineCache, ConcurrentCache}
 import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs, ProcessingTimeout}
@@ -30,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Mi
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
+import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.collection.immutable

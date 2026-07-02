@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, config}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level.{INFO, WARN}

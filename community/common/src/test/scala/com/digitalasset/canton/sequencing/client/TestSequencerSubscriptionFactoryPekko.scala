@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
@@ -23,6 +22,7 @@ import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTrace
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 
 import java.util.concurrent.atomic.AtomicReference

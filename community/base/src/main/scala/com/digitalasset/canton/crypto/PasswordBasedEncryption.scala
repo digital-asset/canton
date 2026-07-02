@@ -6,7 +6,11 @@ package com.digitalasset.canton.crypto
 import cats.Order
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
@@ -177,32 +181,48 @@ object PbkdfScheme {
 
 }
 
-sealed trait PasswordBasedEncryptionError extends Product with Serializable with PrettyPrinting
+sealed trait PasswordBasedEncryptionError
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion
 
 object PasswordBasedEncryptionError {
 
   final case class KeyCreationError(error: EncryptionKeyCreationError)
       extends PasswordBasedEncryptionError {
-    override protected def pretty: Pretty[KeyCreationError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[KeyCreationError] = KeyCreationError
+  }
+  object KeyCreationError extends PrettyPrintingCompanion[KeyCreationError] {
+    override val pretty: Pretty[KeyCreationError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
 
   final case class DecryptError(error: DecryptionError) extends PasswordBasedEncryptionError {
-    override protected def pretty: Pretty[DecryptError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DecryptError] = DecryptError
+  }
+  object DecryptError extends PrettyPrintingCompanion[DecryptError] {
+    override val pretty: Pretty[DecryptError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
 
   final case class EncryptError(error: EncryptionError) extends PasswordBasedEncryptionError {
-    override protected def pretty: Pretty[EncryptError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[EncryptError] = EncryptError
+  }
+  object EncryptError extends PrettyPrintingCompanion[EncryptError] {
+    override val pretty: Pretty[EncryptError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
 
   final case class PbkdfOutputLengthInvalid(expectedLength: Int, actualLength: Int)
       extends PasswordBasedEncryptionError {
-    override protected def pretty: Pretty[PbkdfOutputLengthInvalid] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[PbkdfOutputLengthInvalid] =
+      PbkdfOutputLengthInvalid
+  }
+  object PbkdfOutputLengthInvalid extends PrettyPrintingCompanion[PbkdfOutputLengthInvalid] {
+    override val pretty: Pretty[PbkdfOutputLengthInvalid] = prettyOfClass(
       param("expectedLength", _.expectedLength),
       param("actualLength", _.actualLength),
     )

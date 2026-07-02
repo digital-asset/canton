@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
@@ -41,6 +40,7 @@ import com.digitalasset.canton.topology.{
   TopologyManagerError,
   UnknownPhysicalSynchronizerId,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.syntax.all.*
 import org.scalatest.Assertion

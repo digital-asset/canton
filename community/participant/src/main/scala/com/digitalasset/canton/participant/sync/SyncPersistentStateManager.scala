@@ -5,8 +5,6 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TopologyConfig
@@ -38,6 +36,8 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{MonadUtil, StampedLockWithHandle}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import scala.annotation.unused
 import scala.collection.concurrent
@@ -491,5 +491,8 @@ class SyncPersistentStateManager(
     )
 
   override def close(): Unit =
-    LifeCycle.close((physicalPersistentStates.values.toSeq :+ aliasResolution)*)(logger)
+    LifeCycle.close(
+      (physicalPersistentStates.values.toSeq ++
+        logicalPersistentStates.values.toSeq :+ aliasResolution)*
+    )(logger)
 }

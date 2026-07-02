@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.PruningSchedule
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
@@ -17,6 +16,7 @@ import com.digitalasset.canton.integration.util.BackgroundWorkloadRunner
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.scheduler.IgnoresTransientSchedulerErrors
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.util.chaining.*
 

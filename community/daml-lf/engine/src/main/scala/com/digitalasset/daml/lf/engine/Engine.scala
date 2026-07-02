@@ -610,8 +610,10 @@ class Engine(
 
             config.profileDir.foreach { dir =>
               val desc = Engine.profileDesc(tx)
-              val profileFile = dir.resolve(s"${meta.preparationTime}-$desc.json")
-              machine.profile.name = s"${meta.preparationTime}-$desc"
+              val profileBaseName = s"${meta.preparationTime}-$desc"
+                .replaceAll("[/\\\\]", "_") // Avoid directory escape
+              val profileFile = dir.resolve(s"$profileBaseName.json")
+              machine.profile.name = profileBaseName
               machine.profile.writeSpeedscopeJson(profileFile)
             }
             val snapshotResult = config.snapshotDir.zip(submissionInfo).flatMap {
@@ -1165,7 +1167,7 @@ object Engine {
         case exercise: Node.Exercise =>
           makeDesc("exercise", exercise.templateId, Some(exercise.choiceId))
         case fetch: Node.Fetch => makeDesc("fetch", fetch.templateId, None)
-        case lookup: Node.LookupByKey => makeDesc("lookup", lookup.templateId, None)
+        case lookup: Node.QueryByKey => makeDesc("lookup", lookup.templateId, None)
       }
     } else {
       s"compound:${tx.roots.length}"

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.admin.api.client.data.RegisteredSynchronizer.Status
 import com.digitalasset.canton.admin.api.client.data.{
@@ -24,6 +23,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuEndToEndIntegrationTest.ExpectedRegisteredSynchronizers
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration

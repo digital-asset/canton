@@ -14,8 +14,6 @@ import cats.syntax.functor.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.api.MetricQualification
 import com.daml.metrics.{HistogramDefinition, MetricsFilterConfig}
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.daml.tls.{
   BaseServerTlsConfig,
   ServerAuthRequirementConfig,
@@ -115,10 +113,12 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.time.DisasterRecoverySequencingTimeUpperBound
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
+import com.digitalasset.canton.tea.TrafficEnforcementConfig
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
 import com.digitalasset.canton.version.ParticipantProtocolVersion
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{
   Config,
@@ -744,7 +744,7 @@ object CantonConfig {
 
   import BaseCantonConfig.Readers.preventAllUnknownKeys
 
-  import com.daml.nonempty.NonEmptyUtil.instances.*
+  import com.digitalasset.nonempty.NonEmptyUtil.instances.*
   import pureconfig.ConfigReader
   import pureconfig.generic.semiauto.*
   import pureconfig.module.cats.*
@@ -1688,6 +1688,13 @@ object CantonConfig {
       import DeclarativeSequencerConfig.Readers.*
       deriveReader[SequencerNodeConfig]
     }
+
+    lazy implicit val trafficEnforcementConfigInternalReader
+        : ConfigReader[TrafficEnforcementConfig.Internal] =
+      deriveReader[TrafficEnforcementConfig.Internal]
+
+    lazy implicit val trafficEnforcementConfigReader: ConfigReader[TrafficEnforcementConfig] =
+      deriveReader[TrafficEnforcementConfig]
   }
 
   private implicit def cantonConfigReader(implicit
@@ -2395,6 +2402,13 @@ object CantonConfig {
       import DeclarativeSequencerConfig.Writers.*
       deriveWriter[SequencerNodeConfig]
     }
+
+    lazy implicit val trafficEnforcementConfigInternalWriter
+        : ConfigWriter[TrafficEnforcementConfig.Internal] =
+      deriveWriter[TrafficEnforcementConfig.Internal]
+
+    lazy implicit val trafficEnforcementConfigWriter: ConfigWriter[TrafficEnforcementConfig] =
+      deriveWriter[TrafficEnforcementConfig]
   }
 
   private def makeWriter(confidential: Boolean): ConfigWriter[CantonConfig] = {

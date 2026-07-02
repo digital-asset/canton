@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.sequencer.reference
 import cats.data.EitherT
 import com.daml.metrics.OpenTelemetryOnDemandMetricsReader
 import com.daml.metrics.api.{HistogramInventory, MetricName}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveDouble, PositiveInt}
@@ -82,6 +81,7 @@ import com.digitalasset.canton.{
   MockedNodeParameters,
   ProtocolVersionChecksFixtureAsyncWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
 import org.scalatest.{Assertion, FutureOutcome}

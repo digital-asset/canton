@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, ReassignmentId}
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 

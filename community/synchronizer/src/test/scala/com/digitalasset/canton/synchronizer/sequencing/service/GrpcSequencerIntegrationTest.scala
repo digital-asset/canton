@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
@@ -93,6 +92,7 @@ import com.digitalasset.canton.version.{
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{config, *}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import io.grpc.{Server, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer

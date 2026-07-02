@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.security
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.console.InstanceReference
@@ -11,6 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.concurrent.Eventually
 
 import java.time.Instant

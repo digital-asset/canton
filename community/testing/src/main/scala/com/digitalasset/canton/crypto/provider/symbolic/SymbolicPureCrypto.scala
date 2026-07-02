@@ -4,7 +4,6 @@
 package com.digitalasset.canton.crypto.provider.symbolic
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoParallelismConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -18,6 +17,7 @@ import com.digitalasset.canton.serialization.{DeserializationError, Deterministi
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteStringUtil, EitherUtil}
 import com.digitalasset.canton.version.HasToByteString
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 

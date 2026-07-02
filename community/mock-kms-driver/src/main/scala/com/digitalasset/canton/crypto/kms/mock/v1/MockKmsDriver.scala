@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.kms.mock.v1
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoProvider.Jce
 import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.crypto.kms.driver.api.v1.*
@@ -29,6 +28,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{DelayUtil, EitherTUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.opentelemetry.context.Context
 

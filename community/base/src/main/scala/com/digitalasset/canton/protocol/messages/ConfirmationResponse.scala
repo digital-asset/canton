@@ -5,9 +5,6 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmptyUtil.instances.*
-import com.daml.nonempty.catsinstances.*
-import com.daml.nonempty.{NonEmpty, NonEmptyF}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
@@ -18,6 +15,8 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmptyUtil.instances.*
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyF}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.macros.GenLens

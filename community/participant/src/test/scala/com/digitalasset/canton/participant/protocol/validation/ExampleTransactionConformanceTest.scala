@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -53,6 +52,7 @@ import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.language.Ast.{DeclaredImports, Expr, GenPackage, PackageMetadata}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
@@ -432,7 +432,9 @@ class ExampleTransactionConformanceTest
             .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
             .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
             .andThen(ViewParticipantData.Optics.externalCallResultsUnsafe)
-            .modify(_.map(_.copy(checkingParties = Set.empty)))(fullTree)
+            .modify(results =>
+              ImmArray.from(results.toSeq.map(_.copy(checkingParties = Set.empty)))
+            )(fullTree)
           _ = tamperedTree.validated shouldBe Right(tamperedTree)
           result <- check(
             buildUnderTest(reinterpretTransaction(example, transaction)),
@@ -442,9 +444,9 @@ class ExampleTransactionConformanceTest
         } yield inside(result) { case Left(ErrorWithSubTransaction(errors, _, _)) =>
           inside(errors.head) { case ViewReconstructionError(received, reconstructed) =>
             val receivedRecord =
-              received.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+              received.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
             val reconstructedRecord =
-              reconstructed.viewParticipantData.tryUnwrap.externalCallResults.loneElement
+              reconstructed.viewParticipantData.tryUnwrap.externalCallResults.toSeq.loneElement
 
             receivedRecord.checkingParties shouldBe Set.empty
             reconstructedRecord.checkingParties shouldBe Set(submitter)

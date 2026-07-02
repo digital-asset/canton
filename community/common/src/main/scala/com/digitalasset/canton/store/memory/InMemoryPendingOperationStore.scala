@@ -56,6 +56,8 @@ class InMemoryGenericPendingOperationStore(
         "delete is not supported in InMemoryGenericPendingOperationStore"
       )
     )
+
+  override def close(): Unit = ()
 }
 
 class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](

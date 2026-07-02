@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.block.update
 
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -44,6 +43,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.collection.IterableUtil
 import com.digitalasset.canton.util.{MaxBytesToDecompress, MonadUtil, TracedPossiblyPrevalidated}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.immutable

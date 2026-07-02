@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{
   AsymmetricEncrypted,
@@ -39,6 +38,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{Generators, GeneratorsLf, LfPartyId}
+import com.digitalasset.nonempty.NonEmptyUtil
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 

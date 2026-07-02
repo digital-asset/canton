@@ -22,7 +22,7 @@ private[dao] trait JdbcLedgerDaoTransactionsWriterSpec extends LoneElement with 
       from <- ledgerDao.lookupLedgerEnd()
       (_, create) <- store(txCreateContractWithKey(alice, keyValue))
       createdContractId = nonTransient(create).loneElement
-      (_, lookup) <- store(txLookupByKey(alice, keyValue, Some(createdContractId)))
+      (_, lookup) <- store(txQueryByKey(alice, keyValue, Vector(createdContractId)))
       to <- ledgerDao.lookupLedgerEnd()
       completions <- getCompletions(
         from.fold(Offset.firstOffset)(_.lastOffset.increment),

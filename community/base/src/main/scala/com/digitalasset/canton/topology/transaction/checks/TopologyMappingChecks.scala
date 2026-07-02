@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.instances.order.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, KeyPurpose, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -32,6 +31,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext

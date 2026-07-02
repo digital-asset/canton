@@ -5,7 +5,6 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
@@ -39,8 +38,9 @@ import com.digitalasset.canton.{
   ProtoDeserializationError,
   checked,
 }
-import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
@@ -88,7 +88,7 @@ final case class ViewParticipantData private (
     actionDescription: ActionDescription,
     rollbackContext: RollbackContext,
     salt: Salt,
-    externalCallResults: Seq[ViewParticipantData.ViewExternalCallResult],
+    externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult],
 )(
     hashOps: HashOps,
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
@@ -98,11 +98,6 @@ final case class ViewParticipantData private (
 ) extends MerkleTreeLeaf[ViewParticipantData](hashOps)
     with HasProtocolVersionedWrapper[ViewParticipantData]
     with ProtocolVersionedMemoizedEvidence {
-
-  def supportsExternalCallResults: Boolean =
-    representativeProtocolVersion >= ViewParticipantData.protocolVersionRepresentativeFor(
-      ProtocolVersion.dev
-    )
 
   def validated(protocolVersion: ProtocolVersion): Either[String, this.type] =
     for {
@@ -164,7 +159,8 @@ final case class ViewParticipantData private (
     else
       for {
         _ <- Either.cond(
-          supportsExternalCallResults,
+          representativeProtocolVersion >=
+            ViewParticipantData.protocolVersionRepresentativeFor(ProtocolVersion.dev),
           (),
           s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards",
         )
@@ -173,7 +169,7 @@ final case class ViewParticipantData private (
           case _ => Left("External call results require an exercise root action")
         }
         _ <- checkDistinct(
-          externalCallResults.map(result => (result.exerciseIndex, result.callIndex))
+          externalCallResults.toSeq.map(result => (result.exerciseIndex, result.callIndex))
         ) { case (exerciseIndex, callIndex) =>
           s"externalCallResults contains duplicate occurrence (exercise index ${exerciseIndex.unwrap}, call index ${callIndex.unwrap})"
         }
@@ -385,7 +381,7 @@ final case class ViewParticipantData private (
     },
     actionDescription = Some(actionDescription.toProtoV31),
     salt = Some(salt.toProtoV30),
-    externalCallResults = externalCallResults.map(_.toProtoV32),
+    externalCallResults = externalCallResults.toSeq.map(_.toProtoV32),
     rolledBack = rollbackContext.inRollback,
   )
 
@@ -404,7 +400,7 @@ final case class ViewParticipantData private (
     param("salt", _.salt),
     paramIfNonEmpty(
       "external call results",
-      _.externalCallResults.map(result =>
+      _.externalCallResults.toSeq.map(result =>
         s"${result.result.extensionId}:${result.result.functionId}@${result.exerciseIndex.unwrap}.${result.callIndex.unwrap}".unquoted
       ),
     ),
@@ -421,7 +417,7 @@ final case class ViewParticipantData private (
       actionDescription: ActionDescription = this.actionDescription,
       rollbackContext: RollbackContext = this.rollbackContext,
       salt: Salt = this.salt,
-      externalCallResults: Seq[ViewParticipantData.ViewExternalCallResult] =
+      externalCallResults: ImmArray[ViewParticipantData.ViewExternalCallResult] =
         this.externalCallResults,
   ): ViewParticipantData =
     ViewParticipantData(
@@ -483,7 +479,7 @@ object ViewParticipantData
       actionDescription: ActionDescription,
       rollbackContext: RollbackContext,
       salt: Salt,
-      externalCallResults: Seq[ViewExternalCallResult],
+      externalCallResults: ImmArray[ViewExternalCallResult],
       protocolVersion: ProtocolVersion,
   ): ViewParticipantData =
     create(hashOps)(
@@ -510,7 +506,7 @@ object ViewParticipantData
       actionDescription: ActionDescription,
       rollbackContext: RollbackContext,
       salt: Salt,
-      externalCallResults: Seq[ViewExternalCallResult],
+      externalCallResults: ImmArray[ViewExternalCallResult],
       protocolVersion: ProtocolVersion,
   ): Either[String, ViewParticipantData] =
     ViewParticipantData(
@@ -566,7 +562,7 @@ object ViewParticipantData
         saltP,
         coreInputsP,
         createdInSubviewArchivedInCoreP,
-        Seq.empty,
+        ImmArray.Empty,
       )
     } yield {
       viewParticipantData
@@ -611,7 +607,7 @@ object ViewParticipantData
         saltP,
         coreInputsP,
         createdInSubviewArchivedInCoreP,
-        Seq.empty,
+        ImmArray.Empty,
       )
     } yield viewParticipantData
   }
@@ -653,7 +649,7 @@ object ViewParticipantData
         saltP,
         coreInputsP,
         createdInSubviewArchivedInCoreP,
-        externalCallResults,
+        ImmArray.from(externalCallResults),
       )
     } yield viewParticipantData
   }
@@ -670,7 +666,7 @@ object ViewParticipantData
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
       coreInputsP: Seq[v30.InputContract],
       createdInSubviewArchivedInCoreP: Seq[String],
-      externalCallResults: Seq[ViewExternalCallResult],
+      externalCallResults: ImmArray[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
       coreInputsSeq <- coreInputsP.traverse(InputContract.fromProtoV30)
@@ -789,7 +785,7 @@ object ViewParticipantData
       GenLens.apply[ViewParticipantData](_.actionDescription)
     val saltUnsafe: Lens[ViewParticipantData, Salt] =
       GenLens.apply[ViewParticipantData](_.salt)
-    val externalCallResultsUnsafe: Lens[ViewParticipantData, Seq[ViewExternalCallResult]] =
+    val externalCallResultsUnsafe: Lens[ViewParticipantData, ImmArray[ViewExternalCallResult]] =
       GenLens.apply[ViewParticipantData](_.externalCallResults)
     val keyResolutionUnsafe
         : Lens[ViewParticipantData, Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =

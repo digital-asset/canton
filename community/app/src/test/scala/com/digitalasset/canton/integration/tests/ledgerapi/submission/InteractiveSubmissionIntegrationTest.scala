@@ -21,7 +21,6 @@ import com.daml.ledger.api.v2.value.Value
 import com.daml.ledger.api.v2.value.Value.Sum
 import com.daml.ledger.javaapi.data.codegen.ContractId as CodeGenCID
 import com.daml.ledger.javaapi.data.{Command, DisclosedContract}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.admin.api.client.data.TemplateId
 import com.digitalasset.canton.annotations.UnstableTest
@@ -66,6 +65,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ExternalParty, Namespace, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Status
 import monocle.Optional

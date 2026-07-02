@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   LtHash16,
@@ -50,6 +49,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   ProtocolVersionChecksAsyncWordSpec,
 }
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

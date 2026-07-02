@@ -4,13 +4,13 @@
 package com.digitalasset.canton.synchronizer.sequencer.store
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.synchronizer.sequencer.CommitMode
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 

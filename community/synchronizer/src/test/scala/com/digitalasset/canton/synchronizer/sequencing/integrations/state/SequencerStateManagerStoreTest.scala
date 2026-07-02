@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.integrations.state
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.TestHash
@@ -17,6 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.ActorSystem

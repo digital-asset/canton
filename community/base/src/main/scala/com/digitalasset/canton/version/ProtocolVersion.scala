@@ -4,7 +4,6 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -18,6 +17,7 @@ import com.digitalasset.canton.version.ProtocolVersion.{
   supported,
 }
 import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import io.circe.Encoder
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}

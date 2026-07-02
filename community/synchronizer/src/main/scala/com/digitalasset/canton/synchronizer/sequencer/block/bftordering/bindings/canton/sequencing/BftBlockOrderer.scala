@@ -373,7 +373,7 @@ final class BftBlockOrderer(
         for {
           size <-
             if (overwrite) store.clearAllEndpoints().map(_ => 0)
-            else store.listEndpoints.map(_.size)
+            else store.listEndpoints().map(_.size)
           _ <-
             if (size == 0)
               PekkoFutureUnlessShutdown.sequence(

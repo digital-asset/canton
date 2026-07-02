@@ -8,7 +8,11 @@ import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.String68
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
@@ -41,15 +45,16 @@ import slick.jdbc.{GetResult, SetParameter}
   */
 sealed abstract class HashAlgorithm(val name: String, val index: Long, val length: Long)
     extends CryptoSpec
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def toProtoEnum: v30.HashAlgorithm
 
-  override protected def pretty: Pretty[HashAlgorithm] = prettyOfString(_.name)
+  override def prettyCompanion: PrettyPrintingCompanion[HashAlgorithm] = HashAlgorithm
 
   private[crypto] def internalBlockSizeInBytes: Int
 }
 
-object HashAlgorithm {
+object HashAlgorithm extends PrettyPrintingCompanion[HashAlgorithm] {
+  override val pretty: Pretty[HashAlgorithm] = prettyOfString(_.name)
 
   implicit val hashAlgorithmOrder: Order[HashAlgorithm] = Order.by[HashAlgorithm, Long](_.index)
 
@@ -93,7 +98,7 @@ final case class Hash private (
     private[crypto] val algorithm: HashAlgorithm,
 ) extends HasCryptographicEvidence
     with Ordered[Hash]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   require(!hash.isEmpty, "Hash must not be empty")
   require(
@@ -118,15 +123,16 @@ final case class Hash private (
   def compare(that: Hash): Int =
     this.toHexString.compare(that.toHexString)
 
-  override val pretty: Pretty[Hash] = prettyOfString(hash =>
-    s"${hash.algorithm.name}:${HexString.toHexString(hash.hash).readableHash}"
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[Hash] = Hash
 
   /** Access to the raw hash, should NOT be used for serialization. */
   private[canton] def unwrap: ByteString = hash
 }
 
-object Hash {
+object Hash extends PrettyPrintingCompanion[Hash] {
+  override val pretty: Pretty[Hash] = prettyOfString(hash =>
+    s"${hash.algorithm.name}:${HexString.toHexString(hash.hash).readableHash}"
+  )
 
   implicit def setParameterHash(implicit
       setByteString: SetParameter[ByteString]

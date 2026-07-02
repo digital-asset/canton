@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore.InconsistentLogicalSynchronizerIds
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait RegisteredSynchronizersStoreTest extends FailOnShutdown {

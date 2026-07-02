@@ -671,8 +671,10 @@ class SystematicTopologyAwareUpgradingIntegrationTest
             expectedErrorCode = PackageSelectionFailed,
             expectedErrorMessage =
               s"""|No synchronizers satisfy the topology requirements for the submitted command: Discarded synchronizers:.*
-                  |.*$daId: Failed to select package-id for package-name '${Foo.PACKAGE_NAME}' appearing in a command root node due to: No vetted package candidate satisfies the package-id filter 'Commands.package_id_selection_preference'=.*foo -> ${FooV3.PACKAGE_ID.toPackageId.show}.*
-                  |.*Candidates:.*${FooV2.PACKAGE_ID.toPackageId.show}.*""".stripMargin,
+                  |.*$daId: Failed to select package-id for package-name '${Foo.PACKAGE_NAME}' appearing in a command root node due to: No vetted package candidate satisfies the package-id filter 'Commands.package_id_selection_preference'=.*foo -> ${toShow(
+                  FooV3.PACKAGE_ID.toPackageId
+                ).show}.*
+                  |.*Candidates:.*${toShow(FooV2.PACKAGE_ID.toPackageId).show}.*""".stripMargin,
             vettingRequirementsForPreferencesInjection = Some(
               Map(
                 Foo.PACKAGE_NAME.toPackageName -> Set(alice),

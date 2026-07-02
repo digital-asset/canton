@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 import cats.Traverse
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionState
@@ -41,6 +40,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.HexString
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertions.fail
 
 import java.time.Instant

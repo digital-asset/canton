@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.sync
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{
   Alarm,
   AlarmErrorCode,
@@ -33,6 +32,7 @@ import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, Physi
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.rpc.status.Status
 import io.grpc.Status.Code
 import org.slf4j.event.Level

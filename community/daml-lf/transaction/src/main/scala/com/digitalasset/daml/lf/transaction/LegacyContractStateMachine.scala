@@ -202,7 +202,7 @@ object LegacyContractStateMachine {
     /** Must be used to handle lookups iff in
       * [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]] mode
       */
-    def handleLookup(lookup: Node.LookupByKey): Either[KeyInputError, State[Nid]] = {
+    def handleLookup(lookup: Node.QueryByKey): Either[KeyInputError, State[Nid]] = {
       // If the key has not yet been resolved, we use the resolution from the lookup node,
       // but this only makes sense if `activeState.keys` is updated by every node and not only by by-key nodes.
       if (mode != LegacyContractKeyUniquenessMode.Strict)
@@ -226,7 +226,7 @@ object LegacyContractStateMachine {
       * against the result potentially turning it into a negative lookup.
       */
     def handleLookupWith(
-        lookup: Node.LookupByKey,
+        lookup: Node.QueryByKey,
         keyInput: Option[ContractId],
     ): Either[KeyInputError, State[Nid]] = {
       if (mode != LegacyContractKeyUniquenessMode.Off)
@@ -330,7 +330,7 @@ object LegacyContractStateMachine {
     ): Either[KeyInputError, State[Nid]] = node match {
       case create: Node.Create => handleCreate(create)
       case fetch: Node.Fetch => handleFetch(fetch)
-      case lookup: Node.LookupByKey =>
+      case lookup: Node.QueryByKey =>
         mode match {
           case LegacyContractKeyUniquenessMode.Strict => handleLookup(lookup)
           case LegacyContractKeyUniquenessMode.Off => handleLookupWith(lookup, keyInput)

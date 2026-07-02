@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.traffic.store.memory
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -13,6 +12,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficPurc
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap

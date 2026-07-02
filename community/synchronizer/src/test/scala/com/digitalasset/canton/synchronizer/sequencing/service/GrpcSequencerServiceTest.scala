@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencing.service
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
@@ -53,6 +52,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   ProtocolVersionChecksFixtureAsyncWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code.*
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}

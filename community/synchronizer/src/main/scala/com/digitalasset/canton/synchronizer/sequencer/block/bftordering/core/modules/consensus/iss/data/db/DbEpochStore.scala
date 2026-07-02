@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -58,6 +57,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
 import com.digitalasset.canton.{ProtoDeserializationError, RichGeneratedMessage}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedResult, SetParameter}
 

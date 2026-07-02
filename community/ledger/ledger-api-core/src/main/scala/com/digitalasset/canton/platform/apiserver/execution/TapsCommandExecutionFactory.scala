@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.implicits.{catsSyntaxAlternativeSeparate, toFoldableOps}
 import com.daml.metrics.Timed
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
 import com.digitalasset.canton.ledger.api.{Commands, PackageReference}
@@ -41,6 +40,7 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine.Error.{Package, Preprocessing}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 
 import scala.collection.MapView

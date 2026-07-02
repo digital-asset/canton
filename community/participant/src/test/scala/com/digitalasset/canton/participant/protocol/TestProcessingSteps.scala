@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
@@ -55,6 +54,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HasToByteString
 import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent

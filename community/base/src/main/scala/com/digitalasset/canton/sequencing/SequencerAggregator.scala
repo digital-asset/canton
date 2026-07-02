@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing
 
 import cats.syntax.either.*
 import com.daml.nameof.NameOf
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -35,6 +34,7 @@ import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 

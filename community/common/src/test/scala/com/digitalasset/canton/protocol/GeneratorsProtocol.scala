@@ -169,18 +169,14 @@ final class GeneratorsProtocol(
   )
 
   def contractInstanceArb[Time <: CreationTime](
-      genTime: Gen[Time],
-      mustHaveKey: Boolean = false,
-      overrideContractId: Option[LfContractId] = None,
+      genTime: Gen[Time]
   ): Arbitrary[GenContractInstance { type InstCreatedAtTime <: Time }] = Arbitrary(
     for {
 
       byKey <- byKeyArb.arbitrary
 
       maybeKeyWithMaintainers <-
-        if (mustHaveKey || byKey)
-          Gen.some(globalKeyWithMaintainersArb.arbitrary)
-        else Gen.const(None)
+        if (byKey) Gen.some(globalKeyWithMaintainersArb.arbitrary) else Gen.const(None)
 
       maintainers = maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.unversioned.maintainers)
       nonMaintainerSignatories <- nonEmptySetGen[LfPartyId]
@@ -195,22 +191,6 @@ final class GeneratorsProtocol(
       signatories = signatories,
       stakeholders = stakeholders,
       keyOpt = maybeKeyWithMaintainers.map(_.unversioned),
-      overrideContractId = overrideContractId,
-    )
-  )
-
-  def contractInstanceWithMetadataArb[Time <: CreationTime](
-      metadataList: List[ContractMetadata],
-      genTime: Gen[Time],
-  ): Arbitrary[GenContractInstance { type InstCreatedAtTime <: Time }] = Arbitrary(
-    for {
-      metadata <- Gen.oneOf(metadataList)
-      createdAt <- genTime
-    } yield ExampleContractFactory.build[Time](
-      createdAt = createdAt,
-      signatories = metadata.signatories,
-      stakeholders = metadata.stakeholders,
-      keyOpt = metadata.maybeKeyWithMaintainers,
     )
   )
 
@@ -292,16 +272,6 @@ final class GeneratorsProtocol(
       if (protocolVersion >= ProtocolVersion.v36) Gen.const(false)
       else Gen.oneOf(true, false)
     )
-
-  implicit val createdContractArb: Arbitrary[CreatedContract] = Arbitrary(
-    for {
-      contract <- contractInstanceArb(
-        genTime = Arbitrary.arbitrary[CreationTime.CreatedAt]
-      ).arbitrary
-      consumedInCore <- Gen.oneOf(true, false)
-      rolledBack <- createdContractRolledBackArb.arbitrary
-    } yield CreatedContract.create(contract, consumedInCore, rolledBack).value
-  )
 
   implicit val contractReassignmentBatch: Arbitrary[ContractsReassignmentBatch] = {
 

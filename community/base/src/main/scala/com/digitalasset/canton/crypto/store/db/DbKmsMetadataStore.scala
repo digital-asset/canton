@@ -4,7 +4,6 @@
 package com.digitalasset.canton.crypto.store.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.kms.KmsKeyId
@@ -17,6 +16,7 @@ import com.digitalasset.canton.resource.IdempotentInsert.insertVerifyingConflict
 import com.digitalasset.canton.resource.{DbParameterUtils, DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.ExecutionContext

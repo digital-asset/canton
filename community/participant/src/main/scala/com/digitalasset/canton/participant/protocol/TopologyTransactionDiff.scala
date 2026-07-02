@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
@@ -22,6 +21,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransactions.P
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 
 private[protocol] object TopologyTransactionDiff {
 

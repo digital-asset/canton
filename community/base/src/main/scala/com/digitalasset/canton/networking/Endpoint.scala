@@ -6,9 +6,8 @@ package com.digitalasset.canton.networking
 import cats.syntax.either.*
 import cats.syntax.reducible.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Attributes
 
 import java.net.URI

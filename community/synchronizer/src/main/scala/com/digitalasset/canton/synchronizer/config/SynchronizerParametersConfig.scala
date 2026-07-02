@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.synchronizer.config
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, NonNegativeFiniteDuration, ProtocolConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 /** Configuration of synchronizer parameters that all members connecting to a synchronizer must
   * adhere to.

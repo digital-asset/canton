@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol.hash
 import com.digitalasset.canton.crypto.InteractiveSubmission.TransactionMetadataForHashing
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.protocol.LfHash
-import com.digitalasset.canton.protocol.hash.NodeHashBuilder.minimumHashingSchemeVersionForLfSerializationVersion
+import com.digitalasset.canton.protocol.hash.NodeHashBuilder.LFSerializationVersionMappingToMinimumHashingSchemeVersion
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.transaction.SerializationVersion.V2
@@ -27,9 +27,7 @@ object TransactionHash {
           s"Cannot hash node with LF serialization version $version using hashing scheme $nodeHashVersion." +
             // If LFS version is V2, it's likely because of contract keys. Add a hint for the user.
             (if (version == V2) " Does the transaction use contract keys?" else "") +
-            s" Please use hashing scheme ${minimumHashingSchemeVersionForLfSerializationVersion(version)
-                .map(_.toString)
-                .getOrElse("N/A")} or higher."
+            s" Please using hashing scheme ${LFSerializationVersionMappingToMinimumHashingSchemeVersion.get(version).map(_.toString).getOrElse("N/A")} or higher."
         )
     final case class UnsupportedHashingVersion(version: HashingSchemeVersion)
         extends NodeHashingError(

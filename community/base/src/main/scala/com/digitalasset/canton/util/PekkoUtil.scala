@@ -13,7 +13,6 @@ import com.daml.metrics.api.{
   MetricQualification,
   MetricsContext,
 }
-import com.daml.nonempty.NonEmpty
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -33,6 +32,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SingletonTraverse.syntax.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.TryUtil.*
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.Logger
 import org.apache.pekko.actor.ActorSystem
@@ -145,7 +145,7 @@ object PekkoUtil extends HasLoggerName {
 
   /** Remembers the last `memory` many elements that have already been emitted previously. Passes
     * those remembered elements downstream with each new element. The current element is the
-    * [[com.daml.nonempty.NonEmptyCollInstances.NEPreservingOps.last1]] of the sequence.
+    * [[com.digitalasset.nonempty.NonEmptyCollInstances.NEPreservingOps.last1]] of the sequence.
     *
     * [[remember]] differs from [[org.apache.pekko.stream.scaladsl.FlowOps.sliding]] in that
     * [[remember]] emits elements immediately when the given source emits, whereas

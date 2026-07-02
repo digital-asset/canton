@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.performance
 
 import cats.syntax.foldable.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
@@ -41,6 +40,7 @@ import com.digitalasset.canton.performance.{
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.{BaseTest, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.Future

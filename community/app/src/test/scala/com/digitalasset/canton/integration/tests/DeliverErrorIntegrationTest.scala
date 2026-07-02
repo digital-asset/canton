@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionReq
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.jdk.CollectionConverters.*

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
@@ -12,6 +11,7 @@ import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, Node}
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait Reassignment {
   def templateId: Ref.Identifier

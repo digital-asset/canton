@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.syntax.bifunctor.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
   Segment,
@@ -22,6 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochStatus,
   SegmentStatus,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 class RetransmissionMessageValidator(epoch: Epoch) {
   private val currentEpochNumber = epoch.info.number

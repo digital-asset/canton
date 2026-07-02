@@ -4,11 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.util.BytesUnit
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait CommitMode {
   private[sequencer] val postgresSettings: NonEmpty[Seq[String]]

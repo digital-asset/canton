@@ -7,8 +7,6 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.metrics.CacheMetrics
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
@@ -46,6 +44,8 @@ import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyCh
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}

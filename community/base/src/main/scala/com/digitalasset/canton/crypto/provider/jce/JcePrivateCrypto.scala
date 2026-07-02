@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.provider.jce
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.CryptoKeyFormat.Symbolic
@@ -16,6 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.DEROctetString
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers

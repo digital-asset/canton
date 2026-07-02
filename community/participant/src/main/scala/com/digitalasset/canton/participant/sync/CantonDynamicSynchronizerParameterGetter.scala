@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.sync
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,6 +19,7 @@ import com.digitalasset.canton.topology.{
   UnknownPhysicalSynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

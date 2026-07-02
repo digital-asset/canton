@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{EitherT, OptionT}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -15,6 +14,7 @@ import com.digitalasset.canton.participant.store.ContractStore.InternalContractI
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent.TrieMap

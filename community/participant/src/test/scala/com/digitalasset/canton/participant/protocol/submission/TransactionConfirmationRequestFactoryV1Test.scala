@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{
   SecureRandomness,
   Signature,
@@ -24,6 +23,7 @@ import com.digitalasset.canton.protocol.{ExampleTransaction, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 class TransactionConfirmationRequestFactoryV1Test
     extends TransactionConfirmationRequestFactoryTest {

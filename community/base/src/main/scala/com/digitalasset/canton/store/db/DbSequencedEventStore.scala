@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -23,6 +22,7 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore.*
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, MaxBytesToDecompress}
 import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.ExecutionContext

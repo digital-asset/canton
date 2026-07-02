@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.nightly.bftordering
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
@@ -18,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SimulationTestStageSettings,
   TopologySettings,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 import scala.collection.immutable.TreeMap

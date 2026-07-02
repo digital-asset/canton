@@ -4,9 +4,9 @@
 package com.digitalasset.canton.topology
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.immutable.SeqMap
 

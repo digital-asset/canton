@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.continuity
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.DbConfig
@@ -33,6 +32,7 @@ import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.util.ReleaseUtils.TestedRelease
 import com.digitalasset.canton.version.ReleaseVersionToProtocolVersions.majorMinorToStableProtocolVersions
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.concurrent.PatienceConfiguration
 

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.lifecycle
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.LifeCycleManager.LifeCycleManagerImpl
@@ -20,6 +19,7 @@ import com.digitalasset.canton.util.{
   Thereafter,
   TwoPhasePriorityAccumulator,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 import scala.collection.BufferedIterator

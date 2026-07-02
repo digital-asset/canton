@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.config
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{
   CryptoKeyFormat,
   EncryptionAlgorithmSpec,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait CryptoProvider extends PrettyPrinting {
 

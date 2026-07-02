@@ -6,7 +6,6 @@ package com.digitalasset.canton.admin.api.client.data
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.{Id, Monad}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.ConsoleEnvironment
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -18,6 +17,7 @@ import com.digitalasset.canton.sequencing.{
   SubscriptionLivenessLimits as SubscriptionLivenessLimitsInternal,
 }
 import com.digitalasset.canton.{SequencerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*

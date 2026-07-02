@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology.processing
 
 import cats.Apply
 import cats.instances.list.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.SignatureCheckError.{InvalidSignature, UnsupportedKeySpec}
 import com.digitalasset.canton.crypto.{Signature, SigningPublicKey, SynchronizerCryptoPureApi}
@@ -45,6 +44,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   ProtocolVersionChecksAsyncWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

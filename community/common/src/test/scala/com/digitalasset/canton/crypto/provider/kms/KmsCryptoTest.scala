@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.provider.kms
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{
   BatchingConfig,
   CachingConfigs,
@@ -25,6 +24,7 @@ import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec

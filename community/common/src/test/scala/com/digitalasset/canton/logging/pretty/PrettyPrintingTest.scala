@@ -53,6 +53,26 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   private val caseClassStr: String =
     s"ExampleCaseClass(alien = $alienStr, singleton = $singletonStr)"
 
+  /** Example of class that extends [[PrettyPrintingFromCompanion]
+    */
+  private case class ExampleCaseClassViaCompanion(
+      alien: ExampleAlienClass,
+      singleton: ExampleSingleton.type,
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ExampleCaseClassViaCompanion] =
+      ExampleCaseClassViaCompanion
+  }
+  private object ExampleCaseClassViaCompanion
+      extends PrettyPrintingCompanion[ExampleCaseClassViaCompanion] {
+    override val pretty: Pretty[ExampleCaseClassViaCompanion] =
+      prettyOfClass(param("alien", _.alien), param("singleton", _.singleton))
+  }
+
+  private val caseClassViaCompanionInst: ExampleCaseClassViaCompanion =
+    ExampleCaseClassViaCompanion(alienInst, ExampleSingleton)
+  private val caseClassViaCompanionStr: String =
+    s"ExampleCaseClassViaCompanion(alien = $alienStr, singleton = $singletonStr)"
+
   /** Example of a class that uses ad hoc pretty printing.
     */
   private case class ExampleAdHocCaseClass(alien: ExampleAlienClass, caseClass: ExampleCaseClass)
@@ -94,6 +114,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     singletonInst.show shouldBe singletonStr
     alienInst.show shouldBe alienStr
     caseClassInst.show shouldBe caseClassStr
+    caseClassViaCompanionInst.show shouldBe caseClassViaCompanionStr
     adHocCaseClassInst.show shouldBe adHocCaseClassStr
     adHocObjectInst.show shouldBe adHocObjectStr
     abstractCaseClass.show shouldBe abstractCaseClassStr
@@ -104,6 +125,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     show"Showing $singletonInst" shouldBe s"Showing $singletonStr"
     show"Showing $alienInst" shouldBe s"Showing $alienStr"
     show"Showing $caseClassInst" shouldBe s"Showing $caseClassStr"
+    show"Showing $caseClassViaCompanionInst" shouldBe s"Showing $caseClassViaCompanionStr"
     show"Showing $adHocCaseClassInst" shouldBe s"Showing $adHocCaseClassStr"
     show"Showing $adHocObjectInst" shouldBe s"Showing $adHocObjectStr"
     show"Showing $abstractCaseClass" shouldBe s"Showing $abstractCaseClassStr"
@@ -113,6 +135,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   "toString is pretty" in {
     singletonInst.toString shouldBe singletonStr
     caseClassInst.toString shouldBe caseClassStr
+    caseClassViaCompanionInst.toString shouldBe caseClassViaCompanionStr
     adHocCaseClassInst.toString shouldBe adHocCaseClassStr
     adHocObjectInst.toString shouldBe adHocObjectStr
     abstractCaseClass.toString shouldBe abstractCaseClassStr
@@ -123,16 +146,29 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     alienInst.toString shouldBe "ExampleAlienClass(p1Val,p2Val)"
   }
 
-  "fail gracefully on a mock" in {
-    val mockedInst = mock[ExampleCaseClass]
+  "fail gracefully on a mock" when {
+    "directly" in {
+      val mockedInst = mock[ExampleCaseClass]
 
-    (the[SmartNullPointerException] thrownBy mockedInst.toString).getMessage should
-      endWith("exampleCaseClass.pretty();\n")
-    (the[SmartNullPointerException] thrownBy mockedInst.show).getMessage should
-      endWith("exampleCaseClass.pretty();\n")
-    import Pretty.PrettyOps
-    (the[SmartNullPointerException] thrownBy mockedInst.toPrettyString()).getMessage should
-      endWith("exampleCaseClass.pretty();\n")
+      (the[SmartNullPointerException] thrownBy mockedInst.toString).getMessage should
+        endWith("exampleCaseClass.pretty();\n")
+      (the[SmartNullPointerException] thrownBy mockedInst.show).getMessage should
+        endWith("exampleCaseClass.pretty();\n")
+      import Pretty.PrettyOps
+      (the[SmartNullPointerException] thrownBy mockedInst.toPrettyString()).getMessage should
+        endWith("exampleCaseClass.pretty();\n")
+    }
+    "via companion" in {
+      val mockedInst = mock[ExampleCaseClassViaCompanion]
+
+      (the[SmartNullPointerException] thrownBy mockedInst.toString).getMessage should
+        endWith("exampleCaseClassViaCompanion.prettyCompanion();\n")
+      (the[SmartNullPointerException] thrownBy mockedInst.show).getMessage should
+        endWith("exampleCaseClassViaCompanion.prettyCompanion();\n")
+      import Pretty.PrettyOps
+      (the[SmartNullPointerException] thrownBy mockedInst.toPrettyString()).getMessage should
+        endWith("exampleCaseClassViaCompanion.prettyCompanion();\n")
+    }
   }
 
   "print null values gracefully" in {

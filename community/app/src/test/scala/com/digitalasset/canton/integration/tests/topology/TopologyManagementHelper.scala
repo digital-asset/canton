@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.{InstanceReference, LocalInstanceReference}
 import com.digitalasset.canton.crypto.KeyPurpose.Signing
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

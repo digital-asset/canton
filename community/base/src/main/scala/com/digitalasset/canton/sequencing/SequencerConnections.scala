@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import cats.{Id, Monad}
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
 }
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerAlias}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 final case class SequencerConnections private (
     aliasToConnection: NonEmpty[Map[SequencerAlias, SequencerConnection]],

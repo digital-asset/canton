@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.showInterpolator
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
@@ -41,6 +40,7 @@ import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{ErrorUtil, MaxBytesToDecompress, Thereafter}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicReference

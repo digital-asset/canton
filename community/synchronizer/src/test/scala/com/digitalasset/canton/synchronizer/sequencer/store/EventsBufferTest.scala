@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.store
 
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,6 +12,7 @@ import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{BytesUnit, LoggerUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec

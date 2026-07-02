@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.config
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{
   EncryptionAlgorithmSpec,
   EncryptionKeySpec,
@@ -13,6 +12,7 @@ import com.digitalasset.canton.crypto.{
   SigningKeySpec,
   SymmetricKeyScheme,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 final case class CryptoProviderScheme[S](default: S, supported: NonEmpty[Set[S]]) {
   require(supported.contains(default))

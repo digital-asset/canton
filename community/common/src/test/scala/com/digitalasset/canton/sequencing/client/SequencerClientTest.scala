@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.*
@@ -116,6 +115,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Keep, Source}

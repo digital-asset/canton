@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.tracing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.nonempty.NonEmpty
 
 /** Utility mixin for creating a single trace context from a batch of traced items */
 object BatchTracing {

@@ -10,7 +10,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -54,6 +53,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import slick.dbio
 import slick.dbio.DBIOAction

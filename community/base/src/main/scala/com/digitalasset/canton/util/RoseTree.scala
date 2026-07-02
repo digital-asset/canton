@@ -4,9 +4,9 @@
 package com.digitalasset.canton.util
 
 import cats.Apply
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.util.RoseTree.{HashCodeState, MapState, hashCodeInit}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.annotation.tailrec

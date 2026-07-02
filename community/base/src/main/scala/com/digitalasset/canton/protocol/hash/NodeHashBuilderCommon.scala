@@ -104,13 +104,12 @@ private[hash] abstract class NodeHashBuilderCommon(
           externalCallResults,
           version,
         ) =>
-      // External-call results are only valid on dev nodes (mirrors the prepared-transaction
-      // decoder). HashingSchemeVersion.V4 adds them in its override; V2/V3 only ever hash pre-dev
-      // nodes (where the field is empty), so fail here rather than silently omitting them.
-      if (externalCallResults.nonEmpty && version != SerializationVersion.VDev)
-        notSupported("external call results in Exercise node", version)
       if (choiceAuthorizers.nonEmpty)
         notSupported("choiceAuthorizers in Exercise node", version) // 2.dev feature
+      // TODO(https://github.com/digital-asset/canton/issues/513)
+      // handle external calls
+      if (externalCallResults.nonEmpty)
+        notSupported("externalCallResults in Exercise node", version) // 2.dev feature
       if (keyOpt.nonEmpty && version == V1) notSupported("keyOpt in Exercise node", version)
       if (byKey && version == V1) notSupported("byKey in Exercise node", version)
       addContext("Exercise Node")
@@ -161,7 +160,7 @@ private[hash] abstract class NodeHashBuilderCommon(
         addContext("Rollback Node")
           .addByte(hash.NodeHashBuilder.NodeTag.RollbackTag.tag, _ => "Rollback Node Tag")
           .withContext("Children")(_.addInt(rollback.children.length))
-      case (node: Node.LookupByKey, _) =>
+      case (node: Node.QueryByKey, _) =>
         notSupported(s"LookupByKey node", node.version)
     }
 

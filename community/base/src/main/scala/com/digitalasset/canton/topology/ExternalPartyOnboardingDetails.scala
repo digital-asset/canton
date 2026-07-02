@@ -7,7 +7,6 @@ import cats.data.Ior
 import cats.syntax.alternative.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Signature, SigningKeyUsage}
 import com.digitalasset.canton.topology.ExternalPartyOnboardingDetails.{
@@ -25,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.{
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.PositiveTopologyTransaction
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.reflect.ClassTag
 

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.kms.KmsError.*
@@ -34,6 +33,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.api.gax.rpc.ResourceExhaustedException
 import com.google.protobuf.ByteString
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider

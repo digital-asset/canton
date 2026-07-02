@@ -9,7 +9,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.{Eval, Monad}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -51,6 +50,7 @@ import com.digitalasset.canton.util.{
   MonadUtil,
   SimpleExecutionQueue,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 

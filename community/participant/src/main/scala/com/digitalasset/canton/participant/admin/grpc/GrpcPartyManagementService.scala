@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTopologyTransaction
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
@@ -46,6 +45,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.duration.Duration
 import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}

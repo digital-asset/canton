@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.{
   AbstractLengthLimitedString,
   LengthLimitedStringCompanion,
 }
 import com.digitalasset.canton.version.IgnoreInSerializationTestExhaustivenessCheck
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.reflections.Reflections
 import org.scalacheck.{Arbitrary, Gen}

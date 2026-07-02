@@ -285,7 +285,8 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     store.saveToken(evictedToken)
 
     // Create an OTK for the evictedKey
-    val evictedOtk = OwnerToKeyMapping.tryCreate(p1, com.daml.nonempty.NonEmpty(Seq, evictedKey))
+    val evictedOtk =
+      OwnerToKeyMapping.tryCreate(p1, com.digitalasset.nonempty.NonEmpty(Seq, evictedKey))
 
     // create a topology transaction for the removal of the created OTK
     val removeTopologyTx = TopologyTransaction(
@@ -373,7 +374,8 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     store.saveToken(retainedToken)
     store.saveToken(evictedToken)
 
-    val retainedOtk = OwnerToKeyMapping.tryCreate(p1, com.daml.nonempty.NonEmpty(Seq, retainedKey))
+    val retainedOtk =
+      OwnerToKeyMapping.tryCreate(p1, com.digitalasset.nonempty.NonEmpty(Seq, retainedKey))
 
     // Create an OTK for the retainedKey
     val replaceTopologyTx = TopologyTransaction(
@@ -452,7 +454,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
           org.mockito.ArgumentMatchers.eq(p1: Member),
           org.mockito.ArgumentMatchers.eq(dummySignature),
           org.mockito.ArgumentMatchers
-            .any[com.daml.nonempty.NonEmpty[Set[SigningKeyUsage]]](),
+            .any[com.digitalasset.nonempty.NonEmpty[Set[SigningKeyUsage]]](),
         )(org.mockito.ArgumentMatchers.any[TraceContext])
       )
       .thenReturn(
@@ -554,7 +556,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
           org.mockito.ArgumentMatchers.eq(p1: Member),
           org.mockito.ArgumentMatchers.eq(dummySignature),
           org.mockito.ArgumentMatchers
-            .any[com.daml.nonempty.NonEmpty[Set[SigningKeyUsage]]](),
+            .any[com.digitalasset.nonempty.NonEmpty[Set[SigningKeyUsage]]](),
         )(org.mockito.ArgumentMatchers.any[TraceContext])
       )
       .thenReturn(

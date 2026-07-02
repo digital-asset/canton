@@ -13,7 +13,6 @@ import com.daml.ledger.javaapi as javab
 import com.daml.ledger.javaapi.data.Transaction.fromProto
 import com.daml.metrics.api.testing.MetricValues
 import com.daml.metrics.api.{MetricHandle, MetricInfo, MetricName, MetricQualification}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -30,6 +29,7 @@ import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsRepor
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Party, PartyId}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.*

@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.data.EitherT
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{HashBuilder, Signature, SigningKeyUsage, SyncCryptoApi}
@@ -31,6 +30,7 @@ import com.digitalasset.canton.version.{
   VersionedProtoCodec,
   VersioningCompanionContext,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.immutable.SortedMap

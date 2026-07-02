@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -27,6 +26,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.store.SessionKeyStore.RecipientGroup
 import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

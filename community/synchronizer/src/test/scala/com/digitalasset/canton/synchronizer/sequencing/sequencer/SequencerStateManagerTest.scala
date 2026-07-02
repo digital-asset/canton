@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts, TopologyConfig}
@@ -59,6 +58,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   config,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer

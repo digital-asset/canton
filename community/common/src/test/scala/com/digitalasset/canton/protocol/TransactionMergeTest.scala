@@ -4,7 +4,6 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.ledger.javaapi.data.Identifier
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ComparesLfTransactions.{TxTree, buildLfTransaction}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, RollbackContextFactory}
@@ -26,6 +25,7 @@ import com.digitalasset.daml.lf.transaction.NodeId
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.digitalasset.daml.lf.value.Value.VersionedValue
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Tests WellFormedTransaction.merge particularly with respect to handling of top-level rollback

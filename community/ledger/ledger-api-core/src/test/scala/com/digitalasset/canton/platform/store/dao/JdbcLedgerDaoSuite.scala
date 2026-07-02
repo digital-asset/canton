@@ -765,17 +765,18 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
   }
 
   /** A transaction that looks up a key */
-  protected final def txLookupByKey(
+  protected final def txQueryByKey(
       party: Party,
       key: String,
-      result: Option[ContractId],
+      result: Vector[ContractId],
   ): (Offset, LedgerEntry.Transaction) = {
     val txBuilder = newBuilder()
     val keyValue = someContractKey(party, key)
     val lookupByKeyNodeId = txBuilder.add(
-      Node.LookupByKey(
+      Node.QueryByKey(
         templateId = someTemplateId,
         packageName = somePackageName,
+        exhaustive = result.isEmpty,
         key = GlobalKeyWithMaintainers
           .assertBuild(
             someTemplateId,

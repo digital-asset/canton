@@ -5,8 +5,8 @@ package com.digitalasset.canton.util
 
 import cats.syntax.parallel.*
 import cats.{Monad, Monoid, Parallel}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 import scala.collection.{IterableOps, immutable}

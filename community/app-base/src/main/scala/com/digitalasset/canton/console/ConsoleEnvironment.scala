@@ -5,7 +5,6 @@ package com.digitalasset.canton.console
 
 import ammonite.util.Bind
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.admin.api.client.data.{
   GrpcSequencerConnection,
   SequencerConnection,
@@ -40,6 +39,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.{LfPartyId, SequencerAlias, SynchronizerAlias}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 import org.tpolecat.typename.TypeName

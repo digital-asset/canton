@@ -212,16 +212,6 @@ class NodeHashTest extends BaseNodeHashTest {
   }
 
   "CreateNodeBuilder" should {
-    "suggest V3 for LF serialization V2 nodes" in {
-      val error = the[NodeHashingError.UnsupportedSerializationVersion] thrownBy hashCreateNode(
-        createNode.copy(version = SerializationVersion.V2)
-      )
-
-      error.getMessage shouldBe
-        "Cannot hash node with LF serialization version V2 using hashing scheme V2." +
-        " Does the transaction use contract keys? Please use hashing scheme V3 or higher."
-    }
-
     "fail global keys" in {
       a[NodeHashingError.UnsupportedFeature] shouldBe thrownBy(
         hashCreateNode(

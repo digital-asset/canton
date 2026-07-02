@@ -164,7 +164,6 @@ class TransactionHashStackSafetyTest extends BaseTest with AnyWordSpecLike {
   private val versionToSerializationVersion: Map[HashingSchemeVersion, SerializationVersion] = Map(
     HashingSchemeVersion.V2 -> SerializationVersion.V1,
     HashingSchemeVersion.V3 -> SerializationVersion.V2,
-    HashingSchemeVersion.V4 -> SerializationVersion.VDev,
   )
 
   "VersionedTransactionHasher" should {

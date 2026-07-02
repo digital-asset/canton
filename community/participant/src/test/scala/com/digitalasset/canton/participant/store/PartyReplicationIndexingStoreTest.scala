@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.OptionT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{
@@ -31,6 +30,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   ReassignmentCounter,
 }
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpecLike
 

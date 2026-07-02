@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -26,6 +25,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   TestPredicateFiltersFixtureAnyWordSpec,
 }
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.wordspec.FixtureAnyWordSpec

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.tag.Security.SecurityTestSuite
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -24,6 +23,7 @@ import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.util.JarResourceUtils
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 /*

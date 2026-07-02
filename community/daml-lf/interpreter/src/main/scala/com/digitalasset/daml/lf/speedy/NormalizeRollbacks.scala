@@ -161,7 +161,7 @@ private[lf] object NormalizeRollbacks {
                 s.pushSeedId(me) { s =>
                   s.push(me, node)(k)
                 }
-              case _: Node.Fetch | _: Node.LookupByKey =>
+              case _: Node.Fetch | _: Node.QueryByKey =>
                 s.push(me, node)(k)
             }
           case Norm.Exe(exe, subs) =>

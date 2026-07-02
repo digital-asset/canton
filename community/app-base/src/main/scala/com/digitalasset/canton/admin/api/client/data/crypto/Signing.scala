@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.admin.api.client.data.crypto
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.nonempty.NonEmpty
 
 final case class RequiredSigningSpecs(
     algorithms: NonEmpty[Set[SigningAlgorithmSpec]],

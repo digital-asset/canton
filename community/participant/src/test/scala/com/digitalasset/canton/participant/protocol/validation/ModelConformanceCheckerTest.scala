@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.toTraverseOps
 import com.daml.ledger.javaapi.data.Command
 import com.daml.ledger.javaapi.data.codegen.{Created, Update}
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest.{getResourcePath, testedProtocolVersion}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout}
@@ -69,6 +68,7 @@ import com.digitalasset.daml.lf.engine.{Error, Error as LfError}
 import com.digitalasset.daml.lf.interpretation.Error.ContractNotFound
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.nonempty.NonEmptyUtil
 import monocle.macros.GenLens
 import monocle.{Lens, Traversal}
 import org.mockito.MockitoSugar

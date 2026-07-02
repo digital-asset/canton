@@ -4,7 +4,6 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.GenTransactionTree.ViewWithWitnessesAndRecipients
 import com.digitalasset.canton.data.LightTransactionViewTree.{
@@ -28,6 +27,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   ProtocolVersionChecksAnyWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import monocle.{PIso, PLens}
 
 import scala.annotation.nowarn

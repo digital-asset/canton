@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.performance.scenarios
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnection,
   SequencerConnectionPoolDelays,
@@ -26,6 +25,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.util.chaining.*
 
