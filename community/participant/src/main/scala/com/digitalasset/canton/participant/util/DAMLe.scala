@@ -429,21 +429,16 @@ class DAMLe(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-    def failExternalCall(
-        error: ReinterpretationError
-    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
-      FutureUnlessShutdown.pure(Left(error))
-
     def handleExternalCall(
         externalCallKey: ExternalCallKey,
         resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
       externalCallReplayData().outputFor(externalCallKey) match {
         case Left(disagreement) =>
-          failExternalCall(disagreement)
+          FutureUnlessShutdown.pure(Left(disagreement))
 
         case Right(None) =>
-          failExternalCall(ExternalCallReplayMissing(externalCallKey))
+          FutureUnlessShutdown.pure(Left(ExternalCallReplayMissing(externalCallKey)))
 
         case Right(Some(storedOutput)) =>
           logger.debug(
