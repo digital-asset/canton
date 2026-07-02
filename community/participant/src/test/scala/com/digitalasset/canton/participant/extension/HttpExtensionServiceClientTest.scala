@@ -824,24 +824,31 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       )
 
       try {
-        val error = manager
-          .handleExternalCall(
-            "missing-extension",
-            "function",
-            "config-hash",
-            "input",
-            ExternalCallMode.Submission,
-          )
-          .failOnShutdown
-          .futureValue
-          .left
-          .value
+        loggerFactory.assertLogs(
+          {
+            val error = manager
+              .handleExternalCall(
+                "missing-extension",
+                "function",
+                "config-hash",
+                "input",
+                ExternalCallMode.Submission,
+              )
+              .failOnShutdown
+              .futureValue
+              .left
+              .value
 
-        error.statusCode shouldBe 404
-        error.requestId shouldBe None
-        error.message should include("Extension 'missing-extension' not configured")
-        error.message should not include "first-extension"
-        error.message should not include "second-extension"
+            error.statusCode shouldBe 404
+            error.requestId shouldBe None
+            error.message should include("Extension 'missing-extension' not configured")
+            error.message should not include "first-extension"
+            error.message should not include "second-extension"
+          },
+          _.warningMessage shouldBe
+            "External call to extension 'missing-extension' (function 'function') failed: " +
+            "status=404, retryable=false, message=Extension 'missing-extension' not configured",
+        )
       } finally {
         manager.close()
       }
