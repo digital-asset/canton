@@ -9,7 +9,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   HashingSchemeVersion,
   PrepareSubmissionResponse,
 }
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -30,6 +29,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.slf4j.event.Level

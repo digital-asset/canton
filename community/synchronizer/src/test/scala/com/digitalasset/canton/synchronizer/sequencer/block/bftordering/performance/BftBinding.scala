@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBenchmarkConfig
+import com.digitalasset.nonempty.NonEmpty
 
 import java.io.Closeable
 import java.util.concurrent.CompletionStage

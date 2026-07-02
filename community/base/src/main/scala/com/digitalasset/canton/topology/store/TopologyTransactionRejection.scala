@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey, SignatureCheckError}
@@ -19,6 +18,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   PositiveTopologyTransaction,
   TxHash,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait TopologyTransactionRejection extends PrettyPrinting with Product with Serializable {
   def asString: String

@@ -17,7 +17,6 @@ import com.daml.ledger.api.v2.reassignment.{
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
 import com.daml.ledger.api.v2.transaction.Transaction as FlatTransaction
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
@@ -54,6 +53,7 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   Node,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.{ExecutionContext, Future}
 

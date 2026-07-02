@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
@@ -44,6 +43,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.TryUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.MapView
 import scala.collection.concurrent.TrieMap

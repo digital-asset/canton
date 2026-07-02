@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.metrics.api.MetricHandle.Meter
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -37,6 +36,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   UserId,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration

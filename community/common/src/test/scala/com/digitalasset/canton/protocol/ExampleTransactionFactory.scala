@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton
 import com.digitalasset.canton.*
 import com.digitalasset.canton.BaseTest.*
@@ -57,6 +56,7 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Versioned}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.*
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.EitherValues
 
 import java.time.Duration as JDuration
@@ -817,7 +817,7 @@ class ExampleTransactionFactory(
       actionDescription = actionDescription,
       rollbackContext = rollbackContextFactory.empty,
       salt = participantDataSalt(viewIndex),
-      externalCallResults = Seq.empty,
+      externalCallResults = ImmArray.Empty,
       protocolVersion = protocolVersion,
     )
 

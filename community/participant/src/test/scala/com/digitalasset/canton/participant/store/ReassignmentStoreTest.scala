@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -52,6 +51,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, MonadUtil}
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, LfPartyId, LfTimestamp}
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, EitherValues}

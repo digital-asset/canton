@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberId
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 class WriteNotificationTest extends AnyWordSpec with BaseTest {

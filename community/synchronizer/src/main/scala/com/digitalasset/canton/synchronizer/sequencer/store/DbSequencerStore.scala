@@ -14,8 +14,6 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.metrics.CacheMetrics
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.catsinstances.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
@@ -58,6 +56,7 @@ import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, 
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{BatchAggregator, BytesUnit, EitherTUtil, ErrorUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import org.h2.api.ErrorCode as H2ErrorCode

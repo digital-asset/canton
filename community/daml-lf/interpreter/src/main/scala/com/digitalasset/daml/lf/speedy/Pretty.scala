@@ -367,7 +367,7 @@ private[lf] object Pretty {
           text(ex.choiceId) + char(':') + prettyIdentifier(ex.templateId) &
           text("on") & prettyContractId(ex.targetCoid) /
           text("with") & prettyValue(false)(ex.chosenValue)
-      case lbk: Node.LookupByKey =>
+      case lbk: Node.QueryByKey =>
         text("lookup by key") & prettyIdentifier(lbk.templateId) /
           text("key") & prettyKeyWithMaintainers(lbk.key) /
           (lbk.result.asCidOption match {
@@ -481,7 +481,7 @@ private[lf] object Pretty {
           text("on") & prettyContractId(ex.targetCoid) /
           (text("    ") + text("with") & prettyValue(false)(ex.chosenValue) / children)
             .nested(4)
-      case lbk: Node.LookupByKey =>
+      case lbk: Node.QueryByKey =>
         text("lookup by key") & prettyIdentifier(lbk.templateId) /
           text("key") & prettyKeyWithMaintainers(lbk.key) /
           (lbk.result.asCidOption match {

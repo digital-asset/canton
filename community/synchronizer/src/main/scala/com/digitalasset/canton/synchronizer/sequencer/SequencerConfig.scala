@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{
   DbLockedConnectionPoolConfig,
@@ -31,6 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
   ReferenceSequencerDriverFactory,
 }
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.nonempty.NonEmpty
 import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
 import pureconfig.{ConfigCursor, ConfigReader, ConfigWriter}
 

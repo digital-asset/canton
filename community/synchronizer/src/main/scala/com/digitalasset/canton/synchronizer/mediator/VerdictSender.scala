@@ -8,7 +8,6 @@ import cats.implicits.toFunctorFilterOps
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{SyncCryptoError, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -26,6 +25,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUnlessShutdownUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, config}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.time.Duration
 import scala.concurrent.ExecutionContext

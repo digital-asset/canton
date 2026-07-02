@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing
 
 import cats.data.EitherT
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -28,6 +27,7 @@ import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTrace
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherUtil, ErrorUtil, FutureUtil, Mutex}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference

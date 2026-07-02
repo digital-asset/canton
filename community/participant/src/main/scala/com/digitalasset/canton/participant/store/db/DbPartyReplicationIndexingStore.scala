@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
@@ -23,6 +22,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{ReassignmentCounter, checked}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.version
 
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
@@ -52,6 +51,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.nonempty.NonEmptyUtil
 import com.google.protobuf.ByteString
 import org.scalacheck.Arbitrary
 import org.scalatest.Assertion

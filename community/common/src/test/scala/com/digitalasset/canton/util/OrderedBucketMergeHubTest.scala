@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.util
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -11,6 +10,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPr
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.OrderedBucketMergeHub.*
 import com.digitalasset.canton.util.PekkoUtil.noOpKillSwitch
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.typesafe.config.ConfigFactory
 import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem

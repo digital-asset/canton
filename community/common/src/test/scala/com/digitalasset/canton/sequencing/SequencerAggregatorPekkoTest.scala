@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing
 
 import cats.data.EitherT
 import cats.implicits.catsSyntaxOptionId
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, Signature, SyncCryptoApi}
@@ -36,6 +35,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   TestPredicateFiltersFixtureAnyWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 import org.apache.pekko.stream.testkit.scaladsl.TestSink

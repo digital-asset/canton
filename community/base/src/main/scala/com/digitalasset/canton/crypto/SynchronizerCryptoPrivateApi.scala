@@ -5,12 +5,12 @@ package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext

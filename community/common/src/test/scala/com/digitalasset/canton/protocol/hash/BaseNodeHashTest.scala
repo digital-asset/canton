@@ -607,7 +607,7 @@ abstract class BaseNodeHashTest
     "throw if some nodes are missing" in {
       an[IncompleteTransactionTree] shouldBe thrownBy {
         VersionedTransactionHasher.tryHashTransaction(
-          hashingSchemeVersion,
+          HashingSchemeVersion.V2,
           VersionedTransaction(
             version = serializationVersion,
             roots = roots,

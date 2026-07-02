@@ -13,7 +13,6 @@ import cats.syntax.validated.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.base.error.{
   Alarm,
   AlarmErrorCode,
@@ -108,6 +107,7 @@ import com.digitalasset.canton.{
   RepairCounter,
   checked,
 }
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference}

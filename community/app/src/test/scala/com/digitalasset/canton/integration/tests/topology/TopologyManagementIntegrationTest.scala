@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.*
@@ -49,6 +48,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level.DEBUG
 
 import scala.annotation.nowarn

@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.sync
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   SynchronizerPredecessor,
@@ -60,6 +59,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.Backoff
 import com.digitalasset.canton.util.{EitherTUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 import scala.math.Ordered.orderingToOrdered

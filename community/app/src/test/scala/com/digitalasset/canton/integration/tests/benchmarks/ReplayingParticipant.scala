@@ -9,7 +9,6 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.{
   RichSynchronizerIdO,
   defaultStaticSynchronizerParameters,
@@ -54,6 +53,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, TracingConfig}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 import org.scalatest.{EitherValues, OptionValues}
 

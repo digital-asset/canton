@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencing.authentication
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
@@ -30,6 +29,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.time.Duration
 import scala.concurrent.ExecutionContext

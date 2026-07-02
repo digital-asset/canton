@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.submission
 
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.PrepareSubmissionResponse
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.crypto.InteractiveSubmission.TransactionMetadataForHashing
@@ -39,6 +38,7 @@ import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{HasExecutionContext, LfTimestamp}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion

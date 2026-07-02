@@ -6,8 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -21,6 +19,8 @@ import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore.{
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 import slick.dbio
 import slick.dbio.DBIOAction
 import slick.jdbc.TransactionIsolation

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout, SessionSigningKeysConfig}
@@ -41,6 +40,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{EitherTUtil, Mutex}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.github.benmanes.caffeine.cache.Scheduler
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting

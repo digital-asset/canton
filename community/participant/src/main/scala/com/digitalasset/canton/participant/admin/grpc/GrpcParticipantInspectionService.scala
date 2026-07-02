@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.implicits.{toBifunctorOps, toTraverseOps}
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -45,6 +44,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.StreamObserver
 
 import java.io.OutputStream

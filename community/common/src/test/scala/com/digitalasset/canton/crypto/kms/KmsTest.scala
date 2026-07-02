@@ -4,7 +4,6 @@
 package com.digitalasset.canton.crypto.kms
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{
@@ -43,6 +42,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ByteString190, ByteString256, ByteString4096}
 import com.digitalasset.canton.version.HasToByteString
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll, FutureOutcome}

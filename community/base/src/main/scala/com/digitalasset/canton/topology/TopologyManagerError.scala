@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.ErrorCategory.{
   InvalidGivenCurrentSystemStateOther,
   InvalidGivenCurrentSystemStateResourceExists,
@@ -39,6 +38,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
 }
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Util
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait TopologyManagerError extends ContextualizedCantonError
 

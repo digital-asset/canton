@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ledger.api.refinements.ApiTypes as lar
 import com.digitalasset.daml.lf
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.apache.pekko.http.scaladsl.model.StatusCode
 

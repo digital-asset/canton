@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
@@ -18,6 +17,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 
 /** @tparam Event
   *   Type variable for the events to be published to the indexer.

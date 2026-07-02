@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.party
 
 import cats.data.EitherT
 import com.daml.ledger.api.v2.state_service.ActiveContract as LapiActiveContract
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -20,6 +19,7 @@ import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, RepairCounter}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem

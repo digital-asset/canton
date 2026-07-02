@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.data.topology
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.RefinedDurationConversionError
 import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -21,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, protocol}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.time.Instant
 

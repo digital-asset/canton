@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.crypto
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
   DeserializationError,
@@ -33,21 +37,23 @@ trait RandomOps {
 final case class SecureRandomness private[crypto] (unwrap: ByteString)
     extends HasCryptographicEvidence
     with HasToByteString
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   override def toByteString: ByteString = getCryptographicEvidence
 
   override def getCryptographicEvidence: ByteString = unwrap
 
-  /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
-    * implement this method.
-    */
-  override protected def pretty: Pretty[SecureRandomness.this.type] = prettyOfClass(
-    unnamedParam(_.unwrap)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SecureRandomness] = SecureRandomness
 }
 
 /** Cryptographically-secure randomness */
-object SecureRandomness {
+object SecureRandomness extends PrettyPrintingCompanion[SecureRandomness] {
+
+  /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
+    * implement this method.
+    */
+  override val pretty: Pretty[SecureRandomness] = prettyOfClass(
+    unnamedParam(_.unwrap)
+  )
 
   /** Recover secure randomness from a byte string. Use for deserialization only. Fails if the
     * provided byte string is not of the expected length.

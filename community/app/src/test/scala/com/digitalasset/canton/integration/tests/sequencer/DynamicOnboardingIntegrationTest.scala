@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.sequencer
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.*
 import com.digitalasset.canton.admin.api.client.data.{
@@ -48,6 +47,7 @@ import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest
 import org.slf4j.event.Level

@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{
   CryptoConfig,
   CryptoProvider,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 final case class CryptoSchemes private (

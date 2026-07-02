@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -20,6 +19,7 @@ import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.{
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{ReassignmentCounter, checked}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.TreeSet

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.data
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
@@ -22,6 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec

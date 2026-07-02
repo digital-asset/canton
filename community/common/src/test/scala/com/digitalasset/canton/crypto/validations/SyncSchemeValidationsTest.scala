@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.validations
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -28,6 +27,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 

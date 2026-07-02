@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import cats.{Eval, Foldable}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -24,6 +23,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.Ordered.orderingToOrdered
 import scala.collection.immutable.SortedMap

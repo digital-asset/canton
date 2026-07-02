@@ -5697,7 +5697,6 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
-          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5781,7 +5780,6 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
-          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5842,7 +5840,6 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
-          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -6226,7 +6223,6 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
-          - HASHING_SCHEME_VERSION_V4
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'
@@ -6261,7 +6257,6 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
-          - HASHING_SCHEME_VERSION_V4
         hashingDetails:
           description: |-
             Optional additional details on how the transaction was encoded and hashed. Only set if verbose_hashing = true in the request

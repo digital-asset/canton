@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ledger.participant.state.ReassignmentCommand.{Assign, Unassign}
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 

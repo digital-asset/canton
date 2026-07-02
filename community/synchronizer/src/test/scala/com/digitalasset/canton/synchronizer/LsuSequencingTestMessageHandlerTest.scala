@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
@@ -51,6 +50,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 import DefaultTestIdentities.{mediatorId, namespace, physicalSynchronizerId, sequencerId}

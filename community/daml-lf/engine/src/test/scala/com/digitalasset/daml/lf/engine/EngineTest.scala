@@ -2509,7 +2509,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
         )
         .consume(lookupContract, lookupPackage, lookupKey)
 
-      val expectedByKeyNodes = tx.transaction.nodes.collect { case (id, _: Node.LookupByKey) =>
+      val expectedByKeyNodes = tx.transaction.nodes.collect { case (id, _: Node.QueryByKey) =>
         id
       }
       val actualByKeyNodes = byKeyNodes(tx)
@@ -3309,7 +3309,7 @@ class EngineTestHelpers(
     val actionNodes = nodes.filter { nodeId =>
       tx.transaction.nodes(nodeId) match {
         case _: Node.Exercise | _: Node.Fetch | _: Node.Create => true
-        case _: Node.LookupByKey | _: Node.Rollback => false
+        case _: Node.QueryByKey | _: Node.Rollback => false
       }
     }
 
@@ -3343,7 +3343,7 @@ class EngineTestHelpers(
                 exe.choiceId,
                 exe.chosenValue,
               )
-            case _: Node.LookupByKey =>
+            case _: Node.QueryByKey =>
               sys.error("unexpected lookup node")
             case _: Node.Rollback =>
               sys.error("unexpected rollback node")

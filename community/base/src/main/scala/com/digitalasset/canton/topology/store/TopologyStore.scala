@@ -7,7 +7,6 @@ import cats.Monoid
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -63,6 +62,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
 }
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer

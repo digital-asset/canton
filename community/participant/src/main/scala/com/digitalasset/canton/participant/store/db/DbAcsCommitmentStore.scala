@@ -7,7 +7,6 @@ import cats.syntax.traverse.*
 import cats.{Eval, Monad}
 import com.daml.nameof.NameOf
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
@@ -54,6 +53,7 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.collection.IterableUtil.Ops
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{InternedPartyId, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.dbio.DBIOAction

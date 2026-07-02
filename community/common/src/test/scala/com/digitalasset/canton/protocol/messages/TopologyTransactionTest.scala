@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.data.CantonTimestamp
@@ -18,6 +17,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
 }
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPackageId}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec

@@ -5,7 +5,6 @@ package com.digitalasset.canton.util
 
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
@@ -65,6 +64,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.data.Ref.UserId
 import com.digitalasset.daml.lf.transaction.test.TestIdFactory
 import com.digitalasset.daml.lf.transaction.{SubmittedTransaction, Transaction}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.*
 

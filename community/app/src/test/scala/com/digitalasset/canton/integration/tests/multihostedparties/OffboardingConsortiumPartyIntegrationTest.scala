@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.CantonLfV21
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -15,6 +14,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
 }
 import com.digitalasset.canton.topology.{Namespace, PartyId, UniqueIdentifier}
+import com.digitalasset.nonempty.NonEmpty
 
 /*
 The goal of this test is to check the behaviour around offboarding of a consortium party (svc).

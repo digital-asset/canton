@@ -734,7 +734,7 @@ final class AvailabilityModule[E <: Env[E]](
             s"number of available batches = $numberOfAvailableBatches)"
         )
         attemptSatisfyingProposalRequest(
-          shortType(actingOnMessageType),
+          actingOnMessageType,
           notifyConsensusIfNoReadyBatches = true,
         )
     }

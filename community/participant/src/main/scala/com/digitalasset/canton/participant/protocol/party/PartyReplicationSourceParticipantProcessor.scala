@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.party
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
@@ -26,6 +25,7 @@ import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.{RepairCounter, checked}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem

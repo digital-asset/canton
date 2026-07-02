@@ -67,7 +67,7 @@ object Blinding {
             tx.nodes(root) match {
               case nr: Node.Rollback =>
                 go(filteredRoots, nr.children ++: remainingRoots)
-              case _: Node.Fetch | _: Node.Create | _: Node.LookupByKey =>
+              case _: Node.Fetch | _: Node.Create | _: Node.QueryByKey =>
                 go(filteredRoots, remainingRoots)
               case ne: Node.Exercise =>
                 go(filteredRoots, ne.children ++: remainingRoots)

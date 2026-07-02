@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Segment
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.SegmentInProgress.RehydrationMessages
@@ -14,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftNetworkMessage
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 class SegmentInProgressTest extends AsyncWordSpec with BftSequencerBaseTest {

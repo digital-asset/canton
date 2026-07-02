@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.transaction
 import cats.implicits.catsSyntaxOptionId
 import cats.instances.order.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeysWithThreshold, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -46,6 +45,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   ProtocolVersionChecksAnyWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.annotation.nowarn

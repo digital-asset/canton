@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing
 
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.SingletonTraverse
 import com.digitalasset.canton.util.SingletonTraverse.syntax.*
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.KillSwitch
 import org.apache.pekko.stream.scaladsl.Flow

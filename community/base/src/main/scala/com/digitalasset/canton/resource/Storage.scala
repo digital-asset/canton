@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.{Eval, Functor, Monad}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -39,6 +38,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.{LfPackageId, LfPartyId, RichGeneratedMessage}
 import com.digitalasset.daml.lf.data.{Bytes, StringModule}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.typesafe.config.{Config, ConfigValueFactory}
 import com.typesafe.scalalogging.Logger

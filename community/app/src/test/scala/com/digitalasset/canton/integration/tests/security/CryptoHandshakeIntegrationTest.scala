@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.security
 
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.SecureConfiguration
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 trait CryptoHandshakeIntegrationTestBase {

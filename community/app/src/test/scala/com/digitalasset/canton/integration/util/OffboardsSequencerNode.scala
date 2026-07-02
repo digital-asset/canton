@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.util
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.{
   InstanceReference,
@@ -13,6 +12,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.SigningKeyUsage.{Protocol, SequencerAuthentication}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Inspectors.forAll
 
 trait OffboardsSequencerNode {

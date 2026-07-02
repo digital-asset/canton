@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology.processing
 
 import cats.instances.order.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{Fingerprint, SigningPublicKey}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.graph.{MutableValueGraph, ValueGraphBuilder}
 
 import scala.collection.concurrent.TrieMap

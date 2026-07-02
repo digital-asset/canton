@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeyUsage, SigningPublicKey}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.topology.{Namespace, TestingOwnerWithKeys}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 import scala.util.Random

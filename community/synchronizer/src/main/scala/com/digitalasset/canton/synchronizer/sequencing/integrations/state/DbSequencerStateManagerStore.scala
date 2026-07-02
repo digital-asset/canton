@@ -7,7 +7,6 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
@@ -30,6 +29,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmptyUtil
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.collection.immutable

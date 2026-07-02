@@ -5,9 +5,9 @@ package com.digitalasset.canton.util
 
 import cats.data.EitherT
 import cats.{Applicative, MonadThrow}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
 

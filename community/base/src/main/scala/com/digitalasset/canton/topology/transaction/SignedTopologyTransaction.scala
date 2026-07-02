@@ -11,9 +11,6 @@ import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,6 +25,8 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}

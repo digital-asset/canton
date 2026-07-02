@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.kms.KmsKeyId
 import com.digitalasset.canton.crypto.store.KmsMetadataStore.KmsMetadata
@@ -14,6 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

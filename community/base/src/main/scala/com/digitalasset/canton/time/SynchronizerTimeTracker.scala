@@ -7,7 +7,6 @@ import cats.Foldable
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.{ProcessingTimeout, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -33,6 +32,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Flow

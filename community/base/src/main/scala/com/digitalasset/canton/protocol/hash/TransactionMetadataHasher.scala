@@ -38,7 +38,5 @@ object TransactionMetadataHasher {
         new v2.TransactionMetadataHasher()
       case HashingSchemeVersion.V3 =>
         new v3.TransactionMetadataHasher()
-      case HashingSchemeVersion.V4 =>
-        new v4.TransactionMetadataHasher()
     }
 }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.block
 
 import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -58,6 +57,7 @@ import com.digitalasset.canton.util.{
   LoggerUtil,
   MonadUtil,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Flow
 

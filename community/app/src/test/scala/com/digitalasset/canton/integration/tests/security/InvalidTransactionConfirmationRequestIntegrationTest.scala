@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.security
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
@@ -69,6 +68,7 @@ import com.digitalasset.canton.util.{MaliciousParticipantNode, MaxBytesToDecompr
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueText}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.scalatest.Tag

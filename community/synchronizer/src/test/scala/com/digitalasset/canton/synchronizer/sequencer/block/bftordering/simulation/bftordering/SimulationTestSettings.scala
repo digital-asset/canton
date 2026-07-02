@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
   DefaultSegmentLength,
@@ -18,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   defaultKeyExpirationDistribution,
   defaultOffboardDistribution,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 

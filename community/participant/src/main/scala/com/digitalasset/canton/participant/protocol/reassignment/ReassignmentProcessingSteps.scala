@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
@@ -66,6 +65,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Promise}

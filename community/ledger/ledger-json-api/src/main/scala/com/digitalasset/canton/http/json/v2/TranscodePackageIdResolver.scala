@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.{toBifunctorOps, toTraverseOps}
 import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.commands.Command
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.http.json.v2.TranscodePackageIdResolver.EitherOps
 import com.digitalasset.canton.ledger.api.validation.GetPreferredPackagesRequestValidator.PackageVettingRequirements
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
@@ -23,6 +22,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 
 import scala.concurrent.{ExecutionContext, Future}

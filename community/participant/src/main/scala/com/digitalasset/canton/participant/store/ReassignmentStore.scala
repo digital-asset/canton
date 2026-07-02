@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxParallelTraverse_
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.UnassignmentData.{
@@ -36,6 +35,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{CheckedT, EitherTUtil, MonadUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}

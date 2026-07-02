@@ -8,8 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.error.CantonBaseError
@@ -38,6 +36,7 @@ import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{BatchN, EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.*

@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -27,6 +26,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.actor.{Cancellable, Scheduler}
 

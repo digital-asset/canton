@@ -4,11 +4,11 @@
 package com.digitalasset.canton.crypto.store
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>

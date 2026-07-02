@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.provider.symbolic
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{
   CryptoKeyFormat,
   EncryptionAlgorithmSpec,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.crypto.{
   SigningKeySpec,
   SymmetricKeyScheme,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 object SymbolicCryptoProvider {
   // The schemes are ignored by symbolic crypto

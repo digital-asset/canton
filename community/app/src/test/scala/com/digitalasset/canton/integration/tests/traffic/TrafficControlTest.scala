@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.traffic
 
 import cats.syntax.functor.*
 import com.daml.ledger.api.v2.commands.Command
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.ParticipantStatus.SubmissionReady
 import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
@@ -75,6 +74,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, Member, Party}
 import com.digitalasset.canton.{TestPredicateFiltersFixtureAnyWordSpec, config}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 

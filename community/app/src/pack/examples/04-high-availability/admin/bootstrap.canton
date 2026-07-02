@@ -1,4 +1,4 @@
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
 import com.digitalasset.canton.sequencing.SequencerConnection

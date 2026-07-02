@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.error
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{
   BaseError,
   ErrorCategory,
@@ -13,6 +12,7 @@ import com.digitalasset.base.error.{
   RpcError,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.rpc.Status
 import com.google.rpc.error_details.ErrorInfo
 import io.grpc.StatusRuntimeException

@@ -931,6 +931,11 @@ class ParticipantNodeBootstrap(
         addCloseable(ledgerApiServerContainer.currentAutoCloseable())
         addCloseable(ledgerApiDependentServices)
         addCloseable(mutablePackageMetadataView)
+        // Health components owned by the bootstrap, not closed by the health service.
+        addCloseable(connectedSynchronizerHealth)
+        addCloseable(connectedSynchronizerEphemeralHealth)
+        addCloseable(connectedSynchronizerSequencerClientHealth)
+        addCloseable(connectedSynchronizerAcsCommitmentProcessorHealth)
 
         // return values
         ParticipantServices(

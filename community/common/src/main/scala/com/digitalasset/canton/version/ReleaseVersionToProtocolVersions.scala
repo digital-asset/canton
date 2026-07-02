@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.version
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 /** Objects and variables of this file are used as part of the release process. Be mindful when
   * removing them. See:

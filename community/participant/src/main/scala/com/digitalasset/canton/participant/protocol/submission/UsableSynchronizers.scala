@@ -8,7 +8,6 @@ import cats.implicits.toFoldableOps
 import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
@@ -29,6 +28,7 @@ import com.digitalasset.canton.version.{
 }
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.engine.Blinding
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

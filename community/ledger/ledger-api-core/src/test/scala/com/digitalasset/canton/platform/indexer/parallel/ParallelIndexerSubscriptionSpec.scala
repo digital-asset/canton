@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.metrics.DatabaseMetrics
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
@@ -75,6 +74,7 @@ import com.digitalasset.daml.lf.transaction.test.{
 import com.digitalasset.daml.lf.transaction.{CommittedTransaction, GlobalKey}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.digitalasset.nonempty.NonEmpty
 import monocle.Monocle.toAppliedFocusOps
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer

@@ -5,8 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.data.Validated
 import cats.syntax.foldable.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.ViewNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
@@ -15,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PrepareCertificate,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
+import com.digitalasset.nonempty.NonEmpty
 
 class ConsensusCertificateValidator(strongQuorum: Int) {
 

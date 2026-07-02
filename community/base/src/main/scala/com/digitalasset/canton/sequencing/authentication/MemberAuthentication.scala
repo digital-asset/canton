@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.authentication
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -14,6 +13,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.Au
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenManager
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}

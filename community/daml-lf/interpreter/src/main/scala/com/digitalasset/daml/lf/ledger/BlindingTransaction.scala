@@ -68,7 +68,7 @@ object BlindingTransaction {
           action match {
             case _: Node.Create =>
               (state, witnesses)
-            case _: Node.LookupByKey =>
+            case _: Node.QueryByKey =>
               (state, witnesses)
             case fetch: Node.Fetch =>
               val state1 =

@@ -225,7 +225,7 @@ class CommandProgressTrackerImpl(
             creates += mk(c.templateId, c.coid.coid, c.keyOpt)
             stats
           case _: Node.Fetch => stats.copy(fetched = stats.fetched + 1)
-          case _: Node.LookupByKey => stats.copy(lookedUpByKey = stats.lookedUpByKey + 1)
+          case _: Node.QueryByKey => stats.copy(lookedUpByKey = stats.lookedUpByKey + 1)
         }
       val stats = transaction.foldInExecutionOrder(Stats())(
         exerciseBegin = (acc, _, exerciseNode) => {

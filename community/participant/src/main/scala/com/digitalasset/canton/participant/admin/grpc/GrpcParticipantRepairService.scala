@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.{
   OtherError,
@@ -58,6 +57,7 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
   protocol,
 }
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.actor.ActorSystem
 

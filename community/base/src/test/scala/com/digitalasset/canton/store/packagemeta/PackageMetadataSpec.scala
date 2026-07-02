@@ -4,7 +4,6 @@
 package com.digitalasset.canton.store.packagemeta
 
 import cats.implicits.catsSyntaxSemigroup
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.Implicits.packageMetadataSemigroup
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.{
   LocalPackagePreference,
@@ -12,6 +11,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata.{
 }
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdentifierConverter
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 

@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.signer
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CacheConfig, CryptoConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
@@ -32,6 +31,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext

@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import cats.syntax.foldable.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -55,6 +54,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{MediatorId, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.{TestEssentials, config}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.{ActorSystem, Scheduler}
 import org.scalatest.Assertion

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
@@ -38,6 +37,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   SequencerCounter,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec

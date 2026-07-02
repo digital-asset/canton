@@ -28,7 +28,6 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   UpdatePartyIdentityProviderIdResponse,
 }
 import com.daml.logging.LoggingContext
-import com.daml.nonempty.NonEmpty
 import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.auth.AuthorizationChecksErrors
@@ -93,6 +92,7 @@ import com.digitalasset.canton.user.{
 }
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code.ALREADY_EXISTS
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer

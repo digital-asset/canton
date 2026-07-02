@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store
 
 import cats.instances.list.*
 import cats.syntax.foldable.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -19,6 +18,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

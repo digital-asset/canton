@@ -9,7 +9,6 @@ import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   InvariantViolation,
@@ -50,6 +49,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.{
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.version.ProtoVersion
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens

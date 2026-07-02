@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{
@@ -66,6 +65,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

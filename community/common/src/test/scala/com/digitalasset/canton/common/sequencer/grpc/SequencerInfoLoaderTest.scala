@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.common.sequencer.grpc
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.{
   LoadSequencerEndpointInformationResult,
@@ -38,6 +37,7 @@ import com.digitalasset.canton.{
   SequencerAlias,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
 import org.scalatest.Assertion

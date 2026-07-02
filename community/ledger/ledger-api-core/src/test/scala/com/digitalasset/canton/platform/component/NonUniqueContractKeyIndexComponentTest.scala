@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.component
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.index.ContractKeyPage
 import com.digitalasset.canton.ledger.participant.state.{
@@ -26,6 +25,7 @@ import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.annotation.tailrec

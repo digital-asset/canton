@@ -195,13 +195,12 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
 
   private val exerciseNodeHash = "5b9af41fe9032a70a772063301907c823e933d2df5bae2b48293f33cf3992611"
 
-  private val lookupNode = Node.LookupByKey(
+  private val lookupNode = Node.QueryByKey(
     packageName = packageName0,
     templateId = defRef("module", "name"),
+    exhaustive = false,
     key = globalKey,
-    result = Some(
-      ContractId.V1.assertFromString(contractId1)
-    ),
+    result = Vector(ContractId.V1.assertFromString(contractId1)),
     version = SerializationVersion.V1,
   )
 

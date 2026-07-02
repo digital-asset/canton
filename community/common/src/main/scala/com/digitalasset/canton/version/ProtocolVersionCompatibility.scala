@@ -4,7 +4,6 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.ErrorCategory.SecurityAlert
 import com.digitalasset.base.error.{ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -15,6 +14,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion.InvalidProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersionCompatibility.UnsupportedVersion
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}

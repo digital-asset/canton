@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform
 
 import cats.implicits.{catsSyntaxAlternativeSeparate, toFoldableOps}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.PackageReference
 import com.digitalasset.canton.ledger.api.PackageReference.*
@@ -35,6 +34,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageVersion
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.language.Ast.PackageSignature
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.immutable.SortedSet
 import scala.collection.{MapView, mutable}

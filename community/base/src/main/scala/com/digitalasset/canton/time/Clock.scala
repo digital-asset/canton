@@ -284,8 +284,10 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     val cancelTask = new RunOnClosing {
       override def name: String = s"cancel-$taskName"
       override def done: Boolean = f.isCompleted
-      override def run()(implicit traceContext: TraceContext): Unit =
+      override def run()(implicit traceContext: TraceContext): Unit = {
+        logger.debug(s"Aborting scheduled task '$taskName' due to shutdown")
         handle.cancel(AbortedDueToShutdown)
+      }
     }
 
     // Cancel the task upon shutdown

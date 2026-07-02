@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
@@ -55,6 +54,7 @@ import com.digitalasset.canton.{
   SequencerAlias,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec

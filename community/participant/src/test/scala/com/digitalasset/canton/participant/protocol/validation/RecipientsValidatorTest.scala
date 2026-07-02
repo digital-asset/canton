@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Member, ParticipantId, TestingTopology}
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 

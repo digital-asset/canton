@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology
 
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest.testedProtocolVersion
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.SigningKeySpec.EcSecp256k1
@@ -42,6 +41,7 @@ import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmptyUtil
 import org.scalatest.wordspec.AsyncWordSpec
 
 class CantonOrderingTopologyProviderTest

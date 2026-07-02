@@ -7,7 +7,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.String185
@@ -46,6 +45,7 @@ import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{BaseTest, FutureHelpers}
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext}

@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.console.ConsoleEnvironment
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -15,6 +14,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnection as SequencerConnectionInternal,
 }
 import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.dsl.*
 

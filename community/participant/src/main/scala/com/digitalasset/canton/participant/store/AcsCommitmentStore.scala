@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -22,6 +21,7 @@ import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.store.PrunableByTime
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.immutable

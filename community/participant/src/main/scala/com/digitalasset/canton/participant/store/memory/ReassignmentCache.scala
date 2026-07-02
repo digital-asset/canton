@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -30,6 +29,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, CheckedT}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent

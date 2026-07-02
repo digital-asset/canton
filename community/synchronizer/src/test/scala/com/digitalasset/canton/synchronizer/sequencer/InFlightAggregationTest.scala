@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts, TopologyConfig}
@@ -37,6 +36,7 @@ import com.digitalasset.canton.{
   TestEssentials,
   TestPredicateFiltersFixtureAnyWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
 

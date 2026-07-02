@@ -7,7 +7,6 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.{
@@ -36,6 +35,7 @@ import com.digitalasset.canton.metrics.{
   SigningMetrics,
 }
 import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.Logger
 import pureconfig.configurable.{genericMapReader, genericMapWriter}
 import pureconfig.error.CannotConvert

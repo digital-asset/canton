@@ -8,7 +8,6 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError
@@ -49,6 +48,7 @@ import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

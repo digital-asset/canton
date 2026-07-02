@@ -88,7 +88,7 @@ class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissi
               hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
             ),
           _.errorMessage should include(
-            "Cannot hash node with LF serialization version V2 using hashing scheme V2. Does the transaction use contract keys? Please use hashing scheme V3 or higher."
+            "Cannot hash node with LF serialization version V2 using hashing scheme V2. Does the transaction use contract keys? Please using hashing scheme V3 or higher."
           ),
         )
     }
@@ -115,7 +115,7 @@ class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissi
             hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
           ),
           _.errorMessage should include(
-            "Cannot hash node with LF serialization version V2 using hashing scheme V2. Does the transaction use contract keys? Please use hashing scheme V3 or higher."
+            "Cannot hash node with LF serialization version V2 using hashing scheme V2. Does the transaction use contract keys? Please using hashing scheme V3 or higher."
           ),
         )
     }

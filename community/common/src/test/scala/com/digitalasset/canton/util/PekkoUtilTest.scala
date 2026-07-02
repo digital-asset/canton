@@ -5,7 +5,6 @@ package com.digitalasset.canton.util
 
 import cats.Eq
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.concurrent.Threading
@@ -27,6 +26,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   WithKillSwitch,
   noOpKillSwitch,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 import org.apache.pekko.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped

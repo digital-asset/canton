@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.participant.state.metrics
 
 import cats.data.EitherT
 import com.daml.metrics.Timed
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -47,6 +46,7 @@ import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.Future

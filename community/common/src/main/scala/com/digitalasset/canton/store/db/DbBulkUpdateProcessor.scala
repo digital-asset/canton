@@ -4,7 +4,6 @@
 package com.digitalasset.canton.store.db
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -15,6 +14,7 @@ import com.digitalasset.canton.store.db.DbBulkUpdateProcessor.BulkUpdatePendingC
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, SingleUseCell}
+import com.digitalasset.nonempty.NonEmpty
 import slick.dbio.{DBIOAction, Effect, NoStream}
 
 import java.sql.Statement

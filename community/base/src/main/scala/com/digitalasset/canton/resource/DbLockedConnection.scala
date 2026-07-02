@@ -511,6 +511,10 @@ class DbLockedConnection private (
     TraceContext.withNewTraceContext("close_locked_connection") { implicit traceContext =>
       logger.debug(s"Closing DB-locked connection")
 
+      // Close the execution queue first so that no health check or set-passive task runs
+      // concurrently with (or after) the connection teardown below.
+      LifeCycle.close(execQueue)(logger)
+
       transitionEither[Unit, State.Recovering.type, State.Connected](
         getConnectedOrRecovering(_),
         State.Disconnecting,

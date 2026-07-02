@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
@@ -55,6 +54,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 

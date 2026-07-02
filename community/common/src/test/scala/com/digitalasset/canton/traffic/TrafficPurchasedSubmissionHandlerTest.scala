@@ -6,7 +6,6 @@ package com.digitalasset.canton.traffic
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown
@@ -35,6 +34,7 @@ import com.digitalasset.canton.time.{SimClock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.rpc.status.Status
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.clearInvocations

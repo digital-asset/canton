@@ -4,7 +4,11 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.crypto.provider.jce
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import io.circe.Json
 
 /** A JSON Web Key.
@@ -78,29 +82,43 @@ trait JwksOps {
   def toJwk(publicKey: SigningPublicKey): Either[JwksError, Jwk]
 }
 
-sealed trait JwksError extends Product with Serializable with PrettyPrinting
+sealed trait JwksError extends Product with Serializable with PrettyPrintingFromCompanion
 
 object JwksError {
   final case class GeneralError(error: Throwable) extends JwksError {
-    override protected def pretty: Pretty[GeneralError] =
+    override def prettyCompanion: PrettyPrintingCompanion[GeneralError] = GeneralError
+  }
+  object GeneralError extends PrettyPrintingCompanion[GeneralError] {
+    override val pretty: Pretty[GeneralError] =
       prettyOfClass(unnamedParam(_.error))
   }
 
   final case class JceJavaKeyConversionError(error: jce.JceJavaKeyConversionError)
       extends JwksError {
-    override protected def pretty: Pretty[JceJavaKeyConversionError] =
+    override def prettyCompanion: PrettyPrintingCompanion[JceJavaKeyConversionError] =
+      JceJavaKeyConversionError
+  }
+  object JceJavaKeyConversionError extends PrettyPrintingCompanion[JceJavaKeyConversionError] {
+    override val pretty: Pretty[JceJavaKeyConversionError] =
       prettyOfClass(unnamedParam(_.error))
   }
 
   final case class UnsupportedKeySpec(
       keySpec: SigningKeySpec
   ) extends JwksError {
-    override protected def pretty: Pretty[UnsupportedKeySpec] =
+    override def prettyCompanion: PrettyPrintingCompanion[UnsupportedKeySpec] = UnsupportedKeySpec
+  }
+  object UnsupportedKeySpec extends PrettyPrintingCompanion[UnsupportedKeySpec] {
+    override val pretty: Pretty[UnsupportedKeySpec] =
       prettyOfClass(param("keySpec", _.keySpec))
   }
 
   final case class KeyParameterExtractionError(message: String) extends JwksError {
-    override protected def pretty: Pretty[KeyParameterExtractionError] =
+    override def prettyCompanion: PrettyPrintingCompanion[KeyParameterExtractionError] =
+      KeyParameterExtractionError
+  }
+  object KeyParameterExtractionError extends PrettyPrintingCompanion[KeyParameterExtractionError] {
+    override val pretty: Pretty[KeyParameterExtractionError] =
       prettyOfClass(unnamedParam(_.message.singleQuoted))
   }
 

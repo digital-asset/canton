@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing
 
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -41,6 +40,7 @@ import com.digitalasset.canton.util.{
   OrderedBucketMergeHubOps,
 }
 import com.digitalasset.canton.version.RepresentativeProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.{Flow, Source}
 import org.apache.pekko.stream.{KillSwitch, OverflowStrategy}

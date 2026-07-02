@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentMatchers.eq as isEq
 
 import java.util.UUID

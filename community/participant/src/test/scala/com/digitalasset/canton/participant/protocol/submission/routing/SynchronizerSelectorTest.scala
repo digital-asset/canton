@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.SynchronizerCryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError
@@ -39,6 +38,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAnyWordSpec,
 }
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.*
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}

@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.mediator.service
 import cats.syntax.functor.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.server.pekko.ServerAdapter
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor, TransactionView}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.synchronizer.mediator.{FinalizedResponse, Mediato
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.GrpcStreamingUtils.withServerCallStreamObserver
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source

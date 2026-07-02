@@ -9,7 +9,6 @@ import cats.data.{Chain, NonEmptyChain}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{
   NoPathRollbackContextFactory,
   PathRollbackContextFactory,
@@ -28,6 +27,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{checked, protocol}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.Transaction
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.immutable.HashMap
 import scala.collection.mutable

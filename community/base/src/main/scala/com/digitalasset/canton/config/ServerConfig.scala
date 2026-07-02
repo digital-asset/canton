@@ -4,7 +4,6 @@
 package com.digitalasset.canton.config
 
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.nonempty.NonEmpty
 import com.daml.tls.{TlsClientConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
@@ -14,6 +13,7 @@ import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChann
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import scala.concurrent.duration.DurationInt

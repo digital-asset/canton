@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.security
 
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.tag.Security.SecurityTestSuite
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.{
@@ -20,6 +19,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 /** Integration test for post-quantum cryptography support in nodes.

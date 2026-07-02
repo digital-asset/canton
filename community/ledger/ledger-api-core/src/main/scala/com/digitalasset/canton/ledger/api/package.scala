@@ -13,7 +13,6 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
 }
 import com.daml.ledger.api.v2.{package_reference, package_service}
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
-import com.daml.nonempty.*
 import com.daml.platform.v1.page_tokens.ListVettedPackagesPageTokenPayload
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
@@ -43,6 +42,7 @@ import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.logging.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.value.Value as Lf
+import com.digitalasset.nonempty.*
 import scalaz.syntax.tag.*
 import scalaz.{@@, Tag}
 

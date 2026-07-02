@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -17,6 +16,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfPartyId, checked}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

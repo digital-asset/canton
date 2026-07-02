@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{Chain, EitherT}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
@@ -22,6 +21,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
@@ -13,6 +12,7 @@ import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.nonempty.NonEmpty
 
 /** Provides shorthands for general purpose types.
   *

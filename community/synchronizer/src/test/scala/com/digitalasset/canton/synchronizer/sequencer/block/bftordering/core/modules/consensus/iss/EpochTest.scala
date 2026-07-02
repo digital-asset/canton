@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 class EpochTest extends AsyncWordSpec with BftSequencerBaseTest {

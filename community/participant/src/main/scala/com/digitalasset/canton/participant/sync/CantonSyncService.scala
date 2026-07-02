@@ -12,7 +12,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
@@ -122,6 +121,7 @@ import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import io.grpc.Status
@@ -1507,6 +1507,8 @@ class CantonSyncService(
       transactionRoutingProcessor,
       synchronizerRegistry,
       synchronizerConnectionConfigStore,
+      pendingLsuOperationsStore,
+      genericPendingOperationStore,
       syncPersistentStateManager,
       // As currently we stop the persistent state in here as a next step,
       // and as we need the indexer to terminate before the persistent state and after the sources which are pushing to the indexing queue(connected synchronizers, inFlightSubmissionTracker etc),

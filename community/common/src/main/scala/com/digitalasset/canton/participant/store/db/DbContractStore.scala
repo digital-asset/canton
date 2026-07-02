@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.implicits.{toBifunctorOps, toTraverseOps}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.CantonRequireTypes.String2066
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
@@ -23,6 +22,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, SetParameter}

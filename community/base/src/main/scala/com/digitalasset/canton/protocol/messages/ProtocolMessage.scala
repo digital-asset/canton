@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{
   HashPurpose,
@@ -36,6 +35,7 @@ import com.digitalasset.canton.version.{
   VersionedProtoCodec,
   VersioningCompanionContext,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext

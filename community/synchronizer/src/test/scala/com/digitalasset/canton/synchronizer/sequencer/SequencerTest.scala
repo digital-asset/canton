@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -32,6 +31,7 @@ import com.digitalasset.canton.version.{
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, config}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer

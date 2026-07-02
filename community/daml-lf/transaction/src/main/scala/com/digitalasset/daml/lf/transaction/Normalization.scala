@@ -76,7 +76,7 @@ class Normalization {
             keyOpt = old.keyOpt.map(normKWM(old.version)),
           )
 
-      case old: Node.LookupByKey =>
+      case old: Node.QueryByKey =>
         old.copy(
           key = normKWM(old.version)(old.key)
         )

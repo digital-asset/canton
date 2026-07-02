@@ -7,7 +7,6 @@ import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
@@ -90,6 +89,7 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.scalatest.Tag

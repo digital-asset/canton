@@ -731,6 +731,8 @@ object BuildCommon {
       `model-based-testing-generators`,
       `model-based-testing-drivers`,
       `model-based-testing-integration-tests`,
+      `traffic-enforcement-api`,
+      `traffic-enforcement-component`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -1005,7 +1007,6 @@ object BuildCommon {
         DamlProjects.`daml-jwt`,
         DamlProjects.`daml-lf-transaction`,
         DamlProjects.`ledger-api-scala`,
-        DamlProjects.`nonempty-cats`,
         DamlProjects.executors,
         DamlProjects.`rs-grpc-bridge`,
         DamlProjects.`rs-grpc-pekko`,
@@ -1233,6 +1234,7 @@ object BuildCommon {
         `community-common` % "test->test",
         `daml-tls` % "test->test",
         `ledger-json-api` % "compile->compile;test->test",
+        `traffic-enforcement-component`,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -1691,7 +1693,7 @@ object BuildCommon {
     lazy val `magnolify-addon` = project
       .in(file("community/lib/magnolify"))
       .dependsOn(
-        DamlProjects.`nonempty-cats`
+        DamlProjects.`nonempty`
       )
       .settings(
         sharedSettings,
@@ -2005,6 +2007,7 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         `daml-adjustable-clock` % "test->test",
         `ledger-common-dars` % Test,
+        `traffic-enforcement-api`,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -2575,6 +2578,71 @@ object BuildCommon {
           )
         ),
       )
+
+    lazy val `traffic-enforcement-api` =
+      Project(
+        "traffic-enforcement-api",
+        file("community/traffic-enforcement/api"),
+      )
+        .dependsOn(`util-observability`)
+        .settings(
+          sharedCantonCommunitySettings,
+          enablePublishLibrary,
+          Compile / PB.protoSources := Seq(baseDirectory.value / "protobuf"),
+          Compile / PB.targets := Seq(
+            scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
+          ),
+          Compile / bufLintCheck := (Compile / bufLintCheck)
+            .dependsOn(
+              // these proto files are loaded by buf.work.yaml
+              DamlProjects.`google-common-protos-scala` / PB.unpackDependencies
+            )
+            .value,
+          libraryDependencies ++= Seq(
+            scalapb_runtime,
+            scalapb_runtime_grpc,
+          ),
+          addProtobufFilesToHeaderCheck(Compile),
+        )
+
+    lazy val `traffic-enforcement-component` =
+      Project(
+        "traffic-enforcement-component",
+        file("community/traffic-enforcement/component"),
+      )
+        .dependsOn(
+          `traffic-enforcement-api`,
+          DamlProjects.`ledger-api-scala`,
+          `ledger-api-core`,
+          DamlProjects.`ledger-api-proto`,
+          `util-observability`,
+          CommunityProjects.`community-testing` % Test,
+        )
+        .enablePlugins(DamlPlugin)
+        .settings(
+          sharedCantonCommunitySettings,
+          Compile / PB.targets := Seq(
+            scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf"
+          ),
+          Compile / bufLintCheck := (Compile / bufLintCheck)
+            .dependsOn(
+              // these proto files are loaded by buf.work.yaml
+              DamlProjects.`google-common-protos-scala` / PB.unpackDependencies
+            )
+            .value,
+          libraryDependencies ++= Seq(
+            commons_io,
+            pekko_actor_typed,
+            pekko_stream,
+            pekko_slf4j % "compile->compile;test->test",
+            pureconfig_core,
+            pureconfig_generic,
+            scalapb_runtime,
+            scalapb_runtime_grpc,
+            logback_classic % Runtime,
+            scalatest % Test,
+          ),
+        )
   }
 
   object DamlProjects {
@@ -2590,7 +2658,6 @@ object BuildCommon {
       `scalatest-utils`,
       `scala-utils`,
       `nonempty`,
-      `nonempty-cats`,
       `rs-grpc-bridge`,
       `rs-grpc-pekko`,
       `logging-entries`,
@@ -3035,6 +3102,7 @@ object BuildCommon {
       .settings(
         libsScalaSettings,
         libraryDependencies ++= Seq(
+          cats,
           scalacheck % Test,
           scalatest % Test,
           scalatestScalacheck % Test,
@@ -3042,23 +3110,6 @@ object BuildCommon {
           scalaz_scalacheck_binding % Test,
           shapeless % Test,
         ),
-        enablePublishLibrary,
-      )
-
-    lazy val `nonempty-cats` = project
-      .in(file("base/nonempty-cats"))
-      .dependsOn(
-        `nonempty`,
-        `scalatest-utils` % Test,
-      )
-      .settings(
-        libsScalaSettings,
-        libraryDependencies ++= Seq(
-          cats,
-          scalatest % Test,
-          scalaz_core % Test,
-        ),
-        enablePublishLibrary,
       )
 
     lazy val `daml-jwt` = project
@@ -3923,6 +3974,7 @@ object BuildCommon {
         `daml-lf-data` % "compile->compile;test->test",
         `daml-lf-parser` % Test,
         `nonempty`,
+        `scalatest-utils` % Test,
       )
 
     lazy val `daml-lf-parser` = project

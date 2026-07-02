@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
@@ -12,6 +11,7 @@ import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.sequencing.BftSender
 import com.digitalasset.canton.sequencing.BftSender.FailedToReachThreshold
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.slf4j.event.Level

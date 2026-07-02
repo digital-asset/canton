@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, PositiveFiniteDuration}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
@@ -11,6 +10,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.{BaseTest, Generators}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.*

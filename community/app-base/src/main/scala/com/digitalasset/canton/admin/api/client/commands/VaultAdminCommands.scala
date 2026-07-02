@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.crypto.admin.v30.VaultServiceGrpc.VaultServiceStu
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v30 as cryptoproto, *}
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.ManagedChannel
 

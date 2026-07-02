@@ -5,7 +5,6 @@ package com.digitalasset.canton.http.json
 
 import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.value.Value
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.http.json.v2.{JsCommand, TranscodePackageIdResolver}
 import com.digitalasset.canton.ledger.api.PackageReference
@@ -34,6 +33,7 @@ import com.digitalasset.canton.{
   LfPackageVersion,
   LfPartyId,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.util.{Failure, Success, Try}

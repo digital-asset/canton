@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.topology
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 

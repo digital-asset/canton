@@ -396,17 +396,18 @@ jobs:
         - compile # optional dependency, introduced to save credits in case of compile errors
 
 ### for release-lines we want to run data continuity tests as part of the continuous integration
-  - test_data_continuity_dumps:
-      context:
-        - datadog
-        - artifactory
-        - azure-self-cache
-        - maven-mirror
-        - da-images
-      requires:
-        - compile
-      filters:
-        branches:
-          ignore:
-            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
+# TODO(#33681): Disable temporarily until traffic enforcement is forward ported to main
+#  - test_data_continuity_dumps:
+#      context:
+#        - datadog
+#        - artifactory
+#        - azure-self-cache
+#        - maven-mirror
+#        - da-images
+#      requires:
+#        - compile
+#      filters:
+#        branches:
+#          ignore:
+#            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.Generators
 import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
@@ -31,6 +30,7 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.topology.{GeneratorsTopology, Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmptyUtil
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}

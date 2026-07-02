@@ -8,7 +8,6 @@ import cats.syntax.functor.*
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.commands.Command.toJavaProto
 import com.daml.ledger.javaapi
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
@@ -49,6 +48,7 @@ import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.MaliciousParticipantNode
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code
 import monocle.Traversal
 import monocle.macros.GenLens

@@ -6,12 +6,12 @@ package com.digitalasset.canton.synchronizer.sequencer.store
 import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.synchronizer.sequencer.SynchronizerSequencingTestUtils
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}
+import com.digitalasset.nonempty.NonEmptyUtil
 import org.scalatest.compatible.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 

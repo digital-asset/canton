@@ -9,7 +9,6 @@ import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.*
@@ -106,6 +105,7 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.NonEmpty
 import monocle.PLens
 
 import scala.collection.immutable.SortedMap

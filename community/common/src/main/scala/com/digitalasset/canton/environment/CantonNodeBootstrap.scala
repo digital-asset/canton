@@ -13,7 +13,6 @@ import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{CacheMetrics, ExecutorServiceMetrics, HealthMetrics}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
 import com.digitalasset.canton.auth.{CantonAdminTokenDispenser, GrpcAuthInterceptorFactory}
 import com.digitalasset.canton.concurrent.{
@@ -128,6 +127,7 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion, ReleaseVersion}
 import com.digitalasset.canton.watchdog.WatchdogService
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.ServerServiceDefinition
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
 import io.opentelemetry.api.trace.Tracer

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.FullTransactionViewTree
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.LLState
 import com.digitalasset.daml.lf.transaction.{ErrOr, NextGenContractStateMachine, TransactionError}
+import com.digitalasset.nonempty.NonEmpty
 
 class NextGenInternalConsistencyChecker(
     override val participantId: ParticipantId,

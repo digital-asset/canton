@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import cats.data.Validated.Valid
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.auth.AuthorizedUser
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
@@ -39,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import monocle.macros.syntax.lens.*
 import org.scalatest.prop.{TableFor1, TableFor2}

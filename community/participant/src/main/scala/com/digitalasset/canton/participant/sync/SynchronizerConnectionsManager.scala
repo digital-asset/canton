@@ -10,7 +10,6 @@ import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
@@ -83,6 +82,7 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.retry.Backoff
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.collect.{BiMap, HashBiMap}
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer

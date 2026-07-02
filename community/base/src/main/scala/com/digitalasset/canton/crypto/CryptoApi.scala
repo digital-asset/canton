@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.show.*
 import com.daml.metrics.ExecutorServiceMetrics
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -56,6 +55,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.{HasToByteString, ReleaseProtocolVersion}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext

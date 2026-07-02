@@ -240,9 +240,6 @@ enum HashingSchemeVersion {
   reserved 1; // Hashing Scheme V1 - unsupported
   HASHING_SCHEME_VERSION_V2 = 2;
   HASHING_SCHEME_VERSION_V3 = 3;
-  // Development-protocol-only hashing scheme for LF development-version prepared transactions.
-  // V4 includes exercise external_call_results in the prepared transaction hash.
-  HASHING_SCHEME_VERSION_V4 = 4;
 }
 // [docs-entry-end: HashingSchemeVersion]
 

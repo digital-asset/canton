@@ -8,7 +8,6 @@ import cats.syntax.alternative.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -41,6 +40,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.mutable

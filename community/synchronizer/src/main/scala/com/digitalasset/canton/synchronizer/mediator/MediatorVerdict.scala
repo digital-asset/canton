@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.{
@@ -16,6 +15,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{NonPositiveLocalVerdict, Verdict}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import pprint.Tree
 
 sealed trait MediatorVerdict extends Product with Serializable with PrettyPrinting {

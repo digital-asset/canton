@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.kms
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.crypto.{
   CryptoPureApi,
@@ -18,6 +17,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.util.ByteString190
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.FixtureAsyncWordSpec

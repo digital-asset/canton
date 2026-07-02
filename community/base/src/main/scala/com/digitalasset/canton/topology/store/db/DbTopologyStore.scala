@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.store.db
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
@@ -45,6 +44,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer

@@ -5,7 +5,11 @@ package com.digitalasset.canton.crypto.provider.jce
 
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 
 import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 import java.security.{
@@ -119,12 +123,18 @@ object JceJavaKeyConverter {
 
 }
 
-sealed trait JceJavaKeyConversionError extends Product with Serializable with PrettyPrinting
+sealed trait JceJavaKeyConversionError
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion
 
 object JceJavaKeyConversionError {
 
   final case class GeneralError(error: Exception) extends JceJavaKeyConversionError {
-    override protected def pretty: Pretty[GeneralError] =
+    override def prettyCompanion: PrettyPrintingCompanion[GeneralError] = GeneralError
+  }
+  object GeneralError extends PrettyPrintingCompanion[GeneralError] {
+    override val pretty: Pretty[GeneralError] =
       prettyOfClass(unnamedParam(_.error))
   }
 
@@ -132,12 +142,19 @@ object JceJavaKeyConversionError {
       format: CryptoKeyFormat,
       supportedKeyFormats: Set[CryptoKeyFormat],
   ) extends JceJavaKeyConversionError {
-    override protected def pretty: Pretty[UnsupportedKeyFormat] =
+    override def prettyCompanion: PrettyPrintingCompanion[UnsupportedKeyFormat] =
+      UnsupportedKeyFormat
+  }
+  object UnsupportedKeyFormat extends PrettyPrintingCompanion[UnsupportedKeyFormat] {
+    override val pretty: Pretty[UnsupportedKeyFormat] =
       prettyOfClass(param("format", _.format), param("supportedKeyFormats", _.supportedKeyFormats))
   }
 
   final case class InvalidKey(error: String) extends JceJavaKeyConversionError {
-    override protected def pretty: Pretty[InvalidKey] =
+    override def prettyCompanion: PrettyPrintingCompanion[InvalidKey] = InvalidKey
+  }
+  object InvalidKey extends PrettyPrintingCompanion[InvalidKey] {
+    override val pretty: Pretty[InvalidKey] =
       prettyOfClass(unnamedParam(_.error.unquoted))
   }
 

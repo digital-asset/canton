@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.applicativeError.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.error.TransactionRoutingError
@@ -20,6 +19,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 import scala.math.Ordered.orderingToOrdered

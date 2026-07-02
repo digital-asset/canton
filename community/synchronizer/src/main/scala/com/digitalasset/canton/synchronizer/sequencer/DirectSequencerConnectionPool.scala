@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
@@ -27,6 +26,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContextExecutor
 

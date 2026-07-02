@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{
@@ -35,6 +34,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.apache.pekko.actor.ActorSystem

@@ -5,13 +5,13 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.{BinaryFileUtil, ReassignmentTag}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.{ByteString, InvalidProtocolBufferException}
 import slick.jdbc.{GetResult, SetParameter}
 

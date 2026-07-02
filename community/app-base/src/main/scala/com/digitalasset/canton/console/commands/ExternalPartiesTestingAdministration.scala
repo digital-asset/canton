@@ -7,8 +7,6 @@ import cats.Applicative
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.admin.api.client.data.{
   KnownPhysicalSynchronizerId,
   ListPartiesResult,
@@ -49,6 +47,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{SynchronizerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import java.time.Instant

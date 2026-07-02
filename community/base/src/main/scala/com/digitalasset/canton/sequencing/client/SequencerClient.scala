@@ -15,7 +15,6 @@ import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout, TestingConfigInternal}
@@ -112,6 +111,7 @@ import com.digitalasset.canton.util.TryUtil.*
 import com.digitalasset.canton.util.collection.IterableUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SequencerCounter, time}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer

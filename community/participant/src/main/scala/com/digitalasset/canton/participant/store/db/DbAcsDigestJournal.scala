@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,6 +19,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.PositionedParameters
 import slick.jdbc.canton.SQLActionBuilder
 

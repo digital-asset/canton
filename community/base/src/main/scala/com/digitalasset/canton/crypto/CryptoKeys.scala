@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto
 
 import cats.Order
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
@@ -26,6 +25,7 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import io.circe.Encoder

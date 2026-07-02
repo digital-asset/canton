@@ -4,13 +4,13 @@
 package com.digitalasset.canton.topology.transaction
 
 import cats.syntax.bifunctor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
+import com.digitalasset.nonempty.NonEmpty
 
 object TopologyTransactionSignature {
 

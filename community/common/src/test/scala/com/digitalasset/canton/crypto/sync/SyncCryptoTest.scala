@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.sync
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.KmsConfig.Driver
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -44,6 +43,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigValueFactory
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.BeforeAndAfterAll
