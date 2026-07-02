@@ -34,10 +34,6 @@ object ConfigValidations extends NamedLogging {
   type Validation = CantonConfig => Validated[NonEmpty[Seq[String]], Unit]
 
   private val Valid: Validated[NonEmpty[Seq[String]], Unit] = Validated.valid(())
-  private val EngineExtensionVersionPathSegmentPattern = "[A-Za-z0-9._~-]+".r
-  private val EngineExtensionVersionPathSegmentDescription =
-    "a non-empty URI path segment containing only unreserved characters [A-Za-z0-9._~-], excluding '.' and '..'"
-  private val EngineExtensionTargetPortDescription = s"between 1 and ${Port.maxValidPort}"
 
   private def toValidated(errors: Seq[String]): Validated[NonEmpty[Seq[String]], Unit] = NonEmpty
     .from(errors)
@@ -452,11 +448,11 @@ object ConfigValidations extends NamedLogging {
       Option.when(
         extensionConfig.version == "." ||
           extensionConfig.version == ".." ||
-          !EngineExtensionVersionPathSegmentPattern.pattern
-            .matcher(extensionConfig.version)
-            .matches()
+          !extensionConfig.version.matches("[A-Za-z0-9._~-]+")
       )(
-        s"For participant ${name.unwrap}, engine.extensions.$extensionId.version must be $EngineExtensionVersionPathSegmentDescription, but found '${extensionConfig.version}'"
+        s"For participant ${name.unwrap}, engine.extensions.$extensionId.version must be " +
+          "a non-empty URI path segment containing only unreserved characters [A-Za-z0-9._~-], " +
+          s"excluding '.' and '..', but found '${extensionConfig.version}'"
       )
     }
     toValidated(errors)
@@ -467,7 +463,8 @@ object ConfigValidations extends NamedLogging {
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     val errors = engineExtensionErrors(config) { case (name, extensionId, extensionConfig) =>
       Option.when(extensionConfig.port == Port.Dynamic)(
-        s"For participant ${name.unwrap}, engine.extensions.$extensionId.port must be $EngineExtensionTargetPortDescription, but found '${extensionConfig.port}'"
+        s"For participant ${name.unwrap}, engine.extensions.$extensionId.port must be " +
+          s"between 1 and ${Port.maxValidPort}, but found '${extensionConfig.port}'"
       )
     }
     toValidated(errors)
