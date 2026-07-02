@@ -134,16 +134,7 @@ object DAMLe {
       outputs: Set[LfBytes],
   ) extends ReinterpretationError {
     override protected def pretty: Pretty[ExternalCallRecordedResultDisagreement] = prettyOfClass(
-      param("extension id", _.key.extensionId.doubleQuoted),
-      param("function id", _.key.functionId.doubleQuoted),
-      param(
-        "config bytes",
-        disagreement => hexPayloadSize(disagreement.key.config).doubleQuoted,
-      ),
-      param(
-        "input bytes",
-        disagreement => hexPayloadSize(disagreement.key.input).doubleQuoted,
-      ),
+      param("key", _.key),
       param("recorded output count", _.outputs.size),
       param(
         "recorded output bytes",
@@ -161,28 +152,26 @@ object DAMLe {
       key: ExternalCallKey
   ) extends ReinterpretationError {
     override protected def pretty: Pretty[ExternalCallReplayMissing] = prettyOfClass(
-      param("extension id", _.key.extensionId.doubleQuoted),
-      param("function id", _.key.functionId.doubleQuoted),
-      param(
-        "config bytes",
-        missing => hexPayloadSize(missing.key.config).doubleQuoted,
-      ),
-      param(
-        "input bytes",
-        missing => hexPayloadSize(missing.key.input).doubleQuoted,
-      ),
+      param("key", _.key)
     )
   }
 
   /** Deterministic external-call identity. Config and input are engine-emitted canonical hex
-    * strings.
+    * strings. The pretty-printed form deliberately shows only payload sizes, never the payloads.
     */
   final case class ExternalCallKey(
       extensionId: String,
       functionId: String,
       config: String,
       input: String,
-  )
+  ) extends PrettyPrinting {
+    override protected def pretty: Pretty[ExternalCallKey] = prettyOfClass(
+      param("extension id", _.extensionId.doubleQuoted),
+      param("function id", _.functionId.doubleQuoted),
+      param("config bytes", key => hexPayloadSize(key.config).doubleQuoted),
+      param("input bytes", key => hexPayloadSize(key.input).doubleQuoted),
+    )
+  }
 
   object ExternalCallKey {
 
