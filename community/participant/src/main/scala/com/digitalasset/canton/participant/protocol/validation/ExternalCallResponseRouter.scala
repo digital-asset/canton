@@ -290,24 +290,21 @@ private[validation] object ExternalCallResponseRouter {
     val orderedDisagreements =
       disagreements.distinct.sorted(orderRecordedResultDisagreement)
 
-    if (orderedDisagreements.isEmpty) Map.empty
-    else {
-      val orderedViews =
-        viewsWithHostedParties.sortBy(_.viewPosition)(ViewPosition.orderViewPosition.toOrdering)
+    val orderedViews =
+      viewsWithHostedParties.sortBy(_.viewPosition)(ViewPosition.orderViewPosition.toOrdering)
 
-      val routed =
-        orderedDisagreements.flatMap { disagreement =>
-          occurrencesByParty(disagreement, orderedViews).toSeq.map { case (party, occurrences) =>
-            party -> (disagreement -> Inconsistency(
-              disagreement.key,
-              disagreement.outputs,
-              occurrences,
-            ))
-          }
+    val routed =
+      orderedDisagreements.flatMap { disagreement =>
+        occurrencesByParty(disagreement, orderedViews).toSeq.map { case (party, occurrences) =>
+          party -> (disagreement -> Inconsistency(
+            disagreement.key,
+            disagreement.outputs,
+            occurrences,
+          ))
         }
+      }
 
-      routed.groupMap(_._1)(_._2)
-    }
+    routed.groupMap(_._1)(_._2)
   }
 
   /** For a single recorded disagreement, the occurrences of its external call that each hosted
