@@ -7,7 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPartyId, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import org.scalatest.wordspec.AnyWordSpec
@@ -17,12 +17,12 @@ import scala.concurrent.ExecutionContext
 class ExternalCallConsistencyCheckerTest
     extends AnyWordSpec
     with BaseTest
+    with ProtocolVersionChecksAnyWordSpec
     with ExternalCallValidationTestUtil {
 
   implicit val ec: ExecutionContext = directExecutionContext
 
-  protected val factory =
-    new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))()
+  protected val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
   private val partyA = ExampleTransactionFactory.signatory
   private val partyB = ExampleTransactionFactory.submitter
@@ -69,7 +69,7 @@ class ExternalCallConsistencyCheckerTest
   }
 
   "ExternalCallConsistencyChecker" should {
-    "report only hosted parties that check conflicting outputs" in {
+    "report only hosted parties that check conflicting outputs" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val result = check(
         leftCheckingParties = Set(partyA),
         rightCheckingParties = Set(partyA),
@@ -79,7 +79,7 @@ class ExternalCallConsistencyCheckerTest
       result.inconsistentParties shouldBe Set(partyA)
     }
 
-    "not report conflicting outputs for disjoint checking parties" in {
+    "not report conflicting outputs for disjoint checking parties" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val result = check(
         leftCheckingParties = Set(partyA),
         rightCheckingParties = Set(partyB),
@@ -90,7 +90,7 @@ class ExternalCallConsistencyCheckerTest
       result.visibleInconsistencies should have size 1
     }
 
-    "record visible disagreements without reporting non-hosted checking parties" in {
+    "record visible disagreements without reporting non-hosted checking parties" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val result = check(
         leftCheckingParties = Set(partyC),
         rightCheckingParties = Set(partyC),
@@ -106,7 +106,7 @@ class ExternalCallConsistencyCheckerTest
       )
     }
 
-    "not report identical outputs" in {
+    "not report identical outputs" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val result = check(
         leftCheckingParties = Set(partyA),
         rightCheckingParties = Set(partyA),
@@ -117,7 +117,7 @@ class ExternalCallConsistencyCheckerTest
       result.inconsistentParties shouldBe Set.empty
     }
 
-    "not report different semantic calls with different outputs" in {
+    "not report different semantic calls with different outputs" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val result = check(
         leftCheckingParties = Set(partyA),
         rightCheckingParties = Set(partyA),
@@ -128,7 +128,7 @@ class ExternalCallConsistencyCheckerTest
       result.inconsistentParties shouldBe Set.empty
     }
 
-    "report repeated semantic calls on the same node with different outputs" in {
+    "report repeated semantic calls on the same node with different outputs" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val example = factory.MultipleRoots
       val view = withExternalCallResults(
         example.rootViews(4),
@@ -164,7 +164,7 @@ class ExternalCallConsistencyCheckerTest
       )
     }
 
-    "report all independent disagreements for the same hosted checking party" in {
+    "report all independent disagreements for the same hosted checking party" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val example = factory.MultipleRoots
       val firstCall = externalCallResult.copy(functionId = "function-a")
       val secondCall = externalCallResult.copy(functionId = "function-b")
@@ -215,6 +215,17 @@ class ExternalCallConsistencyCheckerTest
         "function-a",
         "function-b",
       )
+    }
+
+    "return the empty result for views without external-call results" in {
+      val example = factory.MultipleRoots
+
+      val result = ExternalCallConsistencyChecker.check(
+        Map(ViewPosition.root -> validationResult(example.rootViews(4))),
+        Set(partyA),
+      )
+
+      result shouldBe ExternalCallConsistencyChecker.Result.empty
     }
   }
 }
