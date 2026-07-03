@@ -213,7 +213,9 @@ object Error {
     ) extends Error
 
     object ExecutionFailed {
-      sealed abstract class Error extends Serializable with Product
+      sealed abstract class Error extends Serializable with Product {
+        def message: String
+      }
 
       final case class CallFailed(message: String) extends Error
 

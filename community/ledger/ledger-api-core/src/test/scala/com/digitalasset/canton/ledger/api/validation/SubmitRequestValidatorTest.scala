@@ -6,6 +6,10 @@ package com.digitalasset.canton.ledger.api.validation
 import com.daml.ledger.api.v2.command_service.SubmitAndWaitForTransactionRequest
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod as DeduplicationPeriodProto
 import com.daml.ledger.api.v2.commands.{Command, Commands, CreateCommand, PrefetchContractKey}
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  HashingSchemeVersion as ApiHashingSchemeVersion,
+  PrepareSubmissionRequest,
+}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters, TransactionFormat}
 import com.daml.ledger.api.v2.value.Value.Sum
@@ -22,6 +26,7 @@ import com.digitalasset.canton.ledger.api.{ApiMocks, Commands as ApiCommands, Di
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.command.{
   ApiCommand as LfCommand,
   ApiCommands as LfCommands,
@@ -212,6 +217,12 @@ class SubmitRequestValidatorTest
 
     when(validateDisclosedContractsMock.validateCommands(any[Commands])(any[ErrorLoggingContext]))
       .thenReturn(Right(internal.disclosedContracts))
+    when(
+      validateDisclosedContractsMock.validateDisclosedContracts(
+        any[Seq[com.daml.ledger.api.v2.commands.DisclosedContract]]
+      )(any[ErrorLoggingContext])
+    )
+      .thenReturn(Right(ImmArray.Empty))
 
     new CommandsValidator(
       validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty,
@@ -222,6 +233,8 @@ class SubmitRequestValidatorTest
   private val testedSubmitAndWaitRequestValidator = new SubmitAndWaitRequestValidator(
     testedCommandValidator
   )
+
+  private val testedSubmitRequestValidator = new SubmitRequestValidator(testedCommandValidator)
 
   private val testedValueValidator = ValueValidator
 
@@ -284,6 +297,36 @@ class SubmitRequestValidatorTest
             "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: transaction_format",
           metadata = Map.empty,
         )
+      }
+    }
+
+    "validating interactive submission requests" should {
+      "accept HASHING_SCHEME_VERSION_V4 for prepare requests" in {
+        val result = testedSubmitRequestValidator.validatePrepare(
+          req = PrepareSubmissionRequest(
+            userId = userId,
+            commandId = commandId.unwrap,
+            commands = Seq(api.command),
+            minLedgerTime = None,
+            actAs = Seq(api.submitter),
+            readAs = Seq.empty,
+            disclosedContracts = Seq.empty,
+            synchronizerId = api.synchronizerId,
+            packageIdSelectionPreference = Seq.empty,
+            verboseHashing = false,
+            prefetchContractKeys = Seq.empty,
+            maxRecordTime = None,
+            estimateTrafficCost = None,
+            tapsMaxPasses = None,
+            hashingSchemeVersion = Some(ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V4),
+          ),
+          currentLedgerTime = internal.ledgerTime,
+          currentUtcTime = internal.submittedAt,
+        )
+
+        inside(result) { case Right(validated) =>
+          validated.hashingSchemeVersion shouldBe HashingSchemeVersion.V4
+        }
       }
     }
 
