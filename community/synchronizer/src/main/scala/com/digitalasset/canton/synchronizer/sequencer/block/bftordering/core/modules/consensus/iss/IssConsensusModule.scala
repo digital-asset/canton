@@ -934,7 +934,10 @@ final class IssConsensusModule[E <: Env[E]](
     val epochSnapshot = EpochStore.Epoch(epochInfo, epochState.lastBlockCommitMessages)
 
     if (sync) {
-      context.blockingAwait(epochStore.completeEpoch(epochInfo.number))
+      context.blockingAwait(
+        epochStore.completeEpoch(epochInfo.number),
+        config.blockingDbReadTimeout,
+      )
     } else {
       pipeToSelf(epochStore.completeEpoch(epochInfo.number)) {
         case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)

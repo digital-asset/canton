@@ -41,7 +41,7 @@ class LedgerEffectAbsolutizer(absolutizer: ContractIdAbsolutizer) {
           absolutizedKey <- gKey.key.traverseCid(absolutizer.absolutizeContractId)
           absolutizedResolution <- absolutizeKeyResolution(resolution.unversioned)
         } yield (
-          LfGlobalKey.assertBuild(gKey.templateId, gKey.packageName, absolutizedKey, gKey.hash),
+          LfGlobalKey(gKey.templateId, gKey.packageName, absolutizedKey, gKey.hash),
           resolution.copy(unversioned = absolutizedResolution),
         )
       }

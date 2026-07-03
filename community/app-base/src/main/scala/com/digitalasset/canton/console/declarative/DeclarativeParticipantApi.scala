@@ -762,6 +762,7 @@ class DeclarativeParticipantApi(
           ParticipantAdminCommands.SynchronizerConnectivity.ConnectSynchronizer(
             synchronizerConnectionConfig,
             sequencerConnectionValidation = SequencerConnectionValidation.Active,
+            onboardingTransactions = Nil,
           )
         )
       } yield ()

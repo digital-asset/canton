@@ -36,6 +36,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferTimeout,
+  DefaultInitQueryTimeout,
+  DefaultInitTimeout,
   DefaultMaxBatchCreationInterval,
   DefaultMaxBatchesPerProposal,
   DefaultMaxMempoolQueueSize,
@@ -207,14 +209,22 @@ final case class BftBlockOrdererConfig(
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
     sequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
       DefaultSequencerCoreSubscriptionConfig,
+    initTimeout: config.NonNegativeFiniteDuration = DefaultInitTimeout,
+    initQueryTimeout: config.NonNegativeFiniteDuration = DefaultInitQueryTimeout,
 ) {
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
+
   require(
     maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
     s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
       s"$maxBatchesPerBlockProposal maximum batches per block proposal means " +
       s"$maxRequestsPerBlock maximum requests per block, " +
       s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
+  )
+
+  require(
+    initTimeout.underlying >= initQueryTimeout.underlying,
+    s"initTimeout $initTimeout must be >= initQueryTimeout $initQueryTimeout",
   )
 }
 
@@ -255,6 +265,11 @@ object BftBlockOrdererConfig {
 
   val DefaultSequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
     SequencerCoreSubscriptionConfig()
+
+  val DefaultInitTimeout: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(10.minutes)
+  val DefaultInitQueryTimeout: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(5.minutes)
 
   /** Configuration for peer-to-peer network settings
     *

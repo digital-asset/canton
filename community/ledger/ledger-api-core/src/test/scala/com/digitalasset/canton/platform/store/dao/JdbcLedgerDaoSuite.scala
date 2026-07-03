@@ -362,7 +362,7 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       maintainers: Set[Party]
   ): GlobalKeyWithMaintainers = {
     val aTextValue = ValueText(scala.util.Random.nextString(10))
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       someTemplateId,
       aTextValue,
       crypto.Hash.hashPrivateKey(aTextValue.toString),
@@ -685,14 +685,13 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         signatories = Set(party),
         stakeholders = Set(party),
         key = Some(
-          GlobalKeyWithMaintainers
-            .assertBuild(
-              someTemplateId,
-              someContractKey(party, key),
-              crypto.Hash.hashPrivateKey(key),
-              Set(party),
-              somePackageName,
-            )
+          GlobalKeyWithMaintainers(
+            someTemplateId,
+            someContractKey(party, key),
+            crypto.Hash.hashPrivateKey(key),
+            Set(party),
+            somePackageName,
+          )
         ),
       )
     )
@@ -736,14 +735,13 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         exerciseResult = Some(LfValue.ValueUnit),
         keyOpt = maybeKey.map { k =>
           val keyValue = someContractKey(party, k)
-          GlobalKeyWithMaintainers
-            .assertBuild(
-              someTemplateId,
-              keyValue,
-              crypto.Hash.hashPrivateKey(keyValue.toString),
-              Set(party),
-              somePackageName,
-            )
+          GlobalKeyWithMaintainers(
+            someTemplateId,
+            keyValue,
+            crypto.Hash.hashPrivateKey(keyValue.toString),
+            Set(party),
+            somePackageName,
+          )
         },
         byKey = false,
         externalCallResults = ImmArray.empty,
@@ -777,14 +775,13 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         templateId = someTemplateId,
         packageName = somePackageName,
         exhaustive = result.isEmpty,
-        key = GlobalKeyWithMaintainers
-          .assertBuild(
-            someTemplateId,
-            keyValue,
-            crypto.Hash.hashPrivateKey(keyValue.toString),
-            Set(party),
-            somePackageName,
-          ),
+        key = GlobalKeyWithMaintainers(
+          someTemplateId,
+          keyValue,
+          crypto.Hash.hashPrivateKey(keyValue.toString),
+          Set(party),
+          somePackageName,
+        ),
         result = result,
         version = txVersion,
       )

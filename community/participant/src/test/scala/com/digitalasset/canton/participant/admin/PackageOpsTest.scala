@@ -404,7 +404,6 @@ class PackageOpsTest extends PackageOpsTestBase {
         syncPersistentStateO = topologyTestSetup.get(_).map(_._2),
         loggerFactory = loggerFactory,
       ),
-      initialProtocolVersion = testedProtocolVersion,
       loggerFactory = loggerFactory,
       timeouts = ProcessingTimeout(),
       futureSupervisor = futureSupervisor,
@@ -419,6 +418,7 @@ class PackageOpsTest extends PackageOpsTestBase {
       } yield {
         when(persistentState.topologyStore).thenReturn(mock[TopologyStore[SynchronizerStore]])
         when(persistentState.psid).thenReturn(psId)
+        when(topologyManager.psid).thenReturn(psId)
         when(topologyClient.approximateTimestamp).thenReturn(approxTime)
         val asOfExpectedTime = if (queryAtApproximateTime) approxTime else CantonTimestamp.MaxValue
         when(

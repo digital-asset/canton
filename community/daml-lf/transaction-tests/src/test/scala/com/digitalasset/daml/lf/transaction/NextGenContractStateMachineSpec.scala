@@ -54,7 +54,7 @@ class NextGenContractStateMachineSpec
     val keyPkgName = Ref.PackageName.assertFromString("key-package-name")
     def keyValue(s: String) = V.ValueText(s)
     def keyHash(s: String) = crypto.Hash.hashPrivateKey(s)
-    def globalKey(k: String) = GlobalKey.assertBuild(
+    def globalKey(k: String) = GlobalKey(
       "Mod:T",
       keyPkgName,
       keyValue(k),
@@ -364,7 +364,7 @@ class NextGenContractStateMachineSpec
 
   implicit class GKeyStringOps(private val key: String) {
     def gkey: GlobalKey =
-      GlobalKey.assertBuild(
+      GlobalKey(
         tmplIdWithKey,
         pkgName,
         V.ValueText(key),
@@ -399,7 +399,7 @@ class NextGenContractStateMachineSpec
   private def toKeyWithMaintainers(
       key: String
   ): GlobalKeyWithMaintainers =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       tmplIdWithKey,
       V.ValueText(key),
       crypto.Hash.hashPrivateKey(key),
@@ -516,7 +516,7 @@ class NextGenContractStateMachineSpec
     }
 
     def toGlobalKey(keyId: Int): GlobalKey =
-      GlobalKey.assertBuild(
+      GlobalKey(
         tmplIdWithoutKey,
         pkgName,
         V.ValueInt64(keyId.toLong),

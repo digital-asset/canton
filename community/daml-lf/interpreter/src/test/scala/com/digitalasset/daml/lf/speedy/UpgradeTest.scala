@@ -551,7 +551,7 @@ class UpgradeTest
   val commonKeyHash = crypto.Hash.hashPrivateKey(alice)
 
   val v1_key =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       i"'-pkg1-':M:T",
       commonKeyValue,
       commonKeyHash,
@@ -560,7 +560,7 @@ class UpgradeTest
     )
 
   val v2_key =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       i"'-pkg2-':M:T",
       commonKeyValue,
       commonKeyHash,
@@ -578,7 +578,7 @@ class UpgradeTest
           ValueParty(bob),
           ValueInt64(100),
         )
-      val v_missingFieldKey = GlobalKeyWithMaintainers.assertBuild(
+      val v_missingFieldKey = GlobalKeyWithMaintainers(
         i"'-pkg2-':M:T",
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),
@@ -638,7 +638,7 @@ class UpgradeTest
     "missing non-optional field -- should be rejected" in {
       // should be caught by package upgradability check
       val v_missingField = makeRecord(ValueParty(alice))
-      val v_missingFieldKey = GlobalKeyWithMaintainers.assertBuild(
+      val v_missingFieldKey = GlobalKeyWithMaintainers(
         i"'-pkg1-':M:T",
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),
@@ -697,7 +697,7 @@ class UpgradeTest
           ValueParty(bob),
           ValueInt64(100),
         )
-      def key(templateId: Ref.TypeConId) = GlobalKeyWithMaintainers.assertBuild(
+      def key(templateId: Ref.TypeConId) = GlobalKeyWithMaintainers(
         templateId,
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),
@@ -912,7 +912,7 @@ class UpgradeTest
           ValueInt64(100),
           ValueText("extra"),
         )
-      val v1_extraTextKey = GlobalKeyWithMaintainers.assertBuild(
+      val v1_extraTextKey = GlobalKeyWithMaintainers(
         i"'-pkg1-':M:T",
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),
@@ -974,7 +974,7 @@ class UpgradeTest
           ValueInt64(100),
           ValueOptional(Some(ValueParty(bob))),
         )
-      val v1_extraSomeKey = GlobalKeyWithMaintainers.assertBuild(
+      val v1_extraSomeKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),
@@ -1048,7 +1048,7 @@ class UpgradeTest
           ValueInt64(100),
           Value.ValueOptional(None),
         )
-      val v1_extraNoneKey = GlobalKeyWithMaintainers.assertBuild(
+      val v1_extraNoneKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),
@@ -1102,7 +1102,7 @@ class UpgradeTest
           ValueInt64(100),
           Value.ValueOptional(None),
         )
-      val v1_extraNoneKey = GlobalKeyWithMaintainers.assertBuild(
+      val v1_extraNoneKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
         crypto.Hash.hashPrivateKey(alice),

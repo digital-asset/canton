@@ -131,7 +131,7 @@ object ExampleContractFactory extends EitherValues {
       maintainers: Set[Ref.Party] = Set(signatory),
       value: Long = nextInt64(),
   ): GlobalKeyWithMaintainers =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       templateId = templateId,
       value = Value.ValueInt64(value),
       valueHash =

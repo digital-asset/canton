@@ -57,11 +57,7 @@ object GlobalKeySerialization {
         .fromString(packageNameP)
         .leftMap(err => ProtoDeserializationError.ValueDeserializationError("GlobalKey.proto", err))
 
-      globalKey <- LfGlobalKey
-        .build(templateId, packageName, versionedKey.unversioned, hash)
-        .leftMap(err =>
-          ProtoDeserializationError.ValueDeserializationError("GlobalKey.key", err.toString)
-        )
+      globalKey = LfGlobalKey(templateId, packageName, versionedKey.unversioned, hash)
 
     } yield LfVersioned(versionedKey.version, globalKey)
   }

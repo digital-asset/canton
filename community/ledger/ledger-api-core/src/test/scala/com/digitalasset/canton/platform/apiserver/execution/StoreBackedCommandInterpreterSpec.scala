@@ -110,7 +110,7 @@ class StoreBackedCommandInterpreterSpec
         Ref.Party.assertFromString("unexpectedObs"),
       ),
       keyOpt = Some(
-        KeyWithMaintainers.assertBuild(
+        KeyWithMaintainers(
           templateId = identifier,
           LfValue.ValueTrue,
           crypto.Hash.hashPrivateKey("dummy-key-hash"),
@@ -434,7 +434,7 @@ class StoreBackedCommandInterpreterSpec
 
   private val keyHash: crypto.Hash = crypto.Hash.hashPrivateKey("nuck-test-key")
   private val globalKey: GlobalKey =
-    GlobalKey.assertBuild(identifier, packageName, Value.ValueText("key"), keyHash)
+    GlobalKey(identifier, packageName, Value.ValueText("key"), keyHash)
 
   private def mkContract(id: String): LfFatContractInst = {
     val (_, _, contract) = createCycleContract(id)

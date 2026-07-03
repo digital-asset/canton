@@ -213,14 +213,13 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             unsuffixedId(1),
             signatories = Set(signatory),
             key = Some(
-              LfGlobalKeyWithMaintainers
-                .assertBuild(
-                  templateId,
-                  contractArg.unversioned,
-                  crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),
-                  Set.empty,
-                  LfPackageName.assertFromString("package-name"),
-                )
+              LfGlobalKeyWithMaintainers(
+                templateId,
+                contractArg.unversioned,
+                crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),
+                Set.empty,
+                LfPackageName.assertFromString("package-name"),
+              )
             ),
           ),
           ExampleTransactionFactory.exerciseNode(
@@ -228,7 +227,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             signatories = Set(signatory),
             actingParties = Set(signatory),
             key = Some(
-              LfGlobalKeyWithMaintainers.assertBuild(
+              LfGlobalKeyWithMaintainers(
                 templateId,
                 contractArg.unversioned,
                 crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),

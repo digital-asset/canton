@@ -46,7 +46,7 @@ class SyncCryptoWithSessionKeysTest
   private def sessionKeysCache(p: SynchronizerCryptoClient) =
     p.syncCryptoSigner
       .asInstanceOf[SyncCryptoSignerWithSessionKeys]
-      .sessionKeysSigningCache
+      .sessionSigningKeysCache
       .asMap()
 
   private def sessionKeysVerificationCache(p: SynchronizerCryptoClient) =
@@ -55,7 +55,7 @@ class SyncCryptoWithSessionKeysTest
   private def cleanUpSessionKeysCache(p: SynchronizerCryptoClient): Unit = {
     p.syncCryptoSigner
       .asInstanceOf[SyncCryptoSignerWithSessionKeys]
-      .sessionKeysSigningCache
+      .sessionSigningKeysCache
       .invalidateAll()
     p.syncCryptoSigner.asInstanceOf[SyncCryptoSignerWithSessionKeys].pendingRequests.clear()
   }

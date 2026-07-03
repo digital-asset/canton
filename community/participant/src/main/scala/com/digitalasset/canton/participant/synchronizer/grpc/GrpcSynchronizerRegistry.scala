@@ -50,6 +50,7 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.time.{Clock, WallClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
@@ -140,7 +141,8 @@ class GrpcSynchronizerRegistry(
   }
 
   override def connect(
-      storedConfig: StoredSynchronizerConnectionConfig
+      storedConfig: StoredSynchronizerConnectionConfig,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
@@ -163,6 +165,7 @@ class GrpcSynchronizerRegistry(
         syncPersistentStateManager,
         info,
         connectionPool,
+        onboardingTransactions,
       )(
         cryptoApiProvider,
         clock,

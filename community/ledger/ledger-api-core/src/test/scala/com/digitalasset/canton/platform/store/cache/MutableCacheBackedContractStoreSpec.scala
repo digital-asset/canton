@@ -1033,7 +1033,7 @@ object MutableCacheBackedContractStoreSpec {
   private def party(name: String): Party = Party.assertFromString(name)
 
   private def globalKey(desc: String): Key =
-    Key.assertBuild(
+    Key(
       Identifier.assertFromString("some:template:name"),
       Ref.PackageName.assertFromString("pkg-name"),
       ValueText(desc),

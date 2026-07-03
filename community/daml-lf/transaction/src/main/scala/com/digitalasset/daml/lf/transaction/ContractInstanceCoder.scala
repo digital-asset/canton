@@ -124,11 +124,10 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
                   .left
                   .map(hashErr => DecodeError(hashErr.msg))
               )
-        gkey <- GlobalKey
-          .build(templateId, packageName, keyValue, hash)
-          .left
-          .map(hashErr => DecodeError(hashErr.msg))
-      } yield GlobalKeyWithMaintainers(gkey, maintainers)
+      } yield GlobalKeyWithMaintainers(
+        GlobalKey(templateId, packageName, keyValue, hash),
+        maintainers,
+      )
 
     private[transaction] def strictDecodeKeyWithMaintainers(
         version: SerializationVersion,

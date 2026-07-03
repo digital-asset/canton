@@ -33,7 +33,7 @@ class InputContractPackagesTest extends AnyWordSpec with BaseTest with TestIdFac
 
     "extract package ids associated with nodes" in {
 
-      val globalKey = LfGlobalKey.assertBuild(
+      val globalKey = LfGlobalKey(
         t(p2),
         defaultPackageName,
         Value.ValueUnit,

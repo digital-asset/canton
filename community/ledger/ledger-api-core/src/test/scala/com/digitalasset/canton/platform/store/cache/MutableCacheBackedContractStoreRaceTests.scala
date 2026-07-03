@@ -300,7 +300,7 @@ private object MutableCacheBackedContractStoreRaceTests {
       contractsCount: Long,
   ): Seq[Long => SimplifiedContractStateEvent] = {
     val keys = (0L until keysCount).map { keyIdx =>
-      keyIdx -> Key.assertBuild(
+      keyIdx -> Key(
         Identifier.assertFromString("pkgId:module:entity"),
         Ref.PackageName.assertFromString("pkg-name"),
         ValueInt64(keyIdx),

@@ -495,7 +495,7 @@ private[events] object TransactionLogUpdatesConversions {
   ): Future[apiEvent.CreatedEvent] = {
     val keyOpt = createdEvent.keyInfo
       .map { keyInfo =>
-        GlobalKeyWithMaintainers.assertBuild(
+        GlobalKeyWithMaintainers(
           templateId = createdEvent.templateId,
           value = keyInfo.value.unversioned,
           valueHash = keyInfo.hash,

@@ -41,44 +41,71 @@ object PartitionManager {
     ): E#FutureUnlessShutdownT[String]
   }
 
-  def create(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit ec: ExecutionContext
+  def create(
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+      onboardedSequencerEpochNumberO: Option[EpochNumber],
+  )(implicit
+      ec: ExecutionContext
   ): PekkoFutureUnlessShutdown[Option[(PartitionCreator[PekkoEnv], PartitionPruner[PekkoEnv])]] =
-    PekkoFutureUnlessShutdown(
-      functionFullName,
-      () =>
-        (for {
-          dbStorage <- OptionT.fromOption[FutureUnlessShutdown](
-            Some(storage)
-              .collect { case dbStorage: DbStorage => (dbStorage, dbStorage.profile) }
-              .collect { case (dbStorage, _: DbStorage.Profile.Postgres) => dbStorage }
-          )
-          initStore = new PruningManagerInitStore(dbStorage, timeouts, loggerFactory)
-          ((minPartitionNumbers, maxPartitionNumbers), partitionSize) <-
-            TraceContext.withNewTraceContext("initialize partition management")(
-              implicit traceContext =>
-                OptionT.liftF(for {
-                  maps <- initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
-                  partitionSize <- initStore.latestPartitionSizeEntry
-                } yield (maps, partitionSize))
+    TraceContext.withNewTraceContext("initialize partition management")(implicit traceContext =>
+      PekkoFutureUnlessShutdown(
+        functionFullName,
+        () =>
+          (for {
+            dbStorage <- OptionT.fromOption[FutureUnlessShutdown](
+              Some(storage)
+                .collect { case dbStorage: DbStorage => (dbStorage, dbStorage.profile) }
+                .collect { case (dbStorage, _: DbStorage.Profile.Postgres) => dbStorage }
             )
-        } yield (
-          new PartitionManager.PartitionCreatorImpl(
-            dbStorage,
-            timeouts,
-            loggerFactory,
-            maxPartitionNumbers,
-            partitionSize,
-          ),
-          new PartitionManager.PartitionPrunerImpl(
-            dbStorage,
-            timeouts,
-            loggerFactory,
-            minPartitionNumbers,
-            partitionSize,
-          ),
-        )).value,
-      orderingStage = Some(functionFullName),
+            initStore = new PruningManagerInitStore(dbStorage, timeouts, loggerFactory)
+            partitionSize <- OptionT.liftF(initStore.latestPartitionSizeEntry)
+            (partitionCreator, partitionPruner) <- OptionT.liftF {
+              def partitionCreator(maxPartitionNumbers: Map[String, Long]) =
+                new PartitionManager.PartitionCreatorImpl(
+                  dbStorage,
+                  timeouts,
+                  loggerFactory,
+                  maxPartitionNumbers,
+                  partitionSize,
+                )
+              def partitionPruner(minPartitionNumbers: Map[String, Long]) =
+                new PartitionManager.PartitionPrunerImpl(
+                  dbStorage,
+                  timeouts,
+                  loggerFactory,
+                  minPartitionNumbers,
+                  partitionSize,
+                )
+              onboardedSequencerEpochNumberO match {
+                case Some(epochNumber) =>
+                  // if we are initializing from a newly onboarded node, we could be starting from any arbitrary epochNumber,
+                  // in that case, we want to drop the default partitions created by the migrations, and manually create
+                  // the partitions we would need to support this epoch number
+                  for {
+                    _ <- initStore.cleanUpDefaultPartitions()
+                    // we give an uninitialized maxPartitionNumbers map to the partition creator so that it tracks the right
+                    // partition numbers when we call createPartitionsIfNeeded in the next line
+                    creator = partitionCreator(Map())
+                    _ <- creator.createPartitionsIfNeeded(epochNumber).futureUnlessShutdown()
+                    // after the correct partitions have been created we can initialize the partition pruner with the right minPartitionNumbers
+                    (minPartitionNumbers, _) <-
+                      initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
+                  } yield (creator, partitionPruner(minPartitionNumbers))
+                case None =>
+                  for {
+                    (minPartitionNumbers, maxPartitionNumbers) <-
+                      initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
+                  } yield (
+                    partitionCreator(maxPartitionNumbers),
+                    partitionPruner(minPartitionNumbers),
+                  )
+              }
+            }
+          } yield (partitionCreator, partitionPruner)).value,
+        orderingStage = Some(functionFullName),
+      )
     )
 
   private[pruning] val outputBlocksTable = "ord_metadata_output_blocks"
@@ -136,8 +163,9 @@ object PartitionManager {
       Partition(partitionName, tableName, newPartitionFrom, newPartitionTo)
     }
 
+    val currentPartitionNumber = newEpochNumber / partitionSize
     // we create partitions one step (partition size) ahead
-    val nextEpochPartitionNumber = (newEpochNumber + partitionSize) / partitionSize
+    val nextEpochPartitionNumber = currentPartitionNumber + 1
     // we have to support storing batches of epoch number twice the batch validity ahead, so
     // the step will be the max between that and the partition size
     val nextBatchesTableEpochPartitionNumber = {
@@ -145,15 +173,32 @@ object PartitionManager {
       (newEpochNumber + step) / partitionSize
     }
 
-    val partitions = (for {
-      partitionNumber <- (maxEpochPartitionNumbers.partitionNumber + 1) to nextEpochPartitionNumber
-      tableName <- epochPartitionedTables
-    } yield partition(tableName, partitionNumber))
+    val partitions = {
+      // if the max partition number we keep track of is -1, it means this is an uninitialized value, which happens
+      // with newly onboarded nodes. in that case, we create the current partition and the next.
+      // Otherwise, we create the next one, if it hasn't been created yet.
+      val initial =
+        if (maxEpochPartitionNumbers.partitionNumber == -1) currentPartitionNumber
+        else maxEpochPartitionNumbers.partitionNumber + 1
+      (for {
+        partitionNumber <- initial to nextEpochPartitionNumber
+        tableName <- epochPartitionedTables
+      } yield partition(tableName, partitionNumber))
+    }
 
-    val batchesPartitions = (for {
-      partitionNumber <-
-        (maxEpochPartitionNumbers.batchTablePartitionNumber + 1) to nextBatchesTableEpochPartitionNumber
-    } yield partition(batchesTable, partitionNumber))
+    val batchesPartitions = {
+      // if the max partition number we keep track of is -1, it means this is an uninitialized value, which happens
+      // with newly onboarded nodes. in that case, we create the partitions covering the validity window of batches,
+      // including in the past. Otherwise, we only create partitions ahead.
+      val initial =
+        if (maxEpochPartitionNumbers.batchTablePartitionNumber == -1)
+          (newEpochNumber - OrderingRequestBatch.BatchValidityDurationEpochs) / partitionSize
+        else maxEpochPartitionNumbers.batchTablePartitionNumber + 1
+      (for {
+        partitionNumber <-
+          initial to nextBatchesTableEpochPartitionNumber
+      } yield partition(batchesTable, partitionNumber))
+    }
 
     (
       (partitions ++ batchesPartitions).sortBy(_.from),
@@ -569,6 +614,25 @@ object PartitionManager {
             rows.map { case (tableName, _, maxPartition) => tableName -> maxPartition }.toMap
           (minPartitionsMap, maxPartitionsMap)
         }
+    }
+
+    def cleanUpDefaultPartitions()(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Unit] = {
+      val tables = batchesTable +: epochPartitionedTables
+      val partitionsToDelete = for {
+        table <- tables
+        partitions <- Seq(s"${table}_p0", s"${table}_p1")
+      } yield partitions
+      storage
+        .update_(
+          DBIO
+            .sequence(
+              partitionsToDelete.map(partitionName => sqlu"drop table if exists #$partitionName;")
+            )
+            .transactionally,
+          functionFullName,
+        )
     }
   }
 

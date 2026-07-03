@@ -47,7 +47,7 @@ object DisclosedContractCreator {
       fields = ImmArray(Some(Ref.Name.assertFromString("something")) -> ValueTrue),
     )
 
-    private val keyWithMaintainers: GlobalKeyWithMaintainers = GlobalKeyWithMaintainers.assertBuild(
+    private val keyWithMaintainers: GlobalKeyWithMaintainers = GlobalKeyWithMaintainers(
       lf.templateId,
       LfValue.ValueRecord(
         None,

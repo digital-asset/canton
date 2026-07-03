@@ -137,7 +137,7 @@ trait Endpoints extends NamedLogging {
             TracedInput(i)
           ) // We do not pass traceheaders on Websockets
             .map(out => Right[JsCantonError, O](out))
-            .recover(handleErrorInSocket(TraceContext.empty))
+            .recover(handleErrorInSocket(jwt.traceContext()))
         // According to tapir documentation pekko-http does not expose control frames (Ping, Pong and Close)
         //  We cannot send error as close frame
         Future.successful(errorHandlingService)
@@ -293,9 +293,7 @@ trait Endpoints extends NamedLogging {
   ): Endpoint[CallerContext, TracedInput[P], E, Unit, Any] =
     endpoint.mapIn(traceHeadersMapping[P]())
 
-  implicit class FutureOps[R](future: Future[R]) {
-    // TODO(#27556): Pass TraceContext from caller
-    implicit val traceContext: TraceContext = TraceContext.empty
+  implicit class FutureOps[R](future: Future[R])(implicit traceContext: TraceContext) {
     def resultToRight: Future[Either[JsCantonError, R]] =
       future
         .map(Right(_))

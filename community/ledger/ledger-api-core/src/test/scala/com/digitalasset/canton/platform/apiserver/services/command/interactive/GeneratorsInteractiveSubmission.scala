@@ -26,7 +26,6 @@ import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Time}
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
-  GlobalKey,
   Node,
   NodeId,
   SerializationVersion as LfSerializationVersion,
@@ -110,9 +109,8 @@ final class GeneratorsInteractiveSubmission(
         .copy(
           keyOpt = node.keyOpt.map { globalKeyWithMaintainers =>
             globalKeyWithMaintainers.copy(
-              globalKey = GlobalKey.assertWithRenormalizedValue(
-                globalKeyWithMaintainers.globalKey,
-                normalizeValue(globalKeyWithMaintainers.globalKey.key),
+              globalKeyWithMaintainers.globalKey.copy(
+                key = normalizeValue(globalKeyWithMaintainers.globalKey.key)
               )
             )
           }
@@ -122,10 +120,7 @@ final class GeneratorsInteractiveSubmission(
       node
         .copy(
           key = node.key.copy(
-            globalKey = GlobalKey.assertWithRenormalizedValue(
-              node.key.globalKey,
-              normalizeValue(node.key.globalKey.key),
-            )
+            globalKey = node.key.globalKey.copy(key = normalizeValue(node.key.globalKey.key))
           )
         )
         .asInstanceOf[N]

@@ -37,21 +37,21 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
     val party = Ref.Party.assertFromString("party1")
 
     val key1 = GlobalKeyWithMaintainers(
-      globalKey = GlobalKey.assertBuild(
+      globalKey = GlobalKey(
         templateId = ExampleContractFactory.templateId,
         key = Value.ValueInt64(10),
         packageName = ExampleContractFactory.packageName,
-        keyHash = crypto.Hash.hashPrivateKey("1"),
+        hash = crypto.Hash.hashPrivateKey("1"),
       ),
       maintainers = Set(party),
     )
 
     val key2 = GlobalKeyWithMaintainers(
-      globalKey = GlobalKey.assertBuild(
+      globalKey = GlobalKey(
         templateId = ExampleContractFactory.templateId,
         key = Value.ValueInt64(20),
         packageName = ExampleContractFactory.packageName,
-        keyHash = crypto.Hash.hashPrivateKey("2"),
+        hash = crypto.Hash.hashPrivateKey("2"),
       ),
       maintainers = Set(party),
     )

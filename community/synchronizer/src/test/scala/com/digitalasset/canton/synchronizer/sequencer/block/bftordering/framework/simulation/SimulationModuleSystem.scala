@@ -178,10 +178,6 @@ object SimulationModuleSystem {
     override def abort(failure: Throwable): Nothing =
       fail(failure)
 
-    override def blockingAwait[X](future: SimulationFuture[X]): X = future
-      .resolveValue()
-      .fold(abort(_), identity)
-
     override def blockingAwait[X](future: SimulationFuture[X], duration: FiniteDuration): X = future
       .resolveValue()
       .fold(abort(_), identity)

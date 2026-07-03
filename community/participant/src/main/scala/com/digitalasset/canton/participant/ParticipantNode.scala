@@ -366,7 +366,6 @@ class ParticipantNodeBootstrap(
         participantId = participantId,
         stateManager = manager,
         topologyLookup = topologyLookup,
-        initialProtocolVersion = ProtocolVersion.latest,
         loggerFactory = ParticipantNodeBootstrap.this.loggerFactory,
         timeouts = timeouts,
         futureSupervisor = futureSupervisor,

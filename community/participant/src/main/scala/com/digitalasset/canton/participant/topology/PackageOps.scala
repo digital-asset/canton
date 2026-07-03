@@ -41,7 +41,6 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FailureMode, SimpleExecutionQueue}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.nonempty.NonEmpty
@@ -117,7 +116,6 @@ class PackageOpsImpl(
     val participantId: ParticipantId,
     stateManager: SyncPersistentStateManager,
     topologyLookup: TopologyLookup,
-    initialProtocolVersion: ProtocolVersion,
     val loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
@@ -523,7 +521,7 @@ class PackageOpsImpl(
             serial = Some(nextSerial),
             signingKeys = Seq.empty,
             namespacesToSignFor = Seq.empty,
-            protocolVersion = initialProtocolVersion,
+            protocolVersion = topologyManager.psid.protocolVersion,
             expectFullAuthorization = true,
             forceChanges = forceFlags,
             waitToBecomeEffective = waitToBecomeEffective,

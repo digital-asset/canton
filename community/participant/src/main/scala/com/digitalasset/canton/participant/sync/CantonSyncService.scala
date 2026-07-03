@@ -113,6 +113,7 @@ import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClientWithInit,
   TopologySnapshot,
 }
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
@@ -1204,6 +1205,7 @@ class CantonSyncService(
             Hence, we decrease the level from WARN to INFO.
              */
             logLevelFailureInitialAttempt = Level.INFO,
+            onboardingTransactions = None,
           )(tc),
         disconnectSynchronizer = disconnectSynchronizer(finishLsuRequest.alias)(_),
         metrics,
@@ -1349,10 +1351,16 @@ class CantonSyncService(
       synchronizerAlias: SynchronizerAlias,
       keepRetrying: Boolean,
       connectSynchronizer: ConnectSynchronizer,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[PhysicalSynchronizerId]] =
-    connectionsManager.connectSynchronizer(synchronizerAlias, keepRetrying, connectSynchronizer)
+    connectionsManager.connectSynchronizer(
+      synchronizerAlias,
+      keepRetrying,
+      connectSynchronizer,
+      onboardingTransactions = onboardingTransactions,
+    )
 
   /** Get the synchronizer connection corresponding to the alias. Fail if no connection can be
     * found. If more than one connections are found, takes the highest one.
@@ -1432,6 +1440,7 @@ class CantonSyncService(
             alias,
             ConnectSynchronizer.Connect,
             skipStatusCheck = true,
+            onboardingTransactions = None,
           )
 
         success <- identityPusher

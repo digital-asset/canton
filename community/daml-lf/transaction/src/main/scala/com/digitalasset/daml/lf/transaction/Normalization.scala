@@ -93,8 +93,7 @@ class Normalization {
     x match {
       case GlobalKeyWithMaintainers(key, maintainers) =>
         GlobalKeyWithMaintainers(
-          GlobalKey
-            .assertBuild(key.templateId, key.packageName, normValue(version)(key.key), key.hash),
+          GlobalKey(key.templateId, key.packageName, normValue(version)(key.key), key.hash),
           maintainers,
         )
     }

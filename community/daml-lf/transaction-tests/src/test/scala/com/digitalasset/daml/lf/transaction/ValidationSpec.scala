@@ -76,7 +76,7 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
   private val samValue2: Val = V.ValueText(samContractId1.coid)
 
   private val samKWM1 =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       samTemplateId1,
       samValue1,
       crypto.Hash.hashPrivateKey("dummy-key-hash-1"),
@@ -84,7 +84,7 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
       somePkgName,
     )
   private val samKWM2 =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       samTemplateId1,
       samValue1,
       crypto.Hash.hashPrivateKey("dummy-key-hash-2"),
@@ -92,7 +92,7 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
       somePkgName,
     )
   private val samKWM3 =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       samTemplateId2,
       samValue2,
       crypto.Hash.hashPrivateKey("dummy-key-hash-3"),

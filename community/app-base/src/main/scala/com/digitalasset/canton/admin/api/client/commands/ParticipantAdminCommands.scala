@@ -62,7 +62,13 @@ import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.topology.transaction.{GrpcConnection, ParticipantPermission}
+import com.digitalasset.canton.topology.transaction.{
+  GrpcConnection,
+  ParticipantPermission,
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyMapping,
+}
 import com.digitalasset.canton.topology.{
   ParticipantId,
   PartyId,
@@ -1515,6 +1521,7 @@ object ParticipantAdminCommands {
     final case class ConnectSynchronizer(
         config: InternalSynchronizerConnectionConfig,
         sequencerConnectionValidation: SequencerConnectionValidation,
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]],
     ) extends Base[v30.ConnectSynchronizerRequest, v30.ConnectSynchronizerResponse, Unit] {
 
       override protected def createRequest(): Either[String, v30.ConnectSynchronizerRequest] =
@@ -1522,6 +1529,7 @@ object ParticipantAdminCommands {
           v30.ConnectSynchronizerRequest(
             config = Some(config.toProtoV30),
             sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,
+            onboardingTransactions = onboardingTransactions.map(_.toByteString),
           )
         )
 

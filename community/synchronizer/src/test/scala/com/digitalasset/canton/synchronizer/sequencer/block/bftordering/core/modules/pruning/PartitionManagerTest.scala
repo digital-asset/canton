@@ -56,6 +56,27 @@ class PartitionManagerTest extends AsyncWordSpec with BftSequencerBaseTest {
           partitionName shouldBe s"${tableName}_p3"
       }
     }
+    // this use case is used with newly onboarded nodes
+    "if given uninitialized -1 value, create current partition and the next" in {
+      // testing on common tables (excluding batches table) first.
+      // we see that for each table, we create both the partition for the current epoch and one partition ahead as well
+      inside(
+        newPartitions(partitionSize, EpochNumber(3550), HighestCreatedPartitionNumbers(-1, 50))
+      ) { case (partitions, HighestCreatedPartitionNumbers(36, 50)) =>
+        partitions should have size (12)
+        partitions.collect { case Partition(_, _, 3500, 3600) => } should have size (6)
+        partitions.collect { case Partition(_, _, 3600, 3700) => } should have size (6)
+      }
+
+      // for the batches table we start creating partitions 500 epochs in the past (batch validity) all the way to
+      // 1000 epochs ahead (twice batch validity, which is what we are supposed to support).
+      inside(
+        newPartitions(partitionSize, EpochNumber(3550), HighestCreatedPartitionNumbers(50, -1))
+      ) { case (partitions, HighestCreatedPartitionNumbers(50, 45)) =>
+        partitions should have size (16)
+        forAll(partitions)(p => p.tableName shouldBe PartitionManager.batchesTable)
+      }
+    }
 
     "prune partitions below current epoch number or block number" in {
       // nothing to prune because already pruned
@@ -130,7 +151,7 @@ class PartitionManagerDatabaseTest
     with BftSequencerBaseTest
     with PostgresTest {
 
-  def create() = PartitionManager.create(storage, timeouts, loggerFactory)
+  def create() = PartitionManager.create(storage, timeouts, loggerFactory, None)
 
   override def cleanDb(storage: DbStorage)(implicit
       tc: TraceContext
@@ -320,6 +341,45 @@ class PartitionManagerDatabaseTest
           getVacuumStats(partitionName).onShutdown(fail()).futureValue shouldBe (2, 0)
         }
         _ = creator.close()
+      } yield succeed).onShutdown(fail())
+    }
+  }
+
+}
+
+class PartitionManagerOnboardingTest
+    extends AsyncWordSpec
+    with BftSequencerBaseTest
+    with PostgresTest {
+
+  def create(onboardedSequencerEpochNumber: EpochNumber) =
+    PartitionManager.create(storage, timeouts, loggerFactory, Some(onboardedSequencerEpochNumber))
+
+  override def cleanDb(storage: DbStorage)(implicit
+      tc: TraceContext
+  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
+
+  override def mkDbConfig(basicConfig: DbBasicConfig): DbConfig.Postgres = {
+    val defaultDbConfig = super.mkDbConfig(basicConfig)
+    defaultDbConfig.copy(parameters =
+      DbParametersConfig(partitions = PartitionConfig(initialBftOrdererTablesPartitionSize = 100))
+    )
+  }
+
+  "Onboarding" should {
+    "be able to start up on a specified initial epoch number" in {
+      val initStore = new PruningManagerInitStore(storage, timeouts, loggerFactory)
+      def getMinMaxPartitionNumbers =
+        initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
+      (for {
+        _ <- create(EpochNumber(3500L)).futureUnlessShutdown()
+        (minMap0, maxMap0) <- getMinMaxPartitionNumbers
+        _ = {
+          maxMap0(PartitionManager.batchesTable) shouldBe (45)
+          forAll((maxMap0 - PartitionManager.batchesTable).values)(_ shouldBe (36L))
+          minMap0(PartitionManager.batchesTable) shouldBe (30)
+          forAll((minMap0 - PartitionManager.batchesTable).values)(_ shouldBe (35L))
+        }
       } yield succeed).onShutdown(fail())
     }
   }

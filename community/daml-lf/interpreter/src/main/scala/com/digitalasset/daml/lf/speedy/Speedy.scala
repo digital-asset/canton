@@ -140,7 +140,7 @@ private[lf] object Speedy {
     val lfValue: V = globalKey.key
     def renormalizedGlobalKeyWithMaintainers: GlobalKeyWithMaintainers =
       globalKeyWithMaintainers.copy(
-        globalKey = GlobalKey.assertWithRenormalizedValue(globalKey, key.toNormalizedValue)
+        globalKey = globalKey.copy(key = key.toNormalizedValue)
       )
   }
 
@@ -1403,14 +1403,7 @@ private[lf] object Speedy {
     private[lf] def globalKey(pkgName: PackageName, templateId: TypeConId, keyValue: SValue) = {
       for {
         hash <- SValueHash.hashContractKey(pkgName, templateId.qualifiedName, keyValue)
-        res <- GlobalKey
-          .build(
-            templateId,
-            pkgName,
-            keyValue.toNormalizedValue,
-            hash,
-          )
-      } yield res
+      } yield GlobalKey(templateId, pkgName, keyValue.toNormalizedValue, hash)
     }.toOption
 
     private[lf] def assertGlobalKey(pkgName: PackageName, templateId: TypeConId, keyValue: SValue) =

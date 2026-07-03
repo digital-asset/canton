@@ -1312,7 +1312,7 @@ object InMemoryStateUpdaterSpec {
           ContractStateEvent.Activated(
             contractId = createdEvent.contractId,
             globalKey = createdEvent.keyInfo.map(keyInfo =>
-              Key.assertBuild(
+              Key(
                 createdEvent.templateId,
                 createdEvent.packageName,
                 keyInfo.value.unversioned,

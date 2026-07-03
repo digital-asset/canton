@@ -47,7 +47,7 @@ abstract class BaseNodeHashTest
 
   // Global Keys //
   protected val globalKey = GlobalKeyWithMaintainers(
-    GlobalKey.assertBuild(
+    GlobalKey(
       defRef("module_key", "name"),
       PackageName.assertFromString("package_name_key"),
       VA.text.inj("hello"),
@@ -56,7 +56,7 @@ abstract class BaseNodeHashTest
     Set[Party](Ref.Party.assertFromString("david")),
   )
   protected val globalKey2 = GlobalKeyWithMaintainers(
-    GlobalKey.assertBuild(
+    GlobalKey(
       defRef("module_key", "name"),
       PackageName.assertFromString("package_name_key"),
       VA.text.inj("bye"),

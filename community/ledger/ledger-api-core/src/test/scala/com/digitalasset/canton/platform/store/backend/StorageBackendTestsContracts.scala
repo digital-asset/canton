@@ -29,13 +29,13 @@ private[backend] trait StorageBackendTestsContracts
   behavior of "StorageBackend (contracts)"
 
   it should "correctly find key states using non-unique key lookup with limit 1" in {
-    val key1 = GlobalKey.assertBuild(
+    val key1 = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueUnit,
       crypto.Hash.hashPrivateKey("dummy-key-hash-1"),
     )
-    val key2 = GlobalKey.assertBuild(
+    val key2 = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueText("value"),
@@ -183,17 +183,17 @@ private[backend] trait StorageBackendTestsContracts
   }
 
   it should "correctly find non unique contract key contracts" in {
-    val key1 = GlobalKey.assertBuild(
+    val key1 = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueUnit,
       crypto.Hash.hashPrivateKey("1"),
     )
-    val key2 = GlobalKey.assertBuild(
+    val key2 = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueText("value"),
-      keyHash = crypto.Hash.hashPrivateKey("2"),
+      hash = crypto.Hash.hashPrivateKey("2"),
     )
     val internalContractId = 123L
     val internalContractId2 = 223L
@@ -380,17 +380,17 @@ private[backend] trait StorageBackendTestsContracts
   }
 
   it should "correctly find non unique contract key contracts in batch via nonUniqueContractKeysPlain" in {
-    val key1 = GlobalKey.assertBuild(
+    val key1 = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueUnit,
       crypto.Hash.hashPrivateKey("batch-1"),
     )
-    val key2 = GlobalKey.assertBuild(
+    val key2 = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueText("value"),
-      keyHash = crypto.Hash.hashPrivateKey("batch-2"),
+      hash = crypto.Hash.hashPrivateKey("batch-2"),
     )
     val iid1 = 101L
     val iid2 = 102L
@@ -587,7 +587,7 @@ private[backend] trait StorageBackendTestsContracts
 
   it should "correctly handle various create, assign, unassign, archive event sequences in batch" in {
     val keyHash = crypto.Hash.hashPrivateKey("mixed-events")
-    val key = GlobalKey.assertBuild(
+    val key = GlobalKey(
       Identifier.assertFromString("A:B:C"),
       someTemplateId.pkg.name,
       ValueUnit,

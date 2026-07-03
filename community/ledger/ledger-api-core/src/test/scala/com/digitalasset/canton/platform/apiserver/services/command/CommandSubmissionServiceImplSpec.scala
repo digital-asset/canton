@@ -130,13 +130,12 @@ class CommandSubmissionServiceImplSpec
             LfError.Interpretation(
               LfError.Interpretation.DamlException(
                 LfInterpretationError.DuplicateContractKey(
-                  GlobalKey
-                    .assertBuild(
-                      tmplId,
-                      PackageName.assertFromString("pkg-name"),
-                      Value.ValueUnit,
-                      crypto.Hash.hashPrivateKey("dummy-key-hash"),
-                    )
+                  GlobalKey(
+                    tmplId,
+                    PackageName.assertFromString("pkg-name"),
+                    Value.ValueUnit,
+                    crypto.Hash.hashPrivateKey("dummy-key-hash"),
+                  )
                 )
               ),
               None,
