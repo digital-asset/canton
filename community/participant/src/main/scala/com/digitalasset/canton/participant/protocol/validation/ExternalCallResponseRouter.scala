@@ -20,23 +20,35 @@ import com.digitalasset.daml.lf.data.Bytes
 
 import scala.concurrent.ExecutionContext
 
+/** A received view together with the confirming parties of the view that this participant hosts.
+  */
 private[validation] final case class ViewWithHostedParties(
     viewPosition: ViewPosition,
     validationResult: ViewValidationResult,
     hostedConfirmingParties: Set[LfPartyId],
 )
 
+/** A recorded external-call result selected for re-validation, together with the hosted checking
+  * parties whose approval of the view depends on it.
+  */
 private[validation] final case class ExternalCallValidationOccurrence(
     viewPosition: ViewPosition,
     result: ViewParticipantData.ViewExternalCallResult,
     hostedCheckingParties: Set[LfPartyId],
 )
 
+/** An abstention from confirming a view because a recorded external-call result could not be
+  * re-validated.
+  */
 private[validation] final case class ExternalCallValidationAbstain(
     viewPosition: ViewPosition,
     reason: String,
 )
 
+/** Per-party outcome of re-validating recorded external-call results: `rejects` holds the
+  * re-validation mismatches (as inconsistencies carrying the recorded and the computed output),
+  * `abstains` holds the per-view abstentions where a result could not be re-validated.
+  */
 private[validation] final case class ExternalCallValidationRoutes(
     rejects: Map[LfPartyId, Seq[Inconsistency]],
     abstains: Map[LfPartyId, Seq[ExternalCallValidationAbstain]],
@@ -82,9 +94,10 @@ private[validation] final case class ExternalCallValidationRoutes(
 
 /** Per-request external-call routing state.
   *
-  * Computes which hosted confirming parties must reject (or whose model-conformance rejections are
-  * superseded) because of external-call result disagreements, both for results visible across views
-  * and for disagreements surfaced during replay reinterpretation.
+  * Aggregates the two disagreement sources of a request, namely the results recorded across the
+  * received views (checked by [[ExternalCallConsistencyChecker]]) and the disagreements raised
+  * during replay reinterpretation, and computes which hosted confirming parties must reject because
+  * of them (or which model-conformance rejections they supersede).
   */
 private[validation] final class ExternalCallRoutingContext(
     recordedResultDisagreements: Seq[DAMLe.ExternalCallRecordedResultDisagreement],
@@ -109,6 +122,10 @@ private[validation] final class ExternalCallRoutingContext(
       .map(_._1)
       .toSet
 
+  /** Consistency of the external-call results recorded across all received views, checked for the
+    * union of the hosted confirming parties of all views. See
+    * [[ExternalCallConsistencyChecker.Result]].
+    */
   lazy val recordedConsistencyResult: ExternalCallConsistencyChecker.Result =
     if (hasAnyVisibleExternalCallResults) {
       val allHostedConfirmingParties =
@@ -119,11 +136,22 @@ private[validation] final class ExternalCallRoutingContext(
       )
     } else ExternalCallConsistencyChecker.Result.empty
 
+  /** Whether `error` is an external-call replay disagreement for which some hosted confirming party
+    * checks a matching occurrence. Such errors are expected to supersede the generic
+    * model-conformance rejection of the view: the affected parties reject with the disagreement
+    * inconsistency provided by [[inconsistenciesForView]] instead.
+    */
   def isRoutableModelConformanceError(error: ModelConformanceChecker.Error): Boolean =
     ExternalCallResponseRouter
       .externalCallRecordedResultDisagreement(error)
       .exists(routableRecordedExternalCallDisagreements)
 
+  /** Yields for every party in `hostedConfirmingParties` at most one inconsistency among the
+    * disagreeing external-call results that the party checks in the given view: from the results
+    * recorded across views where the party is affected there, otherwise from the replay
+    * disagreements. Parties in the result are expected to reject the view with the returned
+    * inconsistency.
+    */
   def inconsistenciesForView(
       viewPosition: ViewPosition,
       hostedConfirmingParties: Set[LfPartyId],
@@ -156,10 +184,39 @@ private[validation] final class ExternalCallRoutingContext(
   }
 }
 
-/** Routes external-call result disagreements to per-view, per-party local verdicts.
+/** Routes external-call validation outcomes to per-view, per-party local verdicts.
   *
-  * Holds the external-call validator used to re-run calls during validation. Stateless helpers that
-  * do not need the validator live on the companion object.
+  * External-call verdicts derive from three sources:
+  *   - disagreements between the results recorded across the views of the transaction, computed by
+  *     [[ExternalCallConsistencyChecker]] (see
+  *     [[ExternalCallRoutingContext.recordedConsistencyResult]]),
+  *   - disagreements within the replay data of a single view, surfaced by reinterpretation as
+  *     [[com.digitalasset.canton.participant.util.DAMLe.ExternalCallRecordedResultDisagreement]]
+  *     model-conformance errors (see [[ExternalCallRoutingContext.inconsistenciesForView]]),
+  *   - re-validation of undisputed recorded results against the extension service (see
+  *     [[validationOccurrences]] and [[validateExternalCalls]]).
+  *
+  * Intended data flow for a request: construct an [[ExternalCallRoutingContext]] from the view
+  * validation results and the reinterpretation disagreements; alarm on all visible recorded
+  * disagreements, including those that affect no hosted party
+  * ([[reportVisibleRecordedDisagreementAlarms]]); obtain the per-party disagreement rejections of
+  * every view ([[ExternalCallRoutingContext.inconsistenciesForView]]); for the views that would
+  * otherwise be approved, select the candidate occurrences for re-validation
+  * ([[validationOccurrences]]) and re-run them against the extension service
+  * ([[validateExternalCalls]]). The resulting [[ExternalCallValidationRoutes]] are folded into the
+  * per-view verdicts via [[ExternalCallValidationRoutes.rejectsForView]] and
+  * [[ExternalCallValidationRoutes.abstainsForView]], with rejections taking precedence:
+  * [[ExternalCallValidationRoutes.abstainsForView]] is fed only the parties that are not already
+  * rejecting. Net effect per hosted confirming party: it rejects the disagreements and mismatches
+  * among the occurrences it checks, abstains where re-validation was not possible, and approves
+  * otherwise.
+  *
+  * Stateless helpers that do not need the validator live on the companion object.
+  *
+  * @param externalCallValidator
+  *   The validator used to re-run external calls during validation.
+  * @param externalCallValidationParallelism
+  *   Bounds the number of concurrent validator calls in [[validateExternalCalls]].
   */
 private[validation] class ExternalCallResponseRouter(
     externalCallValidator: ExternalCallValidator,
@@ -169,6 +226,15 @@ private[validation] class ExternalCallResponseRouter(
 
   import ExternalCallResponseRouter.*
 
+  /** Selects the recorded external-call results that a view is expected to re-validate against the
+    * extension service before its hosted parties approve it.
+    *
+    * For every view in `approvingViewPositions` (mapping the views that would otherwise be approved
+    * to their approving hosted parties), every recorded result of the view is selected for the
+    * parties that check it and would approve, excluding the parties that already reject the view
+    * because of a disagreement ([[ExternalCallRoutingContext.inconsistenciesForView]]). Results
+    * with no such party yield no occurrence.
+    */
   def validationOccurrences(
       viewsWithHostedParties: Seq[ViewWithHostedParties],
       approvingViewPositions: Map[ViewPosition, Set[LfPartyId]],
@@ -204,6 +270,24 @@ private[validation] class ExternalCallResponseRouter(
         }
       }
 
+  /** Re-validates the selected occurrences against the extension service and routes the verdicts to
+    * parties.
+    *
+    * Occurrences are grouped by their semantic call
+    * ([[com.digitalasset.canton.participant.util.DAMLe.ExternalCallKey]]). Only keys whose selected
+    * occurrences all record the same output are re-validated: once per key, with the number of
+    * concurrent validator calls bounded by `externalCallValidationParallelism`. Keys with
+    * disagreeing recorded outputs are not re-validated; those disagreements are covered by
+    * [[ExternalCallRoutingContext]] (per-party rejections where a hosted party checks conflicting
+    * occurrences, visible-disagreement alarms otherwise).
+    *
+    * Verdict routing, applied to every hosted checking party of every occurrence of the key:
+    * [[ExternalCallValidator.Mismatched]] yields a rejection (an [[Inconsistency]] carrying the
+    * recorded and the computed output), [[ExternalCallValidator.UnableToValidate]] yields an
+    * abstention with the given reason, and [[ExternalCallValidator.Matched]] yields nothing. The
+    * per-party sequences of the returned [[ExternalCallValidationRoutes]] are deduplicated and
+    * sorted, so the routes are deterministic.
+    */
   def validateExternalCalls(
       occurrences: Seq[ExternalCallValidationOccurrence]
   )(implicit
@@ -249,6 +333,10 @@ private[validation] class ExternalCallResponseRouter(
       }
   }
 
+  /** Emits one [[ExternalCallValidationError.ExternalCallResultDisagreementAlarm]] per disagreement
+    * among the recorded results visible to this participant, independently of whether a hosted
+    * party is affected.
+    */
   def reportVisibleRecordedDisagreementAlarms(
       requestId: RequestId,
       recordedConsistencyResult: ExternalCallConsistencyChecker.Result,
