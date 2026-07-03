@@ -97,7 +97,8 @@ private[validation] final case class ExternalCallValidationRoutes(
   * Aggregates the two disagreement sources of a request, namely the results recorded across the
   * received views (checked by [[ExternalCallConsistencyChecker]]) and the disagreements raised
   * during replay reinterpretation, and computes which hosted confirming parties must reject because
-  * of them (or which model-conformance rejections they supersede).
+  * of them (or which model-conformance rejections they suppress and partially replace, see
+  * [[isRoutableModelConformanceError]]).
   */
 private[validation] final class ExternalCallRoutingContext(
     recordedResultDisagreements: Seq[DAMLe.ExternalCallRecordedResultDisagreement],
@@ -140,9 +141,9 @@ private[validation] final class ExternalCallRoutingContext(
     * checks a matching occurrence. Such an error is expected to suppress the generic (malformed)
     * model-conformance rejection of the request; in its place, the hosted confirming parties that
     * check a matching occurrence reject per view with the disagreement inconsistency provided by
-    * [[inconsistenciesForView]]. Note that the routed rejections cover fewer parties than the
-    * suppressed blanket rejection: views without a matching occurrence and confirming parties that
-    * do not check the result are not rejected through this path.
+    * [[inconsistenciesForView]]. Note that the routed rejections cover at most as many parties as
+    * the suppressed blanket rejection, and in general fewer: views without a matching occurrence
+    * and confirming parties that do not check the result are not rejected through this path.
     */
   def isRoutableModelConformanceError(error: ModelConformanceChecker.Error): Boolean =
     ExternalCallResponseRouter
