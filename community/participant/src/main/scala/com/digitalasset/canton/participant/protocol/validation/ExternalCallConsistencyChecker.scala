@@ -130,12 +130,8 @@ object ExternalCallConsistencyChecker {
     viewValidationResults.toSeq
       .sortBy(_._1)(ViewPosition.orderViewPosition.toOrdering)
       .flatMap { case (viewPosition, viewValidationResult) =>
-        val viewParticipantData = viewValidationResult.view.viewParticipantData
-        if (
-          viewParticipantData.supportsExternalCallResults &&
-          viewParticipantData.externalCallResults.nonEmpty
-        ) {
-          viewParticipantData.externalCallResults.map { externalCallResult =>
+        viewValidationResult.view.viewParticipantData.externalCallResults.map {
+          externalCallResult =>
             val occurrence = ExternalCallOccurrence(
               viewPosition,
               externalCallResult.exerciseIndex,
@@ -147,8 +143,7 @@ object ExternalCallConsistencyChecker {
               occurrence,
               externalCallResult.checkingParties,
             )
-          }
-        } else Seq.empty
+        }
       }
 
   private def visibleInconsistencies(
