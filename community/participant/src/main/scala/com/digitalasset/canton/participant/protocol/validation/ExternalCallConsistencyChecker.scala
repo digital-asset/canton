@@ -186,13 +186,9 @@ object ExternalCallConsistencyChecker {
       hostedConfirmingParties: Set[LfPartyId],
   ): Result = {
     val occurrences = visibleOccurrences(viewValidationResults)
-    if (occurrences.isEmpty) Result.empty
-    else {
-      val visible = visibleInconsistencies(occurrences)
-      Result(
-        inconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
-        visibleInconsistencies = visible,
-      )
-    }
+    Result(
+      inconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
+      visibleInconsistencies = visibleInconsistencies(occurrences),
+    )
   }
 }
