@@ -97,14 +97,14 @@ private[validation] final class ExternalCallRoutingContext(
       viewParticipantData.externalCallResults.nonEmpty
     }
 
-  private lazy val recordedReplayDisagreementInconsistencies =
+  private lazy val recordedExternalCallDisagreementInconsistencies =
     ExternalCallResponseRouter.recordedExternalCallDisagreementInconsistencies(
       recordedResultDisagreements,
       viewsWithHostedParties,
     )
 
   private lazy val routableRecordedExternalCallDisagreements =
-    recordedReplayDisagreementInconsistencies.valuesIterator
+    recordedExternalCallDisagreementInconsistencies.valuesIterator
       .flatMap(_.iterator)
       .map(_._1)
       .toSet
@@ -141,7 +141,7 @@ private[validation] final class ExternalCallRoutingContext(
       recordedResultInconsistencies.map(_._1).toSet
 
     val recordedReplayInconsistencies =
-      recordedReplayDisagreementInconsistencies.toSeq.flatMap {
+      recordedExternalCallDisagreementInconsistencies.toSeq.flatMap {
         case (party, disagreementInconsistencies)
             if hostedConfirmingParties(party) &&
               !partiesWithRecordedResultInconsistencies(party) =>
