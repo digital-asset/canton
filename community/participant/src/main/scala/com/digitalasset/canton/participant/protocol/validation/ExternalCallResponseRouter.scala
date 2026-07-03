@@ -41,6 +41,11 @@ private[validation] final case class ExternalCallValidationRoutes(
     rejects: Map[LfPartyId, Seq[Inconsistency]],
     abstains: Map[LfPartyId, Seq[ExternalCallValidationAbstain]],
 ) {
+
+  /** Yields for every party in `hostedConfirmingParties` an inconsistency in `rejects(party)` that
+    * has the given `viewPosition` (provided it exists). Picks the smallest inconsistency per party
+    * by [[ExternalCallConsistencyChecker.orderInconsistency]] so that the result is deterministic.
+    */
   def rejectsForView(
       viewPosition: ViewPosition,
       hostedConfirmingParties: Set[LfPartyId],
