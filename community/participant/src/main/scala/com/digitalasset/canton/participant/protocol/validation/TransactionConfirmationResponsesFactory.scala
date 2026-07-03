@@ -451,10 +451,9 @@ class TransactionConfirmationResponsesFactory(
             externalCallRouting,
           )
 
-        localValidationRoutes <-
-          if (localValidationOccurrences.isEmpty)
-            FutureUnlessShutdown.pure(ExternalCallValidationRoutes(Map.empty, Map.empty))
-          else externalCallRouter.validateExternalCalls(localValidationOccurrences)
+        localValidationRoutes <- externalCallRouter.validateExternalCalls(
+          localValidationOccurrences
+        )
 
         responses = ordinaryViewResults.flatMap {
           case (viewWithHostedParties, localVerdictAndPartiesO) =>
