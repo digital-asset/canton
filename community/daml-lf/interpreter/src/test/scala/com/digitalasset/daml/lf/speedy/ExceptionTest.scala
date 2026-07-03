@@ -1317,7 +1317,7 @@ class ExceptionTest
                   SValue.SList(FrontStack(SValue.SParty(alice))),
                 ),
               )
-              val globalKey = GlobalKeyWithMaintainers.assertBuild(
+              val globalKey = GlobalKeyWithMaintainers(
                 templateId = templateId,
                 value = key.toNormalizedValue,
                 valueHash = SValueHash.assertHashContractKey(

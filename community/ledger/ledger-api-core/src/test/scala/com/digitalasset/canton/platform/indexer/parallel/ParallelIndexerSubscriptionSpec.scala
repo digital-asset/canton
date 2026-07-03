@@ -1438,17 +1438,17 @@ class ParallelIndexerSubscriptionSpec
   }
 
   it should "build contractStateEvents from the batched DbDtos" in {
-    val key1 = GlobalKey.assertBuild(
+    val key1 = GlobalKey(
       templateId = Ref.Identifier.assertFromString("p:m:t"),
       packageName = Ref.PackageName.assertFromString("pkg-name"),
       key = Value.ValueInt64(10),
-      keyHash = crypto.Hash.hashPrivateKey("k1"),
+      hash = crypto.Hash.hashPrivateKey("k1"),
     )
-    val key2 = GlobalKey.assertBuild(
+    val key2 = GlobalKey(
       templateId = Ref.Identifier.assertFromString("p:m:t"),
       packageName = Ref.PackageName.assertFromString("pkg-name"),
       key = Value.ValueInt64(20),
-      keyHash = crypto.Hash.hashPrivateKey("k2"),
+      hash = crypto.Hash.hashPrivateKey("k2"),
     )
     val createActivate = someEventActivate.copy(
       event_type = PersistentEventType.Create.asInt,

@@ -238,13 +238,13 @@ class PreprocessorSpec
       val bobKeySValue = SValue.SList(FrontStack(SValue.SParty(bob)))
       val bobKey = bobKeySValue.toNormalizedValue
 
-      val globalKey1 = GlobalKey.assertBuild(
+      val globalKey1 = GlobalKey(
         withKeyTmplId,
         pkgName,
         parties,
         SValueHash.assertHashContractKey(pkgName, withKeyTmplId.qualifiedName, partiesSValue),
       )
-      val globalKey2 = GlobalKey.assertBuild(
+      val globalKey2 = GlobalKey(
         withKeyTmplId,
         pkgName,
         bobKey,
@@ -383,7 +383,7 @@ class PreprocessorSpec
         inside(resultAllPrefetch) { case ResultPrefetch(contractIds, keys, resume) =>
           contractIds.toSet shouldBe ((contractId +: moreContractIds).toSet)
           keys shouldBe Map(
-            GlobalKey.assertBuild(
+            GlobalKey(
               withContractIdTmplId,
               pkgName,
               parties,
@@ -556,8 +556,13 @@ final class PreprocessorSpecHelpers {
       signatories = signatories,
       stakeholders = signatories,
       contractKeyWithMaintainers = key.map(k =>
-        GlobalKeyWithMaintainers
-          .assertBuild(templateId, k, crypto.Hash.hashPrivateKey(k.toString), signatories, pkgName)
+        GlobalKeyWithMaintainers(
+          templateId,
+          k,
+          crypto.Hash.hashPrivateKey(k.toString),
+          signatories,
+          pkgName,
+        )
       ),
       createdAt = CreationTime.CreatedAt(data.Time.Timestamp.Epoch),
       authenticationData = Bytes.Empty,

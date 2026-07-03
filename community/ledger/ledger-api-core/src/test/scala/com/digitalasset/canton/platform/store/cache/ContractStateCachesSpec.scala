@@ -843,7 +843,7 @@ class ContractStateCachesSpec
       val packageName = Ref.PackageName.assertFromString("pkg-name")
       val keyValue = keyIdx.incrementAndGet()
       val key = Option.when(withKey)(
-        Key.assertBuild(
+        Key(
           templateId,
           packageName,
           ValueInt64(keyValue),
@@ -907,7 +907,7 @@ class ContractStateCachesSpec
     ContractId.V1(Hash.hashPrivateKey(id.toString))
 
   private def key(value: Long): Key =
-    Key.assertBuild(
+    Key(
       Identifier.assertFromString("some:template:name"),
       Ref.PackageName.assertFromString("pkg-name"),
       ValueInt64(value),

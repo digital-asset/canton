@@ -435,7 +435,7 @@ private object ContractInstanceCoderSpec {
       version: SerializationVersion,
   ) =
     key.copy(globalKey =
-      GlobalKey.assertBuild(
+      GlobalKey(
         key.globalKey.templateId,
         key.globalKey.packageName,
         normalize(key.value, version),

@@ -400,13 +400,12 @@ class TransactionSpec
           "RolledBackUnsuccessfulLookup",
         ).map { s =>
           val node = create(cid(s))
-          GlobalKey
-            .assertBuild(
-              node.templateId,
-              node.packageName,
-              V.ValueText(cid(s).coid),
-              crypto.Hash.hashPrivateKey(cid(s).coid),
-            )
+          GlobalKey(
+            node.templateId,
+            node.packageName,
+            V.ValueText(cid(s).coid),
+            crypto.Hash.hashPrivateKey(cid(s).coid),
+          )
         }.toSet
 
       builder.build().contractKeys shouldBe expectedResults
@@ -419,7 +418,7 @@ class TransactionSpec
     val keyPkgName = Ref.PackageName.assertFromString("key-package-name")
     def keyValue(s: String) = V.ValueText(s)
     def keyHash(s: String) = crypto.Hash.hashPrivateKey(s)
-    def globalKey(k: String) = GlobalKey.assertBuild(
+    def globalKey(k: String) = GlobalKey(
       "Mod:T",
       keyPkgName,
       keyValue(k),
@@ -752,7 +751,7 @@ class TransactionSpec
       builder.add(create4, rollback)
       builder.add(exercise(builder, create6, parties, true))
 
-      def key(s: String) = GlobalKey.assertBuild(
+      def key(s: String) = GlobalKey(
         "Mod:T",
         create0.packageName,
         V.ValueText(s),

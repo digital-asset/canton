@@ -172,14 +172,12 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
       observers = List(observer),
       contractKeyWithMaintainers = Option.when(withKey)(
         GlobalKeyWithMaintainers(
-          GlobalKey
-            .assertBuild(
-              templateId = template,
-              packageName = pkg.pkgName,
-              key = normalizedKeyValue,
-              keyHash =
-                SValueHash.assertHashContractKey(pkg.pkgName, template.qualifiedName, keySValue),
-            ),
+          GlobalKey(
+            templateId = template,
+            packageName = pkg.pkgName,
+            key = normalizedKeyValue,
+            hash = SValueHash.assertHashContractKey(pkg.pkgName, template.qualifiedName, keySValue),
+          ),
           Set(alice),
         )
       ),
@@ -205,11 +203,11 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
     observers = List(bob),
     contractKeyWithMaintainers = Option.when(withKey)(
       GlobalKeyWithMaintainers(
-        GlobalKey.assertBuild(
+        GlobalKey(
           templateId = Human,
           packageName = pkg.pkgName,
           key = normalizedKeyValue,
-          keyHash = SValueHash.assertHashContractKey(pkg.pkgName, Human.qualifiedName, keySValue),
+          hash = SValueHash.assertHashContractKey(pkg.pkgName, Human.qualifiedName, keySValue),
         ),
         Set(alice),
       )
@@ -226,22 +224,22 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
   private[this] val getIfaceContract = Map(iface_contract.contractId -> iface_contract)
 
   private[this] val getKeys = Map(
-    GlobalKey.assertBuild(
+    GlobalKey(
       templateId = T,
       packageName = pkg.pkgName,
       key = keyValue,
-      keyHash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
+      hash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
     ) -> Vector(cId)
   )
 
   private[this] val cIds = Vector(cId, cId2, cId3, cId4, cId5)
 
   private[this] def getKeysWithNContracts(n: Int) = Map(
-    GlobalKey.assertBuild(
+    GlobalKey(
       templateId = T,
       packageName = pkg.pkgName,
       key = keyValue,
-      keyHash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
+      hash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
     ) -> cIds.take(n)
   )
 
@@ -2180,12 +2178,11 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
             Map(c.contractId -> c)
           }
           val getKeys = Map(
-            GlobalKey.assertBuild(
+            GlobalKey(
               templateId = TExcept,
               packageName = pkg.pkgName,
               key = keyValue,
-              keyHash =
-                SValueHash.assertHashContractKey(pkg.pkgName, TExcept.qualifiedName, keySValue),
+              hash = SValueHash.assertHashContractKey(pkg.pkgName, TExcept.qualifiedName, keySValue),
             ) -> Vector(cId)
           )
 

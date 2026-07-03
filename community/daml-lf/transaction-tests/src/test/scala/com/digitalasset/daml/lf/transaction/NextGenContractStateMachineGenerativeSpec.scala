@@ -148,7 +148,7 @@ object NextGenContractStateMachineGenerativeSpec {
   }
 
   private def toGlobalKey(keyId: Concrete.KeyId): GlobalKey =
-    GlobalKey.assertBuild(
+    GlobalKey(
       templateId,
       pkgName,
       V.ValueInt64(keyId.toLong),

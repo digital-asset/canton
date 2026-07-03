@@ -228,9 +228,8 @@ private[refinement] final class EnricherImpl(
       key: GlobalKeyWithMaintainers
   ): GlobalKeyWithMaintainers =
     key.copy(globalKey =
-      GlobalKey.assertWithRenormalizedValue(
-        key.globalKey,
-        unsafeEnrichContractKey(key.globalKey.templateId, key.globalKey.key),
+      key.globalKey.copy(
+        key = unsafeEnrichContractKey(key.globalKey.templateId, key.globalKey.key)
       )
     )
 

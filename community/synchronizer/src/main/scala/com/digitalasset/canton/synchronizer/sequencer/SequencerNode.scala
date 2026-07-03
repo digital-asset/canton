@@ -948,6 +948,7 @@ class SequencerNodeBootstrap(
           val node = new SequencerNode(
             config,
             clock,
+            storage,
             sequencerRuntime,
             adminTokenDispenser,
             synchronizerLoggerFactory,
@@ -1084,6 +1085,7 @@ class SequencerNodeBootstrap(
 class SequencerNode(
     config: SequencerNodeConfig,
     override protected val clock: Clock,
+    storage: Storage,
     val sequencer: SequencerRuntime,
     override val adminTokenDispenser: CantonAdminTokenDispenser,
     protected val loggerFactory: NamedLoggerFactory,
@@ -1102,7 +1104,7 @@ class SequencerNode(
 
   logger.info(s"Creating sequencer server with public api ${config.publicApi}")(TraceContext.empty)
 
-  override def isActive = true
+  override def isActive = storage.isActive
 
   override def status: SequencerNodeStatus = {
     val healthStatus = sequencer.health

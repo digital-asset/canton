@@ -70,7 +70,7 @@ object Enricher {
   }
 
   private def impoverish(key: GlobalKey): GlobalKey =
-    GlobalKey.assertBuild(
+    GlobalKey(
       templateId = key.templateId,
       key.packageName,
       key = impoverish(key.key),

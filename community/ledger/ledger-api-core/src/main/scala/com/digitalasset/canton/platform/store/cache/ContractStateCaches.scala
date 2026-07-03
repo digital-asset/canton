@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.cache
 
 import cats.data.NonEmptyVector
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.{
   Active,
@@ -107,8 +108,8 @@ object ContractStateCaches {
     val invalidationsBuilder = Set.newBuilder[Key]
     keyEvents.foreach { case (key, events) =>
       resolveKeyUpdatesFor(events, cached.get(key), logger) match {
-        case Some(value) => upsertsBuilder.addOne(key -> value)
-        case None => invalidationsBuilder.addOne(key)
+        case Some(value) => discard(upsertsBuilder.addOne(key -> value))
+        case None => discard(invalidationsBuilder.addOne(key))
       }
     }
     (upsertsBuilder.result(), invalidationsBuilder.result())

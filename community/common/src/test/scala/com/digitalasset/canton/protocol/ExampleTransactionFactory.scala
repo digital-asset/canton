@@ -169,7 +169,7 @@ object ExampleTransactionFactory {
   ): Versioned[LfGlobalKey] =
     LfVersioned(
       serializationVersion,
-      LfGlobalKey.assertBuild(
+      LfGlobalKey(
         templateId,
         packageName,
         value,

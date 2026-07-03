@@ -212,7 +212,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           templateId = contractTemplate,
           argument = Value.ValueUnit,
           keyOpt = Some(
-            GlobalKeyWithMaintainers.assertBuild(
+            GlobalKeyWithMaintainers(
               templateId = contractTemplate,
               value = keyValue,
               valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),
@@ -427,7 +427,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         templateId = contractTemplate,
         argument = Value.ValueUnit,
         keyOpt = Some(
-          GlobalKeyWithMaintainers.assertBuild(
+          GlobalKeyWithMaintainers(
             templateId = contractTemplate,
             value = keyValue,
             valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),
@@ -1228,11 +1228,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         keyOpt = Some(
           GlobalKeyWithMaintainers(
-            globalKey = GlobalKey.assertBuild(
+            globalKey = GlobalKey(
               templateId = Ref.Identifier.assertFromString("P:M:T2"),
               packageName = ExampleContractFactory.packageName,
               key = Value.ValueUnit,
-              keyHash = crypto.Hash.hashPrivateKey("dummy-key-hash"),
+              hash = crypto.Hash.hashPrivateKey("dummy-key-hash"),
             ),
             maintainers = Set("signatory2"),
           )
@@ -2473,7 +2473,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         createdAt = CreationTime.CreatedAt(Time.Timestamp.assertFromLong(17000000)),
         keyOpt = Some(
-          GlobalKeyWithMaintainers.assertBuild(
+          GlobalKeyWithMaintainers(
             templateId = templateId,
             value = keyValue,
             valueHash = crypto.Hash.hashPrivateKey(keyValue.toString),

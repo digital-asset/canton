@@ -297,7 +297,7 @@ object Node {
   }
 
   private def rehash(gk: GlobalKeyWithMaintainers) =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       gk.globalKey.templateId,
       gk.value,
       gk.globalKey.hash,

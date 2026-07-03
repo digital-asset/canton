@@ -55,10 +55,12 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.InitialTopologySnapshotValidator
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
@@ -85,6 +87,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       syncPersistentStateManager: SyncPersistentStateManager,
       sequencerAggregatedInfo: SequencerAggregatedInfo,
       connectionPool: SequencerConnectionPool,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(
       cryptoApiProvider: SyncCryptoApiParticipantProvider,
       clock: Clock,
@@ -265,6 +268,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
               psid,
               config.synchronizerAlias,
               client,
+              onboardingTransactions,
             )
             _ <- EitherT.cond[FutureUnlessShutdown](
               success,

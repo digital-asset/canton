@@ -6,10 +6,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 import cats.{Applicative, Traverse}
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config
 import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelApplicativeFutureUnlessShutdown
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework
@@ -40,11 +41,6 @@ import scala.concurrent.duration.*
 import scala.util.Try
 
 object PekkoModuleSystem {
-
-  // Should be a few millis, but giving it a good margin to be safe.
-  private val PekkoActorSystemStartupMaxDuration = 15.seconds
-
-  private val BlockingOperationTimeout = 30.seconds
 
   private def pekkoBehavior[MessageT](
       moduleSystem: PekkoModuleSystem,
@@ -272,9 +268,6 @@ object PekkoModuleSystem {
           case None => NoOp()
         }
       }
-
-    override def blockingAwait[X](actionAndFuture: PekkoFutureUnlessShutdown[X]): X =
-      blockingAwait(actionAndFuture, BlockingOperationTimeout)
 
     override def blockingAwait[X](
         actionAndFuture: PekkoFutureUnlessShutdown[X],
@@ -568,6 +561,7 @@ object PekkoModuleSystem {
       ) => PekkoP2PGrpcNetworkManager,
       exitOnFatalFailures: Boolean,
       isOrdererHealthy: AtomicBoolean,
+      initTimeout: config.NonNegativeFiniteDuration,
       metrics: BftOrderingMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -616,10 +610,13 @@ object PekkoModuleSystem {
           BootstrapSetup().withDefaultExecutionContext(executionContext).withConfig(config),
       )
     }
-    // The code within Behaviors.setup will be run as soon as the ActorSystem is created, so
-    // the future below will not take more than a few millis. In this case, waiting is more sensible than
-    // propagating Future values.
-    val result = blocking(Await.result(resultPromise.future, PekkoActorSystemStartupMaxDuration))
+    // Behaviors.setup runs during ActorSystem creation and performs the module system initialization,
+    //  which can be expensive (for example during onboarding). We block here up to `initTimeout`
+    //  for simplicity rather than propagating Future values further up the construction path.
+    val result =
+      initTimeout.await(s"Initializing Pekko module system within $initTimeout")(
+        resultPromise.future
+      )(ErrorLoggingContext.fromTracedLogger(logger))
     PekkoModuleSystemInitResult(
       actorSystem,
       result,

@@ -34,7 +34,7 @@ object LfTransactionBuilder {
   val defaultPackageName: Ref.PackageName = Ref.PackageName.assertFromString("pkgName")
   val defaultInterfaceId: LfInterfaceId = defaultTemplateId
 
-  val defaultGlobalKey: LfGlobalKey = LfGlobalKey.assertBuild(
+  val defaultGlobalKey: LfGlobalKey = LfGlobalKey(
     defaultTemplateId,
     defaultPackageName,
     Value.ValueUnit,

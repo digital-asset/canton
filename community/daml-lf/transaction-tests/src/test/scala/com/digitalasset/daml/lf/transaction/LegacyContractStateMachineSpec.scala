@@ -71,7 +71,7 @@ class LegacyContractStateMachineSpec
       templateId: Ref.TypeConId,
       key: String,
   ): GlobalKeyWithMaintainers =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       templateId,
       Value.ValueText(key),
       crypto.Hash.hashPrivateKey(key),
@@ -87,7 +87,7 @@ class LegacyContractStateMachineSpec
     else Some(toKeyWithMaintainers(templateId, key))
 
   def gkey(key: String): GlobalKey =
-    GlobalKey.assertBuild(
+    GlobalKey(
       templateId,
       pkgName,
       Value.ValueText(key),

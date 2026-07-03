@@ -366,11 +366,10 @@ class TransactionCoder(allowNullCharacters: Boolean) {
           .fromBytes(data.Bytes.fromByteString(msg.getHash))
           .left
           .map(DecodeError(_))
-        gkey <- GlobalKey
-          .build(templateId, packageName, keyValue, hash)
-          .left
-          .map(hashErr => DecodeError(hashErr.msg))
-      } yield GlobalKeyWithMaintainers(gkey, maintainers)
+      } yield GlobalKeyWithMaintainers(
+        GlobalKey(templateId, packageName, keyValue, hash),
+        maintainers,
+      )
 
     // package private for test, do not use outside TransactionCoder
     private[this] def decodeValue(

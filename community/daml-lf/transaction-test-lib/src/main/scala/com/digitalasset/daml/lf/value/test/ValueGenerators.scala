@@ -324,18 +324,15 @@ object ValueGenerators {
     for {
       key <- valueGen(allowContractIds = false)
       maintainers <- genNonEmptyParties
-      gkey = GlobalKey
-        .build(
-          templateId,
-          packageName,
-          key,
-          // This hash ensures non-collision but does not ensure that two keys that are equal modulo
-          // smart contract upgrade have the same hash.
-          crypto.Hash.hashPrivateKey(s"$packageName:${templateId.qualifiedName}:${key.toString}"),
-        )
-        .toOption
-      if gkey.isDefined
-    } yield GlobalKeyWithMaintainers(gkey.get, maintainers)
+      gkey = GlobalKey(
+        templateId,
+        packageName,
+        key,
+        // This hash ensures non-collision but does not ensure that two keys that are equal modulo
+        // smart contract upgrade have the same hash.
+        crypto.Hash.hashPrivateKey(s"$packageName:${templateId.qualifiedName}:${key.toString}"),
+      )
+    } yield GlobalKeyWithMaintainers(gkey, maintainers)
 
   /** Generates a single ExternalCallResult for testing serialization. */
   val externalCallResultGen: Gen[ExternalCallResult] =

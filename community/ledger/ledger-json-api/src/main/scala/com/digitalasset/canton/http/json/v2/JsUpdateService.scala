@@ -357,7 +357,7 @@ class JsUpdateService(
         toGetUpdatesRequest(request, forTrees = false)
       } via
         prepareSingleWsStream(
-          updateServiceClient(caller.token())(tc).getUpdates,
+          updateServiceClient(caller.token()).getUpdates,
           (r: update_service.GetUpdatesResponse) => protocolConverters.GetUpdatesResponse.toJson(r),
         )
     }

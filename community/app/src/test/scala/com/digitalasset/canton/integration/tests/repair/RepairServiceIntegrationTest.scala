@@ -979,14 +979,12 @@ sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTe
               )
             val lfPackageName = Ref.PackageName.assertFromString("CantonTestsLF23")
             val keyWithMaintainers = ExampleTransactionFactory.globalKeyWithMaintainers(
-              LfGlobalKey
-                .build(
-                  lfNoMaintainerTemplateId,
-                  lfPackageName,
-                  Value.ValueUnit,
-                  crypto.Hash.hashPrivateKey("dummy-key-hash"),
-                )
-                .value,
+              LfGlobalKey(
+                lfNoMaintainerTemplateId,
+                lfPackageName,
+                Value.ValueUnit,
+                crypto.Hash.hashPrivateKey("dummy-key-hash"),
+              ),
               Set.empty,
               LfSerializationVersion.V2,
             )

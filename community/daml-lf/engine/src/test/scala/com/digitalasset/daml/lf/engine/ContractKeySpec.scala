@@ -144,7 +144,7 @@ class ContractKeySpec
       ArraySeq(SValue.SParty(alice), SValue.SInt64(42)),
     )
     Map(
-      GlobalKey.assertBuild(
+      GlobalKey(
         TypeConId(basicTestsPkgId, withKeyTemplate),
         basicTestsPkg.pkgName,
         sKey.toNormalizedValue,
@@ -162,7 +162,9 @@ class ContractKeySpec
   private[this] val lookupKey: PartialFunction[GlobalKey, Vector[FatContractInstance]] = {
     case GlobalKey(
           BasicTests_WithKey,
+          _,
           ValueRecord(_, ImmArray((_, ValueParty(`alice`)), (_, ValueInt64(42)))),
+          _,
         ) =>
       Vector(withKeyContractInst)
   }
@@ -318,7 +320,7 @@ class ContractKeySpec
         signatories = List(party),
         contractKeyWithMaintainers = Some(
           GlobalKeyWithMaintainers(
-            GlobalKey.assertBuild(
+            GlobalKey(
               templateId = keyedId,
               packageName = multiKeysPkg.pkgName,
               key = sKey.toNormalizedValue,

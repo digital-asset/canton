@@ -422,8 +422,6 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
       fun: Try[X] => Option[MessageT]
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit
 
-  def blockingAwait[X](future: E#FutureUnlessShutdownT[X]): X
-
   def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration): X
 
   def become(module: Module[E, MessageT])(implicit traceContext: TraceContext): Unit

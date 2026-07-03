@@ -74,17 +74,14 @@ class FatContractInstanceSpec extends AnyFreeSpec with Matchers with TableDriven
   "Disallow global key template to to differ from contract" in {
     val node = mkCreateNode(TransactionBuilder.newV2Cid)
 
-    val keyOpt = GlobalKeyWithMaintainers
-      .build(
-        templateId = Ref.Identifier.assertFromString("-dummyPkg-:NotTemplateModule:dummyName"),
-        value = Value.ValueText("key1"),
-        crypto.Hash.hashPrivateKey("dummy-key-hash"),
-        maintainers = node.signatories,
-        packageName = node.packageName,
-      )
-      .toOption
-
-    val createWithMismatchingKeyTemplate = node.copy(keyOpt = keyOpt)
+    val keyOpt = GlobalKeyWithMaintainers(
+      templateId = Ref.Identifier.assertFromString("-dummyPkg-:NotTemplateModule:dummyName"),
+      value = Value.ValueText("key1"),
+      crypto.Hash.hashPrivateKey("dummy-key-hash"),
+      maintainers = node.signatories,
+      packageName = node.packageName,
+    )
+    val createWithMismatchingKeyTemplate = node.copy(keyOpt = Some(keyOpt))
 
     a[IllegalArgumentException] shouldBe
       thrownBy(

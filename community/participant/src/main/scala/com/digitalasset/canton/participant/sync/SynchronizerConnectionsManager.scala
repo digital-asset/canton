@@ -78,6 +78,7 @@ import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClientWithInit,
   TopologySnapshot,
 }
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
@@ -348,6 +349,7 @@ private[sync] class SynchronizerConnectionsManager(
               con,
               connectSynchronizer = ConnectSynchronizer.ReconnectSynchronizers,
               skipStatusCheck = false,
+              onboardingTransactions = None,
             ).transform {
               case Left(SyncServiceFailedSynchronizerConnection(_, parent)) if ignoreFailures =>
                 // if the error is retryable, we'll reschedule an automatic retry so this synchronizer gets connected eventually
@@ -503,6 +505,7 @@ private[sync] class SynchronizerConnectionsManager(
       keepRetrying: Boolean,
       connectSynchronizer: ConnectSynchronizer,
       logLevelFailureInitialAttempt: Level = Level.WARN,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[PhysicalSynchronizerId]] = {
@@ -538,6 +541,7 @@ private[sync] class SynchronizerConnectionsManager(
           initial = initial,
           connectSynchronizer = connectSynchronizer,
           logLevelFailureInitialAttempt = logLevelFailureInitialAttempt,
+          onboardingTransactions = onboardingTransactions,
         )
       }
   }
@@ -554,6 +558,7 @@ private[sync] class SynchronizerConnectionsManager(
       initial: Boolean,
       connectSynchronizer: ConnectSynchronizer,
       logLevelFailureInitialAttempt: Level = Level.WARN,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[PhysicalSynchronizerId]] =
@@ -565,6 +570,7 @@ private[sync] class SynchronizerConnectionsManager(
           synchronizerAlias,
           connectSynchronizer,
           skipStatusCheck = false,
+          onboardingTransactions = onboardingTransactions,
         ).transform {
           case Left(SyncServiceError.SyncServiceFailedSynchronizerConnection(_, err))
               if keepRetrying && err.retryable.nonEmpty =>
@@ -631,6 +637,7 @@ private[sync] class SynchronizerConnectionsManager(
             keepRetrying = true,
             initial = false,
             connectSynchronizer = connectSynchronizer,
+            onboardingTransactions = None,
           ),
           s"Background reconnect to $synchronizerAlias",
         )
@@ -709,6 +716,7 @@ private[sync] class SynchronizerConnectionsManager(
       synchronizerAlias: SynchronizerAlias,
       connectSynchronizer: ConnectSynchronizer,
       skipStatusCheck: Boolean,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
@@ -723,6 +731,7 @@ private[sync] class SynchronizerConnectionsManager(
           synchronizerAlias,
           startConnectedSynchronizerProcessing = connectSynchronizer.startConnectedSynchronizer,
           skipStatusCheck = skipStatusCheck,
+          onboardingTransactions = onboardingTransactions,
         )
     }
 
@@ -771,7 +780,10 @@ private[sync] class SynchronizerConnectionsManager(
             s"Performing handshake with synchronizer with id ${synchronizerConnectionConfig.configuredPsid} and config: ${synchronizerConnectionConfig.config}"
           )
           synchronizerHandle <- EitherT(
-            synchronizerRegistry.connect(synchronizerConnectionConfig)
+            synchronizerRegistry.connect(
+              synchronizerConnectionConfig,
+              onboardingTransactions = None,
+            )
           )
             .leftMap[SyncServiceError](err =>
               SyncServiceError.SyncServiceFailedSynchronizerConnection(synchronizerAlias, err)
@@ -1013,6 +1025,7 @@ private[sync] class SynchronizerConnectionsManager(
       synchronizerAlias: SynchronizerAlias,
       startConnectedSynchronizerProcessing: Boolean,
       skipStatusCheck: Boolean,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] = {
@@ -1023,7 +1036,7 @@ private[sync] class SynchronizerConnectionsManager(
       SyncServiceFailedSynchronizerConnection,
       SynchronizerHandle,
     ] =
-      EitherT(synchronizerRegistry.connect(config)).leftMap(err =>
+      EitherT(synchronizerRegistry.connect(config, onboardingTransactions)).leftMap(err =>
         SyncServiceError.SyncServiceFailedSynchronizerConnection(synchronizerAlias, err)
       )
 
@@ -1461,6 +1474,7 @@ private[sync] class SynchronizerConnectionsManager(
             Hence, we decrease the level from WARN to INFO.
              */
             logLevelFailureInitialAttempt = Level.INFO,
+            onboardingTransactions = None,
           )(tc),
         disconnectSynchronizer = disconnectSynchronizer(alias)(_),
         metrics,
@@ -1525,6 +1539,7 @@ private[sync] class SynchronizerConnectionsManager(
             alias,
             keepRetrying = true,
             connectSynchronizer = ConnectSynchronizer.Connect,
+            onboardingTransactions = None,
           )(tc),
         disconnectSynchronizer = disconnectSynchronizer(alias)(_),
         metrics,

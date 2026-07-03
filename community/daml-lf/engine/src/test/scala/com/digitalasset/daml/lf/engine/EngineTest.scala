@@ -2015,11 +2015,11 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
         val sKey = mkSValuePair(SValue.SParty(alice), SValue.SInt64(43))
         err shouldBe IErr.DamlException(
           interpretation.Error.ContractKeyNotFound(
-            GlobalKey.assertBuild(
+            GlobalKey(
               templateId = BasicTests_WithKey,
               packageName = basicTestsPkg.pkgName,
               key = sKey.toNormalizedValue,
-              keyHash = SValueHash.assertHashContractKey(
+              hash = SValueHash.assertHashContractKey(
                 basicTestsPkg.pkgName,
                 templateId.qualifiedName,
                 sKey,
@@ -2246,7 +2246,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
     )
     val keyValue = keySValue.toNormalizedValue.asInstanceOf[ValueRecord]
 
-    val expected = GlobalKey.assertBuild(
+    val expected = GlobalKey(
       templateId,
       basicTestsPkg.pkgName,
       keyValue,
@@ -2394,11 +2394,11 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
       inside(result) { case Left(IErr(err, _)) =>
         err shouldBe IErr.DamlException(
           interpretation.Error.ContractKeyNotFound(
-            GlobalKey.assertBuild(
+            GlobalKey(
               templateId = BasicTests_WithKey,
               packageName = basicTestsPkg.pkgName,
               key = sKey.toNormalizedValue,
-              keyHash = SValueHash.assertHashContractKey(
+              hash = SValueHash.assertHashContractKey(
                 basicTestsPkg.pkgName,
                 templateId.qualifiedName,
                 sKey,
@@ -2445,11 +2445,11 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
       inside(result) { case Left(IErr(err, _)) =>
         err shouldBe IErr.DamlException(
           interpretation.Error.ContractKeyNotFound(
-            GlobalKey.assertBuild(
+            GlobalKey(
               templateId = BasicTests_WithKey,
               packageName = basicTestsPkg.pkgName,
               key = sKey.toNormalizedValue,
-              keyHash = SValueHash.assertHashContractKey(
+              hash = SValueHash.assertHashContractKey(
                 basicTestsPkg.pkgName,
                 Identifier(basicTestsPkgId, "BasicTests:WithKey").qualifiedName,
                 sKey,
@@ -2568,11 +2568,11 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
       signatories = List(party),
       contractKeyWithMaintainers = Some(
         GlobalKeyWithMaintainers(
-          GlobalKey.assertBuild(
+          GlobalKey(
             templateId = TypeConId(pkgId, "MultiKeys:Keyed"),
             packageName = pkg.pkgName,
             key = sKey.toNormalizedValue,
-            keyHash = SValueHash.assertHashContractKey(
+            hash = SValueHash.assertHashContractKey(
               pkg.pkgName,
               "MultiKeys:Keyed",
               sKey,
@@ -2823,11 +2823,11 @@ class EngineTestExceptions(
     signatories = List(party),
     contractKeyWithMaintainers = Some(
       GlobalKeyWithMaintainers(
-        GlobalKey.assertBuild(
+        GlobalKey(
           templateId = TypeConId(exceptionsPkgId, "Exceptions:K"),
           packageName = exceptionsPkg.pkgName,
           key = sKey.toNormalizedValue,
-          keyHash = SValueHash.assertHashContractKey(
+          hash = SValueHash.assertHashContractKey(
             exceptionsPkg.pkgName,
             "Exceptions:K",
             sKey,
@@ -3188,11 +3188,11 @@ class EngineTestHelpers(
       observers = List.empty,
       contractKeyWithMaintainers = Some(
         GlobalKeyWithMaintainers(
-          GlobalKey.assertBuild(
+          GlobalKey(
             templateId = TypeConId(basicTestsPkgId, withKeyTemplate),
             packageName = basicTestsPkg.pkgName,
             key = sKey.toNormalizedValue,
-            keyHash = SValueHash.assertHashContractKey(basicTestsPkg.pkgName, withKeyTemplate, sKey),
+            hash = SValueHash.assertHashContractKey(basicTestsPkg.pkgName, withKeyTemplate, sKey),
           ),
           Set(alice),
         )

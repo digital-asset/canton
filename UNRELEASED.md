@@ -80,6 +80,7 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
   - *BREAKING*: The metric `daml.participant.api.services.pruning.contract_pruning_retried`, which tracks how many times contract pruning was retried, is now a histogram.
   - *BREAKING*: Removed the unused metrics `daml.participant.api.lapi.streams.transaction_trees_sent` and `daml.participant.api.index.transaction_trees_buffer_size`.
 - The `ledger-api-server-parameters.contract-id-seeding` configuration parameter is deprecated and no longer used. The contract ID seeding now uses the same random source as the rest of Canton, which is the equivalent of the `strong` type.
+- Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
 
 ### Preview Features
 - preview feature

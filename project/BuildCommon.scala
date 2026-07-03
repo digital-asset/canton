@@ -3108,6 +3108,7 @@ object BuildCommon {
           scalatestScalacheck % Test,
           shapeless % Test,
         ),
+        enablePublishLibrary,
       )
 
     lazy val `daml-jwt` = project

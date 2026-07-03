@@ -73,11 +73,11 @@ private[store] object StorageBackendTestValues extends OptionValues {
   val someRepresentativePackageId: Ref.PackageId =
     Ref.PackageId.assertFromString("representative-pkg")
   val someTemplateId2: NameTypeConRef = NameTypeConRef.assertFromString("#pkg-name:Mod:Template2")
-  val someContractKey: GlobalKey = GlobalKey.assertBuild(
+  val someContractKey: GlobalKey = GlobalKey(
     templateId = someTemplateIdFull.toIdentifier,
     packageName = Ref.PackageName.assertFromString("pkg-name"),
     key = Value.ValueUnit,
-    keyHash = Hash.hashPrivateKey("someKey"),
+    hash = Hash.hashPrivateKey("someKey"),
   )
   val someIdentityParams: ParameterStorageBackend.IdentityParams =
     ParameterStorageBackend.IdentityParams(someParticipantId)

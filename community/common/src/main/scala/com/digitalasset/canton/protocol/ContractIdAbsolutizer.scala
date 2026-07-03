@@ -77,7 +77,7 @@ class ContractIdAbsolutizer(
           }
           .map { absolutizedKey =>
             keyWithMaintainers.copy(globalKey =
-              LfGlobalKey.assertBuild(gkey.templateId, gkey.packageName, absolutizedKey, gkey.hash)
+              LfGlobalKey(gkey.templateId, gkey.packageName, absolutizedKey, gkey.hash)
             )
           }
       }

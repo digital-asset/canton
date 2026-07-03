@@ -86,7 +86,10 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
       .toList
       .flatMap(_.forgetNE)
 
-  supportedHashingSchemeVersions.foreach(testExternalSubmissionDemo)
+  // TODO(i33946): Implement V4 hashing scheme in the python demo and re-enable the test
+  supportedHashingSchemeVersions
+    .filterNot(_ == HashingSchemeVersion.V4)
+    .foreach(testExternalSubmissionDemo)
 
   def testExternalSubmissionDemo(hashingSchemeVersion: HashingSchemeVersion): Unit = {
     s"run the interactive submission demo ($hashingSchemeVersion)" in { implicit env =>

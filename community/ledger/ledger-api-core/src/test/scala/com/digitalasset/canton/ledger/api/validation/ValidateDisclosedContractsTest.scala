@@ -327,7 +327,7 @@ object ValidateDisclosedContractsTest {
     private val authenticationDataBytes: Bytes =
       ContractAuthenticationDataV1(salt)(CantonContractIdVersion.maxV1).toLfBytes
 
-    val keyWithMaintainers: GlobalKeyWithMaintainers = GlobalKeyWithMaintainers.assertBuild(
+    val keyWithMaintainers: GlobalKeyWithMaintainers = GlobalKeyWithMaintainers(
       lf.templateId,
       LfValue.ValueRecord(
         None,

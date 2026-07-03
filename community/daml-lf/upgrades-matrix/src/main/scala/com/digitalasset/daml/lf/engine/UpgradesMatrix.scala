@@ -2193,7 +2193,7 @@ class UpgradesMatrixCases(
     ): Option[GlobalKeyWithMaintainers] =
       Some {
         val keySValue = globalContractv1KeySValue(setupData)
-        GlobalKeyWithMaintainers.assertBuild(
+        GlobalKeyWithMaintainers(
           v1TplId,
           keySValue.toNormalizedValue,
           SValueHash.assertHashContractKey(
@@ -2211,7 +2211,7 @@ class UpgradesMatrixCases(
     ): Option[GlobalKeyWithMaintainers] =
       Some {
         val keySValue = globalContractv2KeySValue(setupData)
-        GlobalKeyWithMaintainers.assertBuild(
+        GlobalKeyWithMaintainers(
           v2TplId,
           keySValue.toNormalizedValue,
           SValueHash.assertHashContractKey(

@@ -27,12 +27,14 @@ import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SynchronizerId,
   TopologyManagerError,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
 /** A registry of synchronizers. */
@@ -47,7 +49,8 @@ trait SynchronizerRegistry extends AutoCloseable {
     *   set).
     */
   def connect(
-      storedConfig: StoredSynchronizerConnectionConfig
+      storedConfig: StoredSynchronizerConnectionConfig,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[

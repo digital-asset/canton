@@ -34,7 +34,7 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
     )
 
   private val globalKey = GlobalKeyWithMaintainers(
-    GlobalKey.assertBuild(
+    GlobalKey(
       defRef("module_key", "name"),
       PackageName.assertFromString("package_name_key"),
       VA.text.inj("hello"),
@@ -44,7 +44,7 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
   )
 
   private val globalKey2 = GlobalKeyWithMaintainers(
-    GlobalKey.assertBuild(
+    GlobalKey(
       defRef("module_key", "name"),
       PackageName.assertFromString("package_name_key"),
       VA.text.inj("bye"),

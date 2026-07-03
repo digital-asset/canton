@@ -1572,7 +1572,7 @@
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{namespace}}.{{node}}",
+          "legendFormat": "{{namespace}}.{{node}} ({{mode}})",
           "refId": "A"
         }
       ],
@@ -1812,7 +1812,7 @@
           "instant": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "{{namespace}}.{{node}}",
+          "legendFormat": "{{namespace}}.{{node}} ({{mode}})",
           "refId": "A"
         }
       ],

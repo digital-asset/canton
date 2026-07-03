@@ -1,5 +1,0 @@
-^main$
-zenith-network:angelol/external-call-06-split-pr3-interp
-fork/zenith-network/angelol/external-call-06-split-pr3-interp
-zenith-network/angelol/external-call-06-split-pr3-interp
-pull/551/head
