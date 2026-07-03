@@ -137,9 +137,12 @@ private[validation] final class ExternalCallRoutingContext(
     } else ExternalCallConsistencyChecker.Result.empty
 
   /** Whether `error` is an external-call replay disagreement for which some hosted confirming party
-    * checks a matching occurrence. Such errors are expected to supersede the generic
-    * model-conformance rejection of the view: the affected parties reject with the disagreement
-    * inconsistency provided by [[inconsistenciesForView]] instead.
+    * checks a matching occurrence. Such an error is expected to suppress the generic (malformed)
+    * model-conformance rejection of the request; in its place, the hosted confirming parties that
+    * check a matching occurrence reject per view with the disagreement inconsistency provided by
+    * [[inconsistenciesForView]]. Note that the routed rejections cover fewer parties than the
+    * suppressed blanket rejection: views without a matching occurrence and confirming parties that
+    * do not check the result are not rejected through this path.
     */
   def isRoutableModelConformanceError(error: ModelConformanceChecker.Error): Boolean =
     ExternalCallResponseRouter
@@ -190,7 +193,8 @@ private[validation] final class ExternalCallRoutingContext(
   *   - disagreements between the results recorded across the views of the transaction, computed by
   *     [[ExternalCallConsistencyChecker]] (see
   *     [[ExternalCallRoutingContext.recordedConsistencyResult]]),
-  *   - disagreements within the replay data of a single view, surfaced by reinterpretation as
+  *   - disagreements within the replay data of a single reinterpretation, that is, of a view
+  *     together with its subviews, surfaced as
   *     [[com.digitalasset.canton.participant.util.DAMLe.ExternalCallRecordedResultDisagreement]]
   *     model-conformance errors (see [[ExternalCallRoutingContext.inconsistenciesForView]]),
   *   - re-validation of undisputed recorded results against the extension service (see
