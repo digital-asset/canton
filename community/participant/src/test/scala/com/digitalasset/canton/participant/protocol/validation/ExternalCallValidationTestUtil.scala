@@ -40,7 +40,7 @@ private[validation] trait ExternalCallValidationTestUtil {
     TransactionView.Optics.viewParticipantDataUnsafe
       .modify(vpd => vpd.tryUnwrap.copy(externalCallResults = results))(view)
 
-  protected val externalCallResult = ExternalCallResult(
+  protected val externalCallResult: ExternalCallResult = ExternalCallResult(
     extensionId = "extension",
     functionId = "function",
     config = Bytes.fromStringUtf8("config"),
@@ -48,7 +48,7 @@ private[validation] trait ExternalCallValidationTestUtil {
     output = Bytes.fromStringUtf8("output"),
   )
 
-  protected val otherExternalCallOutput =
+  protected val otherExternalCallOutput: ExternalCallResult =
     externalCallResult.copy(output = Bytes.fromStringUtf8("other-output"))
 
   protected def validationResult(
