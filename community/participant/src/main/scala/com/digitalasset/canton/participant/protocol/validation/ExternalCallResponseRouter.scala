@@ -83,7 +83,6 @@ private[validation] final class ExternalCallRoutingContext(
   private lazy val hasAnyVisibleExternalCallResults: Boolean =
     viewValidationResults.valuesIterator.exists { viewValidationResult =>
       val viewParticipantData = viewValidationResult.view.viewParticipantData
-      viewParticipantData.supportsExternalCallResults &&
       viewParticipantData.externalCallResults.nonEmpty
     }
 
