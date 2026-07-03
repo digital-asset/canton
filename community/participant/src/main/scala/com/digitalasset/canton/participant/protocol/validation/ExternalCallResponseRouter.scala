@@ -317,22 +317,19 @@ private[validation] object ExternalCallResponseRouter {
   ): Map[LfPartyId, Set[ExternalCallOccurrence]] =
     orderedViews
       .flatMap { view =>
-        val viewParticipantData = view.validationResult.view.viewParticipantData
-        if (!viewParticipantData.supportsExternalCallResults) Seq.empty
-        else
-          viewParticipantData.externalCallResults
-            .filter(result => matchesDisagreement(disagreement, result))
-            .flatMap { result =>
-              val occurrence = ExternalCallOccurrence(
-                view.viewPosition,
-                result.exerciseIndex,
-                result.callIndex,
-              )
-              result.checkingParties
-                .intersect(view.hostedConfirmingParties)
-                .toSeq
-                .map(_ -> occurrence)
-            }
+        view.validationResult.view.viewParticipantData.externalCallResults
+          .filter(result => matchesDisagreement(disagreement, result))
+          .flatMap { result =>
+            val occurrence = ExternalCallOccurrence(
+              view.viewPosition,
+              result.exerciseIndex,
+              result.callIndex,
+            )
+            result.checkingParties
+              .intersect(view.hostedConfirmingParties)
+              .toSeq
+              .map(_ -> occurrence)
+          }
       }
       .groupMap(_._1)(_._2)
       .view
