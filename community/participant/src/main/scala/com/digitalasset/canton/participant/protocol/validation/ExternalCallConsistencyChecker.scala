@@ -19,10 +19,12 @@ import com.google.protobuf.ByteString
 
 /** Checks whether visible external-call results agree.
   *
-  * External-call results are replay data that participate in validation. If two visible occurrences
-  * of the same external call record different outputs, a hosted confirming party must reject the
-  * transaction locally instead of approving an ambiguous result. Visible disagreements are also
-  * retained independently of hosted-party routing so callers can report suspicious recorded data.
+  * An external-call result is ''visible'' to this participant if it is recorded in one of the
+  * (unblinded) views that this participant has received for validation. External-call results are
+  * replay data that participate in validation. If two visible occurrences of the same external
+  * call record different outputs, a hosted confirming party must reject the transaction locally
+  * instead of approving an ambiguous result. Visible disagreements are also retained independently
+  * of hosted-party routing so callers can report suspicious recorded data.
   */
 object ExternalCallConsistencyChecker {
 
@@ -69,14 +71,26 @@ object ExternalCallConsistencyChecker {
       )
   }
 
+  /** Outcome of [[check]].
+    *
+    * @param hostedInconsistencies
+    *   Inconsistencies grouped by hosted confirming party, restricted for each party to the
+    *   occurrences that the party is responsible for checking. Grouped by party because
+    *   confirmation responses are issued on behalf of individual confirming parties: each hosted
+    *   confirming party must reject exactly the disagreements among its own occurrences.
+    * @param visibleInconsistencies
+    *   Inconsistencies across all occurrences visible to this participant, irrespective of which
+    *   parties it hosts. Used to alarm on suspicious recorded data even if this participant hosts
+    *   no affected checking party.
+    */
   final case class Result(
-      inconsistencies: Map[LfPartyId, Seq[Inconsistency]],
+      hostedInconsistencies: Map[LfPartyId, Seq[Inconsistency]],
       visibleInconsistencies: Seq[Inconsistency],
   ) extends PrettyPrinting {
-    def inconsistentParties: Set[LfPartyId] = inconsistencies.keySet
+    def inconsistentParties: Set[LfPartyId] = hostedInconsistencies.keySet
 
     override protected def pretty: Pretty[Result] = prettyOfClass(
-      param("inconsistencies", _.inconsistencies),
+      param("hostedInconsistencies", _.hostedInconsistencies),
       param("visibleInconsistencies", _.visibleInconsistencies),
     )
   }
@@ -85,6 +99,14 @@ object ExternalCallConsistencyChecker {
     val empty: Result = Result(Map.empty, Seq.empty)
   }
 
+  /** An external-call result recorded in a view that this participant has received.
+    *
+    * @param checkingParties
+    *   The node-level confirming parties responsible for checking this result: the signatories
+    *   and acting parties of the exercise node that recorded the call, as determined at
+    *   transaction-tree construction. See
+    *   [[com.digitalasset.canton.data.ViewParticipantData.ViewExternalCallResult]].
+    */
   private final case class VisibleExternalCallOccurrence(
       key: DAMLe.ExternalCallKey,
       output: Bytes,
@@ -177,9 +199,9 @@ object ExternalCallConsistencyChecker {
       .mapValues(_.sorted(orderInconsistency))
       .toMap
 
-  /** Returns per-party inconsistencies for hosted confirming parties that can see disagreeing
-    * outputs for the same external call. Also records visible disagreements that should be alarmed
-    * even if this participant does not host an affected checking party.
+  /** Returns per-party inconsistencies for hosted confirming parties that check disagreeing
+    * outputs for the same external call, as well as the disagreements across all visible
+    * occurrences. See [[Result]] for how the two differ.
     */
   def check(
       viewValidationResults: Map[ViewPosition, ViewValidationResult],
@@ -187,7 +209,7 @@ object ExternalCallConsistencyChecker {
   ): Result = {
     val occurrences = visibleOccurrences(viewValidationResults)
     Result(
-      inconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
+      hostedInconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
       visibleInconsistencies = visibleInconsistencies(occurrences),
     )
   }

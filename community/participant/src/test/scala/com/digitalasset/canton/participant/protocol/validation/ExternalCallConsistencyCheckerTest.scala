@@ -154,7 +154,7 @@ class ExternalCallConsistencyCheckerTest
       )
 
       result.inconsistentParties shouldBe Set(partyA)
-      val inconsistency = result.inconsistencies(partyA).loneElement
+      val inconsistency = result.hostedInconsistencies(partyA).loneElement
       inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallOutput.output)
       inconsistency.occurrences.map(occurrence =>
         occurrence.exerciseIndex -> occurrence.callIndex
@@ -211,7 +211,7 @@ class ExternalCallConsistencyCheckerTest
       )
 
       result.inconsistentParties shouldBe Set(partyA)
-      result.inconsistencies(partyA).map(_.key.functionId).toSet shouldBe Set(
+      result.hostedInconsistencies(partyA).map(_.key.functionId).toSet shouldBe Set(
         "function-a",
         "function-b",
       )
