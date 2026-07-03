@@ -131,6 +131,7 @@ class TransactionProcessingSteps(
     createNodeEnricher: ContractEnricher,
     authorizationValidator: AuthorizationValidator,
     internalConsistencyChecker: InternalConsistencyChecker,
+    externalCallResponseRouter: ExternalCallResponseRouter,
     tracker: CommandProgressTracker,
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
@@ -898,12 +899,34 @@ class TransactionProcessingSteps(
             }
         )
 
+        // The external-call check re-validates recorded external-call results against the
+        // extension service. Like the model conformance check, it is kicked off here and only
+        // awaited when the confirmation responses are created, so that its network I/O runs
+        // concurrently with the other checks (including the reinterpretation, whose errors it
+        // consumes to route replay disagreements).
+        externalCallValidationResultF = {
+          val participantViews = parsedRequest.rootViewTrees.forgetNE
+            .flatMap(viewTree => viewTree.view.allSubviewsWithPosition(viewTree.viewPosition))
+            .map { case (view, viewPosition) =>
+              viewPosition -> ParticipantTransactionView.tryCreate(view)
+            }
+            .toMap
+          externalCallResponseRouter.check(
+            requestId,
+            participantViews,
+            ipsSnapshot,
+            conformanceResultET.value.map(_.swap.toSeq.flatMap(_.nonAbortErrors)),
+            runValidation = malformedPayloads.isEmpty,
+          )
+        }
+
       } yield ParallelChecksResult(
         authenticationResult,
         consistencyResultE,
         authorizationResult,
         conformanceResultET,
         internalConsistencyResultET,
+        externalCallValidationResultF,
         timeValidationE,
         replayCheckResult,
       )
@@ -976,6 +999,7 @@ class TransactionProcessingSteps(
         authorizationResult = parallelChecksResult.authorizationResult,
         modelConformanceResultET = parallelChecksResult.conformanceResultET,
         internalConsistencyResultET = parallelChecksResult.internalConsistencyResultET,
+        externalCallValidationResultF = parallelChecksResult.externalCallValidationResultF,
         consumedInputsOfHostedParties = usedAndCreated.contracts.consumedInputsOfHostedStakeholders,
         witnessed = usedAndCreated.contracts.witnessed,
         createdContracts = usedAndCreated.contracts.created,
@@ -1637,6 +1661,7 @@ object TransactionProcessingSteps {
         ErrorWithInternalConsistencyCheck,
         Unit,
       ],
+      externalCallValidationResultF: FutureUnlessShutdown[ExternalCallResponseRouter.Result],
       timeValidationResultE: Either[TimeCheckFailure, Unit],
       replayCheckResult: Option[String],
   ) {

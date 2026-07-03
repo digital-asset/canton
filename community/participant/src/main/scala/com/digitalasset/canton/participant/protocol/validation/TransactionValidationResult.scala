@@ -33,6 +33,7 @@ final case class TransactionValidationResult(
       ErrorWithInternalConsistencyCheck,
       Unit,
     ],
+    externalCallValidationResultF: FutureUnlessShutdown[ExternalCallResponseRouter.Result],
     consumedInputsOfHostedParties: Map[LfContractId, Set[LfPartyId]],
     witnessed: Map[LfContractId, GenContractInstance],
     createdContracts: Map[LfContractId, NewContractInstance],

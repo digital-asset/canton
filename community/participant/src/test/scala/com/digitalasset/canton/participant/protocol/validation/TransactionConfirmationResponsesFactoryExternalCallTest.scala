@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
@@ -34,33 +33,25 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
     with HasExecutionContext
     with ExternalCallValidationTestUtil {
 
-  protected val factory =
+  protected val factory: ExampleTransactionFactory =
     new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))()
 
-  private lazy val sut =
+  private lazy val sut: TransactionConfirmationResponsesFactory =
     responseFactory(ProtocolVersion.dev)
 
   private def responseFactory(
-      protocolVersion: ProtocolVersion,
-      externalCallValidator: ExternalCallValidator = matchingExternalCallValidator,
+      protocolVersion: ProtocolVersion
   ): TransactionConfirmationResponsesFactory =
     new TransactionConfirmationResponsesFactory(
       submittingParticipant,
       factory.psid.copy(protocolVersion = protocolVersion),
-      externalCallValidator,
-      PositiveInt.tryCreate(8),
       loggerFactory,
     )
 
-  private val defaultTopologySnapshot = {
-    val snapshot = mock[TopologySnapshot]
-    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
-      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
-        FutureUnlessShutdown.pure(parties)
-      }
-    snapshot
-  }
-
+  /** Builds the transaction validation result the way `doParallelChecks` does: the external-call
+    * check runs over the given views (eagerly, so its alarms are emitted here) and its outcome is
+    * embedded as precomputed data for the factory.
+    */
   private def transactionValidationResult(
       viewValidationResults: Map[ViewPosition, ViewValidationResult],
       authorizationResult: Map[ViewPosition, String] = Map.empty,
@@ -68,7 +59,20 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
         ModelConformanceChecker.ErrorWithSubTransaction[ViewAbsoluteLedgerEffect],
         ModelConformanceChecker.Result,
       ] = Right(defaultModelConformanceResult),
-  ): TransactionValidationResult =
+      externalCallValidator: ExternalCallValidator = matchingExternalCallValidator,
+      topologySnapshot: TopologySnapshot = identityTopologySnapshot,
+      runValidation: Boolean = true,
+  ): TransactionValidationResult = {
+    val externalCallValidationResult = externalCallRouter(externalCallValidator)
+      .check(
+        requestId,
+        viewValidationResults.view.mapValues(_.view).toMap,
+        topologySnapshot,
+        FutureUnlessShutdown.pure(modelConformanceResultE.swap.toSeq.flatMap(_.nonAbortErrors)),
+        runValidation,
+      )
+      .futureValueUS
+
     TransactionValidationResult(
       updateId = defaultModelConformanceResult.updateId,
       submitterMetadataO = None,
@@ -81,6 +85,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
         .rightT[FutureUnlessShutdown, InternalConsistencyChecker.ErrorWithInternalConsistencyCheck](
           ()
         ),
+      externalCallValidationResultF = FutureUnlessShutdown.pure(externalCallValidationResult),
       consumedInputsOfHostedParties = Map.empty,
       witnessed = Map.empty,
       createdContracts = Map.empty,
@@ -93,11 +98,12 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       validatedExternalTransactionHash = None,
       commitAfterFailedActivenessCheck = false,
     )
+  }
 
   private def createResponses(
       transactionValidationResult: TransactionValidationResult,
       responseFactory: TransactionConfirmationResponsesFactory = sut,
-      topologySnapshot: TopologySnapshot = defaultTopologySnapshot,
+      topologySnapshot: TopologySnapshot = identityTopologySnapshot,
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload] = Seq.empty,
   ): Seq[ConfirmationResponse] =
     responseFactory
@@ -200,7 +206,8 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
               Map(
                 leftViewPosition -> validationResult(left),
                 rightViewPosition -> validationResult(right),
-              )
+              ),
+              topologySnapshot = noHostedConfirmersTopologySnapshot,
             ),
             noHostedConfirmersTopologySnapshot,
           )
@@ -213,7 +220,9 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
     "alarm on visible recorded external-call disagreements with malformed payloads" in {
       val responses = loggerFactory.assertLogs(
         createResponses(
-          transactionValidationResult(conflictingExternalCallViews),
+          // Mirrors doParallelChecks: with malformed payloads, the external-call check still
+          // runs (and alarms), but skips the re-validation.
+          transactionValidationResult(conflictingExternalCallViews, runValidation = false),
           malformedPayloads = Seq(ProtocolProcessor.IncompleteLightViewTree(ViewPosition.root)),
         ),
         { (logEntry: LogEntry) =>
@@ -255,8 +264,10 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       )
 
       val responses = createResponses(
-        transactionValidationResult(Map(leftViewPosition -> validationResult(view))),
-        responseFactory = responseFactory(ProtocolVersion.dev, validator),
+        transactionValidationResult(
+          Map(leftViewPosition -> validationResult(view)),
+          externalCallValidator = validator,
+        )
       )
 
       validator.observed shouldBe Seq(key -> externalCallResult.output)
@@ -271,7 +282,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       }
     }
 
-    "not run local external-call validation when a malformed verdict already wins" in {
+    "produce only the malformed verdict although re-validation ran concurrently" in {
       val example = factory.MultipleRoots
       val confirmers = Set(submitter)
       val view = withExternalCallResults(
@@ -294,13 +305,15 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
           transactionValidationResult(
             Map(leftViewPosition -> validationResult(view)),
             authorizationResult = Map(leftViewPosition -> "authorization failure"),
-          ),
-          responseFactory = responseFactory(ProtocolVersion.dev, validator),
+            externalCallValidator = validator,
+          )
         ),
         _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.MalformedRequest),
       )
 
-      validator.observed shouldBe Seq.empty
+      // Re-validation runs concurrently with the other checks and cannot know that a malformed
+      // verdict will win; its outcome is simply not routed into the malformed response.
+      validator.observed shouldBe Seq(key -> externalCallResult.output)
       inside(responses.loneElement) { case ConfirmationResponse(_, reject: LocalReject, parties) =>
         reject.isMalformed shouldBe true
         parties shouldBe Set.empty
@@ -349,12 +362,13 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
                 ),
               ),
               rightViewPosition -> validationResult(right),
-            )
-          ),
-          responseFactory = responseFactory(ProtocolVersion.dev, validator),
+            ),
+            externalCallValidator = validator,
+          )
         )
       }
 
+      // The disagreeing occurrences are excluded from re-validation entirely.
       validator.observed shouldBe Seq.empty
       val leftResponses = responses.filter(_.viewPositionO.contains(leftViewPosition))
       leftResponses should have size 2
@@ -496,6 +510,59 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
           reject.isMalformed && confirmingParties.isEmpty
         case _ => false
       } shouldBe false
+    }
+
+    "prefer replay disagreements over concurrent re-validation mismatches for the same party and view" in {
+      val example = factory.MultipleRoots
+      val confirmers = Set(submitter, signatory)
+      val view = withExternalCallResults(
+        withConfirmers(example.rootViews(4), confirmers),
+        Seq(
+          externalCallViewResult(
+            exerciseIndex = 0,
+            result = externalCallResult,
+            checkingParties = Set(submitter),
+          )
+        ),
+      )
+      val key = DAMLe.ExternalCallKey.fromResult(externalCallResult)
+      // Re-validation cannot know about the replay disagreement (it runs concurrently with the
+      // reinterpretation), so the same occurrence yields both a replay disagreement and a
+      // re-validation mismatch for the checking party.
+      val validator = new RecordingExternalCallValidator(
+        Map(
+          key -> ExternalCallValidator.Mismatched(
+            computedOutput = otherExternalCallOutput.output,
+            recordedOutput = externalCallResult.output,
+          )
+        )
+      )
+
+      val responses = createResponses(
+        transactionValidationResult(
+          Map(leftViewPosition -> validationResult(view)),
+          modelConformanceResultE = Left(
+            modelConformanceRecordedDisagreement(view, externalCallResult)
+          ),
+          externalCallValidator = validator,
+        )
+      )
+
+      // The occurrence was re-validated, but the disagreement rejection takes precedence: the
+      // checking party receives exactly one external-call rejection for the view.
+      validator.observed shouldBe Seq(key -> externalCallResult.output)
+      val leftResponses = responses.filter(_.viewPositionO.contains(leftViewPosition))
+      leftResponses should have size 2
+      leftResponses.count(_.confirmingParties == Set(submitter)) shouldBe 1
+      inside(leftResponses.find(_.confirmingParties == Set(submitter)).value) {
+        case ConfirmationResponse(_, reject: LocalReject, _) =>
+          reject.isMalformed shouldBe false
+          reject.reason.message should include("inconsistent external call results")
+      }
+      inside(leftResponses.find(_.confirmingParties == Set(signatory)).value) {
+        case ConfirmationResponse(_, LocalApprove(), _) =>
+          succeed
+      }
     }
 
   }

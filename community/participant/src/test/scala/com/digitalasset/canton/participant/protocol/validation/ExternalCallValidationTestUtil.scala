@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   ParticipantTransactionView,
@@ -18,6 +18,8 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
@@ -88,6 +90,26 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       FutureUnlessShutdown.pure(ExternalCallValidator.Matched)
   }
 
+  protected def externalCallRouter(
+      externalCallValidator: ExternalCallValidator = matchingExternalCallValidator
+  ): ExternalCallResponseRouter =
+    new ExternalCallResponseRouter(
+      ExampleTransactionFactory.submittingParticipant,
+      externalCallValidator,
+      PositiveInt.tryCreate(8),
+      loggerFactory,
+    )
+
+  /** Resolves every confirming party as hosted. */
+  protected lazy val identityTopologySnapshot: TopologySnapshot = {
+    val snapshot = mock[TopologySnapshot]
+    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
+      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
+        FutureUnlessShutdown.pure(parties)
+      }
+    snapshot
+  }
+
   /** Distinct view positions with values matching their names; ordered `left < unrelated < right <
     * secondRight` under [[ViewPosition.orderViewPosition]].
     */
@@ -147,6 +169,9 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       )(view)
   }
 
+  protected def participantView(view: TransactionView): ParticipantTransactionView =
+    ParticipantTransactionView.tryCreate(view)
+
   protected def validationResult(
       view: TransactionView,
       activenessResult: ViewActivenessResult = ViewActivenessResult(
@@ -156,7 +181,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       ),
   ): ViewValidationResult =
     ViewValidationResult(
-      ParticipantTransactionView.tryCreate(view),
+      participantView(view),
       activenessResult,
     )
 

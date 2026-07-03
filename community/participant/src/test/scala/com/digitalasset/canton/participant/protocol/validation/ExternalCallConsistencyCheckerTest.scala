@@ -58,11 +58,11 @@ class ExternalCallConsistencyCheckerTest
 
     ExternalCallConsistencyChecker.check(
       Map(
-        ViewPosition.root -> validationResult(left),
+        ViewPosition.root -> participantView(left),
         ViewPosition(
           List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
         ) ->
-          validationResult(right),
+          participantView(right),
       ),
       hostedParties,
     )
@@ -149,7 +149,7 @@ class ExternalCallConsistencyCheckerTest
       )
 
       val result = ExternalCallConsistencyChecker.check(
-        Map(ViewPosition.root -> validationResult(view)),
+        Map(ViewPosition.root -> participantView(view)),
         Set(partyA),
       )
 
@@ -201,11 +201,11 @@ class ExternalCallConsistencyCheckerTest
 
       val result = ExternalCallConsistencyChecker.check(
         Map(
-          ViewPosition.root -> validationResult(left),
+          ViewPosition.root -> participantView(left),
           ViewPosition(
             List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
           ) ->
-            validationResult(right),
+            participantView(right),
         ),
         Set(partyA),
       )
@@ -221,7 +221,7 @@ class ExternalCallConsistencyCheckerTest
       val example = factory.MultipleRoots
 
       val result = ExternalCallConsistencyChecker.check(
-        Map(ViewPosition.root -> validationResult(example.rootViews(4))),
+        Map(ViewPosition.root -> participantView(example.rootViews(4))),
         Set(partyA),
       )
 
