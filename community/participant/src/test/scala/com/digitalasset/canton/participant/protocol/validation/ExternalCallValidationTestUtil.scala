@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   ParticipantTransactionView,
+  PathRollbackContextFactory,
   TransactionView,
   ViewConfirmationParameters,
   ViewParticipantData,
@@ -14,14 +15,14 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
+import com.digitalasset.nonempty.NonEmpty
 
-import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters.*
 
 /** Shared fixtures for the external-call validation tests.
@@ -36,7 +37,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
   /** Provided by the mixing test, where an implicit `ExecutionContext` is available to build it. */
   protected def factory: ExampleTransactionFactory
 
-  protected def externalCallViewResult(
+  def externalCallViewResult(
       exerciseIndex: Int,
       result: ExternalCallResult,
       checkingParties: Set[LfPartyId],
@@ -49,7 +50,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       checkingParties = checkingParties,
     )
 
-  protected def withExternalCallResults(
+  def withExternalCallResults(
       view: TransactionView,
       results: Seq[ViewParticipantData.ViewExternalCallResult],
   ): TransactionView =
@@ -60,7 +61,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       results: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result]
   ) extends ExternalCallValidator {
     private val observedKeys =
-      new ConcurrentLinkedQueue[(DAMLe.ExternalCallKey, Bytes)]
+      new java.util.concurrent.ConcurrentLinkedQueue[(DAMLe.ExternalCallKey, Bytes)]
 
     def observed: Seq[(DAMLe.ExternalCallKey, Bytes)] = observedKeys.asScala.toSeq
 
@@ -68,7 +69,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
         key: DAMLe.ExternalCallKey,
         recordedOutput: Bytes,
     )(implicit
-        traceContext: TraceContext
+        traceContext: com.digitalasset.canton.tracing.TraceContext
     ): FutureUnlessShutdown[ExternalCallValidator.Result] = {
       observedKeys.add(key -> recordedOutput)
       FutureUnlessShutdown.pure(
@@ -82,7 +83,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
         key: DAMLe.ExternalCallKey,
         recordedOutput: Bytes,
     )(implicit
-        traceContext: TraceContext
+        traceContext: com.digitalasset.canton.tracing.TraceContext
     ): FutureUnlessShutdown[ExternalCallValidator.Result] =
       FutureUnlessShutdown.pure(ExternalCallValidator.Matched)
   }
@@ -157,6 +158,40 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
     ViewValidationResult(
       ParticipantTransactionView.tryCreate(view),
       activenessResult,
+    )
+
+  protected def defaultModelConformanceResult: ModelConformanceChecker.Result = {
+    val example = factory.MultipleRoots
+    ModelConformanceChecker.Result(
+      example.updateId,
+      WellFormedTransaction.checkOrThrow(
+        example.versionedSuffixedTransaction,
+        example.metadata,
+        WellFormedTransaction.WithSuffixesAndMerged,
+        PathRollbackContextFactory,
+      ),
+      unmergedTransactionsWithoutTopLevelRollbackNodes = Seq.empty,
+    )
+  }
+
+  protected def modelConformanceRecordedDisagreement(
+      view: TransactionView,
+      result: ExternalCallResult,
+      conflictingOutput: Bytes = otherExternalCallOutput.output,
+  ): ModelConformanceChecker.ErrorWithSubTransaction[ViewAbsoluteLedgerEffect] =
+    ModelConformanceChecker.ErrorWithSubTransaction(
+      NonEmpty(
+        Seq,
+        ModelConformanceChecker.DAMLeError(
+          DAMLe.ExternalCallRecordedResultDisagreement(
+            key = DAMLe.ExternalCallKey.fromResult(result),
+            outputs = Set(result.output, conflictingOutput),
+          ),
+          view.viewHash,
+        ),
+      ),
+      validSubTransactionO = None,
+      validSubViewEffects = Seq.empty,
     )
 
   protected def assertRecordedDisagreementAlarms[A](count: Int = 1)(within: => A): A =

@@ -89,8 +89,7 @@ class TransactionConfirmationResponsesFactory(
             case _: LocalApprove =>
               localValidationRoutes.abstainsForView(
                 viewPosition,
-                hostedConfirmingParties,
-                rejectedParties,
+                hostedConfirmingParties -- rejectedParties,
               )
             case _ =>
               Seq.empty
@@ -105,11 +104,7 @@ class TransactionConfirmationResponsesFactory(
               val reject = logged(
                 requestId,
                 LocalRejectError.ConsistencyRejections.ExternalCallResultDisagreement
-                  .Reject(
-                    inconsistency.description
-                      .limit(ExternalCallResponseRouter.maxExternalCallDisagreementDetailsLength)
-                      .toString
-                  ),
+                  .Reject(inconsistency.description),
               ).toLocalReject(protocolVersion)
               responseForView(
                 viewPosition,
@@ -127,11 +122,7 @@ class TransactionConfirmationResponsesFactory(
               responseForView(
                 viewPosition,
                 LocalAbstainError.CannotPerformAllValidations
-                  .Abstain(
-                    reason
-                      .limit(ExternalCallResponseRouter.maxExternalCallDisagreementDetailsLength)
-                      .toString
-                  )
+                  .Abstain(reason)
                   .toLocalAbstain(protocolVersion),
                 parties.toSet,
               )
