@@ -171,10 +171,7 @@ private[validation] class ExternalCallResponseRouter(
           approvingParties =>
             val viewParticipantData =
               viewWithHostedParties.validationResult.view.viewParticipantData
-            if (
-              !viewParticipantData.supportsExternalCallResults ||
-              viewParticipantData.externalCallResults.isEmpty
-            ) Seq.empty
+            if (viewParticipantData.externalCallResults.isEmpty) Seq.empty
             else {
               val alreadyRejectedParties =
                 externalCallRouting
