@@ -168,7 +168,6 @@ private[validation] class ExternalCallResponseRouter(
 ) extends NamedLogging {
 
   import ExternalCallResponseRouter.*
-  import com.digitalasset.canton.util.ShowUtil.*
 
   def validationOccurrences(
       viewsWithHostedParties: Seq[ViewWithHostedParties],
@@ -255,16 +254,13 @@ private[validation] class ExternalCallResponseRouter(
       recordedConsistencyResult: ExternalCallConsistencyChecker.Result,
   )(implicit traceContext: TraceContext): Unit =
     recordedConsistencyResult.visibleInconsistencies.foreach { inconsistency =>
-      val details = inconsistency.description.limit(maxExternalCallDisagreementDetailsLength)
       ExternalCallValidationError.ExternalCallResultDisagreementAlarm
-        .Warn(s"Observed inconsistent external call results: $details")
+        .Warn(s"Observed inconsistent external call results: ${inconsistency.description}")
         .logWithContext(Map("requestId" -> requestId.toString))
     }
 }
 
 private[validation] object ExternalCallResponseRouter {
-
-  val maxExternalCallDisagreementDetailsLength = 1024
 
   private val orderRecordedResultDisagreement
       : Ordering[DAMLe.ExternalCallRecordedResultDisagreement] =
