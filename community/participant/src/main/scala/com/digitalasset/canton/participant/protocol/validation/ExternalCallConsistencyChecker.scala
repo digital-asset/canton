@@ -21,10 +21,10 @@ import com.google.protobuf.ByteString
   *
   * An external-call result is ''visible'' to this participant if it is recorded in one of the
   * (unblinded) views that this participant has received for validation. External-call results are
-  * replay data that participate in validation. If two visible occurrences of the same external
-  * call record different outputs, a hosted confirming party must reject the transaction locally
-  * instead of approving an ambiguous result. Visible disagreements are also retained independently
-  * of hosted-party routing so callers can report suspicious recorded data.
+  * replay data that participate in validation. If two visible occurrences of the same external call
+  * record different outputs, a hosted confirming party must reject the transaction locally instead
+  * of approving an ambiguous result. Visible disagreements are also retained independently of
+  * hosted-party routing so callers can report suspicious recorded data.
   */
 object ExternalCallConsistencyChecker {
 
@@ -102,8 +102,8 @@ object ExternalCallConsistencyChecker {
   /** An external-call result recorded in a view that this participant has received.
     *
     * @param checkingParties
-    *   The node-level confirming parties responsible for checking this result: the signatories
-    *   and acting parties of the exercise node that recorded the call, as determined at
+    *   The node-level confirming parties responsible for checking this result: the signatories and
+    *   acting parties of the exercise node that recorded the call, as determined at
     *   transaction-tree construction. See
     *   [[com.digitalasset.canton.data.ViewParticipantData.ViewExternalCallResult]].
     */
@@ -199,9 +199,9 @@ object ExternalCallConsistencyChecker {
       .mapValues(_.sorted(orderInconsistency))
       .toMap
 
-  /** Returns per-party inconsistencies for hosted confirming parties that check disagreeing
-    * outputs for the same external call, as well as the disagreements across all visible
-    * occurrences. See [[Result]] for how the two differ.
+  /** Returns per-party inconsistencies for hosted confirming parties that check disagreeing outputs
+    * for the same external call, as well as the disagreements across all visible occurrences. See
+    * [[Result]] for how the two differ.
     */
   def check(
       viewValidationResults: Map[ViewPosition, ViewValidationResult],
