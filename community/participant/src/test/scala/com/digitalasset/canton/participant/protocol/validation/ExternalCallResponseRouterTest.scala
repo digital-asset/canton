@@ -161,7 +161,7 @@ final class ExternalCallResponseRouterTest
       abstain.reason should include("extension service is not configured")
 
       routes
-        .abstainsForView(leftViewPosition, confirmers, rejectedParties = Set.empty)
+        .abstainsForView(leftViewPosition, confirmers)
         .map(_._1) shouldBe Seq(submitter)
     }
 
@@ -199,11 +199,11 @@ final class ExternalCallResponseRouterTest
       validator.observed shouldBe Seq(externalCallKey -> externalCallResult.output)
       routes.abstains(submitter).loneElement.viewPosition shouldBe leftViewPosition
       routes
-        .abstainsForView(leftViewPosition, confirmers, rejectedParties = Set.empty)
+        .abstainsForView(leftViewPosition, confirmers)
         .map(_._1) shouldBe Seq(submitter)
       // The abstain does not leak into the unaffected view.
       routes
-        .abstainsForView(rightViewPosition, confirmers, rejectedParties = Set.empty) shouldBe empty
+        .abstainsForView(rightViewPosition, confirmers) shouldBe empty
     }
 
     "not locally validate external calls when no hosted confirmer is a checking party" in {

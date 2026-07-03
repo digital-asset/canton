@@ -59,13 +59,19 @@ private[validation] final case class ExternalCallValidationRoutes(
       case _ => None
     }
 
+  /** Yields for every party in `nonRejectingConfirmingParties` the abstain reason in
+    * `abstains(party)` recorded for the given `viewPosition` (provided it exists). Picks the
+    * smallest reason per party so that the result is deterministic.
+    *
+    * @param nonRejectingConfirmingParties
+    *   The hosted confirming parties that are not already rejecting for this view.
+    */
   def abstainsForView(
       viewPosition: ViewPosition,
-      hostedConfirmingParties: Set[LfPartyId],
-      rejectedParties: Set[LfPartyId],
+      nonRejectingConfirmingParties: Set[LfPartyId],
   ): Seq[(LfPartyId, String)] =
     abstains.toSeq.sortBy { case (party, _) => party }.flatMap {
-      case (party, abstains) if hostedConfirmingParties(party) && !rejectedParties(party) =>
+      case (party, abstains) if nonRejectingConfirmingParties(party) =>
         abstains
           .filter(_.viewPosition == viewPosition)
           .minByOption(_.reason)
