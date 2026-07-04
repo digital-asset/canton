@@ -102,13 +102,14 @@ object ExternalCallValidationRoutes {
   *   - re-validation of undisputed recorded results against the extension service (see
   *     `validationOccurrences` and `validateExternalCalls`).
   *
-  * Intended data flow for a request: `doParallelChecks` invokes [[check]] concurrently with the
-  * other validation suites (following the pattern of `ModelConformanceChecker.check`); the returned
+  * Intended data flow for a request: `doParallelChecks` invokes [[check]] without awaiting it, so
+  * that it runs concurrently with the model conformance and internal consistency checks (following
+  * the pattern of `ModelConformanceChecker.check`); the returned
   * [[ExternalCallResponseRouter.Result]] travels to `TransactionConfirmationResponsesFactory`
   * through the transaction validation result, and the factory translates it -- without further
-  * validation work -- into per-view, per-party verdicts: rejections for the disagreements and
-  * re-validation mismatches a hosted confirming party checks, abstentions where re-validation was
-  * not possible, and approval otherwise.
+  * validation work -- into per-view, per-party verdicts: rejections for the disagreements a hosted
+  * confirming party checks, rejections and abstentions from re-validation on views that would
+  * otherwise be approved, and the view's own verdict for the remaining parties.
   *
   * Stateless helpers that do not need the validator live on the companion object.
   *
@@ -134,9 +135,11 @@ class ExternalCallResponseRouter(
     *   - checking the consistency of the recorded results across all views
     *     ([[ExternalCallConsistencyChecker.check]]) and alarming on every visible disagreement,
     *     including those that affect no hosted party,
-    *   - re-validating the undisputed recorded results that a hosted confirming party checks
-    *     (`validationOccurrences`, `validateExternalCalls`). The network I/O starts before the
-    *     model-conformance result is available, so it runs concurrently with the reinterpretation,
+    *   - re-validating the recorded results that a hosted confirming party checks and is not
+    *     already rejecting, where the selected occurrences agree on the output
+    *     (`validationOccurrences`, `validateExternalCalls`). The network I/O is kicked off without
+    *     awaiting the model-conformance result, so it can run concurrently with the
+    *     reinterpretation,
     *   - routing the replay disagreements surfaced by the model-conformance errors to the hosted
     *     confirming parties that check a matching occurrence
     *     (`recordedExternalCallDisagreementInconsistencies`).
@@ -271,9 +274,12 @@ class ExternalCallResponseRouter(
     * concurrent validator calls bounded by `externalCallValidationParallelism`. Keys with
     * disagreeing recorded outputs are not re-validated; those disagreements are covered by the
     * consistency check (per-party rejections where a hosted party checks conflicting occurrences,
-    * visible-disagreement alarms otherwise). Since the selection spans all views of the request, a
-    * key whose recorded outputs disagree anywhere in the request is never re-validated,
-    * independently of which views end up being approved.
+    * and visible-disagreement alarms in every case). Since the selection spans all views of the
+    * request (not only those that end up approved), this skip is independent of the per-view
+    * verdicts. It is however scoped to the selected occurrences: a conflicting occurrence that no
+    * hosted, non-rejecting confirming party checks does not participate in the aggregation, so the
+    * remaining side of such a disagreement is still re-validated for the parties that check it,
+    * while the dropped side stays covered by the consistency check as above.
     *
     * Verdict routing, applied to every hosted checking party of every occurrence of the key:
     * [[ExternalCallValidator.Mismatched]] yields a rejection (an

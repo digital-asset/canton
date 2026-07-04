@@ -902,8 +902,8 @@ class TransactionProcessingSteps(
         // The external-call check re-validates recorded external-call results against the
         // extension service. Like the model conformance check, it is kicked off here and only
         // awaited when the confirmation responses are created, so that its network I/O runs
-        // concurrently with the other checks (including the reinterpretation, whose errors it
-        // consumes to route replay disagreements).
+        // concurrently with the remaining checks (in particular the reinterpretation, whose
+        // errors it consumes to route replay disagreements).
         externalCallValidationResultF = {
           val participantViews = parsedRequest.rootViewTrees.forgetNE
             .flatMap(viewTree => viewTree.view.allSubviewsWithPosition(viewTree.viewPosition))

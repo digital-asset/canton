@@ -134,9 +134,10 @@ class TransactionConfirmationResponsesFactory(
     /** Converts the local verdict of a view into confirmation responses, splitting it by party
       * where precomputed external-call outcomes ([[ExternalCallResponseRouter.Result]]) apply:
       * hosted confirming parties that check a disagreeing external-call result reject the view with
-      * the disagreement, parties whose checked results could not be re-validated abstain, and the
-      * remaining parties respond with the view's own verdict. For a request without external calls,
-      * `externalCallResult` is empty and the view's verdict is returned unsplit.
+      * the disagreement, parties whose checked results could not be re-validated abstain (on views
+      * that would otherwise be approved), and the remaining parties respond with the view's own
+      * verdict. For a request without external calls, `externalCallResult` is empty and the view's
+      * verdict is returned unsplit.
       */
     def responsesForVerdict(
         viewPosition: ViewPosition,
@@ -256,8 +257,11 @@ class TransactionConfirmationResponsesFactory(
               // An external-call replay disagreement that is routed to a hosted checking party is
               // not turned into (nor logged as) a malformed model-conformance rejection of the
               // whole view: the routed parties instead reject the affected views with a dedicated,
-              // equally logged ExternalCallResultDisagreement rejection (see responsesForVerdict),
-              // so every model-conformance error still surfaces in exactly one logged rejection.
+              // equally logged ExternalCallResultDisagreement rejection (see responsesForVerdict).
+              // A routed error is never silent: its visible-disagreement alarm has fired in the
+              // external-call check, and each affected view logs its rejection when emitting it --
+              // unless the view is rejected as malformed for another reason, in which case that
+              // stronger rejection wins the view (the alarm remains on record).
               Option.unless(externalCallResult.isRoutableModelConformanceError(cause))(
                 logged(
                   requestId,
