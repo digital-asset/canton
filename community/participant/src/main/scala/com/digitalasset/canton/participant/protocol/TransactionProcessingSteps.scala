@@ -94,7 +94,13 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LoggerUtil, RoseTree}
+import com.digitalasset.canton.util.{
+  EitherTUtil,
+  ErrorUtil,
+  FutureUnlessShutdownUtil,
+  LoggerUtil,
+  RoseTree,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LedgerSubmissionId,
@@ -908,16 +914,28 @@ class TransactionProcessingSteps(
           val participantViews = parsedRequest.rootViewTrees.forgetNE
             .flatMap(viewTree => viewTree.view.allSubviewsWithPosition(viewTree.viewPosition))
             .map { case (view, viewPosition) =>
-              viewPosition -> ParticipantTransactionView.tryCreate(view)
+              // The root view trees received for validation are fully unblinded, so tryCreate
+              // cannot throw (computeValidationResult below relies on the same invariant).
+              viewPosition -> checked(ParticipantTransactionView.tryCreate(view))
             }
             .toMap
-          externalCallResponseRouter.check(
+          val checkResultF = externalCallResponseRouter.check(
             requestId,
             participantViews,
             ipsSnapshot,
             conformanceResultET.value.map(_.swap.toSeq.flatMap(_.nonAbortErrors)),
             runValidation = malformedPayloads.isEmpty,
           )
+          if (malformedPayloads.nonEmpty) {
+            // Responses for malformed requests are constructed without awaiting the check
+            // (only its alarms matter there); drain it so that failures are logged rather
+            // than silently discarded.
+            FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+              checkResultF,
+              "external-call check on a request with malformed payloads",
+            )
+          }
+          checkResultF
         }
 
       } yield ParallelChecksResult(

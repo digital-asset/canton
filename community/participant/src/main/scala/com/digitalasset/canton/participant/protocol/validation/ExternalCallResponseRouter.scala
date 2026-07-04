@@ -23,71 +23,6 @@ import com.digitalasset.daml.lf.data.Bytes
 
 import scala.concurrent.ExecutionContext
 
-/** An abstention from confirming a view because a recorded external-call result could not be
-  * re-validated.
-  */
-final case class ExternalCallValidationAbstain(
-    viewPosition: ViewPosition,
-    reason: String,
-)
-
-/** Per-party outcome of re-validating recorded external-call results: `rejects` holds the
-  * re-validation mismatches (as inconsistencies carrying the recorded and the computed output),
-  * `abstains` holds the per-view abstentions where a result could not be re-validated.
-  */
-final case class ExternalCallValidationRoutes(
-    rejects: Map[LfPartyId, Seq[Inconsistency]],
-    abstains: Map[LfPartyId, Seq[ExternalCallValidationAbstain]],
-) {
-
-  /** Yields for every party in `nonRejectingConfirmingParties` an inconsistency in `rejects(party)`
-    * that has the given `viewPosition` (provided it exists). Picks the smallest inconsistency per
-    * party by [[ExternalCallConsistencyChecker.orderInconsistency]] so that the result is
-    * deterministic.
-    *
-    * @param nonRejectingConfirmingParties
-    *   The hosted confirming parties that are not already rejecting for this view (rejections for
-    *   disagreements take precedence over re-validation outcomes, and at most one external-call
-    *   rejection is routed per party and view).
-    */
-  def rejectsForView(
-      viewPosition: ViewPosition,
-      nonRejectingConfirmingParties: Set[LfPartyId],
-  ): Seq[(LfPartyId, Inconsistency)] =
-    rejects.toSeq.sortBy { case (party, _) => party }.flatMap {
-      case (party, inconsistencies) if nonRejectingConfirmingParties(party) =>
-        inconsistencies
-          .filter(_.occurrences.exists(_.viewPosition == viewPosition))
-          .minByOption(identity)(ExternalCallConsistencyChecker.orderInconsistency)
-          .map(party -> _)
-      case _ => None
-    }
-
-  /** Yields for every party in `nonRejectingConfirmingParties` the abstain reason in
-    * `abstains(party)` recorded for the given `viewPosition` (provided it exists). Picks the
-    * smallest reason per party so that the result is deterministic.
-    *
-    * @param nonRejectingConfirmingParties
-    *   The hosted confirming parties that are not already rejecting for this view.
-    */
-  def abstainsForView(
-      viewPosition: ViewPosition,
-      nonRejectingConfirmingParties: Set[LfPartyId],
-  ): Seq[(LfPartyId, String)] =
-    abstains.toSeq.sortBy { case (party, _) => party }.flatMap {
-      case (party, abstains) if nonRejectingConfirmingParties(party) =>
-        abstains
-          .filter(_.viewPosition == viewPosition)
-          .minByOption(_.reason)
-          .map(abstain => party -> abstain.reason)
-      case _ => None
-    }
-}
-
-object ExternalCallValidationRoutes {
-  val empty: ExternalCallValidationRoutes = ExternalCallValidationRoutes(Map.empty, Map.empty)
-}
-
 /** Checks and re-validates the external-call results of a transaction request, as one of the
   * parallel validation suites invoked from `TransactionProcessingSteps.doParallelChecks`.
   *
@@ -368,6 +303,71 @@ object ExternalCallResponseRouter {
       hostedCheckingParties: Set[LfPartyId],
   )
 
+  /** An abstention from confirming a view because a recorded external-call result could not be
+    * re-validated.
+    */
+  final case class ExternalCallValidationAbstain(
+      viewPosition: ViewPosition,
+      reason: String,
+  )
+
+  /** Per-party outcome of re-validating recorded external-call results: `rejects` holds the
+    * re-validation mismatches (as inconsistencies carrying the recorded and the computed output),
+    * `abstains` holds the per-view abstentions where a result could not be re-validated.
+    */
+  final case class ExternalCallValidationRoutes(
+      rejects: Map[LfPartyId, Seq[Inconsistency]],
+      abstains: Map[LfPartyId, Seq[ExternalCallValidationAbstain]],
+  ) {
+
+    /** Yields for every party in `nonRejectingConfirmingParties` an inconsistency in
+      * `rejects(party)` that has the given `viewPosition` (provided it exists). Picks the smallest
+      * inconsistency per party by `ExternalCallConsistencyChecker.orderInconsistency` so that the
+      * result is deterministic.
+      *
+      * @param nonRejectingConfirmingParties
+      *   The hosted confirming parties that are not already rejecting for this view (rejections for
+      *   disagreements take precedence over re-validation outcomes, and at most one external-call
+      *   rejection is routed per party and view).
+      */
+    def rejectsForView(
+        viewPosition: ViewPosition,
+        nonRejectingConfirmingParties: Set[LfPartyId],
+    ): Seq[(LfPartyId, Inconsistency)] =
+      rejects.toSeq.sortBy { case (party, _) => party }.flatMap {
+        case (party, inconsistencies) if nonRejectingConfirmingParties(party) =>
+          inconsistencies
+            .filter(_.occurrences.exists(_.viewPosition == viewPosition))
+            .minByOption(identity)(ExternalCallConsistencyChecker.orderInconsistency)
+            .map(party -> _)
+        case _ => None
+      }
+
+    /** Yields for every party in `nonRejectingConfirmingParties` the abstain reason in
+      * `abstains(party)` recorded for the given `viewPosition` (provided it exists). Picks the
+      * smallest reason per party so that the result is deterministic.
+      *
+      * @param nonRejectingConfirmingParties
+      *   The hosted confirming parties that are not already rejecting for this view.
+      */
+    def abstainsForView(
+        viewPosition: ViewPosition,
+        nonRejectingConfirmingParties: Set[LfPartyId],
+    ): Seq[(LfPartyId, String)] =
+      abstains.toSeq.sortBy { case (party, _) => party }.flatMap {
+        case (party, abstains) if nonRejectingConfirmingParties(party) =>
+          abstains
+            .filter(_.viewPosition == viewPosition)
+            .minByOption(_.reason)
+            .map(abstain => party -> abstain.reason)
+        case _ => None
+      }
+  }
+
+  object ExternalCallValidationRoutes {
+    val empty: ExternalCallValidationRoutes = ExternalCallValidationRoutes(Map.empty, Map.empty)
+  }
+
   /** Precomputed external-call validation outcome of a request, produced by `check` and consumed by
     * `TransactionConfirmationResponsesFactory` as pure data.
     *
@@ -507,17 +507,17 @@ object ExternalCallResponseRouter {
       orderedViews: Seq[ViewWithHostedParties],
   ): Map[LfPartyId, Set[ExternalCallOccurrence]] =
     orderedViews
-      .flatMap { view =>
-        view.view.viewParticipantData.externalCallResults
+      .flatMap { viewWithHostedParties =>
+        viewWithHostedParties.view.viewParticipantData.externalCallResults
           .filter(result => matchesDisagreement(disagreement, result))
           .flatMap { result =>
             val occurrence = ExternalCallOccurrence(
-              view.viewPosition,
+              viewWithHostedParties.viewPosition,
               result.exerciseIndex,
               result.callIndex,
             )
             result.checkingParties
-              .intersect(view.hostedConfirmingParties)
+              .intersect(viewWithHostedParties.hostedConfirmingParties)
               .toSeq
               .map(_ -> occurrence)
           }

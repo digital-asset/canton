@@ -131,14 +131,13 @@ class TransactionConfirmationResponsesFactory(
       }
     }
 
-    /** Converts the local verdict of a view into confirmation responses, splitting it by party
-      * where precomputed external-call outcomes ([[ExternalCallResponseRouter.Result]]) apply:
-      * hosted confirming parties that check a disagreeing external-call result reject the view with
-      * the disagreement, parties whose checked results could not be re-validated abstain (on views
-      * that would otherwise be approved), and the remaining parties respond with the view's own
-      * verdict. For a request without external calls, `externalCallResult` is empty and the view's
-      * verdict is returned unsplit.
-      */
+    // Converts the local verdict of a view into confirmation responses, splitting it by party
+    // where precomputed external-call outcomes (ExternalCallResponseRouter.Result) apply:
+    // hosted confirming parties that check a disagreeing external-call result reject the view
+    // with the disagreement, parties whose checked results could not be re-validated abstain (on
+    // views that would otherwise be approved), and the remaining parties respond with the view's
+    // own verdict. For a request without external calls, `externalCallResult` is empty and the
+    // view's verdict is returned unsplit.
     def responsesForVerdict(
         viewPosition: ViewPosition,
         hostedConfirmingParties: Set[LfPartyId],
@@ -214,9 +213,10 @@ class TransactionConfirmationResponsesFactory(
                 checked(
                   ConfirmationResponse.tryCreate(
                     Some(viewPosition),
-                    LocalAbstainError.CannotPerformAllValidations
-                      .Abstain(reason)
-                      .toLocalAbstain(protocolVersion),
+                    logged(
+                      requestId,
+                      LocalAbstainError.CannotPerformAllValidations.Abstain(reason),
+                    ).toLocalAbstain(protocolVersion),
                     parties.toSet,
                   )
                 )
