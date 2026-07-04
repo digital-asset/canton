@@ -914,8 +914,9 @@ class TransactionProcessingSteps(
           val participantViews = parsedRequest.rootViewTrees.forgetNE
             .flatMap(viewTree => viewTree.view.allSubviewsWithPosition(viewTree.viewPosition))
             .map { case (view, viewPosition) =>
-              // The root view trees received for validation are fully unblinded, so tryCreate
-              // cannot throw (computeValidationResult below relies on the same invariant).
+              // The represented view of each root view tree is fully unblinded
+              // (FullTransactionViewTree invariant), so tryCreate cannot throw for it or any of
+              // its subviews (computeValidationResult below relies on the same invariant).
               viewPosition -> checked(ParticipantTransactionView.tryCreate(view))
             }
             .toMap
@@ -932,7 +933,7 @@ class TransactionProcessingSteps(
             // than silently discarded.
             FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
               checkResultF,
-              "external-call check on a request with malformed payloads",
+              "external-call check failed for a request with malformed payloads",
             )
           }
           checkResultF
