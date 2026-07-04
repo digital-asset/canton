@@ -20,11 +20,13 @@ import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.nonempty.NonEmpty
 
+import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters.*
 
 /** Shared fixtures for the external-call validation tests.
@@ -39,7 +41,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
   /** Provided by the mixing test, where an implicit `ExecutionContext` is available to build it. */
   protected def factory: ExampleTransactionFactory
 
-  def externalCallViewResult(
+  protected def externalCallViewResult(
       exerciseIndex: Int,
       result: ExternalCallResult,
       checkingParties: Set[LfPartyId],
@@ -52,7 +54,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       checkingParties = checkingParties,
     )
 
-  def withExternalCallResults(
+  protected def withExternalCallResults(
       view: TransactionView,
       results: Seq[ViewParticipantData.ViewExternalCallResult],
   ): TransactionView =
@@ -63,7 +65,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       results: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result]
   ) extends ExternalCallValidator {
     private val observedKeys =
-      new java.util.concurrent.ConcurrentLinkedQueue[(DAMLe.ExternalCallKey, Bytes)]
+      new ConcurrentLinkedQueue[(DAMLe.ExternalCallKey, Bytes)]
 
     def observed: Seq[(DAMLe.ExternalCallKey, Bytes)] = observedKeys.asScala.toSeq
 
@@ -71,7 +73,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
         key: DAMLe.ExternalCallKey,
         recordedOutput: Bytes,
     )(implicit
-        traceContext: com.digitalasset.canton.tracing.TraceContext
+        traceContext: TraceContext
     ): FutureUnlessShutdown[ExternalCallValidator.Result] = {
       observedKeys.add(key -> recordedOutput)
       FutureUnlessShutdown.pure(
@@ -85,7 +87,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
         key: DAMLe.ExternalCallKey,
         recordedOutput: Bytes,
     )(implicit
-        traceContext: com.digitalasset.canton.tracing.TraceContext
+        traceContext: TraceContext
     ): FutureUnlessShutdown[ExternalCallValidator.Result] =
       FutureUnlessShutdown.pure(ExternalCallValidator.Matched)
   }
@@ -99,6 +101,16 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
       PositiveInt.tryCreate(8),
       loggerFactory,
     )
+
+  /** Resolves only `hostedParties` as hosted. */
+  protected def hostingTopologySnapshot(hostedParties: Set[LfPartyId]): TopologySnapshot = {
+    val snapshot = mock[TopologySnapshot]
+    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
+      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
+        FutureUnlessShutdown.pure(parties.intersect(hostedParties))
+      }
+    snapshot
+  }
 
   /** Resolves every confirming party as hosted. */
   protected lazy val identityTopologySnapshot: TopologySnapshot = {

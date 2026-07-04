@@ -5,7 +5,10 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.data.{TransactionView, ViewPosition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.protocol.validation.ExternalCallResponseRouter.ViewWithHostedParties
+import com.digitalasset.canton.participant.protocol.validation.ExternalCallResponseRouter.{
+  ExternalCallValidationRoutes,
+  ViewWithHostedParties,
+}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{signatory, submitter}
@@ -37,16 +40,6 @@ final class ExternalCallResponseRouterTest
 
   private val externalCallKey: DAMLe.ExternalCallKey =
     DAMLe.ExternalCallKey.fromResult(externalCallResult)
-
-  /** Resolves only `hostedParties` as hosted. */
-  private def hostingTopologySnapshot(hostedParties: Set[LfPartyId]): TopologySnapshot = {
-    val snapshot = mock[TopologySnapshot]
-    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
-      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
-        FutureUnlessShutdown.pure(parties.intersect(hostedParties))
-      }
-    snapshot
-  }
 
   private def runCheck(
       sut: ExternalCallResponseRouter,
@@ -85,10 +78,9 @@ final class ExternalCallResponseRouterTest
 
   /** Two views recording the same external call with disagreeing outputs, both seen by `submitter`.
     */
-  private def conflictingViews(
-      confirmers: Set[LfPartyId] = Set(submitter, signatory)
-  ): Seq[(ViewPosition, TransactionView)] = {
+  private def conflictingViews(): Seq[(ViewPosition, TransactionView)] = {
     val example = factory.MultipleRoots
+    val confirmers = Set(submitter, signatory)
     val left = withExternalCallResults(
       withConfirmers(example.rootViews(4), confirmers),
       Seq(externalCallViewResult(exerciseIndex = 0, externalCallResult, Set(submitter))),
@@ -554,7 +546,7 @@ final class ExternalCallResponseRouterTest
         unrelatedViewPosition -> secondKey,
         secondRightViewPosition -> secondKey,
       )
-      expectedKeyByView.foreach { case (viewPosition, expectedKey) =>
+      forEvery(expectedKeyByView) { case (viewPosition, expectedKey) =>
         val routed = result.inconsistenciesForView(viewPosition, confirmers)
         routed.map(_._1) shouldBe Seq(submitter)
         routed.loneElement._2.key shouldBe expectedKey

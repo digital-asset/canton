@@ -23,10 +23,10 @@ import com.digitalasset.canton.protocol.messages.{
   LocalApprove,
   LocalReject,
 }
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
+import org.scalatest.Assertion
 
 final class TransactionConfirmationResponsesFactoryExternalCallTest
     extends BaseTestWordSpec
@@ -37,14 +37,9 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
     new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))()
 
   private lazy val sut: TransactionConfirmationResponsesFactory =
-    responseFactory(ProtocolVersion.dev)
-
-  private def responseFactory(
-      protocolVersion: ProtocolVersion
-  ): TransactionConfirmationResponsesFactory =
     new TransactionConfirmationResponsesFactory(
       submittingParticipant,
-      factory.psid.copy(protocolVersion = protocolVersion),
+      factory.psid.copy(protocolVersion = ProtocolVersion.dev),
       loggerFactory,
     )
 
@@ -102,11 +97,10 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
 
   private def createResponses(
       transactionValidationResult: TransactionValidationResult,
-      responseFactory: TransactionConfirmationResponsesFactory = sut,
       topologySnapshot: TopologySnapshot = identityTopologySnapshot,
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload] = Seq.empty,
   ): Seq[ConfirmationResponse] =
-    responseFactory
+    sut
       .createConfirmationResponses(
         requestId,
         malformedPayloads,
@@ -116,6 +110,13 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       .futureValueUS
       .value
       .responses
+
+  private def assertNoMalformedResponses(responses: Seq[ConfirmationResponse]): Assertion =
+    responses.filter {
+      case ConfirmationResponse(_, reject: LocalReject, parties) =>
+        reject.isMalformed && parties.isEmpty
+      case _ => false
+    } shouldBe empty
 
   private def conflictingExternalCallViews: Map[ViewPosition, ViewValidationResult] = {
     val example = factory.MultipleRoots
@@ -190,12 +191,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
           )
         ),
       )
-      val noHostedConfirmersTopologySnapshot = {
-        val snapshot = mock[TopologySnapshot]
-        when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
-          .thenReturn(FutureUnlessShutdown.pure(Set.empty))
-        snapshot
-      }
+      val noHostedConfirmersTopologySnapshot = hostingTopologySnapshot(Set.empty)
 
       val responsesO = assertRecordedDisagreementAlarms() {
         sut
@@ -369,7 +365,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       }
 
       // The disagreeing occurrences are excluded from re-validation entirely.
-      validator.observed shouldBe Seq.empty
+      validator.observed shouldBe empty
       val leftResponses = responses.filter(_.viewPositionO.contains(leftViewPosition))
       leftResponses should have size 2
       inside(leftResponses.find(_.confirmingParties == Set(submitter)).value) {
@@ -382,11 +378,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
           reject.isMalformed shouldBe false
           reject.reason.message should not include "inconsistent external call results"
       }
-      responses.exists {
-        case ConfirmationResponse(_, reject: LocalReject, parties) =>
-          reject.isMalformed && parties.isEmpty
-        case _ => false
-      } shouldBe false
+      assertNoMalformedResponses(responses)
     }
 
     "prefer malformed verdicts over external-call disagreement responses" in {
@@ -436,11 +428,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
         case ConfirmationResponse(_, LocalApprove(), _) =>
           succeed
       }
-      responses.exists {
-        case ConfirmationResponse(_, reject: LocalReject, confirmingParties) =>
-          reject.isMalformed && confirmingParties.isEmpty
-        case _ => false
-      } shouldBe false
+      assertNoMalformedResponses(responses)
     }
 
     "route recorded external-call replay ambiguity for disjoint checking parties" in {
@@ -505,11 +493,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
           succeed
       }
 
-      responses.exists {
-        case ConfirmationResponse(_, reject: LocalReject, confirmingParties) =>
-          reject.isMalformed && confirmingParties.isEmpty
-        case _ => false
-      } shouldBe false
+      assertNoMalformedResponses(responses)
     }
 
     "prefer replay disagreements over concurrent re-validation mismatches for the same party and view" in {
