@@ -161,7 +161,7 @@ private[validation] final class ExternalCallRoutingContext(
       hostedConfirmingParties: Set[LfPartyId],
   ): Seq[(LfPartyId, Inconsistency)] = {
     val recordedResultInconsistencies =
-      recordedConsistencyResult.inconsistencies.toSeq.flatMap {
+      recordedConsistencyResult.hostedInconsistencies.toSeq.flatMap {
         case (party, inconsistencies) if hostedConfirmingParties(party) =>
           inconsistencies
             .find(_.occurrences.exists(_.viewPosition == viewPosition))

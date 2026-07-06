@@ -299,7 +299,7 @@ final class ExternalCallResponseRouterTest
       val sut = router(validator)
 
       // The visible recorded disagreement already rejects the checking party.
-      routing.recordedConsistencyResult.inconsistencies.keySet shouldBe Set(submitter)
+      routing.recordedConsistencyResult.hostedInconsistencies.keySet shouldBe Set(submitter)
       routing.recordedConsistencyResult.visibleInconsistencies should have size 1
       routing
         .inconsistenciesForView(leftViewPosition, Set(submitter, signatory))
@@ -380,8 +380,8 @@ final class ExternalCallResponseRouterTest
 
       // One visible disagreement per distinct external call, both routed to the checking party.
       routing.recordedConsistencyResult.visibleInconsistencies should have size 2
-      routing.recordedConsistencyResult.inconsistencies.keySet shouldBe Set(submitter)
-      routing.recordedConsistencyResult.inconsistencies(submitter) should have size 2
+      routing.recordedConsistencyResult.hostedInconsistencies.keySet shouldBe Set(submitter)
+      routing.recordedConsistencyResult.hostedInconsistencies(submitter) should have size 2
 
       // Each affected view rejects the checking party with the inconsistency for its own call.
       val expectedKeyByView = Map(
@@ -459,7 +459,7 @@ final class ExternalCallResponseRouterTest
 
       // No single hosted party sees both outputs, so the visible (hosted) consistency check finds
       // nothing -- but the disagreement is still globally visible and therefore alarmed.
-      routing.recordedConsistencyResult.inconsistencies shouldBe empty
+      routing.recordedConsistencyResult.hostedInconsistencies shouldBe empty
       routing.recordedConsistencyResult.visibleInconsistencies should have size 1
 
       // The replay disagreement routes to each checking party for the occurrence they can see.
