@@ -76,14 +76,20 @@ class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseT
       val manager = emptyManager
       val validator = ExtensionServiceExternalCallValidator.create(Some(manager))
 
-      validator
-        .validate(externalCallKey, recordedOutput)
-        .failOnShutdown
-        .map { result =>
-          result shouldBe ExternalCallValidator.UnableToValidate(
-            "external-call validation failed with status 404"
-          )
-        }
+      loggerFactory
+        .assertLogs(
+          validator
+            .validate(externalCallKey, recordedOutput)
+            .failOnShutdown
+            .map { result =>
+              result shouldBe ExternalCallValidator.UnableToValidate(
+                "external-call validation failed with status 404"
+              )
+            },
+          _.warningMessage shouldBe
+            "External call to extension 'extension-id' (function 'function-id') failed: " +
+            "status=404, retryable=false, message=Extension 'extension-id' not configured",
+        )
         .thereafter(_ => manager.close())
     }
   }
