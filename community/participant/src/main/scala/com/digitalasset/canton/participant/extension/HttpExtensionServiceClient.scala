@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.config.{
   ExtensionServiceAuthConfig,
   ExtensionServiceConfig,
 }
+import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.util.retry.{Backoff, NoExceptionRetryPolicy, Success}
@@ -292,7 +293,7 @@ class HttpExtensionServiceClient(
             .header("Accept", "text/plain")
             .header("X-Daml-External-Function-Id", functionId)
             .header("X-Daml-External-Config-Hash", configHash)
-            .header("X-Daml-External-Mode", mode.headerValue)
+            .header("X-Daml-External-Mode", mode.wireValue)
             .header("X-Request-Id", requestId)
             .header("Idempotency-Key", idempotencyKey)
 
@@ -317,7 +318,7 @@ class HttpExtensionServiceClient(
                 .build()
 
               logger.debug(
-                s"Making external call to extension '$extensionId': functionId=$functionId, mode=${mode.headerValue}, requestId=$requestId"
+                s"Making external call to extension '$extensionId': functionId=$functionId, mode=${mode.wireValue}, requestId=$requestId"
               )
 
               performUnlessClosing
@@ -426,7 +427,7 @@ class HttpExtensionServiceClient(
       requestId: String,
       defaultMessage: String,
   )(implicit tc: TraceContext): ExtensionCallError = {
-    debugLogErrorBody(resp, requestId)
+    logErrorBody(resp, requestId)
     ExtensionCallError(
       resp.statusCode(),
       defaultMessage,
@@ -435,13 +436,13 @@ class HttpExtensionServiceClient(
     )
   }
 
-  private def debugLogErrorBody(resp: HttpResponse[String], requestId: String)(implicit
+  private def logErrorBody(resp: HttpResponse[String], requestId: String)(implicit
       tc: TraceContext
   ): Unit =
-    if (logger.underlying.isDebugEnabled) {
+    if (logger.underlying.isInfoEnabled) {
       val statusCode = resp.statusCode()
       HttpExtensionServiceClient.diagnosticResponseBody(resp.body()).foreach { body =>
-        logger.debug(
+        logger.info(
           s"External call to extension '$extensionId' returned HTTP $statusCode with response body '$body': requestId=$requestId"
         )
       }
@@ -452,7 +453,7 @@ class HttpExtensionServiceClient(
 }
 
 object HttpExtensionServiceClient {
-  private val MaxDiagnosticResponseBodyChars: Int = 1024
+  private val MaxDiagnosticResponseBodyChars: Int = 8192
 
   private[extension] def isRetryableHttpStatus(statusCode: Int): Boolean =
     statusCode match {

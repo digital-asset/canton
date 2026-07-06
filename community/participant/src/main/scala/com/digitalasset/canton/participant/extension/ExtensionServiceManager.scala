@@ -9,7 +9,9 @@ import com.digitalasset.canton.http.HttpService
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ExtensionServiceConfig
+import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherUtil.*
 
 import java.net.http.HttpClient
 import java.security.KeyStore
@@ -110,8 +112,8 @@ class ExtensionServiceManager(
       configHash: String,
       input: String,
       mode: ExternalCallMode,
-  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] =
-    clients.get(extensionId) match {
+  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] = {
+    val result = clients.get(extensionId) match {
       case Some(client) =>
         client.call(functionId, configHash, input, mode)
       case None =>
@@ -126,6 +128,15 @@ class ExtensionServiceManager(
           )
         )
     }
+    // Log the full error here, at the last common point before the per-consumer
+    // sanitization drops the message.
+    result.map(_.tapLeft { error =>
+      val requestId = error.requestId.fold("")(id => s", requestId=$id")
+      logger.warn(
+        s"External call to extension '$extensionId' (function '$functionId') failed: status=${error.statusCode}, retryable=${error.retryable}$requestId, message=${error.message}"
+      )
+    })
+  }
 
   def initializeOnStartup()(implicit
       tc: TraceContext

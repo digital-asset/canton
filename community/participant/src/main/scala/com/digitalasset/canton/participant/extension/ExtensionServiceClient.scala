@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Error information from external call failures. */
@@ -21,14 +22,6 @@ object ExtensionValidationResult {
   case object Valid extends ExtensionValidationResult
 
   final case class Invalid(errors: Seq[String]) extends ExtensionValidationResult
-}
-
-/** Execution modes Canton currently emits for external calls. */
-sealed abstract class ExternalCallMode(val headerValue: String) extends Product with Serializable
-
-object ExternalCallMode {
-  case object Submission extends ExternalCallMode("submission")
-  case object Validation extends ExternalCallMode("validation")
 }
 
 /** Trait for extension service clients.

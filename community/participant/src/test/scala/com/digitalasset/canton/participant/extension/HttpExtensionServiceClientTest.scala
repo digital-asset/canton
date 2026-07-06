@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.config.{
   ExtensionServiceAuthConfig,
   ExtensionServiceConfig,
 }
+import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -129,6 +130,39 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
 
       uri.toString shouldBe "http://[::1]:8080/api/v0/external-call"
       Set("::1", "[::1]") should contain(uri.getHost)
+    }
+
+    "send empty config hash and input as an empty HTTP header and body" in {
+      val observedConfigHash = new AtomicReference[String]("not observed")
+      val observedBody = new AtomicReference[String]("not observed")
+
+      val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+      server.createContext(
+        "/",
+        exchange => {
+          val headers = exchange.getRequestHeaders
+          observedConfigHash.set(headers.getFirst("X-Daml-External-Config-Hash"))
+          observedBody.set(
+            new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
+          )
+          writeResponse(exchange, 200, "beef")
+        },
+      )
+      server.start()
+
+      try {
+        val client = newClient(configFor(server))
+
+        client
+          .call("external-function", "", "", ExternalCallMode.Validation)(TraceContext.empty)
+          .failOnShutdown
+          .futureValue shouldBe Right("beef")
+
+        observedConfigHash.get shouldBe ""
+        observedBody.get shouldBe ""
+      } finally {
+        server.stop(0)
+      }
     }
 
     "reject malformed outbound header values without sending a request" in {
@@ -790,24 +824,31 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       )
 
       try {
-        val error = manager
-          .handleExternalCall(
-            "missing-extension",
-            "function",
-            "config-hash",
-            "input",
-            ExternalCallMode.Submission,
-          )
-          .failOnShutdown
-          .futureValue
-          .left
-          .value
+        loggerFactory.assertLogs(
+          {
+            val error = manager
+              .handleExternalCall(
+                "missing-extension",
+                "function",
+                "config-hash",
+                "input",
+                ExternalCallMode.Submission,
+              )
+              .failOnShutdown
+              .futureValue
+              .left
+              .value
 
-        error.statusCode shouldBe 404
-        error.requestId shouldBe None
-        error.message should include("Extension 'missing-extension' not configured")
-        error.message should not include "first-extension"
-        error.message should not include "second-extension"
+            error.statusCode shouldBe 404
+            error.requestId shouldBe None
+            error.message should include("Extension 'missing-extension' not configured")
+            error.message should not include "first-extension"
+            error.message should not include "second-extension"
+          },
+          _.warningMessage shouldBe
+            "External call to extension 'missing-extension' (function 'function') failed: " +
+            "status=404, retryable=false, message=Extension 'missing-extension' not configured",
+        )
       } finally {
         manager.close()
       }

@@ -1380,6 +1380,19 @@ object CantonConfig {
       implicit val cantonEngineConfigReader: ConfigReader[CantonEngineConfig] = {
         implicit val engineLoggingConfigReader: ConfigReader[EngineLoggingConfig] =
           deriveReader[EngineLoggingConfig]
+        implicit val extensionServiceAuthConfigNoneReader
+            : ConfigReader[ExtensionServiceAuthConfig.None.type] =
+          deriveReader[ExtensionServiceAuthConfig.None.type]
+        implicit val extensionServiceAuthConfigBearerTokenFileReader
+            : ConfigReader[ExtensionServiceAuthConfig.BearerTokenFile] =
+          deriveReader[ExtensionServiceAuthConfig.BearerTokenFile]
+        implicit val extensionServiceAuthConfigReader: ConfigReader[ExtensionServiceAuthConfig] =
+          deriveReader[ExtensionServiceAuthConfig]
+        implicit val tlsClientConfigOnlyTrustFileReader
+            : ConfigReader[TlsClientConfigOnlyTrustFile] =
+          deriveReader[TlsClientConfigOnlyTrustFile]
+        implicit val extensionServiceConfigReader: ConfigReader[ExtensionServiceConfig] =
+          deriveReader[ExtensionServiceConfig]
         deriveReader[CantonEngineConfig]
       }
       implicit val participantStoreConfigReader: ConfigReader[ParticipantStoreConfig] = {
@@ -2105,6 +2118,19 @@ object CantonConfig {
       implicit val cantonEngineConfigWriter: ConfigWriter[CantonEngineConfig] = {
         implicit val engineLoggingConfigWriter: ConfigWriter[EngineLoggingConfig] =
           deriveWriter[EngineLoggingConfig]
+        implicit val extensionServiceAuthConfigNoneWriter
+            : ConfigWriter[ExtensionServiceAuthConfig.None.type] =
+          deriveWriter[ExtensionServiceAuthConfig.None.type]
+        implicit val extensionServiceAuthConfigBearerTokenFileWriter
+            : ConfigWriter[ExtensionServiceAuthConfig.BearerTokenFile] =
+          deriveWriter[ExtensionServiceAuthConfig.BearerTokenFile]
+        implicit val extensionServiceAuthConfigWriter: ConfigWriter[ExtensionServiceAuthConfig] =
+          deriveWriter[ExtensionServiceAuthConfig]
+        implicit val tlsClientConfigOnlyTrustFileWriter
+            : ConfigWriter[TlsClientConfigOnlyTrustFile] =
+          deriveWriter[TlsClientConfigOnlyTrustFile]
+        implicit val extensionServiceConfigWriter: ConfigWriter[ExtensionServiceConfig] =
+          deriveWriter[ExtensionServiceConfig]
         deriveWriter[CantonEngineConfig]
       }
       implicit val participantStoreConfigWriter: ConfigWriter[ParticipantStoreConfig] = {
