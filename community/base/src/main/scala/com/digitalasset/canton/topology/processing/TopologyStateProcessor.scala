@@ -93,7 +93,7 @@ class TopologyStateProcessorImpl private[processing] (
 
   override def close(): Unit = cache.close()
 
-  def validateAndApplyAuthorization(
+  override def validateAndApplyAuthorization(
       sequenced: SequencedTime,
       effective: EffectiveTime,
       transactions: Seq[GenericSignedTopologyTransaction],

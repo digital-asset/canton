@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, PackageName, Par
 import com.digitalasset.daml.lf.data.{BackStack, Bytes, ImmArray, Time}
 import com.digitalasset.daml.lf.interpretation.Error as IErr
 import com.digitalasset.daml.lf.ledger.Authorize
-import com.digitalasset.daml.lf.speedy.Speedy.{CachedKey, ContractInfo}
+import com.digitalasset.daml.lf.speedy.Speedy.ContractInfo
 import com.digitalasset.daml.lf.transaction.{
   ExternalCallResult,
   GlobalKeyWithMaintainers,
@@ -427,7 +427,7 @@ private[speedy] case class PartialTransaction(
         actingParties = actingParties,
         signatories = contract.signatories,
         stakeholders = contract.stakeholders,
-        keyOpt = contract.keyOpt.map(_.globalKeyWithMaintainers),
+        keyOpt = contract.keyOpt,
         byKey = normByKey(version, byKey),
         version = version,
         interfaceId = interfaceId,
@@ -455,10 +455,14 @@ private[speedy] case class PartialTransaction(
 
   def authorizeQueryByKey(
       optLocation: Option[Location],
-      key: CachedKey,
+      key: GlobalKeyWithMaintainers,
   ): Either[IErr, Unit] = {
     val auth = Authorize(context.info.authorizers)
-    authorizationChecker.authorizeLookupByKey(optLocation, key.templateId, key.maintainers)(
+    authorizationChecker.authorizeLookupByKey(
+      optLocation,
+      key.globalKey.templateId,
+      key.maintainers,
+    )(
       auth
     ) match {
       case fa :: _ =>
@@ -470,15 +474,15 @@ private[speedy] case class PartialTransaction(
 
   def insertQueryByKey(
       optLocation: Option[Location],
-      key: CachedKey,
+      key: GlobalKeyWithMaintainers,
       result: KeyMapping,
       keyVersion: SerializationVersion,
   ): PartialTransaction = {
     val node = Node.QueryByKey(
       packageName = key.globalKey.packageName,
-      templateId = key.templateId,
+      templateId = key.globalKey.templateId,
       exhaustive = result.exhaustive,
-      key = key.globalKeyWithMaintainers,
+      key = key,
       result = result.queue,
       version = keyVersion,
     )
@@ -521,7 +525,12 @@ private[speedy] case class PartialTransaction(
           interfaceId = interfaceId,
           contractKey =
             // We need to renormalize the key
-            contract.keyOpt.map(_.renormalizedGlobalKeyWithMaintainers),
+            contract.keyOpt.map(keyWithMaintainers =>
+              GlobalKeyWithMaintainers.assertWithRenormalizedValue(
+                keyWithMaintainers,
+                keyWithMaintainers.value,
+              )
+            ),
           choiceId = choiceId,
           consuming = consuming,
           actingParties = actingParties,

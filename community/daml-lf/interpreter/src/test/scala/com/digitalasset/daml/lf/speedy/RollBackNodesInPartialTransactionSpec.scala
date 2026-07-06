@@ -47,11 +47,15 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
 
   private[this] implicit class PartialTransactionExtra(val ptx: PartialTransaction) {
 
+    val createArg = SValue.SRecord(templateId, ImmArray.empty, ArraySeq.empty)
+
     val contract = ContractInfo(
       version = txVersion,
       packageName = pkgName,
       templateId = templateId,
-      value = SValue.SRecord(templateId, ImmArray.empty, ArraySeq.empty),
+      createArg = createArg.toNormalizedValue,
+      hash =
+        crypto.SValueHash.assertHashContractInstance(pkgName, templateId.qualifiedName, createArg),
       signatories = Set(party),
       observers = Set.empty,
       keyOpt = None,

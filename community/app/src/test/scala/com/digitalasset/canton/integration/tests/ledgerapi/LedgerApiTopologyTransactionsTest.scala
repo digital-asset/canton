@@ -460,6 +460,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
         val synchronizerIndex = participant3.testing.state_inspection
           .lookupCleanSynchronizerIndex(acmeName)
           .value
+          .futureValueUS
           .value
         logger.info(
           s"Sequenced time: $sequencedTime, current record time: ${synchronizerIndex.recordTime}, effective time: $effectiveTime"
@@ -484,6 +485,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
       val currentRecordTime = participant3.testing.state_inspection
         .lookupCleanSynchronizerIndex(acmeName)
         .value
+        .futureValueUS
         .value
         .recordTime
       logger.info(

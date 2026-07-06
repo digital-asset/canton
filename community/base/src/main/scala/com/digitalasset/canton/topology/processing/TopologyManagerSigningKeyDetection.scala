@@ -77,22 +77,23 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
 
   private def filterKnownKeysForNamespace(
       namespace: Namespace,
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingToAuthorize: TopologyMapping,
       returnAllValidKeys: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CryptoPrivateStoreError, Seq[Fingerprint]] = {
-
     // Group and pre-filter candidates, extracting only what's needed (fingerprint and level).
     // If `namespace` happens to be a decentralized namespace, we must check the "highest level"
     // for each namespace separately.
     val candidatesPerOwnerNamespace: List[(Namespace, List[(Fingerprint, Int)])] =
       tryGetAuthorizationCheckForNamespace(namespace)
-        .authorizedDelegations()
+        .authorizedDelegations(
+          keyToAuthorizeO = mappingToAuthorize.select[NamespaceDelegation].map(_.target.fingerprint)
+        )
         .view
         .map { case (ownerNamespace, delegations) =>
           val candidates = delegations.view.collect {
-            case (delegation, level) if delegation.mapping.canSign(mappingToAuthorize) =>
+            case (delegation, level) if delegation.mapping.canSign(mappingToAuthorize.code) =>
               (delegation.mapping.target.fingerprint, level)
           }.toList
           (ownerNamespace, candidates)
@@ -191,7 +192,7 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
         // TODO(#33650) – replace with unboundedFlatTraverse; safe because the number of required namespaces
         //  for a single topology transaction is bounded to a low number by protocol definitions (requiredAuth).
         .parFlatTraverse(namespace =>
-          filterKnownKeysForNamespace(namespace, toSign.mapping.code, returnAllValidKeys)
+          filterKnownKeysForNamespace(namespace, toSign.mapping, returnAllValidKeys)
             .map { keys =>
               if (keys.nonEmpty) logger.debug(s"Keys for $namespace: $keys")
               keys

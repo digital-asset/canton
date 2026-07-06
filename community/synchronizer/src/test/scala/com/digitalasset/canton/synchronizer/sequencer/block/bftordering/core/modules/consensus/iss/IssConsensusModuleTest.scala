@@ -108,7 +108,7 @@ import org.slf4j.event.Level.ERROR
 
 import java.time.Instant
 import scala.collection.mutable.ArrayBuffer
-import scala.util.{Random, Try}
+import scala.util.Try
 
 class IssConsensusModuleTest
     extends AsyncWordSpec
@@ -1556,7 +1556,6 @@ class IssConsensusModuleTest
             loggerFactory,
           )
         ),
-        new Random(4),
         dependencies,
         loggerFactory,
         timeouts,

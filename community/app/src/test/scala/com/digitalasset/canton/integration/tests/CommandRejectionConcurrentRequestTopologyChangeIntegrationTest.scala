@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,12 +12,17 @@ import com.digitalasset.canton.error.MediatorError.MalformedMessage
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.integration.util.{
+  AcsInspection,
+  EntitySyntax,
+  PartiesAllocator,
+  TestUtils,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -204,6 +208,12 @@ sealed trait CommandRejectionConcurrentRequestTopologyChangeIntegrationTest
 
           // Use the provided delay to increase the time between submission and sequencing
           environment.simClock.value.advance(submissionToSequencingDelay.toJava)
+
+          // The time moves lazily on the CantonBFT, hence the need to wait
+          TestUtils.waitForTargetTimeOnSynchronizerNode(
+            targetTime = environment.simClock.value.now,
+            logger = logger,
+          )(sequencer1)
 
           // Unblock the confirmation request
           topologyChangeP.trySuccess(())
@@ -423,7 +433,7 @@ class CommandRejectionConcurrentRequestTopologyChangeIntegrationTestPostgres
     extends CommandRejectionConcurrentRequestTopologyChangeIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2"))

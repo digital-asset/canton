@@ -41,7 +41,6 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -2378,11 +2377,9 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
 
 }
 
-@UnstableTest // TODO(#19922)
 class ParticipantRestartStaticTimeIntegrationTest
     extends ParticipantRestartStaticTimeIntegrationTestBase
 
-@UnstableTest // TODO(#30408)
 class ParticipantRestartStaticTimeReassignmentIntegrationTest
     extends ParticipantRestartStaticTimeIntegrationTestBase(enableAllLedgerApiReassignments = true)
 

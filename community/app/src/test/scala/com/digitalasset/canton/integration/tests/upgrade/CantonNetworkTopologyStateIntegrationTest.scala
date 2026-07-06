@@ -122,7 +122,7 @@ final class CantonNetworkTopologyStateIntegrationTest
 
   private val enablePostgres = true
   private val toxiProxyLatency = 0 // in ms, 0 to disable
-  private val timeout = 30.seconds
+  private val timeout = if (sys.env.contains("CI")) 5.minutes else 30.seconds
 
   private val participant1Proxy = "participant1-to-postgres"
   // using toxi-proxy to simulate database latency

@@ -50,7 +50,7 @@ import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import scala.util.{Failure, Random, Success}
+import scala.util.{Failure, Success}
 
 /** A state transfer behavior for [[IssConsensusModule]]. There are 2 types of state transfer:
   * onboarding (for new nodes) and catch-up (for lagging-behind nodes). These two types work
@@ -92,7 +92,6 @@ final class StateTransferBehavior[E <: Env[E]](
     clock: Clock,
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
-    random: Random,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -126,7 +125,6 @@ final class StateTransferBehavior[E <: Env[E]](
       thisNode,
       dependencies,
       epochStore,
-      random,
       metrics,
       loggerFactory,
     )()
@@ -496,7 +494,6 @@ final class StateTransferBehavior[E <: Env[E]](
         clock,
         loggerFactory,
       ),
-      random,
       dependencies,
       loggerFactory,
       timeouts,

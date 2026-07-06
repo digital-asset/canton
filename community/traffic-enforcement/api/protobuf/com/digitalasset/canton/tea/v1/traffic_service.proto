@@ -39,11 +39,19 @@ message UpdateAccountRequest {
   // Required
   string account_id = 1;
 
-  // New balance.
+  // Balance DELTA to apply to the current balance.
+  // Negative values will decrease the balance, positive values will increase the balance.
   // If unset, the balance will not be updated
   //
   // Optional
-  optional uint64 balance = 2;
+  optional int64 balance_delta = 2;
+
+  // Unique identifier to this update request.
+  // This is used to de-duplicate requests. Caller MUST ensure that this is unique per
+  // request. The same request with the same deduplication_id will be ignored if it has already been processed.
+  //
+  // Required
+  string deduplication_id = 3;
 }
 
 message UpdateAccountResponse {

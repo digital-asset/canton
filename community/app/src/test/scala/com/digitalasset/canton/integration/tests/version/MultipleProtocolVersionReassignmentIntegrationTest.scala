@@ -41,7 +41,6 @@ sealed trait MultipleProtocolVersionReassignmentIntegrationTest
 //    else (lastTwoStables(0), lastTwoStables(0))
 //  }
 
-  private lazy val alphaProtocolVersion: ProtocolVersion = ProtocolVersion.alpha.min1
   private lazy val devProtocolVersion: ProtocolVersion = ProtocolVersion.dev
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -135,36 +134,39 @@ sealed trait MultipleProtocolVersionReassignmentIntegrationTest
   }
 
   "A contract created on a synchronizer" should {
-    "be reassignable to synchronizers running on different protocol versions" in { implicit env =>
-      import env.*
+    "be reassignable to synchronizers running on different protocol versions" onlyRunWhen (ProtocolVersion.alpha.nonEmpty) in {
+      implicit env =>
+        import env.*
 
-      val synchronizerForPV: Map[ProtocolVersion, (SynchronizerId, SynchronizerAlias)] = Map(
-        beforeLastStable -> (daId, daName),
-        lastStable -> (acmeId, acmeName),
-        alphaProtocolVersion -> (repairSynchronizerId, repairSynchronizerName),
-        devProtocolVersion -> (devSynchronizerId, devSynchronizerName),
-      )
+        val alphaProtocolVersion = ProtocolVersion.alpha.min
 
-      val protocolVersions = synchronizerForPV.keysIterator.toList
+        val synchronizerForPV: Map[ProtocolVersion, (SynchronizerId, SynchronizerAlias)] = Map(
+          beforeLastStable -> (daId, daName),
+          lastStable -> (acmeId, acmeName),
+          alphaProtocolVersion -> (repairSynchronizerId, repairSynchronizerName),
+          devProtocolVersion -> (devSynchronizerId, devSynchronizerName),
+        )
 
-      // 2-permutations (`permutations` doesn't support it)
-      val possibleReassignments =
-        for {
-          source <- protocolVersions
-          target <- protocolVersions
-          if source != target
-        } yield (source, target)
+        val protocolVersions = synchronizerForPV.keysIterator.toList
 
-      forAll(possibleReassignments) { case (sourcePV, targetPV) =>
-        clue(s"Reassigning from $sourcePV to $targetPV") {
-          reassign(
-            synchronizerForPV(sourcePV)._1,
-            synchronizerForPV(targetPV)._1,
-            synchronizerForPV(sourcePV)._2,
-            synchronizerForPV(targetPV)._2,
-          )
+        // 2-permutations (`permutations` doesn't support it)
+        val possibleReassignments =
+          for {
+            source <- protocolVersions
+            target <- protocolVersions
+            if source != target
+          } yield (source, target)
+
+        forAll(possibleReassignments) { case (sourcePV, targetPV) =>
+          clue(s"Reassigning from $sourcePV to $targetPV") {
+            reassign(
+              synchronizerForPV(sourcePV)._1,
+              synchronizerForPV(targetPV)._1,
+              synchronizerForPV(sourcePV)._2,
+              synchronizerForPV(targetPV)._2,
+            )
+          }
         }
-      }
     }
   }
 }

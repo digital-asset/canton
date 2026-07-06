@@ -50,6 +50,7 @@ import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{ContractLoader, LfValueTranslation}
 import com.digitalasset.canton.platform.store.interning.StringInterningView
+import com.digitalasset.canton.platform.store.testing.postgresql.PostgresAroundAll
 import com.digitalasset.canton.platform.store.{
   DbSupport,
   FlywayMigrations,
@@ -119,7 +120,7 @@ trait IndexComponentTest
 
   private val dbName: String = getClass.getSimpleName.toLowerCase
 
-  protected val dbConfig: com.digitalasset.canton.config.DbConfig =
+  protected def dbConfig: com.digitalasset.canton.config.DbConfig =
     DbBasicConfig(username = "", password = "", dbName = dbName, host = "", port = 0).toH2DbConfig
 
   protected def jdbcUrl: String = LedgerApiJdbcUrl.fromDbConfig(dbConfig).value.url
@@ -1020,4 +1021,12 @@ object IndexComponentTest {
       dbSupport: DbSupport,
       inMemoryState: InMemoryState,
   )
+
+  trait WithPostgres extends IndexComponentTest with PostgresAroundAll { self: Suite =>
+    override protected def dbConfig: com.digitalasset.canton.config.DbConfig =
+      super[PostgresAroundAll].dbConfig
+    override protected def jdbcUrl: String = super[PostgresAroundAll].jdbcUrl
+    // Improves the visibility of afterAll(), which is public in IndexComponentTest and protected in PostgresAroundAll.
+    override def afterAll(): Unit = super.afterAll()
+  }
 }

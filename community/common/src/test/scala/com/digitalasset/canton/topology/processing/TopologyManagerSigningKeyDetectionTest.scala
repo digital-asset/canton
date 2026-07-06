@@ -58,7 +58,8 @@ class TopologyManagerSigningKeyDetectionTest
           SequencedTime(ts(0)),
           EffectiveTime(ts(0)),
           removals = Map.empty,
-          additions = Seq(ns1k1_k1, ns1k2_k1, ns1k3_k2).map(ValidatedTopologyTransaction(_)),
+          additions =
+            Seq(ns1k1_k1, ns1k2_k1, ns1k3_k2_restrict_nsd).map(ValidatedTopologyTransaction(_)),
         )
         .futureValueUS
 
@@ -90,7 +91,7 @@ class TopologyManagerSigningKeyDetectionTest
         SigningKeys.key3,
       ).map(_.fingerprint)
 
-      // now let's break the chain by removing the NSD for key2.
+      // break the chain by removing the NSD for key2.
       // this prevents key3 from being authorized for new signatures.
       detector.store
         .update(
@@ -253,6 +254,175 @@ class TopologyManagerSigningKeyDetectionTest
         // since we removed key8 from the private key store, it cannot be used to sign something, so it is not suggested
       ).map(_.fingerprint)
 
+    }
+
+    "does not allow self-restrict namespace delegation on an intermediate key" in {
+      val detector = mk()
+
+      // Set up the trust chain: k1 is root, k1 authorizes k2
+      detector.store
+        .update(
+          SequencedTime(ts(0)),
+          EffectiveTime(ts(0)),
+          removals = Map.empty,
+          additions = Seq(ns1k1_k1, ns1k2_k1).map(ValidatedTopologyTransaction(_)),
+        )
+        .futureValueUS
+
+      detector.reset()
+
+      // restricting NSD transaction with k2 is possible with key1 only!!!
+      val result = detector
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          ns1k2_k2_restrict_nsd.transaction, // this is in effect querying who can sign key2 on ns1
+          inStore = None,
+          namespacesToSignFor = Seq.empty,
+          returnAllValidKeys = false,
+        )
+        .futureValueUS
+
+      result.value._2 shouldBe Seq(
+        SigningKeys.key1.fingerprint
+      )
+    }
+
+    "does not allow child keys to sign a parent NSD" in {
+      val detector = mk()
+
+      // Set up the trust chain: k1 is root, k1 authorizes k2
+      detector.store
+        .update(
+          SequencedTime(ts(0)),
+          EffectiveTime(ts(0)),
+          removals = Map.empty,
+          additions = Seq(ns1k1_k1, ns1k2_k1, ns1k3_k2).map(ValidatedTopologyTransaction(_)),
+        )
+        .futureValueUS
+
+      detector.reset()
+
+      // restricting NSD transaction with k2 is possible with key1 only!!!
+      val result = detector
+        .getValidSigningKeysForTransaction(
+          ts(1),
+          // in a transaction we don't take into consideration the signing key k3
+          // so essentially we ask who can sign k2
+          ns1k2_k3.transaction,
+          inStore = None,
+          namespacesToSignFor = Seq.empty,
+          returnAllValidKeys = false,
+        )
+        .futureValueUS
+
+      result.value._2 shouldBe Seq(
+        SigningKeys.key1.fingerprint
+      )
+    }
+
+    "choose the highest signing key (even from another branch) in the namespace graph" in {
+      val detector = mk()
+
+      // Set up the trust chain: k1 is root, k1 authorizes k2, k2 authorized k3
+      // k1 -> k2 -> k3
+      detector.store
+        .update(
+          SequencedTime(ts(0)),
+          EffectiveTime(ts(0)),
+          removals = Map.empty,
+          additions = Seq(ns1k1_k1, ns1k2_k1, ns1k3_k2).map(ValidatedTopologyTransaction(_)),
+        )
+        .futureValueUS
+
+      detector.reset()
+
+      // k1 -> k4 -> k5 -> k6 -> k7
+      detector.store
+        .update(
+          SequencedTime(ts(1)),
+          EffectiveTime(ts(1)),
+          removals = Map.empty,
+          additions =
+            Seq(ns1k4_k1, ns1k5_k4, ns1k6_k5, ns1k7_k6).map(ValidatedTopologyTransaction(_)),
+        )
+        .futureValueUS
+
+      // Now we have: k1 -> k2 -> k3
+      //              |
+      //              k4 -> k5 -> k6 -> k7
+      detector.reset()
+
+      val result = detector
+        .getValidSigningKeysForTransaction(
+          ts(2),
+          // in a transaction we don't take into consideration the signing key k2
+          // so essentially we ask who can sign k3
+          ns1k3_k2.transaction,
+          inStore = None,
+          namespacesToSignFor = Seq.empty,
+          returnAllValidKeys = false,
+        )
+        .futureValueUS
+
+      result.value._2 shouldBe Seq(
+        SigningKeys.key7.fingerprint // k7 which is the "max" on the ns1 path
+      )
+
+      val resultAllValidKeys = detector
+        .getValidSigningKeysForTransaction(
+          ts(2),
+          // in a transaction we don't take into consideration the signing key k2
+          // so essentially we ask who can sign k3
+          ns1k3_k2.transaction,
+          inStore = None,
+          namespacesToSignFor = Seq.empty,
+          returnAllValidKeys = true, // we want to see all the keys
+        )
+        .futureValueUS
+
+      resultAllValidKeys.value._2 should contain theSameElementsAs Seq(
+        SigningKeys.key2.fingerprint,
+        SigningKeys.key1.fingerprint,
+        SigningKeys.key7.fingerprint,
+        SigningKeys.key6.fingerprint,
+        SigningKeys.key5.fingerprint,
+        SigningKeys.key4.fingerprint,
+      )
+    }
+
+    "having a bad state in the store selects the proper signing key" in {
+      val detector = mk()
+
+      // Set up the trust chain: k1 is root, k1 authorizes k2, and then k2 restricts itself
+      detector.store
+        .update(
+          SequencedTime(ts(0)),
+          EffectiveTime(ts(0)),
+          removals = Map.empty,
+          additions =
+            Seq(ns1k1_k1, ns1k2_k1, ns1k2_k2_restrict_nsd).map(ValidatedTopologyTransaction(_)),
+        )
+        .futureValueUS
+
+      detector.reset()
+
+      // k1 can still delegate to k3
+      val result = loggerFactory.assertLogs(
+        detector
+          .getValidSigningKeysForTransaction(
+            ts(1),
+            ns1k3_k2.transaction, // the transaction doesn't take into consideration the k2
+            inStore = None,
+            namespacesToSignFor = Seq.empty,
+            returnAllValidKeys = false,
+          )
+          .futureValueUS,
+        _.warningMessage should (include regex s"dangling.*${SigningKeys.key2.fingerprint}"),
+      )
+
+      result.value._2 shouldBe Seq(
+        SigningKeys.key1.fingerprint
+      )
     }
 
   }

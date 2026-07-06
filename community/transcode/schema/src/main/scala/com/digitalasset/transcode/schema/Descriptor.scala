@@ -87,6 +87,13 @@ object Descriptor:
         cases <- condOpt(body) { case Enumeration(cases) => cases }
       yield (id, cases)
 
+  /* Unknown type body. */
+  case object Unknown extends Adt:
+    object Ctor:
+      def unapply(d: Descriptor): Option[(Identifier, SList[TypeVarName])] =
+        condOpt(d) { case Constructor(id, tp, Unknown) => (id, tp) }
+  val unknown: Unknown.type = Unknown
+
   /** List of values of the same type */
   final case class List private[Descriptor] (value: Descriptor) extends Traversable
   def list(value: Descriptor): List = List(value)
@@ -182,9 +189,6 @@ object Descriptor:
 
   final case class Variable private[Descriptor] (name: TypeVarName) extends Descriptor
   def variable(name: String): Variable = Variable(TypeVarName(name))
-
-  case object Unknown extends Adt
-  val unknown: Unknown.type = Unknown
 
   /** Utility to handle cyclic references */
   private object Lazy:

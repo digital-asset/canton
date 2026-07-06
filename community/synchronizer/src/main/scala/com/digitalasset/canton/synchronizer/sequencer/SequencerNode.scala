@@ -1001,12 +1001,6 @@ class SequencerNodeBootstrap(
   override protected def mkNodeHealthService(
       storage: Storage
   ): (DependenciesHealthService, LivenessHealthService) = {
-    val readiness = DependenciesHealthService(
-      "sequencer",
-      logger,
-      timeouts,
-      Seq(storage),
-    )
     // We use the storage as a fatal dependency so that we transition liveness to NOT_SERVING if
     // the storage fails continuously for longer than `failedToFatalDelay`.
     // The background writer health is fatal as well: once a background write fails, the writer can
@@ -1015,6 +1009,12 @@ class SequencerNodeBootstrap(
       logger,
       timeouts,
       fatalDependencies = Seq(storage, asyncWriterHealth),
+    )
+    val readiness = DependenciesHealthService(
+      "sequencer",
+      logger,
+      timeouts,
+      criticalDependencies = liveness.dependencies ++ Seq(sequencerHealth),
     )
     (readiness, liveness)
   }

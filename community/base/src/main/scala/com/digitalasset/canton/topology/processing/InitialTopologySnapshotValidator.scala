@@ -77,6 +77,7 @@ class InitialTopologySnapshotValidator(
       lookup =>
         new RequiredTopologyMappingChecks(
           staticSynchronizerParameters,
+          store.protocolVersion,
           lookup,
           loggerFactory,
         ),

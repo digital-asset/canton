@@ -47,6 +47,14 @@ final case class GlobalKeyWithMaintainers(
 
 object GlobalKeyWithMaintainers {
 
+  def assertWithRenormalizedValue(
+      keyWithMaintainers: GlobalKeyWithMaintainers,
+      value: Value,
+  ): GlobalKeyWithMaintainers =
+    keyWithMaintainers.copy(
+      globalKey = keyWithMaintainers.globalKey.copy(key = value)
+    )
+
   def apply(
       templateId: TypeConId,
       value: Value,

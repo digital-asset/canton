@@ -93,7 +93,7 @@ trait HealthServiceDatabaseFaultTest extends HealthReportingTestHelper {
       )
     ) { case Seq(nodeHealth) =>
       eventually() {
-        checkServing(nodeHealth)
+        checkServing(nodeHealth, httpHealthConfig = Some(config))
       }
       checkHttpHealth(config.monitoring.httpHealthServer.value.port)(200)
 
@@ -110,7 +110,7 @@ trait HealthServiceDatabaseFaultTest extends HealthReportingTestHelper {
           // decrease maxPollInterval to avoid long poll intervals causing toxic to stay too long and cause
           // the database health to report fatal
           eventually(maxPollInterval = 500.millis) {
-            checkNotServing(nodeHealth)
+            checkNotServing(nodeHealth, httpHealthConfig = Some(config))
           }
           checkHttpHealth(config.monitoring.httpHealthServer.value.port)(503)
         }
@@ -121,7 +121,7 @@ trait HealthServiceDatabaseFaultTest extends HealthReportingTestHelper {
 
       clue("Waiting for serving") {
         eventually() {
-          checkServing(nodeHealth)
+          checkServing(nodeHealth, httpHealthConfig = Some(config))
         }
         checkHttpHealth(config.monitoring.httpHealthServer.value.port)(200)
       }
@@ -159,7 +159,7 @@ trait HealthServiceSequencerDatabaseFaultTest extends HealthServiceDatabaseFault
       )
     ) { case Seq(nodeHealth) =>
       eventually() {
-        checkServing(nodeHealth)
+        checkServing(nodeHealth, httpHealthConfig = Some(config))
       }
 
       loggerFactory.suppressWarnings {
@@ -173,7 +173,7 @@ trait HealthServiceSequencerDatabaseFaultTest extends HealthServiceDatabaseFault
         // Wait until sequencer liveness shows NOT_SERVING
         clue("Waiting for not serving") {
           eventually(timeUntilSuccess = 60.seconds) {
-            checkLivenessNotServing(nodeHealth)
+            checkLivenessNotServing(nodeHealth, httpHealthConfig = Some(config))
           }
         }
 

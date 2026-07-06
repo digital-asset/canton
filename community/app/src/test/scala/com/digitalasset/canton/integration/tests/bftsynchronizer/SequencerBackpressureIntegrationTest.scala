@@ -7,10 +7,10 @@ import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{DbConfig, TestSequencerClientFor}
+import com.digitalasset.canton.config.TestSequencerClientFor
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.examples.java.iou
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -176,5 +176,5 @@ trait SequencerBackpressureIntegrationTest extends CommunityIntegrationTest with
 
 class SequencerBackpressureIntegrationTestPostgres extends SequencerBackpressureIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

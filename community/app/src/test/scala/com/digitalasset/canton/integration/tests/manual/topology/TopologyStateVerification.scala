@@ -311,6 +311,7 @@ class TopologyStateVerification(
           new TopologyMappingChecks.All(
             RequiredTopologyMappingChecks(
               Some(crypto.staticSynchronizerParameters),
+              crypto.staticSynchronizerParameters.protocolVersion,
               lookup,
               replayLoggerFactory,
             ),

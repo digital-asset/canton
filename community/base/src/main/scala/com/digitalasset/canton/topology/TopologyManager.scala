@@ -122,7 +122,12 @@ class SynchronizerTopologyManager(
 
     def makeChecks(lookup: TopologyStateLookup): TopologyMappingChecks = {
       val required =
-        RequiredTopologyMappingChecks(Some(staticSynchronizerParameters), lookup, loggerFactory)
+        RequiredTopologyMappingChecks(
+          Some(staticSynchronizerParameters),
+          staticSynchronizerParameters.protocolVersion,
+          lookup,
+          loggerFactory,
+        )
 
       if (!disableOptionalTopologyChecks)
         new TopologyMappingChecks.All(

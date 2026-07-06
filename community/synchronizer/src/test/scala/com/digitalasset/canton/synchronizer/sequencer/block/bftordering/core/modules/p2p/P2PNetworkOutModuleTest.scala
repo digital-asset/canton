@@ -61,7 +61,7 @@ import shapeless.syntax.std.traversable.*
 
 import java.time.Instant
 import scala.collection.mutable
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Random, Success, Try}
 
 class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
@@ -337,6 +337,83 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             selfNode,
             None,
           )
+        )
+      }
+    }
+
+    "is requested to send a network message to a random authenticated peer among a set of possible recipients" should {
+
+      "do it" when {
+        "at least one of the possible recipients is authenticated" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          Seq(
+            otherInitialEndpointsTupled._1,
+            otherInitialEndpointsTupled._2,
+            otherInitialEndpointsTupled._3,
+          ).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val otherNodeEndpoint = otherInitialEndpointsTupled._1
+          val otherNodeId = endpointToTestBftNodeId(otherNodeEndpoint)
+          val possibleRecipients = Seq(otherNodeId, endpointToTestBftNodeId(anotherEndpoint))
+
+          val networkMessageBody = BftOrderingMessageBody(BftOrderingMessageBody.Message.Empty)
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+            )
+          )
+
+          verify(sendActionSpy, times(1)).apply(
+            eqTo(otherNodeEndpoint),
+            eqTo(
+              BftOrderingMessage(
+                "",
+                Some(networkMessageBody),
+                sentBy = selfNode,
+                sentAt = None,
+              )
+            ),
+          )
+        }
+      }
+    }
+
+    "do nothing" when {
+      "none among the possible recipients is authenticated" in {
+        val sendActionSpy =
+          spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+        val (context, _, module, _) = setupWithIgnoringDefaultDeps(sendActionSpy)
+
+        implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+        val possibleRecipients =
+          Seq(
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+            endpointToTestBftNodeId(anotherEndpoint),
+          )
+
+        module.receive(
+          P2PNetworkOut.SendToRandomAuthenticated(
+            P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+            possibleRecipients,
+          )
+        )
+
+        verify(sendActionSpy, never).apply(
+          any[P2PEndpoint],
+          any[BftOrderingMessage],
         )
       }
     }
@@ -810,6 +887,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         selfNode,
         isGenesis,
         state,
+        new Random(4),
         p2pEndpointsStore,
         SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
         dependencies,

@@ -32,6 +32,7 @@ final class StorageBackendSpecPostgres
     extends AnyFlatSpec
     with StorageBackendProviderPostgres
     with StorageBackendSuite
+    with StorageBackendTestsBatchSize
     with Inside {
 
   behavior of "StorageBackend (Postgres)"

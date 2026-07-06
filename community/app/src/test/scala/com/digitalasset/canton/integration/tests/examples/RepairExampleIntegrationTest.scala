@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.examples
 
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.integration.CommunityIntegrationTest
-import com.digitalasset.canton.integration.plugins.{UseH2, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.ExampleIntegrationTest.{
   referenceConfiguration,
   repairConfiguration,
@@ -13,7 +12,7 @@ import com.digitalasset.canton.integration.tests.examples.ExampleIntegrationTest
 
 sealed abstract class RepairExampleIntegrationTest
     extends ExampleIntegrationTest(
-      referenceConfiguration / "storage" / "h2.conf",
+      referenceConfiguration / "storage" / "postgres.conf",
       repairConfiguration / "synchronizer-repair-lost.conf",
       repairConfiguration / "synchronizer-repair-new.conf",
       repairConfiguration / "participant1.conf",
@@ -27,8 +26,7 @@ sealed abstract class RepairExampleIntegrationTest
   }
 }
 
-// TODO(#26093) port to DB or BFT Sequencer
-final class RepairExampleReferenceIntegrationTestH2 extends RepairExampleIntegrationTest {
-  registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+final class RepairExampleBftOrderingIntegrationTestPostgres extends RepairExampleIntegrationTest {
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

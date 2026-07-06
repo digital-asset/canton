@@ -29,9 +29,12 @@ final case class AsyncWriterConfig(
 
 /** Various parameters for non-standard sequencer settings
   *
-  * @param alphaVersionSupport
-  *   if true, then dev version will be turned on, but we will brick this sequencer node if it is
+  * @param devVersionSupport
+  *   if true, then support for the dev protocol version is enabled and the dev database schemas are
+  *   applied, which does not provide data continuity guarantees and must not be used in production
   *   used for production.
+  * @param alphaVersionSupport
+  *   if true, then support for alpha protocol versions will be turned on.
   * @param dontWarnOnDeprecatedPV
   *   if true, then this sequencer will not emit a warning when configured to use protocol version
   *   2.0.0.

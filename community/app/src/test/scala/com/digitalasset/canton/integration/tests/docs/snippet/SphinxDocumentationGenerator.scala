@@ -725,6 +725,9 @@ class UpgradingDocumentationIntegrationTest
           )
         )(env).bootstrap()
       }
+      .addConfigTransform(
+        ConfigTransforms.setExitOnFatalFailures(false)
+      )
 
   private val fakeMigrationPath = File("tmp/fake-migration")
 

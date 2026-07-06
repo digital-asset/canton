@@ -194,7 +194,7 @@ final class DbStorageMulti private (
   // Run the initial health check
   checkHealth(clock.now)
 
-  private val writeDb: Database = DbLockedConnectionPool.createDatabaseFromPool(
+  private[canton] val writeDb: Database = DbLockedConnectionPool.createDatabaseFromPool(
     writeConnectionPool,
     writeDbExecutor,
   )

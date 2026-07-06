@@ -123,7 +123,7 @@ class SequencerRuntime(
     topologyManagerStatusO: Option[TopologyManagerStatus],
     topologyConfig: TopologyConfig,
     producePostOrderingTopologyTicks: Boolean,
-    storage: Storage,
+    @VisibleForTesting val storage: Storage,
     clock: Clock,
     staticMembersToRegister: Seq[Member],
     authenticationServices: AuthenticationServices,

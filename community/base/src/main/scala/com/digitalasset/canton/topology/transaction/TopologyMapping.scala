@@ -553,8 +553,8 @@ final case class NamespaceDelegation private (
 
   override def referencedUids: Set[UniqueIdentifier] = Set.empty
 
-  def canSign(mappingsToSign: Code): Boolean =
-    restriction.canSign(mappingsToSign)
+  def canSign(mappingCodeToSign: Code): Boolean =
+    restriction.canSign(mappingCodeToSign)
 
   override def toProtoV30: v30.TopologyMapping =
     v30.TopologyMapping(
@@ -640,7 +640,7 @@ object NamespaceDelegation extends TopologyMappingCompanion {
           // explicitly checking for nonEmpty to guard against refactorings away from NonEmpty[Set[...]].
           sit.signatures.nonEmpty &&
           ns.canSign(Code.NamespaceDelegation) &&
-          ns.target.fingerprint == ns.namespace.fingerprint
+          ns.target.fingerprint == ns.namespace.fingerprint // root check
       )
 
   @nowarn("cat=deprecation")
@@ -1881,6 +1881,7 @@ object PartyToParticipant extends TopologyMappingCompanion {
 
     // If a participant is listed several times with different permissions, take the one with the higher
     // Needed for backwards compatibility with existing topologies
+    // TODO(#33949) this is not a good idea: let's not try to fix user mistakes. Reject bad stuff!
     val deduplicateParticipantsWithDifferentPermissionsMap =
       participants
         .groupMapReduce(_.participantId)(identity) { case (first, second) =>
@@ -1910,6 +1911,19 @@ object PartyToParticipant extends TopologyMappingCompanion {
       partySigningKeysWithThreshold,
     )
   }
+
+  @VisibleForTesting
+  def uncheckedCreate(
+      partyId: PartyId,
+      threshold: PositiveInt,
+      participants: Seq[HostingParticipant],
+      partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
+  ): PartyToParticipant = PartyToParticipant(
+    partyId,
+    threshold,
+    participants,
+    partySigningKeysWithThreshold,
+  )
 
   def tryCreate(
       partyId: PartyId,
@@ -2137,6 +2151,10 @@ object MediatorSynchronizerState extends TopologyMappingCompanion {
       active: Seq[MediatorId],
       observers: Seq[MediatorId],
   ): Either[String, MediatorSynchronizerState] = for {
+    // TODO(#33949): this is bad as we check the threshold on the non-deduped active length
+    //   Unclear if fixing this without making the parser pv dependent is dangerous or not.
+    //   As of PV36, we check this in the mapping state which means that once pv35 is gone,
+    //   we can fix these things here and align them
     _ <- Either.cond(
       threshold.unwrap <= active.length,
       (),
@@ -2150,9 +2168,30 @@ object MediatorSynchronizerState extends TopologyMappingCompanion {
           .mkString(", ")}",
     )
     activeNE <- NonEmpty
+      // TODO(#33949) reject, instead of fixing user mistakes
       .from(active.distinct)
       .toRight("mediator synchronizer state requires at least one active mediator")
+    // TODO(#33949) reject, instead of fixing user mistakes
   } yield MediatorSynchronizerState(synchronizerId, group, threshold, activeNE, observers.distinct)
+
+  /** Create a potentially invalid mediator sync state
+    *
+    * This is only visible for testing to check that the mapping checks work.
+    */
+  @VisibleForTesting
+  def uncheckedCreate(
+      synchronizerId: SynchronizerId,
+      group: MediatorGroupIndex,
+      threshold: PositiveInt,
+      active: NonEmpty[Seq[MediatorId]],
+      observers: Seq[MediatorId],
+  ): MediatorSynchronizerState = MediatorSynchronizerState(
+    synchronizerId = synchronizerId,
+    group = group,
+    threshold = threshold,
+    active = active,
+    observers = observers,
+  )
 
   def fromProtoV30(
       value: v30.MediatorSynchronizerState
@@ -2244,6 +2283,10 @@ object SequencerSynchronizerState extends TopologyMappingCompanion {
       active: Seq[SequencerId],
       observers: Seq[SequencerId],
   ): Either[String, SequencerSynchronizerState] = for {
+    // TODO(#33949): this is bad as we check the threshold on the non-deduped active length
+    //   Unclear if fixing this without making the parser pv dependent is dangerous or not.
+    //   As of PV36, we check this in the mapping state which means that once pv35 is gone,
+    //   we can fix these things here and align them
     _ <- Either.cond(
       threshold.unwrap <= active.length,
       (),
@@ -2257,9 +2300,28 @@ object SequencerSynchronizerState extends TopologyMappingCompanion {
           .mkString(", ")}",
     )
     activeNE <- NonEmpty
+      // TODO(#33949) reject, instead of fixing user mistakes
       .from(active.distinct)
       .toRight("sequencer synchronizer state requires at least one active sequencer")
+    // TODO(#33949) reject, instead of fixing user mistakes
   } yield SequencerSynchronizerState(synchronizerId, threshold, activeNE, observers.distinct)
+
+  /** Create a potentially invalid sequencer sync state
+    *
+    * This is only visible for testing to check that the mapping checks work.
+    */
+  @VisibleForTesting
+  def uncheckedCreate(
+      synchronizerId: SynchronizerId,
+      threshold: PositiveInt,
+      active: NonEmpty[Seq[SequencerId]],
+      observers: Seq[SequencerId],
+  ): SequencerSynchronizerState = SequencerSynchronizerState(
+    synchronizerId = synchronizerId,
+    threshold = threshold,
+    active = active,
+    observers = observers,
+  )
 
   def fromProtoV30(
       value: v30.SequencerSynchronizerState

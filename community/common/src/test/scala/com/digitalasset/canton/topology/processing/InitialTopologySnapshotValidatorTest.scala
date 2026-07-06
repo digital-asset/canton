@@ -348,7 +348,7 @@ abstract class InitialTopologySnapshotValidatorTest
           // is broken. Maybe somebody tampered with the topology snapshot after exporting it or there
           // is a bug in the export logic.
           // Regardless, we want the validator to report the inconsistency
-          ns1k3_k2,
+          ns1k3_k2_restrict_nsd,
           rejectionReason = None,
         )
         val (validator, _) = mkDefault()

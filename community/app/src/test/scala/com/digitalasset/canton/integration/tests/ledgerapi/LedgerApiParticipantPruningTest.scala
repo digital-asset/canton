@@ -38,11 +38,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors.ParticipantContractP
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.ParticipantPruningInProgress
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend.DataSourceConfig
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
-import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
-import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.value.Value.ContractId
 import monocle.macros.syntax.lens.*
@@ -58,6 +54,7 @@ import scala.jdk.CollectionConverters.*
 trait LedgerApiParticipantPruningTest
     extends CommunityIntegrationTest
     with SharedEnvironment
+    with DbLockingSupport
     with HasCycleUtils {
   import scala.language.reflectiveCalls
 
@@ -569,29 +566,6 @@ trait LedgerApiParticipantPruningTest
     }
   }
 
-  private def createContract(
-      participant: LocalParticipantReference,
-      synchronizerId: SynchronizerId,
-  ): (String, String) = {
-    val partyId = participant.id.adminParty
-    val createCmd = new test.Dummy(partyId.toProtoPrimitive).create.commands.asScala.toSeq
-    val createTx = participant.ledger_api.javaapi.commands
-      .submit(
-        Seq(partyId),
-        createCmd,
-        commandId = s"createContract-${UUID.randomUUID()}",
-        synchronizerId = Some(synchronizerId),
-      )
-    val cid = createTx.getEvents.asScala.collectFirst {
-      case x if x.toProtoEvent.hasCreated =>
-        val contractId = x.toProtoEvent.getCreated.getContractId
-        logger.info(s"Created contract $contractId at offset ${createTx.getOffset}")
-        contractId
-    }.value
-
-    (createTx.getUpdateId, cid)
-  }
-
   private def createAndExerciseContract(
       participant: LocalParticipantReference,
       synchronizerId: SynchronizerId,
@@ -680,49 +654,6 @@ trait LedgerApiParticipantPruningTest
       .value
     offer.id.exerciseAcceptByPainter().commands.loneElement
   }
-
-  private def withConnectionForTest(
-      participant: LocalParticipantReference
-  )(testFunction: Connection => Unit, onCommit: Connection => Unit = _ => ()) = {
-    val ledgerApiStore =
-      participant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore
-    val conn =
-      ledgerApiStore.ledgerApiDbSupport.storageBackendFactory.createDataSourceStorageBackend
-        .createDataSource(
-          dataSourceConfig = DataSourceConfig(ledgerApiStore.ledgerApiStorage.jdbcUrl),
-          loggerFactory = loggerFactory,
-        )
-        .getConnection
-    conn.setAutoCommit(false)
-    QueryStrategy.withoutNetworkTimeout(testFunction(_))(conn, noTracingLogger)
-    new Object {
-      def commitAndClose(): Unit = {
-        onCommit(conn)
-        conn.commit()
-        conn.close()
-      }
-    }
-  }
-
-  private def eventStorageBackend(participant: LocalParticipantReference) =
-    participant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore.ledgerApiDbSupport.storageBackendFactory
-      .createEventStorageBackend(
-        ledgerEndCache = MutableLedgerEndCache(),
-        stringInterning = new MockStringInterning,
-        loggerFactory = loggerFactory,
-      )
-
-  private def lockPruning(participant: LocalParticipantReference)(conn: Connection) =
-    eventStorageBackend(participant).lockExclusivelyPruningProcessingTable(conn)
-
-  private def readLockContract(participant: LocalParticipantReference, internalContractId: Long)(
-      conn: Connection
-  ) = eventStorageBackend(participant).readLockInternalContractIds(Set(internalContractId))(conn)
-
-  private def writeLockContract(participant: LocalParticipantReference, internalContractId: Long)(
-      conn: Connection
-  ) =
-    eventStorageBackend(participant).writeLockInternalContractIds(cSQL"= $internalContractId")(conn)
 
   def deleteContract(participant: LocalParticipantReference, internalContractId: Long)(implicit
       conn: Connection

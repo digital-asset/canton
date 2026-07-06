@@ -234,13 +234,12 @@ class AuthorizationGraphTest
 
       "ensure once a delegation is revoked, all depending authorizations will become unauthorized" in {
         val graph = mkGraph
-        val nsk4k3 = mkAdd(mkNSD(namespace, key4, canSignNamespaceDelegations = true), key3)
-        val nsk5k3 = mkAdd(mkNSD(namespace, key5, canSignNamespaceDelegations = true), key3)
         graph.replace(nsk1k1)
         graph.replace(nsk2k1)
         graph.replace(nsk3k2)
         graph.replace(nsk4k3)
         graph.replace(nsk5k3)
+
         Seq(key3, key4, key5).foreach(key =>
           forAll(allMappings)(check(graph, _, valid = true)(key))
         )
@@ -253,6 +252,96 @@ class AuthorizationGraphTest
           },
           _.warningMessage should include("The following target keys"),
         )
+      }
+    }
+
+    "calculating dynamic authorized delegations with exclusions via Traverser" should {
+      "return all cached delegations on the None fast-path" in {
+        val graph = mkGraph
+        // k1 -> k2 -> k3
+        graph.replace(nsk1k1)
+        graph.replace(nsk2k1)
+        graph.replace(nsk3k2)
+
+        // keyToAuthorizeO = None
+        val result = graph.authorizedDelegations(keyToAuthorizeO = None)
+        val delegatedKeys = result(namespace).map { case (delegation, _) =>
+          delegation.mapping.target.fingerprint
+        }.toSet
+
+        delegatedKeys shouldBe Set(key1.fingerprint, key2.fingerprint, key3.fingerprint)
+      }
+
+      "return empty sequence if the root namespace key is missing entirely" in {
+        val graph = mkGraph
+
+        val result = graph.authorizedDelegations(keyToAuthorizeO = Some(key2.fingerprint))
+        result(namespace) shouldBe Seq.empty
+      }
+
+      "only allow the root key to sign when the target to authorize is the root key itself" in {
+        val graph = mkGraph
+        // k1 -> k2 -> k3
+        graph.replace(nsk1k1)
+        graph.replace(nsk2k1)
+        graph.replace(nsk3k2)
+
+        // When keyToAuthorize == namespace.fingerprint, the root should be included in the result
+        val result = graph.authorizedDelegations(keyToAuthorizeO = Some(key1.fingerprint))
+        val isolatedKeys = result(namespace).map { case (delegation, _) =>
+          delegation.mapping.target.fingerprint
+        }
+
+        isolatedKeys shouldBe Seq(key1.fingerprint)
+      }
+
+      "accurately include subtrees across independent authorization chains" in {
+        val graph = mkGraph
+
+        // Build the precise architecture outlined in documentation comment:
+        // rootKey -> k1 -> k2 -> k3
+        //   '------> k4 -> k5
+        val nsk4k1 = mkAdd(mkNSD(namespace, key4, canSignNamespaceDelegations = true), key1)
+        val nsk5k4 = mkAdd(mkNSD(namespace, key5, canSignNamespaceDelegations = true), key4)
+
+        graph.replace(nsk1k1)
+        graph.replace(nsk2k1)
+        graph.replace(nsk3k2)
+        graph.replace(nsk4k1)
+        graph.replace(nsk5k4)
+
+        // authorize based on key2
+        val result = graph.authorizedDelegations(keyToAuthorizeO = Some(key2.fingerprint))
+        val suitableKeys = result(namespace).map { case (delegation, _) =>
+          delegation.mapping.target.fingerprint
+        }.toSet
+
+        suitableKeys should contain(key1.fingerprint) // rootKey / k1
+        suitableKeys should contain(key4.fingerprint) // k4
+        suitableKeys should contain(key5.fingerprint) // k5
+
+        // Shouldn't contain self (key2) and its descendants/successors (key3)
+        suitableKeys shouldNot contain(key2.fingerprint)
+        suitableKeys shouldNot contain(key3.fingerprint)
+      }
+
+      "no mutations on graph between calls" in {
+        val graph = mkGraph
+        // k1 -> k2 -> k3
+        graph.replace(nsk1k1)
+        graph.replace(nsk2k1)
+        graph.replace(nsk3k2)
+
+        // Run an exclusion check on k2
+        graph.authorizedDelegations(keyToAuthorizeO = Some(key2.fingerprint))
+
+        // The previous exclusion check shouldn't mutate data
+        val verificationResult = graph.authorizedDelegations(keyToAuthorizeO = None)
+        val persistentKeys = verificationResult(namespace).map { case (delegation, _) =>
+          delegation.mapping.target.fingerprint
+        }.toSet
+
+        persistentKeys shouldBe Set(key1.fingerprint, key2.fingerprint, key3.fingerprint)
       }
     }
   }

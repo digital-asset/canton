@@ -5,11 +5,11 @@ package com.digitalasset.canton.integration.tests.performance
 
 import com.digitalasset.base.error.ErrorCategory
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.{DbConfig, NonNegativeDuration}
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.error.ErrorCodeUtils.errorCategoryFromString
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.{UseConfigTransforms, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseConfigTransforms}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateContractKey
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.performance.*
@@ -49,7 +49,7 @@ trait BasePerformanceIntegrationTest extends BasePerformanceIntegrationTestCommo
   protected def setupPlugins(storagePlugin: EnvironmentSetupPlugin): Unit = {
     registerPlugin(storagePlugin)
     registerPlugin(storageQueuePlugin)
-    registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+    registerPlugin(new UseBftSequencer(loggerFactory))
   }
 
   /** Override to customize the setup the topology. Custom implementations should ensure that

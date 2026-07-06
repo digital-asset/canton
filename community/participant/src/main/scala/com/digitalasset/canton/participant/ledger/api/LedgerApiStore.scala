@@ -102,11 +102,30 @@ class LedgerApiStore(
 
   /** The latest SynchronizerIndex for a synchronizerId until all events are processed fully and
     * published to the Ledger API DB and in memory state.
+    *
+    * Reads the in-memory cache, so it's only fresh if a live indexer is attached to keep it
+    * updated. Use [[cleanSynchronizerIndexFromDb]] otherwise (in tests, lightweight helpers or
+    * inspection code where the caller isn't backed by a live indexer keeping the cache up to date).
     */
   def cleanSynchronizerIndex(
       synchronizerId: SynchronizerId
   ): Option[SynchronizerIndex] =
     ledgerEndCache().flatMap(_.synchronizerIndices.get(synchronizerId))
+
+  /** Like [[cleanSynchronizerIndex]], but reads fresh from the database instead of the cache. Use
+    * this in tests/inspection classes if the caller isn't backed by a live indexer keeping the
+    * cache up to date.
+    */
+  @VisibleForTesting
+  def cleanSynchronizerIndexFromDb(
+      synchronizerId: SynchronizerId
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[Option[SynchronizerIndex]] =
+    executeSqlUS(DatabaseMetrics.ForTesting("cleanSynchronizerIndexFromDb"))(
+      parameterStorageBackend.ledgerEnd
+    ).map(_.flatMap(_.synchronizerIndices.get(synchronizerId)))
 
   def ledgerEnd: Option[LedgerEnd] = ledgerEndCache()
 

@@ -35,7 +35,7 @@ object ProtocolVersionCompatibility {
         val devVersions =
           if (cantonNodeParameters.devVersionSupport) List(ProtocolVersion.dev) else List.empty
         val alphaVersions =
-          if (cantonNodeParameters.alphaVersionSupport) ProtocolVersion.alpha.forgetNE
+          if (cantonNodeParameters.alphaVersionSupport) ProtocolVersion.alpha
           else List.empty
 
         devVersions ++ alphaVersions ++ ReleaseVersionToProtocolVersions.getBetaProtocolVersions(
@@ -71,7 +71,7 @@ object ProtocolVersionCompatibility {
 
     val alpha =
       if (includeAlphaVersions)
-        ProtocolVersion.alpha.forgetNE
+        ProtocolVersion.alpha
       else List.empty
 
     val dev =

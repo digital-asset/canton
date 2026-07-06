@@ -16,7 +16,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.nonempty.NonEmpty
-import com.google.common.graph.{MutableValueGraph, ValueGraphBuilder}
+import com.google.common.graph.{MutableValueGraph, Traverser, ValueGraphBuilder}
 
 import scala.collection.concurrent.TrieMap
 import scala.jdk.CollectionConverters.*
@@ -219,7 +219,6 @@ class AuthorizationGraph(
             // descend into all outgoing authorizations
             go(outgoingAuthorization, level + 1)
           }
-
         }
       }
     }
@@ -272,26 +271,59 @@ class AuthorizationGraph(
 
   override def existsAuthorizedKeyIn(
       authKeys: Set[Fingerprint],
-      mappingToAuthorize: TopologyMapping.Code,
-  ): Boolean = authKeys.exists(getAuthorizedKey(_, mappingToAuthorize).nonEmpty)
+      mappingCodeToAuthorize: TopologyMapping.Code,
+  ): Boolean =
+    authKeys.exists(getAuthorizedKey(_, mappingCodeToAuthorize).nonEmpty)
 
   private def getAuthorizedKey(
       authKey: Fingerprint,
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingCodeToAuthorize: TopologyMapping.Code,
   ): Option[SigningPublicKey] =
     cache
       .get(authKey)
       .map { case (delegation, _) => delegation }
-      .filter(_.mapping.canSign(mappingToAuthorize))
+      .filter(delegation => delegation.mapping.canSign(mappingCodeToAuthorize))
       .map(_.mapping.target)
 
   override def keysSupportingAuthorization(
       authKeys: Set[Fingerprint],
-      mappingToAuthorize: TopologyMapping.Code,
-  ): Set[SigningPublicKey] = authKeys.flatMap(getAuthorizedKey(_, mappingToAuthorize))
+      mappingCodeToAuthorize: TopologyMapping.Code,
+  ): Set[SigningPublicKey] =
+    authKeys.flatMap(getAuthorizedKey(_, mappingCodeToAuthorize))
 
-  def authorizedDelegations(): Map[Namespace, Seq[(AuthorizedNamespaceDelegation, Int)]] =
-    Map(namespace -> cache.values.toSeq)
+  override def authorizedDelegations(
+      keyToAuthorizeO: Option[Fingerprint]
+  ): Map[Namespace, Seq[(AuthorizedNamespaceDelegation, Int)]] =
+    keyToAuthorizeO match {
+      case None =>
+        // Fast path: when we do not need to exclude a key/subtree, reuse the already computed cache.
+        Map(namespace -> cache.values.toSeq)
+      case Some(keyToAuthorize) =>
+        if (!graph.nodes().contains(namespace.fingerprint)) {
+          // the root namespace is not in the graph, therefore we know that there are no valid keys that could authorize
+          Map(namespace -> Seq.empty)
+        } else if (keyToAuthorize == namespace.fingerprint) {
+          // the key to authorize is the namespace key, so this can only be signed by the namespace key itself
+          Map(namespace -> cache.get(namespace.fingerprint).toList)
+        } else {
+          // find all keys in namespace delegation chains that are considered predecessors of keyToAuthorize.
+          // Example with two independent authorization chains from the root key:
+          // rootKey -> k1 -> k2 -> k3
+          //   '------> k4 -> k5
+          // For authorizing the key k2, the algorithm should find [rootKey, k1, k4, k5].
+          // Both k2 and k3 would lead to k2 and k3 to become dangling keys.
+          val suitableKeys = Traverser
+            .forGraph[Fingerprint] { nextKey =>
+              val successors = new java.util.HashSet(graph.successors(nextKey))
+              successors.remove(keyToAuthorize)
+              successors
+            }
+            .breadthFirst(namespace.fingerprint)
+            .asScala
+            .toSet
+          Map(namespace -> suitableKeys.toSeq.flatMap(cache.get))
+        }
+    }
 
   override def toString: String = s"AuthorizationGraph($namespace)"
 }
@@ -301,12 +333,12 @@ trait AuthorizationCheck {
   /** Determines if a subset of the given keys is authorized to sign a given mapping type on behalf
     * of the (possibly decentralized) namespace.
     *
-    * @param mappingToAuthorize
+    * @param mappingCodeToAuthorize
     *   the Code of the mapping that needs to be authorized.
     */
   def existsAuthorizedKeyIn(
       authKeys: Set[Fingerprint],
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingCodeToAuthorize: TopologyMapping.Code,
   ): Boolean
 
   /** Returns those keys that are useful for signing on behalf of the (possibly decentralized)
@@ -317,14 +349,16 @@ trait AuthorizationCheck {
     */
   def keysSupportingAuthorization(
       authKeys: Set[Fingerprint],
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingCodeToAuthorize: TopologyMapping.Code,
   ): Set[SigningPublicKey]
 
   /** Per namespace (required for decentralized namespaces), a list of namespace delegations that
     * have a gapless chain to the root certificate together with the length of the chain to the root
     * certificate for each namespace delegation.
     */
-  def authorizedDelegations(): Map[Namespace, Seq[(AuthorizedNamespaceDelegation, Int)]]
+  def authorizedDelegations(
+      keyToAuthorizeO: Option[Fingerprint]
+  ): Map[Namespace, Seq[(AuthorizedNamespaceDelegation, Int)]]
 }
 
 /** Authorization graph for a decentralized namespace.
@@ -345,18 +379,22 @@ final case class DecentralizedNamespaceAuthorizationGraph(
 
   override def existsAuthorizedKeyIn(
       authKeys: Set[Fingerprint],
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingCodeToAuthorize: TopologyMapping.Code,
   ): Boolean =
-    ownerGraphs.count(_.existsAuthorizedKeyIn(authKeys, mappingToAuthorize)) >= dnd.threshold.value
+    ownerGraphs.count(
+      _.existsAuthorizedKeyIn(authKeys, mappingCodeToAuthorize)
+    ) >= dnd.threshold.value
 
   override def keysSupportingAuthorization(
       authKeys: Set[Fingerprint],
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingCodeToAuthorize: TopologyMapping.Code,
   ): Set[SigningPublicKey] =
     ownerGraphs
-      .flatMap(_.keysSupportingAuthorization(authKeys, mappingToAuthorize))
+      .flatMap(_.keysSupportingAuthorization(authKeys, mappingCodeToAuthorize))
       .toSet
 
-  override def authorizedDelegations(): Map[Namespace, Seq[(AuthorizedNamespaceDelegation, Int)]] =
-    ownerGraphs.flatMap(graph => graph.authorizedDelegations()).toMap
+  override def authorizedDelegations(
+      keyToAuthorizeO: Option[Fingerprint]
+  ): Map[Namespace, Seq[(AuthorizedNamespaceDelegation, Int)]] =
+    ownerGraphs.flatMap(graph => graph.authorizedDelegations(keyToAuthorizeO)).toMap
 }

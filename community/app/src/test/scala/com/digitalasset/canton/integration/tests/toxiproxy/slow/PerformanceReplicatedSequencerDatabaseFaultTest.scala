@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.toxiproxy.slow
 
 import better.files.{File, Resource}
-import com.digitalasset.canton.config
+import com.digitalasset.canton.config.NodeConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -33,6 +33,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, config}
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import io.grpc.health.v1.health.HealthGrpc
 import monocle.macros.syntax.lens.*
@@ -53,6 +54,8 @@ import scala.concurrent.duration.*
 class PerformanceReplicatedSequencerDatabaseFaultTest
     extends ReliabilityPerformanceIntegrationTest
     with ReplicatedNodeHelper
+    with HasExecutionContext
+    with HasActorSystem
     with HealthMonitoringTestUtils
     with BasePerformanceIntegrationTest {
 
@@ -212,34 +215,40 @@ class PerformanceReplicatedSequencerDatabaseFaultTest
 
           val proxy = sequencerProxies(sequencerIndex)
 
-          def withSeqHealthStubs[T](f: (HealthGrpc.HealthStub, HealthGrpc.HealthStub) => T) = {
-            val remoteSequencerHealth = env.actualConfig
-              .remoteSequencersByString(sequencer.name)
-              .grpcHealth
-              .value
-            val remoteSequencerPublicApi = env.actualConfig
-              .remoteSequencersByString(sequencer.name)
-              .publicApi
+          def withSeqHealthStubs[T](
+              f: (HealthGrpc.HealthStub, HealthGrpc.HealthStub, NodeConfig) => T
+          ) = {
+            val nodeConfig = env.actualConfig.remoteSequencersByString(sequencer.name)
+            val remoteSequencerHealth = nodeConfig.grpcHealth.value
+            val remoteSequencerPublicApi = nodeConfig.publicApi
             withHealthStubPairs(
               Seq(
                 remoteSequencerHealth.address -> remoteSequencerHealth.port,
                 remoteSequencerPublicApi.address -> remoteSequencerPublicApi.port,
               )
             ) { case Seq(health, seq) =>
-              f(health, seq)
+              f(health, seq, nodeConfig)
             }
           }
 
-          def checkSeqServing = withSeqHealthStubs { case (health, seq) =>
-            checkServing(health)
-            checkServing(seq)
-            checkServing(seq, CantonGrpcUtil.sequencerHealthCheckServiceName)
+          def checkSeqServing = withSeqHealthStubs { case (health, seq, nodeConfig) =>
+            checkServing(health, httpHealthConfig = Some(nodeConfig))
+            checkServing(seq, httpHealthConfig = Some(nodeConfig))
+            checkServing(
+              seq,
+              httpHealthConfig = Some(nodeConfig),
+              CantonGrpcUtil.sequencerHealthCheckServiceName,
+            )
           }
 
-          def checkSeqNotServing = withSeqHealthStubs { case (health, seq) =>
-            checkNotServing(health)
-            checkNotServing(seq)
-            checkNotServing(seq, CantonGrpcUtil.sequencerHealthCheckServiceName)
+          def checkSeqNotServing = withSeqHealthStubs { case (health, seq, nodeConfig) =>
+            checkNotServing(health, httpHealthConfig = Some(nodeConfig))
+            checkNotServing(seq, httpHealthConfig = Some(nodeConfig))
+            checkNotServing(
+              seq,
+              httpHealthConfig = Some(nodeConfig),
+              CantonGrpcUtil.sequencerHealthCheckServiceName,
+            )
           }
 
           if (!done) {

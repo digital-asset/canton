@@ -107,6 +107,11 @@ object P2PNetworkOut {
       destinationBftNodeId: BftNodeId,
   ): Multicast =
     Multicast(message, Set(destinationBftNodeId))
+
+  final case class SendToRandomAuthenticated(
+      message: BftOrderingNetworkMessage,
+      possibleRecipients: Seq[BftNodeId],
+  ) extends Message
 }
 
 trait P2PNetworkOut[

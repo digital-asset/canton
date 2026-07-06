@@ -1461,8 +1461,8 @@ private[lf] object SBuiltinFun {
             ContU.throwError[Unit](
               IE.CreateEmptyContractKeyMaintainers(
                 contract.templateId,
-                contract.arg,
-                contractKey.lfValue,
+                contract.createArg,
+                contractKey.value,
               )
             )
           case _ =>
@@ -1709,8 +1709,8 @@ private[lf] object SBuiltinFun {
             srcPackageName = srcContractInfo.packageName,
             srcTmplId = srcTmplId,
             srcMetadata = srcContractInfo.metadata,
-            srcArg = srcContractInfo.arg,
-            mbTypedNormalFormAuthenticator = Some(_ == srcContractInfo.valueHash),
+            srcArg = srcContractInfo.createArg,
+            mbTypedNormalFormAuthenticator = Some(_ == srcContractInfo.hash),
             forbidLocalContractIds = false,
             forbidTrailingNones = true,
           )
@@ -2064,14 +2064,14 @@ private[lf] object SBuiltinFun {
 
     def handleKnownInputKey(
         machine: UpdateMachine,
-        cachedKey: CachedKey,
+        key: GlobalKeyWithMaintainers,
         result: KeyMapping,
         payloads: List[SValue],
     ): Control[Nothing]
 
     def authorizeLookup(
         machine: UpdateMachine,
-        key: CachedKey,
+        key: GlobalKeyWithMaintainers,
     ): Either[IE, Unit]
 
   }
@@ -2094,7 +2094,7 @@ private[lf] object SBuiltinFun {
 
       override def handleKnownInputKey(
           machine: UpdateMachine,
-          cachedKey: CachedKey,
+          key: GlobalKeyWithMaintainers,
           result: KeyMapping,
           payloads: List[SValue],
       ): Control[Nothing] =
@@ -2102,12 +2102,12 @@ private[lf] object SBuiltinFun {
           case Some(coid) =>
             Control.Value(SContractId(coid))
           case None =>
-            Control.Error(IE.ContractKeyNotFound(cachedKey.globalKey))
+            Control.Error(IE.ContractKeyNotFound(key.globalKey))
         }
 
       override def authorizeLookup(
           machine: UpdateMachine,
-          key: CachedKey,
+          key: GlobalKeyWithMaintainers,
       ): Right[Nothing, Unit] =
         Right(())
     }
@@ -2118,13 +2118,13 @@ private[lf] object SBuiltinFun {
 
       override final def handleKnownInputKey(
           machine: UpdateMachine,
-          cachedKey: CachedKey,
+          key: GlobalKeyWithMaintainers,
           result: KeyMapping,
           payloads: List[SValue],
       ): Control[Nothing] = {
         machine.ptx = machine.ptx.insertQueryByKey(
           optLocation = machine.getLastLocation,
-          key = cachedKey,
+          key = key,
           result = result,
           keyVersion = machine.assignSerializationVersion(hasKey = true),
         )
@@ -2133,7 +2133,7 @@ private[lf] object SBuiltinFun {
 
       override def authorizeLookup(
           machine: UpdateMachine,
-          key: CachedKey,
+          key: GlobalKeyWithMaintainers,
       ): Either[IE, Unit] =
         machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
     }
@@ -2143,13 +2143,13 @@ private[lf] object SBuiltinFun {
 
       override def handleKnownInputKey(
           machine: UpdateMachine,
-          cachedKey: CachedKey,
+          key: GlobalKeyWithMaintainers,
           result: KeyMapping,
           payloads: List[SValue],
       ): Control[Nothing] = {
         machine.ptx = machine.ptx.insertQueryByKey(
           optLocation = machine.getLastLocation,
-          key = cachedKey,
+          key = key,
           result = result,
           keyVersion = machine.assignSerializationVersion(hasKey = true),
         )
@@ -2169,7 +2169,7 @@ private[lf] object SBuiltinFun {
 
       override def authorizeLookup(
           machine: UpdateMachine,
-          key: CachedKey,
+          key: GlobalKeyWithMaintainers,
       ): Either[IE, Unit] =
         machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
     }
@@ -2215,7 +2215,7 @@ private[lf] object SBuiltinFun {
             for {
               entry <- machine.needKeys(
                 NameOf.qualifiedNameOfCurrentFunc,
-                cachedKey.globalKeyWithMaintainers.globalKey,
+                cachedKey.globalKey,
                 m,
                 mbToken,
               )
@@ -2254,8 +2254,8 @@ private[lf] object SBuiltinFun {
         _ <- ContU.assert(
           cachedKey.maintainers.nonEmpty,
           IE.FetchEmptyContractKeyMaintainers(
-            cachedKey.templateId,
-            cachedKey.lfValue,
+            cachedKey.globalKey.templateId,
+            cachedKey.value,
             cachedKey.globalKey.packageName,
           ),
         )
@@ -2641,17 +2641,14 @@ private[lf] object SBuiltinFun {
       pkgName: PackageName,
       templateId: TypeConId,
       v: SValue,
-  ) =
+  ): GlobalKeyWithMaintainers =
     v match {
       case SStruct(_, vals) =>
         val keyValue = vals(keyIdx)
         val gkey = Speedy.Machine.assertGlobalKey(pkgName, templateId, keyValue)
-        CachedKey(
-          globalKeyWithMaintainers = GlobalKeyWithMaintainers(
-            gkey,
-            extractParties(NameOf.qualifiedNameOfCurrentFunc, vals(maintainerIdx)),
-          ),
-          key = keyValue,
+        GlobalKeyWithMaintainers(
+          gkey,
+          extractParties(NameOf.qualifiedNameOfCurrentFunc, vals(maintainerIdx)),
         )
       case _ => throw SErrorCrash(location, s"Invalid key with maintainers: $v")
     }
@@ -2704,11 +2701,14 @@ private[lf] object SBuiltinFun {
               s"Expected optional key with maintainers, got: $v",
             )
         }
+        val svalue = vals(contractInfoStructArgIdx)
+        val hash = SValueHash.assertHashContractInstance(pkgName, templateId.qualifiedName, svalue)
         ContractInfo(
           version = assignSerializationVersion(mbKey.isDefined),
           packageName = pkgName,
           templateId = templateId,
-          value = vals(contractInfoStructArgIdx),
+          createArg = svalue.toNormalizedValue,
+          hash = hash,
           signatories = extractParties(
             NameOf.qualifiedNameOfCurrentFunc,
             vals(contractInfoStructSignatoriesIdx),
@@ -2783,8 +2783,8 @@ private[lf] object SBuiltinFun {
             dstSArg,
             mbTypedNormalFormAuthenticator,
           )
-          (_, _, dstContract) = result
-        } yield dstContract.value
+          (_, value, _) = result
+        } yield value
 
     machine.getIfLocalContract(coid) match {
       case Some((srcTmplId, srcSArg)) =>
@@ -2809,8 +2809,8 @@ private[lf] object SBuiltinFun {
                 srcTmplId = srcTmplId,
                 srcPkgName = srcContractInfo.packageName,
                 srcMetadata = srcContractInfo.metadata,
-                srcArg = srcContractInfo.arg,
-                mbTypedNormalFormAuthenticator = Some(_ == srcContractInfo.valueHash),
+                srcArg = srcContractInfo.createArg,
+                mbTypedNormalFormAuthenticator = Some(_ == srcContractInfo.hash),
                 forbidLocalContractIds = false,
                 forbidTrailingNones = true,
               )
@@ -2881,7 +2881,24 @@ private[lf] object SBuiltinFun {
       )
       _ <- mbTypedNormalFormAuthenticator match {
         case Some(authenticator) =>
-          authenticateContractInfo(authenticator, coid, srcTmplId, dstContract)
+          ContU.assert(
+            authenticator(
+              SValueHash.assertHashContractInstance(
+                srcPkgName,
+                dstContract.templateId.qualifiedName,
+                dstTmplArg,
+              )
+            ),
+            IE.Upgrade(
+              IE.Upgrade.AuthenticationFailed(
+                coid = coid,
+                srcTemplateId = srcTmplId,
+                dstTemplateId = dstTmplId,
+                createArg = dstContract.createArg,
+                msg = s"failed to authenticate contract",
+              )
+            ),
+          )
         case None => ContU.Unit
       }
     } yield (dstTmplId, dstTmplArg, dstContract)
@@ -2930,32 +2947,6 @@ private[lf] object SBuiltinFun {
         }
     }
   }
-
-  /** Authenticates the provided contractInfo using [authenticator] */
-  private def authenticateContractInfo(
-      authenticator: Hash => Boolean,
-      coid: V.ContractId,
-      srcTemplateId: TypeConId,
-      contractInfo: ContractInfo,
-  ): ContU[Unit] =
-    ContU.assert(
-      authenticator(
-        SValueHash.assertHashContractInstance(
-          contractInfo.packageName,
-          contractInfo.templateId.qualifiedName,
-          contractInfo.value,
-        )
-      ),
-      IE.Upgrade(
-        IE.Upgrade.AuthenticationFailed(
-          coid = coid,
-          srcTemplateId = srcTemplateId,
-          dstTemplateId = contractInfo.templateId,
-          createArg = contractInfo.value.toNormalizedValue,
-          msg = s"failed to authenticate contract",
-        )
-      ),
-    )
 
   /** Checks that the metadata of [original] and [recomputed] are the same, fails with a
     * [Control.Error] if not.

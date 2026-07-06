@@ -7,7 +7,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   StaticSynchronizerParameters,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.console.{
@@ -15,6 +14,7 @@ import com.digitalasset.canton.console.{
   LocalInstanceReference,
   LocalMediatorReference,
 }
+import com.digitalasset.canton.health.{HttpHealthServer, LivenessHealthService}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -42,13 +42,16 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.Refer
 import com.digitalasset.canton.time.TimeProvider
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
+import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, SynchronizerAlias}
 import com.google.protobuf.ByteString
 import io.grpc.health.v1.health.HealthCheckResponse.ServingStatus
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthGrpc}
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.{ManagedChannel, ServerServiceDefinition}
 import monocle.macros.syntax.lens.*
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.model.HttpRequest
+import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.stream.{KillSwitch, Materializer}
 import org.scalatest.Assertion
@@ -61,6 +64,8 @@ import scala.reflect.ClassTag
 trait HealthReportingTestHelper
     extends CommunityIntegrationTest
     with IsolatedEnvironments
+    with HasExecutionContext
+    with HasActorSystem
     with HealthMonitoringTestUtils
     with ReplicatedNodeHelper {
 
@@ -142,7 +147,7 @@ trait HealthReportingTestHelper
   }
 }
 
-trait HealthMonitoringTestUtils { this: BaseTest =>
+trait HealthMonitoringTestUtils { this: BaseTest & HasActorSystem & HasExecutionContext =>
   private val healthCheckTimeout = 2.seconds
 
   // Create stubs from a seq of address / port pairs
@@ -191,11 +196,21 @@ trait HealthMonitoringTestUtils { this: BaseTest =>
     res shouldBe expected
   }
 
-  protected def checkLivenessServing(stub: HealthGrpc.HealthStub): Assertion =
-    checkHealth(ServingStatus.SERVING, stub, "liveness")
+  protected def checkLivenessServing(
+      stub: HealthGrpc.HealthStub,
+      httpHealthConfig: Option[NodeConfig] = None,
+  ): Assertion = {
+    checkHealth(ServingStatus.SERVING, stub, LivenessHealthService.Name)
+    httpCheck(httpHealthConfig, HttpHealthServer.LivenessPaths, 200)
+  }
 
-  protected def checkLivenessNotServing(stub: HealthGrpc.HealthStub): Assertion =
+  protected def checkLivenessNotServing(
+      stub: HealthGrpc.HealthStub,
+      httpHealthConfig: Option[NodeConfig] = None,
+  ): Assertion = {
     checkHealth(ServingStatus.NOT_SERVING, stub, "liveness")
+    httpCheck(httpHealthConfig, HttpHealthServer.LivenessPaths, 503)
+  }
 
   protected def checkContainsState[S <: ComponentHealthState: ClassTag](
       node: LocalInstanceReference,
@@ -210,10 +225,48 @@ trait HealthMonitoringTestUtils { this: BaseTest =>
       case _ => false
     } shouldBe true
 
-  protected def checkServing(stub: HealthGrpc.HealthStub, service: String = ""): Assertion =
+  protected def checkServing(
+      stub: HealthGrpc.HealthStub,
+      httpHealthConfig: Option[NodeConfig] = None,
+      service: String = "",
+  ): Assertion = {
     checkHealth(ServingStatus.SERVING, stub, service)
-  protected def checkNotServing(stub: HealthGrpc.HealthStub, service: String = ""): Assertion =
+    httpCheck(httpHealthConfig, HttpHealthServer.ReadinessPaths, 200)
+  }
+
+  protected def checkNotServing(
+      stub: HealthGrpc.HealthStub,
+      httpHealthConfig: Option[NodeConfig] = None,
+      service: String = "",
+  ): Assertion = {
     checkHealth(ServingStatus.NOT_SERVING, stub, service)
+    httpCheck(httpHealthConfig, HttpHealthServer.ReadinessPaths, 503)
+  }
+
+  protected def httpCheck(
+      httpHealthConfig: Option[NodeConfig],
+      uris: List[String],
+      expectedHttpCode: Int,
+  ): Assertion = {
+    httpHealthConfig.foreach { nodeConfig =>
+      val port = nodeConfig.httpHealthClientConfig.value.port
+      uris.foreach { uri =>
+        val url = s"http://localhost:${port.unwrap}/$uri"
+        logger.info(s"HTTP health check at '$url', expect code '$expectedHttpCode'")
+
+        val statusF = Http()
+          .singleRequest(HttpRequest(uri = url))
+          .flatMap(response =>
+            Unmarshal(response.entity).to[String].map { body =>
+              logger.info(s"Got code '${response.status.intValue()}', body:\n$body")
+              response.status.intValue()
+            }
+          )
+        statusF.futureValue shouldBe expectedHttpCode
+      }
+    }
+    succeed
+  }
 }
 
 trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
@@ -239,7 +292,7 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
             healthPassive,
             ledgerActive,
           ) =>
-        checkLivenessServing(healthActive)
+        checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
 
         checkContainsState[ComponentHealthState.Failed](passiveParticipant, DbStorage.healthName)
         checkContainsState[ComponentHealthState.Ok](activeParticipant, DbStorage.healthName)
@@ -255,11 +308,14 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
           activeParticipant,
           SequencerClient.healthName,
         )
-        checkServing(healthActive)
-        checkNotServing(ledgerActive)
+        checkServing(healthActive, httpHealthConfig = Some(activeConfig))
+        checkNotServing(
+          ledgerActive,
+          httpHealthConfig = None,
+        ) // Ledger API does not have a HTTP health endpoint
 
         // Passive participant is not serving
-        checkNotServing(healthPassive)
+        checkNotServing(healthPassive, httpHealthConfig = Some(passiveConfig))
 
         // Bootstrap the synchronizer and connect the participant
         bootstrapSynchronizer
@@ -285,13 +341,16 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
 
         eventually() {
           // Active should be serving
-          checkLivenessServing(healthActive)
-          checkServing(healthActive)
-          checkServing(ledgerActive)
+          checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
+          checkServing(healthActive, httpHealthConfig = Some(activeConfig))
+          checkServing(
+            ledgerActive,
+            httpHealthConfig = None,
+          ) // Ledger API does not have a HTTP health endpoint
 
           // But not passive
-          checkNotServing(healthPassive)
-          checkLivenessServing(healthPassive)
+          checkNotServing(healthPassive, httpHealthConfig = Some(passiveConfig))
+          checkLivenessServing(healthPassive, httpHealthConfig = Some(passiveConfig))
         }
     }
   }
@@ -313,10 +372,11 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
       )
     ) { case Seq(healthActive, healthPassive) =>
       eventually() {
-        checkServing(healthActive)
-        checkLivenessServing(healthActive)
-        checkNotServing(healthPassive)
-        checkLivenessServing(healthPassive)
+        // The active mediator reports its readiness as 'not serving' until the synchronizer is bootstrapped
+        checkNotServing(healthActive, httpHealthConfig = Some(activeConfig))
+        checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
+        checkNotServing(healthPassive, httpHealthConfig = Some(passiveConfig))
+        checkLivenessServing(healthPassive, httpHealthConfig = Some(passiveConfig))
       }
 
       bootstrapSynchronizer
@@ -344,10 +404,11 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
       )
     ) { case Seq(healthActive, healthPassive) =>
       eventually() {
-        checkServing(healthActive)
-        checkLivenessServing(healthActive)
-        checkNotServing(healthPassive)
-        checkLivenessServing(healthPassive)
+        // The active mediator reports its readiness as 'not serving' until the synchronizer is bootstrapped
+        checkNotServing(healthActive, httpHealthConfig = Some(activeConfig))
+        checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
+        checkNotServing(healthPassive, httpHealthConfig = Some(passiveConfig))
+        checkLivenessServing(healthPassive, httpHealthConfig = Some(passiveConfig))
       }
 
       bootstrapSynchronizer
@@ -371,8 +432,8 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
       )
 
       eventually() {
-        checkNotServing(healthActive)
-        checkLivenessNotServing(healthActive)
+        checkNotServing(healthActive, httpHealthConfig = Some(activeConfig))
+        checkLivenessNotServing(healthActive, httpHealthConfig = Some(activeConfig))
         checkContainsState[ComponentHealthState.Failed](activeMediator, SequencerClient.healthName)
       }
     }
@@ -391,18 +452,26 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
     ) { case Seq(health, seq) =>
       eventually() {
         // When not initialized the sequencer API should expose the health service but return not serving
-        checkNotServing(seq)
-        checkNotServing(seq, CantonGrpcUtil.sequencerHealthCheckServiceName)
-        checkServing(health)
-        checkLivenessServing(health)
+        checkNotServing(seq, httpHealthConfig = Some(seq1Config))
+        checkNotServing(
+          seq,
+          httpHealthConfig = Some(seq1Config),
+          CantonGrpcUtil.sequencerHealthCheckServiceName,
+        )
+        checkNotServing(health, httpHealthConfig = Some(seq1Config))
+        checkLivenessServing(health, httpHealthConfig = Some(seq1Config))
       }
 
       bootstrapSynchronizer
 
       eventually() {
         // Once initialized we should show serving
-        checkServing(seq)
-        checkServing(seq, CantonGrpcUtil.sequencerHealthCheckServiceName)
+        checkServing(seq, httpHealthConfig = Some(seq1Config))
+        checkServing(
+          seq,
+          httpHealthConfig = Some(seq1Config),
+          CantonGrpcUtil.sequencerHealthCheckServiceName,
+        )
         checkContainsState[ComponentHealthState.Ok](sequencer1, Sequencer.healthName)
         checkContainsState[ComponentHealthState.Ok](sequencer1, DbStorage.healthName)
       }
@@ -448,8 +517,12 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
         bootstrapSynchronizer
 
         // Make sure the sequencer is serving
-        checkServing(seq)
-        checkServing(seq, CantonGrpcUtil.sequencerHealthCheckServiceName)
+        checkServing(seq, httpHealthConfig = Some(seq1Config))
+        checkServing(
+          seq,
+          httpHealthConfig = Some(seq1Config),
+          CantonGrpcUtil.sequencerHealthCheckServiceName,
+        )
 
         // Connect to synchronizer and ping to make sure it's working
         activeParticipant.synchronizers.connect_local(sequencer1, synchronizerAlias)
@@ -471,8 +544,8 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
         )
 
         eventually() {
-          checkLivenessServing(par)
-          checkServing(par)
+          checkLivenessServing(par, httpHealthConfig = Some(activeConfig))
+          checkServing(par, httpHealthConfig = Some(activeConfig))
         }
 
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
@@ -486,8 +559,12 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
 
             clue("sequencer is not serving") {
               eventually() {
-                checkNotServing(seq)
-                checkNotServing(seq, CantonGrpcUtil.sequencerHealthCheckServiceName)
+                checkNotServing(seq, httpHealthConfig = Some(seq1Config))
+                checkNotServing(
+                  seq,
+                  httpHealthConfig = Some(seq1Config),
+                  CantonGrpcUtil.sequencerHealthCheckServiceName,
+                )
               }
             }
 
@@ -517,7 +594,6 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
   }
 }
 
-@UnstableTest // TODO(#29329)
 class HealthReportingNodeBftOrderingIntegrationTestPostgres
     extends HealthReportingIndividualNodeTest {
   registerPlugin(new UseBftSequencer(loggerFactory))

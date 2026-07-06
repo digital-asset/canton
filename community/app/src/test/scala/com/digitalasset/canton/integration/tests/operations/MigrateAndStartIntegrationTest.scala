@@ -5,10 +5,10 @@ package com.digitalasset.canton.integration.tests.operations
 
 import better.files.File
 import com.daml.test.evidence.scalatest.OperabilityTestHelpers
-import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.config.{CantonConfig, DbConfig, IdentityConfig}
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -145,9 +145,14 @@ sealed trait MigrateAndStartIntegrationTest
     s"A node starting up" must_ { cause =>
       remedy(setting)(cause)("Abort startup and inform admin") in { implicit env =>
         import env.*
-        assertThrowsAndLogsCommandFailures(
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
           participant2.start(),
-          _.errorMessage should include("pending migrations to get to database schema"),
+          _.errorMessage should include(
+            "Validate schema and run database migrations if necessary failed"
+          ),
+          _.errorMessage should include("Startup of node participant2 failed"),
+          log =>
+            log.commandFailureMessage should include("pending migrations to get to database schema"),
         )
       }
     }
@@ -227,5 +232,5 @@ sealed trait MigrateAndStartIntegrationTest
 }
 
 final class MigrateAndStartReferenceIntegrationTest extends MigrateAndStartIntegrationTest {
-  registerPlugin(new UseReferenceBlockSequencer[Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }
