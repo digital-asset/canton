@@ -13,6 +13,7 @@ import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.SetupPackageVetting.AllUnvettingFlags
 import com.digitalasset.canton.util.collection.MapsUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPackageId}
 import com.digitalasset.daml.lf.archive.DarReader
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -113,9 +114,10 @@ class SetupPackageVetting(
             participant = participant.id,
             store = synchronizerId,
             adds = additions.toSeq,
-            // TODO(#29834): Remove the force flag once dependency unvetting is supported without it
             force =
-              if (explicitUnvettings.nonEmpty) ForceFlags(AllowUnvettedDependencies)
+              if (
+                explicitUnvettings.nonEmpty && synchronizerId.protocolVersion <= ProtocolVersion.v34
+              ) ForceFlags(AllowUnvettedDependencies)
               else ForceFlags.none,
           )
 
@@ -225,8 +227,8 @@ object SetupPackageVetting {
       targetTopology: Map[PhysicalSynchronizerId, Map[ParticipantReference, Set[
         VettedPackage
       ]]],
-      // TODO(#29834): Remove this explicit unvetting option once this declarative
-      //               util does not need to vet dependencies explicitly anymore
+      // TODO(#33919): This argument can be removed once this declarative
+      //               util does not need to vet dependencies explicitly anymore for PV 34 support
       explicitDependencyUnvettingTopology: Map[
         PhysicalSynchronizerId,
         Map[ParticipantReference, Set[LfPackageId]],

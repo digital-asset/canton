@@ -78,6 +78,7 @@ class ModelConformanceChecker(
     packageResolver: PackageResolver,
     contractLookup: ContractLookup,
     parallelism: PositiveInt,
+    protocolVersion: ProtocolVersion,
     validateLegacyContractsV11: Boolean,
     hashOps: HashOps & HmacOps,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -100,9 +101,6 @@ class ModelConformanceChecker(
       commonData: CommonData,
       getEngineAbortStatus: GetEngineAbortStatus,
       reInterpretedTopLevelViews: LazyAsyncReInterpretationMap,
-      // TODO(#29834): Make this a parameter of ModelConformanceChecker as an instance of this is tied to a connected synchronizer and
-      //               implicitly to protocol version
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
@@ -563,6 +561,7 @@ object ModelConformanceChecker {
       packageResolver: PackageResolver,
       contractLookup: ContractLookup,
       participantNodeParameters: ParticipantNodeParameters,
+      protocolVersion: ProtocolVersion,
       hashOps: HashOps & HmacOps,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ModelConformanceChecker = {
@@ -578,6 +577,7 @@ object ModelConformanceChecker {
       packageResolver,
       contractLookup,
       parallelism,
+      protocolVersion,
       participantNodeParameters.validateLegacyContractsV11,
       hashOps,
       loggerFactory,

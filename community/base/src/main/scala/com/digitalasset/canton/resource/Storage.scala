@@ -100,6 +100,8 @@ trait DbStore
     with HasCloseContext
     with DbStorage.Implicits {
   protected val storage: DbStorage
+
+  implicit protected def dbProfile: DbStorage.Profile = storage.profile
 }
 
 trait DbStorage extends Storage { self: NamedLogging =>
@@ -208,6 +210,49 @@ trait DbStorage extends Storage { self: NamedLogging =>
         case _: Postgres => v
       }
       pp.setObject(possiblyBoxed, java.sql.Types.ARRAY)
+    }
+
+    /** Binds Canton Hashes directly to varbinary/bytea arrays.
+      *
+      * Essential for safe ANY(?) lookups on indexed hash columns without triggering H2 BLOB
+      * conversions.
+      */
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    implicit val setParameterArrayHash: SetParameter[Array[com.digitalasset.canton.crypto.Hash]] =
+      (v, pp) => {
+        val bytesArray = v.map(_.getCryptographicEvidence.toByteArray)
+
+        val (typeName, castedArray) = profile match {
+          case _: Profile.Postgres => ("bytea", bytesArray.asInstanceOf[Array[AnyRef]])
+          case _: Profile.H2 => ("varbinary", bytesArray.asInstanceOf[Array[AnyRef]])
+        }
+
+        val sqlArray = pp.ps.getConnection.createArrayOf(typeName, castedArray)
+        pp.setObject(sqlArray, java.sql.Types.ARRAY)
+      }
+
+    /** Multi-dimensional arrays (like Array[Array[Byte]]) passed generically to JDBC `Types.ARRAY`
+      * cause type coercion failures in both Postgres and H2, resulting in queries that silently
+      * return 0 rows. To fix this, we intercept the parameter and explicitly construct the array
+      * using the dialect-specific `createArrayOf` method ("bytea" for Postgres, "blob" for H2).
+      * This strongly types the array at the JDBC connection layer so the database query planner
+      * knows exactly how to evaluate `ANY(?)` expressions.
+      *
+      * There is a caveat for H2, which defaults to BLOBs for raw byte arrays. If a "binary varying"
+      * array is needed (e.g., for indexed lookups), a purpose-built `SetParameter` must be provided
+      * to enable safe ANY(?) constructs, as is the case for [[setParameterArrayHash]].
+      */
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    implicit val setParameterArrayArrayByte: SetParameter[Array[Array[Byte]]] = (v, pp) => {
+      val (typeName, castedArray) = profile match {
+        case _: Profile.Postgres =>
+          ("bytea", v.asInstanceOf[Array[AnyRef]])
+        case _: Profile.H2 =>
+          ("blob", v.map(bytesToBlob).asInstanceOf[Array[AnyRef]])
+      }
+
+      val sqlArray = pp.ps.getConnection.createArrayOf(typeName, castedArray)
+      pp.setObject(sqlArray, java.sql.Types.ARRAY)
     }
 
     private def blobToBytes(blob: Blob): Array[Byte] =
@@ -523,9 +568,6 @@ object DbStorage {
 
     // this is not defined by slick, so need to do define this explicitly for all primitive types
     implicit val setParameterArrayString: SetParameter[Array[String]] = (v, pp) =>
-      pp.setObject(v, java.sql.Types.ARRAY)
-
-    implicit val setParameterArrayArayByte: SetParameter[Array[Array[Byte]]] = (v, pp) =>
       pp.setObject(v, java.sql.Types.ARRAY)
 
     object BuilderChain {
@@ -845,35 +887,90 @@ object DbStorage {
     }
   }
 
-  /** Construct an in clause for a given field.
+  /** Provides a mechanism to inject dialect-specific SQL casting suffixes (like `::bytea[]`) into
+    * generated SQL statements. When using `ANY(?)` with custom types or collections, Postgres query
+    * planners can sometimes lose type information, causing syntax or coercion errors. This trait
+    * ensures the parameter is explicitly cast in the SQL string when necessary for the active
+    * profile.
+    */
+  trait DbArrayCast[T] {
+    def castSuffix(profile: DbStorage.Profile): String
+  }
+
+  object DbArrayCast {
+    // Default fallback: No cast needed for most standard types
+    implicit def defaultCast[T]: DbArrayCast[T] = _ => ""
+
+    implicit val byteArrayCast: DbArrayCast[Array[Byte]] = {
+      case _: DbStorage.Profile.Postgres => "::bytea[]"
+      case _ => ""
+    }
+
+    implicit val hashCast: DbArrayCast[com.digitalasset.canton.crypto.Hash] = {
+      case _: DbStorage.Profile.Postgres => "::bytea[]"
+      case _ => ""
+    }
+  }
+
+  /** Constructs an IN clause for a given database field using the optimized `= ANY(?)` SQL syntax.
+    *
+    * By passing the entire collection as a single array parameter, this completely avoids
+    * generating massive `OR` chains or exceeding JDBC `maxSqlParameters` limits. It utilizes
+    * `DbArrayCast` to safely inject dialect-specific textual casts (e.g., `::bytea[]` for Postgres)
+    * to prevent query planner type coercion failures.
     *
     * The implicit parameter `SetParameter[Array[T]]` can be derived automatically, if instances for
     * `ToDbPrimitive[T, Prim]` and `SetParameter[Array[Prim]]` are in scope.
+    * @param field
+    *   The database column name to query against.
+    * @param values
+    *   The non-empty collection of values to match.
     * @return
-    *   An iterable of the grouped values and the in clause for the grouped values
+    *   A Slick `SQLActionBuilder` representing the parameterized `= ANY(?)` query fragment.
     */
   def toInClause[T: ClassTag](
       field: String,
       values: NonEmpty[immutable.Iterable[T]],
   )(implicit
-      arraySetParameter: SetParameter[Array[T]]
-  ): SQLActionBuilder =
-    sql"#$field = ANY(${values.toArray[T]})"
+      profile: Profile,
+      arraySetParameter: SetParameter[Array[T]],
+      arrayCast: DbArrayCast[T],
+  ): SQLActionBuilder = {
+    val cast = arrayCast.castSuffix(profile)
+    sql"#$field = ANY(${values.toArray[T]}#$cast)"
+  }
 
-  /** Construct an in clause for a given field, where the values are one of the LF string types (eg.
-    * [[com.digitalasset.daml.lf.data.Ref.PackageId]], for which scala cannot generate a `ClassTag`.
+  /** Constructs an IN clause using the optimized `= ANY(?)` SQL syntax for Daml-LF string types.
     *
+    * This is a specialized version of `toInClause` for types where the values are one of the LF
+    * string types (e.g., [[com.digitalasset.daml.lf.data.Ref.PackageId]]), for which Scala cannot
+    * generate a `ClassTag`. It uses a provided [[com.digitalasset.daml.lf.data.StringModule]] to
+    * safely instantiate the underlying array.
+    *
+    * Like the standard `toInClause`, this avoids JDBC parameter limits and utilizes `DbArrayCast`
+    * to prevent dialect-specific type erasure bugs.
+    *
+    * @param field
+    *   The database column name to query against.
+    * @param values
+    *   The non-empty collection of LF string values to match.
+    * @param stringModule
+    *   The Daml-LF string module used to instantiate the array without a `ClassTag`.
     * @return
-    *   An iterable of the grouped values and the in clause for the grouped values
+    *   A Slick `SQLActionBuilder` representing the parameterized `= ANY(?)` query fragment.
     */
   def toInClause[T](
       field: String,
       values: NonEmpty[immutable.Iterable[T]],
       stringModule: StringModule[T],
   )(implicit
-      arraySetParameter: SetParameter[Array[T]]
-  ): SQLActionBuilder =
-    sql"#$field = ANY(${stringModule.Array.apply((values.forgetNE.toSeq)*)})"
+      profile: Profile,
+      arraySetParameter: SetParameter[Array[T]],
+      arrayCast: DbArrayCast[T],
+  ): SQLActionBuilder = {
+    val cast = arrayCast.castSuffix(profile)
+    sql"#$field = ANY(${stringModule.Array.apply((values.forgetNE.toSeq)*)}#$cast)"
+  }
 
   class DbStorageCreationException(message: String) extends RuntimeException(message)
 

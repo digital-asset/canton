@@ -45,7 +45,11 @@ class DisclosedContractNormalizationTest
   )
 
   private val testEngine =
-    new TestEngine(packagePaths = Seq(UpgradingBaseTest.UpgradeV2), loggerFactory = loggerFactory)
+    new TestEngine(
+      packagePaths = Seq(UpgradingBaseTest.UpgradeV2),
+      interpretationConfig = InterpretationConfig.Default,
+      loggerFactory = loggerFactory,
+    )
 
   private def buildUpgrading(
       alice: String,

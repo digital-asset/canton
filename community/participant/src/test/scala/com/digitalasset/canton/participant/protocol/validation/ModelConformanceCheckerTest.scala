@@ -186,6 +186,7 @@ class ModelConformanceCheckerTest
       packageResolver = testEngine.packageResolver,
       contractLookup = mock[ContractLookup],
       parallelism = PositiveInt.tryCreate(100),
+      protocolVersion = testedProtocolVersion,
       validateLegacyContractsV11 = true,
       hashOps = symbolicCrypto.pureCrypto,
       loggerFactory = loggerFactory,
@@ -879,7 +880,6 @@ class ModelConformanceCheckerTest
           commonData = commonData,
           reInterpretedTopLevelViews = reInterpretedTopLevelViews,
           getEngineAbortStatus = getEngineAbortStatus,
-          protocolVersion = testedProtocolVersion,
         )
         .map {
           case valid if valid.updateId == commonData.updateId => valid

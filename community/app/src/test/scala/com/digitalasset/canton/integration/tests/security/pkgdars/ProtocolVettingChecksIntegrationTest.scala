@@ -277,7 +277,8 @@ class ProtocolVettingChecksIntegrationTest
       participant.id,
       store = env.daId,
       removes = removes.map(DamlPackageStore.readPackageId),
-      // TODO(#29834): Remove force flag once vetting state change behavior is adapted to support unvetted dependencies in PV35
-      force = ForceFlags(ForceFlag.AllowUnvettedDependencies),
+      force =
+        if (testedProtocolVersion <= ProtocolVersion.v34) ForceFlag.AllowUnvettedDependencies
+        else ForceFlags.none,
     )
 }

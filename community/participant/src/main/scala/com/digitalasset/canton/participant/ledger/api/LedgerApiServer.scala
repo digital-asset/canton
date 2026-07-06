@@ -378,7 +378,7 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
-        trafficEnforcementBackendO = trafficEnforcementBackendO.map(_.value),
+        trafficEnforcementBackendO = trafficEnforcementBackendO,
         externalCallHandler = externalCallHandler,
       )
       _ <- startHttpApiIfEnabled(

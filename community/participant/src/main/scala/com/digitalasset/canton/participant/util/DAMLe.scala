@@ -406,7 +406,6 @@ class DAMLe(
         transaction = txNoRootRollback,
         metadata = TransactionMetadata.fromLf(ledgerTime, metadata),
         usedPackages = UsedPackages(
-          // TODO(#29834): Optimization: Do not unnecessarily compute both sets if we know we only need one
           actionNodePackageIds = tx.nodes.values.view
             .collect { case node: LfActionNode => node.packageIds }
             .flatten

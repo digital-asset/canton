@@ -253,9 +253,6 @@ object RequireTypes {
     def max(other: PositiveNumeric[T]): PositiveNumeric[T] =
       PositiveNumeric.tryCreate(num.max(value, other.value))
 
-    def min(other: PositiveNumeric[T]): PositiveNumeric[T] =
-      PositiveNumeric.tryCreate(num.min(value, other.value))
-
     def increment: PositiveNumeric[T] = PositiveNumeric.tryCreate(value + num.one)
     def decrement: NonNegativeNumeric[T] = NonNegativeNumeric.tryCreate(value - num.one)
 

@@ -592,7 +592,7 @@ trait VettedPackagesSnapshotClient {
       participantId: ParticipantId,
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
-      // TODO(#29834): Extract a `loadUnvettedPackages` instead of overloading this method with this flag
+      // TODO(#33919): Remove flag once support for PV34 (checkDependencyVetting=true) is removed
       checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages]
 

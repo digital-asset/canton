@@ -118,7 +118,7 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
 }
 
 final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficEnforcementTest {
-  private val nonExistentTeaServerName = s"non-existent-tea-server"
+  private val nonExistentTeaServerName = "non-existent-tea-server"
 
   override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
@@ -137,8 +137,37 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
   )
 
   "Participant" when {
+    "traffic enforcement is enabled" should {
+      "serve traffic service operations" in { implicit env =>
+        import env.*
+
+        val alice = aliceE.partyId.toProtoPrimitive
+
+        // Initially Alice has no balance
+        participant1.ledger_api.traffic.get_account(alice).balance shouldBe 0L
+
+        val aliceBalance = 1_000_000L
+
+        // Update Alice's balance
+        participant1.ledger_api.traffic.update_account(alice, balanceDelta = Some(aliceBalance))
+
+        // Check correct balance for Alice
+        participant1.ledger_api.traffic.get_account(alice).balance shouldBe aliceBalance
+
+        // Now deduct some traffic from Alice's account
+        val deductAmount = 100_000L
+        participant1.ledger_api.traffic.update_account(alice, balanceDelta = Some(-deductAmount))
+
+        // Check correct balance for Alice after deduction
+        participant1.ledger_api.traffic
+          .get_account(alice)
+          .balance shouldBe (aliceBalance - deductAmount)
+      }
+    }
+
     "traffic enforcement is enabled but traffic enforcement server is not available" should {
-      "return graceful errors on traffic and interactive submission service endpoints" in {
+      // TODO(#33681): Re-enable this test once we can test traffic enforcement enabled with a unavailable traffic enforcement server
+      "return graceful errors on traffic and interactive submission service endpoints" ignore {
         implicit env =>
           import env.*
 

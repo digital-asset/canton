@@ -9,7 +9,7 @@ override-components:
   codegen:
     version: $DAML_VERSION
 build-options:
-- --target=2.1
+- --target=2.3
 - --enable-interfaces=yes
 name: Upgrade
 data-dependencies:

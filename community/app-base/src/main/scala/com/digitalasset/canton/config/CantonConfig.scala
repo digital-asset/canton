@@ -556,6 +556,7 @@ final case class CantonConfig(
         requestLimits = sequencerNodeConfig.publicApi.limits,
         maxAuthNoncesPerMember = sequencerNodeConfig.publicApi.maxAuthNoncesPerMember,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
+        maxSubscriptionsPerMember = sequencerNodeConfig.publicApi.maxSubscriptionsPerMember,
         drSequencingTimeUpperBound =
           sequencerNodeConfig.parameters.lsuRepair.globalMaxSequencingTimeExclusive
             .map(DisasterRecoverySequencingTimeUpperBound(_)),

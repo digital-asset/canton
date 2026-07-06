@@ -879,7 +879,6 @@ class TransactionProcessingSteps(
             commonData,
             getEngineAbortStatus = () => engineController.abortStatus,
             reInterpretedTopLevelViews,
-            protocolVersion,
           )
 
         internalConsistencyResultET = EitherT(
