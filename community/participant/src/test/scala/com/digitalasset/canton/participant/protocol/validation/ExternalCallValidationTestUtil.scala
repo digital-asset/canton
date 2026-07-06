@@ -64,7 +64,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
   protected final class RecordingExternalCallValidator(
       results: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result]
   ) extends ExternalCallValidator {
-    private val observedKeys =
+    private val observedKeys: ConcurrentLinkedQueue[(DAMLe.ExternalCallKey, Bytes)] =
       new ConcurrentLinkedQueue[(DAMLe.ExternalCallKey, Bytes)]
 
     def observed: Seq[(DAMLe.ExternalCallKey, Bytes)] = observedKeys.asScala.toSeq
