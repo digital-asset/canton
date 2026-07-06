@@ -136,7 +136,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       Seq(
         externalCallViewResult(
           exerciseIndex = 1,
-          result = otherExternalCallOutput,
+          result = otherExternalCallResult,
           checkingParties = Set(submitter),
         )
       ),
@@ -186,7 +186,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
         Seq(
           externalCallViewResult(
             exerciseIndex = 0,
-            result = otherExternalCallOutput,
+            result = otherExternalCallResult,
             checkingParties = Set(signatory),
           )
         ),
@@ -334,7 +334,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
         Seq(
           externalCallViewResult(
             exerciseIndex = 1,
-            result = otherExternalCallOutput,
+            result = otherExternalCallResult,
             checkingParties = Set(submitter),
           )
         ),
@@ -449,7 +449,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
         Seq(
           externalCallViewResult(
             exerciseIndex = 1,
-            result = otherExternalCallOutput,
+            result = otherExternalCallResult,
             checkingParties = Set(signatory),
           )
         ),
@@ -516,7 +516,7 @@ final class TransactionConfirmationResponsesFactoryExternalCallTest
       val validator = new RecordingExternalCallValidator(
         Map(
           key -> ExternalCallValidator.Mismatched(
-            computedOutput = otherExternalCallOutput.output,
+            computedOutput = otherExternalCallResult.output,
             recordedOutput = externalCallResult.output,
           )
         )

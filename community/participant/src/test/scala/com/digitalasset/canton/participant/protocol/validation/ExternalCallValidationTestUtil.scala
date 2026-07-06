@@ -214,7 +214,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
   protected def modelConformanceRecordedDisagreement(
       view: TransactionView,
       result: ExternalCallResult,
-      conflictingOutput: Bytes = otherExternalCallOutput.output,
+      conflictingOutput: Bytes = otherExternalCallResult.output,
   ): ModelConformanceChecker.ErrorWithSubTransaction[ViewAbsoluteLedgerEffect] =
     ModelConformanceChecker.ErrorWithSubTransaction(
       NonEmpty(
