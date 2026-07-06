@@ -24,9 +24,9 @@ class ExternalCallConsistencyCheckerTest
 
   protected val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
-  private val partyA = ExampleTransactionFactory.signatory
-  private val partyB = ExampleTransactionFactory.submitter
-  private val partyC = ExampleTransactionFactory.observer
+  private val partyA: LfPartyId = ExampleTransactionFactory.signatory
+  private val partyB: LfPartyId = ExampleTransactionFactory.submitter
+  private val partyC: LfPartyId = ExampleTransactionFactory.observer
 
   private def check(
       leftCheckingParties: Set[LfPartyId],

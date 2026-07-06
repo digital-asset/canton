@@ -28,7 +28,7 @@ final class ExternalCallResponseRouterTest
     with HasExecutionContext
     with ExternalCallValidationTestUtil {
 
-  protected val factory =
+  protected val factory: ExampleTransactionFactory =
     new ExampleTransactionFactory(versionOverride = Some(ProtocolVersion.dev))()
 
   private def router(
@@ -40,7 +40,8 @@ final class ExternalCallResponseRouterTest
       loggerFactory,
     )
 
-  private val externalCallKey = DAMLe.ExternalCallKey.fromResult(externalCallResult)
+  private val externalCallKey: DAMLe.ExternalCallKey =
+    DAMLe.ExternalCallKey.fromResult(externalCallResult)
 
   private def hostedView(
       viewPosition: ViewPosition,

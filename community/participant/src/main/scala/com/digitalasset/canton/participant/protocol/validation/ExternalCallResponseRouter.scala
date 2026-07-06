@@ -111,13 +111,15 @@ private[validation] final class ExternalCallRoutingContext(
       viewParticipantData.externalCallResults.nonEmpty
     }
 
-  private lazy val recordedExternalCallDisagreementInconsistencies =
+  private lazy val recordedExternalCallDisagreementInconsistencies
+      : Map[LfPartyId, Seq[(DAMLe.ExternalCallRecordedResultDisagreement, Inconsistency)]] =
     ExternalCallResponseRouter.recordedExternalCallDisagreementInconsistencies(
       recordedResultDisagreements,
       viewsWithHostedParties,
     )
 
-  private lazy val routableRecordedExternalCallDisagreements =
+  private lazy val routableRecordedExternalCallDisagreements
+      : Set[DAMLe.ExternalCallRecordedResultDisagreement] =
     recordedExternalCallDisagreementInconsistencies.valuesIterator
       .flatMap(_.iterator)
       .map(_._1)
