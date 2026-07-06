@@ -129,7 +129,7 @@ private[validation] trait ExternalCallValidationTestUtil { self: BaseTest =>
     output = Bytes.fromStringUtf8("output"),
   )
 
-  protected val otherExternalCallOutput: ExternalCallResult =
+  protected val otherExternalCallResult: ExternalCallResult =
     externalCallResult.copy(output = Bytes.fromStringUtf8("other-output"))
 
   protected def withConfirmers(

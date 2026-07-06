@@ -32,7 +32,7 @@ class ExternalCallConsistencyCheckerTest
       leftCheckingParties: Set[LfPartyId],
       rightCheckingParties: Set[LfPartyId],
       hostedParties: Set[LfPartyId],
-      rightResult: ExternalCallResult = otherExternalCallOutput,
+      rightResult: ExternalCallResult = otherExternalCallResult,
   ): ExternalCallConsistencyChecker.Result = {
     val example = factory.MultipleRoots
     val left = withExternalCallResults(
@@ -102,7 +102,7 @@ class ExternalCallConsistencyCheckerTest
       val visibleInconsistency = result.visibleInconsistencies.loneElement
       visibleInconsistency.outputs shouldBe Set(
         externalCallResult.output,
-        otherExternalCallOutput.output,
+        otherExternalCallResult.output,
       )
     }
 
@@ -122,7 +122,7 @@ class ExternalCallConsistencyCheckerTest
         leftCheckingParties = Set(partyA),
         rightCheckingParties = Set(partyA),
         hostedParties = Set(partyA),
-        rightResult = otherExternalCallOutput.copy(functionId = "other-function"),
+        rightResult = otherExternalCallResult.copy(functionId = "other-function"),
       )
 
       result.inconsistentParties shouldBe Set.empty
@@ -141,7 +141,7 @@ class ExternalCallConsistencyCheckerTest
           ),
           externalCallViewResult(
             exerciseIndex = 0,
-            result = otherExternalCallOutput,
+            result = otherExternalCallResult,
             checkingParties = Set(partyA),
             callIndex = 1,
           ),
@@ -155,7 +155,7 @@ class ExternalCallConsistencyCheckerTest
 
       result.inconsistentParties shouldBe Set(partyA)
       val inconsistency = result.hostedInconsistencies(partyA).loneElement
-      inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallOutput.output)
+      inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallResult.output)
       inconsistency.occurrences.map(occurrence =>
         occurrence.exerciseIndex -> occurrence.callIndex
       ) shouldBe Set(

@@ -78,7 +78,7 @@ final class ExternalCallResponseRouterTest
     )
     val right = withExternalCallResults(
       withConfirmers(example.rootViews(5), confirmers),
-      Seq(externalCallViewResult(exerciseIndex = 1, otherExternalCallOutput, Set(submitter))),
+      Seq(externalCallViewResult(exerciseIndex = 1, otherExternalCallResult, Set(submitter))),
     )
     Seq(
       hostedView(leftViewPosition, left, hostedConfirmingParties),
@@ -98,7 +98,7 @@ final class ExternalCallResponseRouterTest
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
-            computedOutput = otherExternalCallOutput.output,
+            computedOutput = otherExternalCallResult.output,
             recordedOutput = externalCallResult.output,
           )
         )
@@ -122,7 +122,7 @@ final class ExternalCallResponseRouterTest
       routes.rejects.keySet shouldBe Set(submitter)
       val inconsistency = routes.rejects(submitter).loneElement
       inconsistency.key shouldBe externalCallKey
-      inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallOutput.output)
+      inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallResult.output)
       routes.abstains shouldBe empty
 
       // Routed to the affected view for the checking party only; the co-confirmer is left to approve.
@@ -217,7 +217,7 @@ final class ExternalCallResponseRouterTest
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
-            computedOutput = otherExternalCallOutput.output,
+            computedOutput = otherExternalCallResult.output,
             recordedOutput = externalCallResult.output,
           )
         )
@@ -256,7 +256,7 @@ final class ExternalCallResponseRouterTest
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
-            computedOutput = otherExternalCallOutput.output,
+            computedOutput = otherExternalCallResult.output,
             recordedOutput = externalCallResult.output,
           )
         )
@@ -411,7 +411,7 @@ final class ExternalCallResponseRouterTest
         viewsWithHostedParties.head.validationResult.view.unwrap.viewHash
       val disagreement = DAMLe.ExternalCallRecordedResultDisagreement(
         key = externalCallKey,
-        outputs = Set(externalCallResult.output, otherExternalCallOutput.output),
+        outputs = Set(externalCallResult.output, otherExternalCallResult.output),
       )
       val routing = routingContext(viewsWithHostedParties, Seq(disagreement))
 
@@ -428,7 +428,7 @@ final class ExternalCallResponseRouterTest
       // An unrelated disagreement is not routable.
       val unrelatedDisagreement = DAMLe.ExternalCallRecordedResultDisagreement(
         key = DAMLe.ExternalCallKey.fromResult(externalCallResult.copy(functionId = "unrelated")),
-        outputs = Set(externalCallResult.output, otherExternalCallOutput.output),
+        outputs = Set(externalCallResult.output, otherExternalCallResult.output),
       )
       routing.isRoutableModelConformanceError(
         ModelConformanceChecker.DAMLeError(unrelatedDisagreement, leftViewHash)
@@ -445,7 +445,7 @@ final class ExternalCallResponseRouterTest
       val right = withExternalCallResults(
         withConfirmers(example.rootViews(5), confirmers),
         // Same semantic key, different output, seen by a disjoint checking party.
-        Seq(externalCallViewResult(exerciseIndex = 1, otherExternalCallOutput, Set(signatory))),
+        Seq(externalCallViewResult(exerciseIndex = 1, otherExternalCallResult, Set(signatory))),
       )
       val viewsWithHostedParties = Seq(
         hostedView(leftViewPosition, left, confirmers),
@@ -453,7 +453,7 @@ final class ExternalCallResponseRouterTest
       )
       val disagreement = DAMLe.ExternalCallRecordedResultDisagreement(
         key = externalCallKey,
-        outputs = Set(externalCallResult.output, otherExternalCallOutput.output),
+        outputs = Set(externalCallResult.output, otherExternalCallResult.output),
       )
       val routing = routingContext(viewsWithHostedParties, Seq(disagreement))
 
