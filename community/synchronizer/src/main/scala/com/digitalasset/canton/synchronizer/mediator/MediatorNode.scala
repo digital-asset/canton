@@ -167,8 +167,10 @@ final case class MediatorNodeParameters(
 final case class RemoteMediatorConfig(
     adminApi: FullClientConfig,
     token: Option[String] = None,
+    httpHealth: Option[HttpHealthServerConfig] = None,
 ) extends NodeConfig {
   override def clientAdminApi: ClientConfig = adminApi
+  override def httpHealthClientConfig: Option[HttpHealthServerConfig] = httpHealth
 }
 
 /** Mediator Node configuration that defaults to auto-init
@@ -271,23 +273,24 @@ class MediatorNodeBootstrap(
   override protected def mkNodeHealthService(
       storage: Storage
   ): (DependenciesHealthService, LivenessHealthService) = {
-    val readiness =
-      DependenciesHealthService(
-        "mediator",
-        logger,
-        timeouts,
-        criticalDependencies = Seq(storage),
-        softDependencies = Eval.always(
-          deferredSequencerClientHealth +:
-            deferredSequencerConnectionPoolHealthRef.get.apply()
-        ),
-      )
-
     val liveness = LivenessHealthService(
       logger,
       timeouts,
       fatalDependencies = Seq(deferredSequencerClientHealth),
     )
+    val readiness =
+      DependenciesHealthService(
+        "mediator",
+        logger,
+        timeouts,
+        criticalDependencies = Seq(
+          storage
+        ) ++ liveness.dependencies,
+        softDependencies = Eval.always(
+          deferredSequencerConnectionPoolHealthRef.get.apply()
+        ),
+      )
+
     (readiness, liveness)
   }
 

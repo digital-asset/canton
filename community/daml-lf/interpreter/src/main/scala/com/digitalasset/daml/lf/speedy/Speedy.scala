@@ -130,20 +130,6 @@ private[lf] object Speedy {
 
   sealed abstract class LedgerMode extends Product with Serializable
 
-  final case class CachedKey(
-      globalKeyWithMaintainers: GlobalKeyWithMaintainers,
-      key: SValue,
-  ) {
-    def globalKey: GlobalKey = globalKeyWithMaintainers.globalKey
-    def templateId: TypeConId = globalKey.templateId
-    def maintainers: Set[Party] = globalKeyWithMaintainers.maintainers
-    val lfValue: V = globalKey.key
-    def renormalizedGlobalKeyWithMaintainers: GlobalKeyWithMaintainers =
-      globalKeyWithMaintainers.copy(
-        globalKey = globalKey.copy(key = key.toNormalizedValue)
-      )
-  }
-
   final case class ContractMetadata(
       signatories: Set[Party],
       observers: Set[Party],
@@ -156,36 +142,31 @@ private[lf] object Speedy {
       version: SerializationVersion,
       packageName: Ref.PackageName,
       templateId: Ref.TypeConId,
-      value: SValue,
+      createArg: V,
+      hash: Hash,
       signatories: Set[Party],
       observers: Set[Party],
-      keyOpt: Option[CachedKey],
+      keyOpt: Option[GlobalKeyWithMaintainers],
   ) {
     val stakeholders: Set[Party] = signatories union observers
-
-    private[speedy] val any = SValue.SAnyContract(templateId, value)
-    private[speedy] def arg = value.toNormalizedValue
     private[speedy] def gkeyOpt: Option[GlobalKey] = keyOpt.map(_.globalKey)
     private[speedy] def toCreateNode(coid: V.ContractId) =
       Node.Create(
         coid = coid,
         packageName = packageName,
         templateId = templateId,
-        arg = arg,
+        arg = createArg,
         signatories = signatories,
         stakeholders = stakeholders,
-        keyOpt = keyOpt.map(_.globalKeyWithMaintainers),
+        keyOpt = keyOpt,
         version = version,
       )
 
     lazy val metadata: ContractMetadata = ContractMetadata(
       signatories,
       observers,
-      keyOpt.map(_.globalKeyWithMaintainers),
+      keyOpt,
     )
-
-    lazy val valueHash: Hash =
-      SValueHash.assertHashContractInstance(packageName, templateId.qualifiedName, value)
   }
 
   private[speedy] def throwLimitError(location: String, error: IError.Dev.Limit.Error): Nothing =
@@ -550,7 +531,7 @@ private[lf] object Speedy {
           .ContractSignatories(
             cid,
             contract.templateId,
-            contract.arg,
+            contract.createArg,
             contract.signatories,
             _,
           ),
@@ -563,7 +544,7 @@ private[lf] object Speedy {
           .ContractObservers(
             cid,
             contract.templateId,
-            contract.arg,
+            contract.createArg,
             contract.observers,
             _,
           ),

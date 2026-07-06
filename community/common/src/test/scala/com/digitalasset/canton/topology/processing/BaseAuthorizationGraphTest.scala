@@ -51,6 +51,7 @@ trait BaseAuthorizationGraphTest { self: BaseTest =>
   val nsk3k1_nonRoot_remove =
     mkRemove(mkNSD(namespace, key3, canSignNamespaceDelegations = false), key1)
   val nsk4k3 = mkAdd(mkNSD(namespace, key4, canSignNamespaceDelegations = true), key3)
+  val nsk5k3 = mkAdd(mkNSD(namespace, key5, canSignNamespaceDelegations = true), key3)
   val nsk5k3_nonRoot = mkAdd(mkNSD(namespace, key5, canSignNamespaceDelegations = false), key3)
 
   val decentralizedNamespace =

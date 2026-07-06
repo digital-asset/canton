@@ -56,6 +56,7 @@ import com.digitalasset.canton.{BaseTest, FutureHelpers, LfPackageId, LfPartyId}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import org.slf4j.LoggerFactory
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.*
@@ -1010,6 +1011,7 @@ class TestingOwnerWithKeys(
           .fromTrustedByteString(())(bytes)
           .leftMap(_.toString)
           .flatMap(_.select[Op, M].toRight("Parsed to different type"))
+          .leftMap(err => LoggerFactory.getLogger(getClass).error(s"Parse error $err"))
           .getOrElse(throw new IllegalArgumentException("Unable to parse topology tx"))
       }
     } else trans

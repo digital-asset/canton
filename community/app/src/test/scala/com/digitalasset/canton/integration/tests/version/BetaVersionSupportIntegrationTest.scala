@@ -23,9 +23,17 @@ trait BetaVersionSupportIntegrationTest
     with FlagCloseable
     with HasCloseContext {
 
+  /*
+   * participant1:
+   *  - beta on, alpha off: the normal/expected case. Beta support alone is enough to connect to a beta synchronizer.
+   * participant2:
+   *  - beta off, alpha off: a node with no non-stable support at all. Verifies the handshake rejects it.
+   * participant3:
+   *  - beta off, alpha on: verifies that alpha (dev) support is a superset of beta.
+   *    Even though beta is explicitly off, enabling alpha still lets it connect.
+   */
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Manual
-      .addConfigTransforms(ConfigTransforms.setBetaSupport(true)*)
       .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(false)*)
       .addConfigTransforms(
         setNonStandardConfig(true),
@@ -35,7 +43,7 @@ trait BetaVersionSupportIntegrationTest
         ConfigTransforms.updateParticipantConfig("participant3") { config =>
           config
             .focus(_.parameters.alphaVersionSupport)
-            .replace(true) // enable dev version support
+            .replace(true) // enable alpha version support
             .focus(_.parameters.betaVersionSupport)
             .replace(false)
 
@@ -71,7 +79,7 @@ trait BetaVersionSupportIntegrationTest
         participant1.health.ping(participant1.id)
     }
 
-    "not be able to connect to a synchronizer where betaVersionSupport is disabled" onlyRunWhen (_.isBeta) in {
+    "not be able to connect to a synchronizer when betaVersionSupport is disabled in the participant" onlyRunWhen (_.isBeta) in {
       env =>
         import env.*
         loggerFactory.assertThrowsAndLogs[CommandFailure](

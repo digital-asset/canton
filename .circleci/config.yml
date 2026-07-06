@@ -3357,6 +3357,19 @@ workflows:
                         only: /^v.*/
                 requires:
                     - compile
+            - test_data_continuity_dumps:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        ignore:
+                            - /^gh-readonly-queue\/main\/.*/
+                requires:
+                    - compile
         max_auto_reruns: 1
         when:
             and:

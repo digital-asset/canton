@@ -14,6 +14,9 @@ trait HealthService
     extends CloseableHealthElement
     with CompositeHealthElement[String, HealthQuasiComponent] {
   override type State = ServingStatus
+  def dependencies: Seq[HealthQuasiComponent]
+
+  override protected def prettyState: Pretty[ServingStatus] = Pretty[ServingStatus]
 }
 
 /** A [[DependenciesHealthService]] aggregates [[CloseableHealthComponent]]s under critical and soft
@@ -40,8 +43,6 @@ final class DependenciesHealthService(
 
   override protected def closingState: ServingStatus = ServingStatus.NOT_SERVING
 
-  override protected def prettyState: Pretty[ServingStatus] = Pretty[ServingStatus]
-
   override protected def combineDependentStates: ServingStatus =
     if (criticalDependencies.forall(!_.isFailed)) ServingStatus.SERVING
     else ServingStatus.NOT_SERVING
@@ -49,7 +50,8 @@ final class DependenciesHealthService(
   override protected def initialHealthState: ServingStatus =
     if (criticalDependencies.isEmpty) ServingStatus.SERVING else ServingStatus.NOT_SERVING
 
-  def dependencies: Seq[HealthQuasiComponent] = criticalDependencies ++ softDependencies.value
+  override def dependencies: Seq[HealthQuasiComponent] =
+    criticalDependencies ++ softDependencies.value
 }
 
 object DependenciesHealthService {

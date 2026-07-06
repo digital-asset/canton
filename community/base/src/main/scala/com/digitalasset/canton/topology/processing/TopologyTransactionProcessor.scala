@@ -84,7 +84,12 @@ class TopologyTransactionProcessor(
       store,
       cache,
       lookup =>
-        RequiredTopologyMappingChecks(Some(staticSynchronizerParameters), lookup, loggerFactory),
+        RequiredTopologyMappingChecks(
+          Some(staticSynchronizerParameters),
+          staticSynchronizerParameters.protocolVersion,
+          lookup,
+          loggerFactory,
+        ),
       pureCrypto,
       loggerFactory,
     )

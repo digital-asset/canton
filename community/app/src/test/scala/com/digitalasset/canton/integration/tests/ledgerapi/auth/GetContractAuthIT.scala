@@ -4,16 +4,15 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.ledger.api.v2.contract_service.{ContractServiceGrpc, GetContractRequest}
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.integration.TestConsoleEnvironment
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer
 import io.grpc.Status
 import org.scalatest.Assertion
 
 import scala.concurrent.{ExecutionContext, Future}
 
 final class GetContractAuthIT extends SuperReaderServiceCallAuthTests {
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def serviceCallName: String = "ContractService#GetContract"
 

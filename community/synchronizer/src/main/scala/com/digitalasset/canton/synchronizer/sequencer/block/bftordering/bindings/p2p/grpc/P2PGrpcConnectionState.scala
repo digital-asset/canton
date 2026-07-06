@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
@@ -82,9 +81,6 @@ final class P2PGrpcConnectionState(
 
   override def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean =
     stateRef.get().p2pEndpointIdToNetworkRef.get(p2pEndpointId).exists(_.isOutgoingConnection)
-
-  override def authenticatedCount: NonNegativeInt =
-    NonNegativeInt.tryCreate(stateRef.get().bftNodeIdToNetworkRef.size)
 
   override def getBftNodeId(p2pEndpointId: P2PEndpoint.Id): Option[BftNodeId] =
     stateRef.get().p2pEndpointIdToBftNodeId.get(p2pEndpointId)

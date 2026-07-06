@@ -114,7 +114,7 @@ object TrafficEnforcementBackend {
       ec: ExecutionContextIdlenessExecutorService
   ): TrafficEnforcementBackend = {
     val trafficServiceClient = trafficEnforcementServerConfig match {
-      case TrafficEnforcementServerConfig.Internal(inProcessTeaServerName) =>
+      case TrafficEnforcementServerConfig.Internal(inProcessTeaServerName, _projection) =>
         RichTrafficServiceClient.toInternalServer(
           grpcChannelName = inProcessTeaServerName,
           timeout = processingTimeout,

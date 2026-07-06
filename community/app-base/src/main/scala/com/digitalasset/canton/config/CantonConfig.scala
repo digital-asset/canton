@@ -951,9 +951,10 @@ object CantonConfig {
       deriveReader[SequencerApiClientConfig].applyDeprecations
     }
 
+    lazy implicit val httpHealthServerConfigReader: ConfigReader[HttpHealthServerConfig] =
+      deriveReader[HttpHealthServerConfig]
+
     lazy implicit final val nodeMonitoringConfigReader: ConfigReader[NodeMonitoringConfig] = {
-      implicit val httpHealthServerConfigReader: ConfigReader[HttpHealthServerConfig] =
-        deriveReader[HttpHealthServerConfig]
       implicit val grpcHealthServerConfigReader: ConfigReader[GrpcHealthServerConfig] =
         deriveReader[GrpcHealthServerConfig]
       deriveReader[NodeMonitoringConfig]
@@ -1489,6 +1490,10 @@ object CantonConfig {
       deriveReader[SequencerNodeConfig]
     }
 
+    lazy implicit val trafficEnforcementProjectionConfigReader
+        : ConfigReader[TrafficEnforcementServerConfig.ProjectionConfig] =
+      deriveReader[TrafficEnforcementServerConfig.ProjectionConfig]
+
     lazy implicit val trafficEnforcementConfigInternalReader
         : ConfigReader[TrafficEnforcementServerConfig.Internal] =
       deriveReader[TrafficEnforcementServerConfig.Internal]
@@ -1704,9 +1709,9 @@ object CantonConfig {
         deriveWriter[JsonClientConfig]
       deriveWriter[RemoteParticipantConfig]
     }
+    lazy implicit val httpHealthServerConfigWriter: ConfigWriter[HttpHealthServerConfig] =
+      deriveWriter[HttpHealthServerConfig]
     lazy implicit final val nodeMonitoringConfigWriter: ConfigWriter[NodeMonitoringConfig] = {
-      implicit val httpHealthServerConfigWriter: ConfigWriter[HttpHealthServerConfig] =
-        deriveWriter[HttpHealthServerConfig]
       implicit val grpcHealthServerConfigWriter: ConfigWriter[GrpcHealthServerConfig] =
         deriveWriter[GrpcHealthServerConfig]
       deriveWriter[NodeMonitoringConfig]
@@ -2206,6 +2211,10 @@ object CantonConfig {
       import DeclarativeSequencerConfig.Writers.*
       deriveWriter[SequencerNodeConfig]
     }
+
+    lazy implicit val trafficEnforcementProjectionConfigWriter
+        : ConfigWriter[TrafficEnforcementServerConfig.ProjectionConfig] =
+      deriveWriter[TrafficEnforcementServerConfig.ProjectionConfig]
 
     lazy implicit val trafficEnforcementConfigInternalWriter
         : ConfigWriter[TrafficEnforcementServerConfig.Internal] =

@@ -105,7 +105,7 @@ import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.tea.v1.GetAccountResponse
+import com.digitalasset.canton.tea.v1.{GetAccountResponse, UpdateAccountResponse}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
@@ -3756,10 +3756,17 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       @Help.Summary("Update details for the account-id", FeatureFlag.Testing)
       @Help.Description(
         """Update the account details (the balance) for the specified account-id.
-          |If unset, the balance will not be updated"""
+          |If unset, the balance will not be updated
+          |subsequent balance updates with the same deduplicationId will be ignored"""
       )
-      def update_account(accountId: String, balance: Option[Long]) = consoleEnvironment.run {
-        ledgerApiCommand(LedgerApiCommands.Traffic.UpdateAccount(accountId, balance))
+      def update_account(
+          accountId: String,
+          balance: Option[Long],
+          deduplicationId: String = UUID.randomUUID().toString,
+      ): UpdateAccountResponse = consoleEnvironment.run {
+        ledgerApiCommand(
+          LedgerApiCommands.Traffic.UpdateAccount(accountId, balance, deduplicationId)
+        )
       }
     }
   }

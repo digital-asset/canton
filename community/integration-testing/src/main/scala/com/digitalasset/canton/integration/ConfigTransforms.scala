@@ -170,13 +170,13 @@ object ConfigTransforms {
   def setNonStandardConfig(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.nonStandardConfig).replace(enable)
 
-  def setGlobalDevVersionSupport(enable: Boolean): ConfigTransform =
+  private def setGlobalDevVersionSupport(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.devVersionSupport).replace(enable)
 
-  def setGlobalAlphaVersionSupport(enable: Boolean): ConfigTransform =
+  private def setGlobalAlphaVersionSupport(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.alphaVersionSupport).replace(enable)
 
-  def setGlobalBetaVersionSupport(enable: Boolean): ConfigTransform =
+  private def setGlobalBetaVersionSupport(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.betaVersionSupport).replace(enable)
 
   def setExitOnFatalFailures(enable: Boolean): ConfigTransform =
@@ -191,6 +191,24 @@ object ConfigTransforms {
     ),
   )
 
+  def enableParticipantsDevVersionSupport(
+      participantNames: String*
+  ): Seq[ConfigTransform] = participantNames.map {
+    updateParticipantConfig(_)(_.focus(_.parameters.devVersionSupport).replace(true))
+  }
+
+  def enableSequencersDevVersionSupport(
+      sequencerNames: String*
+  ): Seq[ConfigTransform] = sequencerNames.map {
+    updateSequencerConfig(_)(_.focus(_.parameters.devVersionSupport).replace(true))
+  }
+
+  def enableMediatorsDevVersionSupport(
+      mediatorNames: String*
+  ): Seq[ConfigTransform] = mediatorNames.map {
+    updateMediatorConfig(_)(_.focus(_.parameters.devVersionSupport).replace(true))
+  }
+
   def setAlphaVersionSupport(enable: Boolean): Seq[ConfigTransform] = Seq(
     setNonStandardConfig(enable),
     setGlobalAlphaVersionSupport(enable),
@@ -199,6 +217,24 @@ object ConfigTransforms {
         .replace(enable)
     ),
   )
+
+  def enableParticipantsAlphaVersionSupport(
+      participantNames: String*
+  ): Seq[ConfigTransform] = participantNames.map {
+    updateParticipantConfig(_)(_.focus(_.parameters.alphaVersionSupport).replace(true))
+  }
+
+  def enableSequencersAlphaVersionSupport(
+      sequencerNames: String*
+  ): Seq[ConfigTransform] = sequencerNames.map {
+    updateSequencerConfig(_)(_.focus(_.parameters.alphaVersionSupport).replace(true))
+  }
+
+  def enableMediatorsAlphaVersionSupport(
+      mediatorNames: String*
+  ): Seq[ConfigTransform] = mediatorNames.map {
+    updateMediatorConfig(_)(_.focus(_.parameters.alphaVersionSupport).replace(true))
+  }
 
   def setBetaSupport(enable: Boolean): Seq[ConfigTransform] =
     Seq(
@@ -213,7 +249,9 @@ object ConfigTransforms {
     _.focus(_.parameters.startupMemoryCheckConfig).replace(StartupMemoryCheckConfig(level))
 
   lazy val enableDevVersionSupport: Seq[ConfigTransform] = setDevVersionSupport(true)
-  lazy val enableAlphaVersionSupport: Seq[ConfigTransform] = setAlphaVersionSupport(true)
+  lazy val enableAlphaVersionSupport: Seq[ConfigTransform] = setAlphaVersionSupport(
+    true
+  )
 
   /** Default transforms to apply to tests using a [[EnvironmentDefinition]]. Covers the primary
     * ways that distinct concurrent environments may unintentionally collide.

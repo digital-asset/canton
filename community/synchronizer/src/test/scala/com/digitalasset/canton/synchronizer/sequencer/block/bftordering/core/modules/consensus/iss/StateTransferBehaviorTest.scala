@@ -65,8 +65,6 @@ import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.util.Random
-
 class StateTransferBehaviorTest
     extends AsyncWordSpec
     with BftSequencerBaseTest
@@ -582,7 +580,6 @@ class StateTransferBehaviorTest
         clock,
         metrics,
         moduleRefFactory,
-        new Random(4),
         dependencies,
         loggerFactory,
         timeouts,

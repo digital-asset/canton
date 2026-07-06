@@ -26,7 +26,6 @@ import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
-// TODO(#33578) run the component tests with PG as well
 trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentTest {
 
   private val nextRecordTime = new SingleStepIncreasingRecordTime
@@ -813,17 +812,28 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
   }
 }
 
-final class AcsCommitmentStreamsComponentTestCachesDisabled
+final class AcsCommitmentStreamsComponentTestCachesDisabledH2
     extends AcsCommitmentStreamsComponentTest {
   override protected val indexServiceConfig: IndexServiceConfig =
     IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0)
 }
 
-final class AcsCommitmentStreamsComponentTestTinyBuffers extends AcsCommitmentStreamsComponentTest {
+final class AcsCommitmentStreamsComponentTestCachesDisabledPostgres
+    extends AcsCommitmentStreamsComponentTest
+    with IndexComponentTest.WithPostgres {
+  override protected val indexServiceConfig: IndexServiceConfig =
+    IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0)
+}
+
+final class AcsCommitmentStreamsComponentTestTinyBuffersPostgres
+    extends AcsCommitmentStreamsComponentTest
+    with IndexComponentTest.WithPostgres {
   override protected val indexServiceConfig: IndexServiceConfig =
     IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 3)
 }
 
-final class AcsCommitmentStreamsComponentTestDefault extends AcsCommitmentStreamsComponentTest {
+final class AcsCommitmentStreamsComponentTestDefaultPostgres
+    extends AcsCommitmentStreamsComponentTest
+    with IndexComponentTest.WithPostgres {
   override protected val indexServiceConfig: IndexServiceConfig = IndexServiceConfig()
 }

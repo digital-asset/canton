@@ -31,8 +31,6 @@ import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import scala.util.Random
-
 import EpochState.Epoch
 
 final class PreIssConsensusModule[E <: Env[E]](
@@ -42,7 +40,6 @@ final class PreIssConsensusModule[E <: Env[E]](
     clock: Clock,
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
-    random: Random,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -106,7 +103,6 @@ final class PreIssConsensusModule[E <: Env[E]](
               clock,
               loggerFactory,
             ),
-            random,
             dependencies,
             loggerFactory,
             timeouts,

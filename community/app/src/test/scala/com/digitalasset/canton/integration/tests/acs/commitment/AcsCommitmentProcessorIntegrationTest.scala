@@ -10,7 +10,6 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeProportion}
 import com.digitalasset.canton.config.{
   CommitmentSendDelay,
-  DbConfig,
   SessionSigningKeysConfig,
   SynchronizerTimeTrackerConfig,
 }
@@ -19,14 +18,15 @@ import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   CommitmentTestUtil,
   IntervalDuration,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -430,6 +430,13 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         )
         lastCommTick = tickAfter(simClock.uniqueTime())
         simClock.advanceTo(lastCommTick.forgetRefinement.immediateSuccessor)
+
+        // The time moves lazily on the CantonBFT, hence the need to wait
+        TestUtils.waitForTargetTimeOnSynchronizerNode(
+          targetTime = lastCommTick.forgetRefinement.immediateSuccessor,
+          logger = logger,
+        )(sequencer1)
+
         participants.all.foreach(p => p.testing.fetch_synchronizer_times())
 
         logger.info(s"We realign the ACSes by removing the Iou from participant1 as well")
@@ -562,6 +569,14 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         .plusMillis(1)
     )
     val end = simClock.now.toInstant
+
+    // The time moves lazily on the CantonBFT, hence the need to wait
+    TestUtils.waitForTargetTimeOnSynchronizerNode(
+      targetTime = environment.simClock.value.now,
+      logger = logger,
+    )(sequencer1)
+    participants.all.foreach(p => p.testing.fetch_synchronizer_times())
+
     eventually() {
       participant2.commitments.received(
         daName,
@@ -848,11 +863,11 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   }
 }
 
-class AcsCommitmentProcessorReferenceIntegrationTestPostgres
+class AcsCommitmentProcessorBftOrderingIntegrationTestPostgres
     extends AcsCommitmentProcessorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -43,7 +42,6 @@ What happens
 - p3 automatically upgrade (s2 removed from the list of successors)
 - p4 needs repair
  */
-@UnstableTest // TODO(#30893) Re-enable
 final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-faulty-synchronizer-nodes"

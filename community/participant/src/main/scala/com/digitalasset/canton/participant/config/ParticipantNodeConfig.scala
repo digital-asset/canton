@@ -151,9 +151,11 @@ final case class RemoteParticipantConfig(
     ledgerApi: FullClientConfig,
     ledgerJsonApi: Option[JsonClientConfig] = None,
     token: Option[String] = None,
+    httpHealth: Option[HttpHealthServerConfig] = None,
 ) extends BaseParticipantConfig {
   override def clientAdminApi: ClientConfig = adminApi
   override def clientLedgerApi: ClientConfig = ledgerApi
+  override def httpHealthClientConfig: Option[HttpHealthServerConfig] = httpHealth
 }
 
 /** Canton configuration case class to pass-through configuration options to the ledger api server
@@ -296,9 +298,13 @@ object TestingTimeServiceConfig {
   * @param minimumProtocolVersion
   *   The minimum protocol version that this participant will speak when connecting to a
   *   synchronizer
-  * @param alphaVersionSupport
+  * @param devVersionSupport
   *   If set to true, will allow the participant to connect to a synchronizer with dev protocol
-  *   version and will turn on unsafe Daml LF versions.
+  *   version, it will turn on Daml LF dev version, and applies the dev database schema, which does
+  *   not provide data continuity and must not be used in production.
+  * @param alphaVersionSupport
+  *   If set to true, will allow the participant to connect to a synchronizer with alpha protocol
+  *   version.
   * @param dontWarnOnDeprecatedPV
   *   If true, then this participant will not emit a warning when connecting to a sequencer using a
   *   deprecated protocol version (such as 2.0.0).

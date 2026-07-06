@@ -11,6 +11,7 @@ import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{ComponentHealthState, HealthStatus, ReportsHealth}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
@@ -38,6 +39,7 @@ import javax.sql.DataSource
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
+import scala.util.{Failure, Try}
 
 private[canton] trait DbDispatcher {
 
@@ -82,18 +84,22 @@ private[dao] final class DbDispatcherImpl private[dao] (
   )(implicit loggingContext: LoggingContextWithTrace): Future[T] =
     DbDispatcher.withEnrichedLoggingContextAndStartWaitNanos(databaseMetrics) {
       implicit loggingContext: LoggingContextWithTrace => startWait =>
-        Future {
-          connectionProvider.runSQL(
-            DbDispatcher.executeSql(
-              databaseMetrics = databaseMetrics,
-              overallWaitTimer = overallWaitTimer,
-              overallExecutionTimer = overallExecutionTimer,
-              logger = logger,
-              startWaitNanos = startWait,
-            )(sql)
-          )
-        }(executionContext)
-          .transform(identity, DbDispatcher.handleJdbcError(logger))(executionContext)
+        {
+          implicit val ec = executionContext
+          Future {
+            connectionProvider.runSQL(
+              DbDispatcher.executeSql(
+                databaseMetrics = databaseMetrics,
+                overallWaitTimer = overallWaitTimer,
+                overallExecutionTimer = overallExecutionTimer,
+                logger = logger,
+                startWaitNanos = startWait,
+              )(sql)
+            )
+          }
+            .flatMap(Future.fromTry)
+            .transform(identity, DbDispatcher.handleJdbcError(logger))
+        }
     }
 
   def executeSqlUS[T](databaseMetrics: DatabaseMetrics)(
@@ -135,6 +141,7 @@ private[dao] final class DbDispatcherOfStorage(
               startWaitNanos = startWait,
             )(sql),
           )
+          .flatMap(FutureUnlessShutdown.fromTry)
           .transform(identity, DbDispatcher.handleJdbcError(logger))
     }
 
@@ -232,7 +239,7 @@ object DbDispatcher {
       overallExecutionTimer: Timer,
       logger: TracedLogger,
       startWaitNanos: Long,
-  )(sql: Connection => T)(implicit traceContext: TraceContext): Connection => T = { conn =>
+  )(sql: Connection => T)(implicit traceContext: TraceContext): Connection => Try[T] = { conn =>
     val waitNanos = System.nanoTime() - startWaitNanos
     logger.trace(s"Waited ${(waitNanos / 1e6).toLong} ms to acquire connection.")
     databaseMetrics.waitTimer.update(waitNanos, TimeUnit.NANOSECONDS)
@@ -240,8 +247,8 @@ object DbDispatcher {
     val startExecNanos = System.nanoTime()
     conn.setAutoCommit(false)
 
-    def executeSqlInternal(): T =
-      try {
+    val executeSqlInternal: Try[T] = {
+      val executeTry = Try {
         val res = Timed.value(
           databaseMetrics.queryTimer,
           sql(conn),
@@ -251,31 +258,37 @@ object DbDispatcher {
           conn.commit(),
         )
         res
-      } catch {
-        case NonFatal(t) =>
-          // Log the error in the caller with access to more logging context (such as the sql statement description)
-          conn.rollback()
-          throw t
-      } finally {
-        conn.close()
+      }.recoverWith { case NonFatal(t) =>
+        // we don't care if rollback fails, we want to propagate the original exception
+        Try(conn.rollback()).recoverWith { case NonFatal(e) =>
+          logger.info("Got an exception while rolling back db transaction. Ignoring.", e)
+          Failure(e)
+        }.discard
+        // Log the error in the caller with access to more logging context (such as the sql statement description)
+        Failure(t)
       }
+      // finallyTry must be executed before flatMapping to ensure it is executed
+      val finallyTry = Try(conn.close())
+      for {
+        t <- executeTry
+        _ <- finallyTry
+      } yield t
+    }
 
-    def updateMetrics(): Unit =
-      try {
+    val updateMetrics: Try[Unit] =
+      Try {
         val execNanos = System.nanoTime() - startExecNanos
         logger.trace(s"Executed query in ${(execNanos / 1e6).toLong} ms")
         databaseMetrics.executionTimer.update(execNanos, TimeUnit.NANOSECONDS)
         overallExecutionTimer.update(execNanos, TimeUnit.NANOSECONDS)
-      } catch {
-        case NonFatal(e) =>
-          logger.info("Got an exception while updating timer metrics. Ignoring.", e)
+      }.recover { case NonFatal(e) =>
+        logger.info("Got an exception while updating timer metrics. Ignoring.", e)
       }
 
-    try {
-      executeSqlInternal()
-    } finally {
-      updateMetrics()
-    }
+    for {
+      t <- executeSqlInternal
+      _ <- updateMetrics
+    } yield t
   }
 
   private[dao] def withEnrichedLoggingContextAndStartWaitNanos[T](

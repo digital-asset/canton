@@ -265,8 +265,7 @@ object ProtocolVersion {
     s"stable protocol versions $stable should be in sync with build info $releaseStable",
   )
 
-  val alpha: NonEmpty[List[AlphaProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v36)
+  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v36)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -280,7 +279,7 @@ object ProtocolVersion {
   require(
     allProtocolVersions.sizeCompare(allProtocolVersions.distinct) == 0,
     s"All the protocol versions should be distinct." +
-      s"Found: ${Map("deprecated" -> deprecated, "deleted" -> deleted.forgetNE, "beta" -> beta, "alpha" -> alpha.forgetNE, "dev" -> List(dev), "stable" -> stable.forgetNE)}",
+      s"Found: ${Map("deprecated" -> deprecated, "deleted" -> deleted.forgetNE, "beta" -> beta, "alpha" -> alpha, "dev" -> List(dev), "stable" -> stable.forgetNE)}",
   )
 
   /** The latest stable protocol version.

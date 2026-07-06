@@ -227,10 +227,9 @@ private[refinement] final class EnricherImpl(
   private[this] def unsafeEnrichContractKey(
       key: GlobalKeyWithMaintainers
   ): GlobalKeyWithMaintainers =
-    key.copy(globalKey =
-      key.globalKey.copy(
-        key = unsafeEnrichContractKey(key.globalKey.templateId, key.globalKey.key)
-      )
+    GlobalKeyWithMaintainers.assertWithRenormalizedValue(
+      key,
+      unsafeEnrichContractKey(key.globalKey.templateId, key.globalKey.key),
     )
 
   private[lf] def unsafeEnrichContractKey(

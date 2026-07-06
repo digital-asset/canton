@@ -3,12 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.aws
 
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.EncryptedCryptoPrivateStoreIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.aws.AwsEncryptedCryptoPrivateStoreTestBase
 
@@ -39,7 +34,7 @@ class AwsEncryptedCryptoPrivateStoreNoPreDefinedKeyMultiRegionReferenceIntegrati
   setupPlugins(
     protectedNodes,
     storagePlugin = Some(new UsePostgres(loggerFactory)),
-    sequencerPlugin = new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory),
+    sequencerPlugin = new UseBftSequencer(loggerFactory),
     withPreGenKey = false,
     multiRegion = true,
   )

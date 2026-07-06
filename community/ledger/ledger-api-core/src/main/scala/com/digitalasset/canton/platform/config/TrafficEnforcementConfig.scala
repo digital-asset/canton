@@ -3,6 +3,12 @@
 
 package com.digitalasset.canton.platform.config
 
+import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.resource.DbStorage.Profile
+import com.digitalasset.canton.resource.{DbStorageSingle, Storage}
+import com.typesafe.config.{Config, ConfigFactory}
+
 /** Base configuration for the user traffic enforcement in the participant node. Currently, only the
   * internal, in-process server variant is supported, allowing for later an external TEA server to
   * be configured as well.
@@ -32,6 +38,36 @@ object TrafficEnforcementServerConfig {
     *   server
     */
   final case class Internal(
-      inProcessTeaServerName: String = "TeaGrpcInProcServer"
-  ) extends TrafficEnforcementServerConfig
+      inProcessTeaServerName: String = "TeaGrpcInProcServer",
+      projection: ProjectionConfig = ProjectionConfig(),
+  ) extends TrafficEnforcementServerConfig {
+    def pekkoConfig(storage: Storage): Config = storage match {
+      case storage: DbStorageSingle =>
+        storage.profile match {
+          case _: Profile.H2 =>
+            // H2 creates upper case tables but pekko expects lower case by default
+            // this configures pekko to look for upper case ones
+            ConfigFactory.parseString(
+              """pekko.projection.slick.offset-store {
+                |  use-lowercase-schema = false
+                |  table = "PEKKO_PROJECTION_OFFSET_STORE"
+                |  management-table = "PEKKO_PROJECTION_MANAGEMENT"
+                |}""".stripMargin
+            )
+          case _ => ConfigFactory.empty()
+        }
+      case _ => ConfigFactory.empty()
+    }
+  }
+
+  /** Config of the pekko projection in the internal traffic enforcement component
+    * @param maxRetries
+    *   max number of retries on projection failure
+    * @param retryDelay
+    *   delay between restarts of the projection when failing
+    */
+  final case class ProjectionConfig(
+      maxRetries: PositiveInt = PositiveInt.MaxValue,
+      retryDelay: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
+  )
 }

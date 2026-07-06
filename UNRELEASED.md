@@ -80,6 +80,10 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
   - *BREAKING*: The metric `daml.participant.api.services.pruning.contract_pruning_retried`, which tracks how many times contract pruning was retried, is now a histogram.
   - *BREAKING*: Removed the unused metrics `daml.participant.api.lapi.streams.transaction_trees_sent` and `daml.participant.api.index.transaction_trees_buffer_size`.
 - The `ledger-api-server-parameters.contract-id-seeding` configuration parameter is deprecated and no longer used. The contract ID seeding now uses the same random source as the rest of Canton, which is the equivalent of the `strong` type.
+- Health check service improvements:
+  - `liveness` gRPC health check is now up and reporting as `SERVING` before the database migrations are performed (when used with `migrate-and-start = true`), to address the issue of k8s liveness probe failures during long-running migrations.
+  - Mediators will report `readiness` `NOT_SERVING` when `liveness` is also `NOT_SERVING`, where previously it was possible for a mediator to report `readiness` `SERVING` while `liveness` was `NOT_SERVING`.
+  - HTTP health checks now expose the `liveness` and `readiness`, under the URIs `/health/liveness` or `health/live` and `/health/readiness` or `/health/ready` endpoints, respectively. `/health` is still available for backward compatibility, mapping to `readiness`.
 - Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
 
 ### Preview Features

@@ -71,8 +71,8 @@ sealed trait ViewConsistencyTest
               table_schema in ('public', 'debug') and
               -- no views for flyway or blocks tables
               table_name not in ('flyway_schema_history', 'blocks') and
-              -- DEV version adds a column, but it doesn't have any significance, so let's ignore it
-              not (table_name = 'common_node_id' and column_name = 'test_column') and
+              -- DEV version adds a table, but it doesn't have any significance, so let's ignore it
+              not (table_name = 'dev_migration_test') and
               -- exclude partition tables
               table_name !~ '_p[0-9]+$$'
             group by table_name, column_name

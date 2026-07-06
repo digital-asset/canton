@@ -11,11 +11,7 @@ import com.daml.ports.Port
 import com.digitalasset.canton.TestPredicateFiltersFixtureAnyWordSpec
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.CantonConfig
-import com.digitalasset.canton.integration.ConfigTransforms.{
-  enableAlphaVersionSupport,
-  enableDevVersionSupport,
-  setBetaSupport,
-}
+import com.digitalasset.canton.integration.ConfigTransforms.setBetaSupport
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixtureIsolated
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentSetupPlugin}
@@ -194,9 +190,7 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
           _.focus(_.ledgerApi.authServices).replace(Seq(Wildcard))
         )
       val transforms =
-        Seq(noAuth) ++ (if (supportDevLanguageVersions)
-                          enableAlphaVersionSupport ++ enableDevVersionSupport
-                        else Nil) ++ setBetaSupport(testedProtocolVersion.isBeta)
+        Seq(noAuth) ++ setBetaSupport(testedProtocolVersion.isBeta)
       transforms.foldLeft(config)((cfg, transform) => transform(cfg))
     }
   }

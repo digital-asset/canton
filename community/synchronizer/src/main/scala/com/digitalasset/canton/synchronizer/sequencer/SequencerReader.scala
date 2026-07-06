@@ -680,7 +680,6 @@ class SequencerReader(
           .injectKillSwitch(identity)
           .via(fetchPayloadsForEventsBatch())
 
-      // TODO(#23857): With validated events here we will persist their validation status for re-use by other subscriptions.
       eventsSource
         .viaMat(KillSwitches.single) { case (killSwitch, _) =>
           (killSwitch, FutureUnlessShutdown.pure(Done))

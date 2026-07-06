@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkManager,
   P2PNetworkRef,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.BftNodeShuffler
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.{
   BftOrderingMessage,
   BftOrderingMessageBody,
@@ -53,7 +54,7 @@ import com.google.protobuf.timestamp.Timestamp
 import java.time.Instant
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Random, Success}
 
 final class P2PNetworkOutModule[
     E <: Env[E],
@@ -62,6 +63,7 @@ final class P2PNetworkOutModule[
     thisBftNodeId: BftNodeId,
     isGenesis: Boolean,
     state: P2PNetworkOutModule.State,
+    random: Random,
     @VisibleForTesting private[bftordering] val p2pEndpointsStore: P2PEndpointsStore[E],
     metrics: BftOrderingMetrics,
     override val dependencies: P2PNetworkOutModuleDependencies[E, P2PNetworkManagerT],
@@ -73,6 +75,8 @@ final class P2PNetworkOutModule[
     with P2PConnectionEventListener {
 
   private val connectedP2PEndpointIds = mutable.Set.empty[P2PEndpoint.Id]
+
+  private val nodeShuffler = new BftNodeShuffler(random)
 
   val p2pNetworkManager: P2PNetworkManagerT =
     dependencies.createP2PNetworkManager(this, dependencies.p2pNetworkIn)
@@ -115,7 +119,7 @@ final class P2PNetworkOutModule[
 
       case P2PNetworkOut.Internal.Connect(p2pEndpoint) =>
         logger.info("Connecting to operator-added endpoint " + p2pEndpoint.id)
-        ensureConnectivity(P2PAddress.Endpoint(p2pEndpoint))
+        ensureSendingEnabledTo(P2PAddress.Endpoint(p2pEndpoint))
 
       case P2PNetworkOut.Internal.Disconnect(p2pEndpointId) =>
         logger.info("Disconnecting from operator-removed endpoint " + p2pEndpointId)
@@ -144,11 +148,11 @@ final class P2PNetworkOutModule[
             "and ensuring connectivity to it"
         )
         maybeP2PEndpointId.foreach(connectedP2PEndpointIds.add(_).discard)
-        ensureConnectivity(P2PAddress.NodeId(bftNodeId, maybeP2PEndpoint))
+        ensureSendingEnabledTo(P2PAddress.NodeId(bftNodeId, maybeP2PEndpoint))
         emitConnectionStateMetricsAndLogEndpointsStatus(notifyMempool = true)
         maxNodesContemporarilyAuthenticated = Math.max(
           maxNodesContemporarilyAuthenticated,
-          authenticatedCountIncludingSelf,
+          getAuthenticatedCountIncludingSelf(),
         )
         startModulesIfNeeded()
 
@@ -159,6 +163,25 @@ final class P2PNetworkOutModule[
       case P2PNetworkOut.Multicast(message, recipientBftNodeIds) =>
         recipientBftNodeIds.toSeq.sorted // For determinism
           .foreach(sendIfKnown(_, message))
+
+      case P2PNetworkOut.SendToRandomAuthenticated(message, possibleRecipients) =>
+        val authenticatedNodeIds = getAuthenticatedNodeIds(getStatus())
+        nodeShuffler
+          .shuffle(authenticatedNodeIds.intersect(possibleRecipients))
+          .headOption
+          .fold(
+            logger.info(
+              s"No authenticated nodes available among $possibleRecipients " +
+                s"to send random unicast message `${message.getClass.getSimpleName}` to (yet?)"
+            )
+          ) { recipientNodeId =>
+            logger.debug(
+              s"Sending message `${message.getClass.getSimpleName}` " +
+                s"to random authenticated node $recipientNodeId among $possibleRecipients " +
+                s"(all authenticated nodes: $authenticatedNodeIds)"
+            )
+            sendIfKnown(recipientNodeId, message)
+          }
 
       case admin: P2PNetworkOut.Admin =>
         processAdminMessage(admin)
@@ -423,12 +446,12 @@ final class P2PNetworkOutModule[
     if (!initialNodesConnecting) {
       logger.info(s"Connecting to initial P2P endpoints: $otherInitialP2PEndpoints")
       otherInitialP2PEndpoints.foreach(initialP2PEndpoint =>
-        ensureConnectivity(P2PAddress.Endpoint(initialP2PEndpoint)).discard
+        ensureSendingEnabledTo(P2PAddress.Endpoint(initialP2PEndpoint)).discard
       )
       initialNodesConnecting = true
     }
 
-  private def ensureConnectivity(
+  private def ensureSendingEnabledTo(
       p2pAddress: P2PAddress
   )(implicit
       context: E#ActorContextT[P2PNetworkOut.Message],
@@ -444,9 +467,6 @@ final class P2PNetworkOutModule[
         p2pNetworkManager.createNetworkRef(context, p2pAddress)
       }
     }
-
-  private def authenticatedCountIncludingSelf =
-    p2pConnectionState.authenticatedCount.value + 1
 
   private def disconnect(
       p2pEndpointId: P2PEndpoint.Id
@@ -465,7 +485,15 @@ final class P2PNetworkOutModule[
       traceContext: TraceContext,
   ): Unit = {
     val status = getStatus()
-    val connectedCount = status.endpointStatuses.count {
+    val authenticatedCount = getAuthenticatedNodeIds(status).size
+    val connectedCount = getConnectedPeersCount(status)
+    emitConnectedCount(metrics, connectedCount)
+    emitAuthenticatedCount(metrics, authenticatedCount)
+    logEmitForwardP2PStatus(status, notifyMempool)
+  }
+
+  private def getConnectedPeersCount(status: SequencerBftAdminData.PeerNetworkStatus) =
+    status.endpointStatuses.count {
       case PeerConnectionStatus.PeerEndpointStatus(
             _,
             _,
@@ -478,15 +506,37 @@ final class P2PNetworkOutModule[
       case PeerConnectionStatus.PeerIncomingConnection(_) => true
       case _ => false
     }
-    emitConnectedCount(metrics, connectedCount)
-    emitAuthenticatedCount(metrics, p2pConnectionState.authenticatedCount.value)
-    logEmitForwardP2PStatus(status, notifyMempool)
-  }
+
+  private def getAuthenticatedNodeIds(
+      status: SequencerBftAdminData.PeerNetworkStatus
+  ): Seq[BftNodeId] =
+    status.endpointStatuses
+      .collect {
+        case PeerConnectionStatus.PeerEndpointStatus(
+              _,
+              _,
+              PeerEndpointHealth(
+                PeerEndpointHealthStatus.Authenticated(sequencerNodeId),
+                _,
+              ),
+            ) =>
+          SequencerNodeId.toBftNodeId(sequencerNodeId)
+        case PeerConnectionStatus.PeerIncomingConnection(sequencerNodeId) =>
+          SequencerNodeId.toBftNodeId(sequencerNodeId)
+      }
+      .distinct
+      .sorted // For output determinism and easier testing
+
+  private def getAuthenticatedCountIncludingSelf()(implicit
+      context: E#ActorContextT[P2PNetworkOut.Message],
+      traceContext: TraceContext,
+  ): Int =
+    getAuthenticatedNodeIds(getStatus()).size + 1
 
   private def logEmitForwardP2PStatus(
       status: SequencerBftAdminData.PeerNetworkStatus,
       notifyMempool: Boolean,
-  )(implicit traceContext: TraceContext): Unit = {
+  )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit = {
     if (notifyMempool)
       sendConnectivityUpdateToMempool()
     metrics.p2p.update(status)
@@ -494,10 +544,11 @@ final class P2PNetworkOutModule[
   }
 
   private def sendConnectivityUpdateToMempool()(implicit
-      traceContext: TraceContext
+      context: E#ActorContextT[P2PNetworkOut.Message],
+      traceContext: TraceContext,
   ): Unit =
     dependencies.mempool.asyncSend(
-      Mempool.P2PConnectivityUpdate(membership, authenticatedCountIncludingSelf)
+      Mempool.P2PConnectivityUpdate(membership, getAuthenticatedCountIncludingSelf())
     )
 }
 

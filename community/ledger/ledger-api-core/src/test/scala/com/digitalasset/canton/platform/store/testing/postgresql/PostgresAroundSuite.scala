@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.testing.postgresql
 
+import com.digitalasset.canton.config.DbConfig
 import org.scalatest.Suite
 
 trait PostgresAroundSuite extends PostgresAround {
@@ -12,6 +13,8 @@ trait PostgresAroundSuite extends PostgresAround {
   private var database: Option[PostgresDatabase] = None
 
   protected def jdbcUrl: String = postgresDatabase.url
+
+  protected def dbConfig: DbConfig = postgresDatabase.toDbConfig()
 
   @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   protected def postgresDatabase: PostgresDatabase = database.get

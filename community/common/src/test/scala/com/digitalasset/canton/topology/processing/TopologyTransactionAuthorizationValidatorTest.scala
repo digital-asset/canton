@@ -647,7 +647,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           res <- validate(
             validator,
             ts(0),
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2),
+            List(ns1k1_k1, ns1k2_k1, ns1k3_k2_restrict_nsd),
             Map.empty,
             expectFullAuthorization = true,
           )
@@ -730,7 +730,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           res <- validate(
             validator,
             ts(0),
-            List(ns1k1_k1, ns6k3_k6, ns1k3_k2, ns1k2_k1, ns1k3_k2),
+            List(ns1k1_k1, ns6k3_k6, ns1k3_k2_restrict_nsd, ns1k2_k1, ns1k3_k2_restrict_nsd),
             Map.empty,
             expectFullAuthorization = true,
           )
@@ -768,7 +768,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           res <- validate(
             validator,
             ts(1),
-            List(ns1k2_k1, ns1k3_k2),
+            List(ns1k2_k1, ns1k3_k2_restrict_nsd),
             Map.empty,
             expectFullAuthorization = true,
           )
@@ -784,22 +784,47 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           res <- validate(
             validator,
             ts(1),
-            List(ns1k1_k1, ns1k3_k2, ns1k2_k1, ns6k3_k6),
+            List(ns1k1_k1, ns1k3_k2_restrict_nsd, ns1k2_k1, ns6k3_k6),
             Map.empty,
             expectFullAuthorization = true,
           )
 
-        } yield {
-          check(
-            res,
-            Seq(
-              None,
-              Some(_ == NoDelegationFoundForKeys(Set(SigningKeys.key2.fingerprint))),
-              None,
-              Some(_ == NoDelegationFoundForKeys(Set(SigningKeys.key6.fingerprint))),
+        } yield check(
+          res,
+          Seq(
+            None,
+            Some(_ == NoDelegationFoundForKeys(Set(SigningKeys.key2.fingerprint))),
+            None,
+            Some(_ == NoDelegationFoundForKeys(Set(SigningKeys.key6.fingerprint))),
+          ),
+        )
+      }
+
+      // TODO(#33765) - once we have the protocol version where we can fix AuthorizationGraph (canSignMapping method) we can use this test
+      "fail if an intermediate key attempts to self-sign a restriction mapping on a root namespace" ignore {
+        val validator = mk()
+        import Factory.*
+
+        for {
+          res <- validate(
+            validator,
+            ts(1),
+            List(
+              ns1k1_k1, // Initialize root k1
+              ns1k2_k1, // Namespace Delegation (NSD) down to k2
+              ns1k2_k2_restrict_nsd, // k2's self-restriction mapping that shouldn't be allowed
             ),
+            Map.empty,
+            expectFullAuthorization = true,
           )
-        }
+        } yield check(
+          res,
+          List(
+            None,
+            None,
+            Some(_ == NoDelegationFoundForKeys(Set(SigningKeys.key2.fingerprint))),
+          ),
+        )
       }
 
     }

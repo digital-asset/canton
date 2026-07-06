@@ -250,13 +250,21 @@ final class UseBftSequencer(
                 },
             )
           }
-          val blockSequencerConfig =
+          val blockSequencerConfig = {
+            // without this config overrides (which are applied before plugins) are not preserved
+            val existingBlockSequencerConfig =
+              config.sequencers.get(selfInstanceName).map(_.sequencer) match {
+                case Some(bft: SequencerConfig.BftSequencer) => bft.block
+                case Some(external: SequencerConfig.External) => external.block
+                case _ => BlockSequencerConfig()
+              }
             if (shouldBenchmarkBftSequencer)
-              BlockSequencerConfig(
+              existingBlockSequencerConfig.copy(
                 circuitBreaker = BlockSequencerConfig.CircuitBreakerConfig(enabled = false),
                 streamInstrumentation = BlockSequencerStreamInstrumentationConfig(isEnabled = true),
               )
-            else BlockSequencerConfig()
+            else existingBlockSequencerConfig
+          }
           selfInstanceName -> SequencerConfig.BftSequencer(
             block = blockSequencerConfig,
             config = BftBlockOrdererConfig(

@@ -46,7 +46,7 @@ final class LivenessHealthService(
 
   override protected def initialHealthState: ServingStatus = ServingStatus.SERVING
 
-  def dependencies: Seq[HealthQuasiComponent] = fatalDependencies
+  override def dependencies: Seq[HealthQuasiComponent] = fatalDependencies
 }
 
 object LivenessHealthService {

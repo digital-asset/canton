@@ -25,13 +25,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.BftNodeShuffler
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Instant
-import scala.util.{Failure, Random, Success}
+import scala.util.{Failure, Success}
 
 /** Manages a single state transfer instance in a client role and multiple state transfer instances
   * in a server role.
@@ -44,7 +43,6 @@ class StateTransferManager[E <: Env[E]](
     thisNode: BftNodeId,
     dependencies: ConsensusModuleDependencies[E],
     epochStore: EpochStore[E],
-    random: Random,
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(
@@ -79,8 +77,6 @@ class StateTransferManager[E <: Env[E]](
       timeoutMetric = None,
     )
   )
-
-  private val nodeShuffler = new BftNodeShuffler(random)
 
   def inStateTransfer: Boolean = stateTransferStartEpoch.isDefined
 
@@ -247,27 +243,18 @@ class StateTransferManager[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit =
     if (inStateTransfer) {
-      // Ask a single node for an entire epoch of blocks to compromise between noise for different nodes
-      //  and load balancing. Note that we're shuffling (instead of round-robin), so the same node might be chosen
-      //  multiple times in a row, resulting in uneven load balancing for certain periods. On the other hand, shuffling
-      //  is more straightforward code-wise. A potentially irrelevant implication is that the order in which nodes
-      //  are chosen is less predictable (e.g., by malicious nodes), and, at the same time, harder to reason about.
-      // TODO(#24940) consider not rotating when everything runs smoothly
-      val servingNode =
-        nodeShuffler
-          .shuffle(membership.otherNodes.toSeq)
-          .headOption
-          .getOrElse(
-            abort(
-              "Internal inconsistency: there should be at least one serving node to send a block transfer request to"
-            )
-          )
-      logger.info(
-        s"Sending block transfer request for epoch ${request.message.epoch} to $servingNode"
+      val possibleRecipients = membership.otherNodes.toSeq
+      if (possibleRecipients.isEmpty)
+        abort(
+          "Internal inconsistency: there should be at least one serving node to send a block transfer request to"
+        )
+      logger.debug(
+        s"Sending a block transfer request for epoch ${request.message.epoch} to a random " +
+          s"authenticated peer among $possibleRecipients (retry interval = ${config.epochStateTransferRetryTimeout})"
       )
       timeoutManager
         .scheduleTimeout(StateTransferMessage.RetryBlockTransferRequest(request))
-      messageSender.sendBlockTransferRequest(request, servingNode)
+      messageSender.sendBlockTransferRequest(request, possibleRecipients)
     } else {
       logger.info("Not sending a block transfer request when not in state transfer (likely a race)")
     }

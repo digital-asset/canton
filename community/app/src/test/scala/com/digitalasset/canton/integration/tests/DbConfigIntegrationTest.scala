@@ -73,15 +73,17 @@ trait DbConfigIntegrationTest extends CommunityIntegrationTest with SharedEnviro
 
     import newEnv.*
 
+    val expectedLogLines = expectedWarns ++ Seq(
+      "Startup of node participant1 failed"
+    )
     loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
       participant1.start(),
-      logs =>
-        forEvery(logs)(log =>
-          assert(
-            expectedWarns.exists(log.toString.contains(_)),
-            s"line $log contained unexpected problem",
-          )
-        ),
+      forEvery(_)(log =>
+        assert(
+          expectedLogLines.exists(log.toString.contains(_)),
+          s"line $log contained unexpected problem",
+        )
+      ),
     )
 
     newEnv.close()

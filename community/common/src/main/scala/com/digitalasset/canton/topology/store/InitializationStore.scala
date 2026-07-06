@@ -13,7 +13,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Stor
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.TransactionIsolation.Serializable
 
 import java.util.concurrent.atomic.AtomicReference
@@ -30,11 +29,6 @@ trait InitializationStore extends AutoCloseable {
   def uid(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[UniqueIdentifier]]
 
   def setUid(id: UniqueIdentifier)(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
-
-  /** Function used for testing dev version flag. */
-  @VisibleForTesting
-  def throwIfNotDev(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
-
 }
 
 object InitializationStore {
@@ -68,12 +62,6 @@ class InMemoryInitializationStore(override protected val loggerFactory: NamedLog
       )
 
   override def close(): Unit = ()
-
-  override def throwIfNotDev(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
-    FutureUnlessShutdown.failed(
-      new NotImplementedError("isDev does not make sense on the in-memory store")
-    )
-
 }
 
 class DbInitializationStore(
@@ -123,10 +111,4 @@ class DbInitializationStore(
       }.transactionally.withTransactionIsolation(Serializable),
       functionFullName,
     )
-
-  override def throwIfNotDev(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
-    storage
-      .query(sql"SELECT test_column FROM common_node_id".as[Int], functionFullName)
-      .map(_ => true)
-
 }

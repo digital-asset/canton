@@ -78,7 +78,6 @@ trait DatabaseSequencerIntegration extends SequencerIntegration with Spanning {
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Unit] =
-    // TODO(#18394): Batch acknowledgements?
     synchronizeWithClosing(functionFullName)(acknowledgements.toSeq.parTraverse_ {
       case (member, timestamp) =>
         this.writeAcknowledgementInternal(member, timestamp)
