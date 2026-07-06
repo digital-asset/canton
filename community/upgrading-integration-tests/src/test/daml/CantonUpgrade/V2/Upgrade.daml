@@ -23,6 +23,25 @@ template Upgrading with
       controller fetcher
       do pure this
 
+-- Upgrade-compatible V2 of `UpgradingCK`: adds an optional field and keeps the contract key
+-- identical to V1 (same type and maintainer), so a package-name-scoped ExerciseByKey resolves
+-- across versions.
+template UpgradingCK with
+    issuer : Party
+    owner : Party
+    field : Int
+    more : Optional Text
+  where
+    signatory issuer
+    observer owner
+    key (issuer, field) : (Party, Int)
+    maintainer key._1
+
+    choice ChangeOwnerCK : ContractId UpgradingCK
+        with newOwner : Party
+      controller owner
+        do create this with owner = newOwner, field = field + 1
+
 --
 -- Interface Testing
 --

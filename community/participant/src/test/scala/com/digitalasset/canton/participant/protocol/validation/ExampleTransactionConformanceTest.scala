@@ -267,7 +267,6 @@ class ExampleTransactionConformanceTest
           commonData,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
           reInterpretedTopLevelViews,
-          testedProtocolVersion,
         )
         .failOnShutdown
     }
@@ -281,6 +280,7 @@ class ExampleTransactionConformanceTest
         packageResolver,
         mock[ContractLookup],
         PositiveInt.tryCreate(100),
+        testedProtocolVersion,
         validateLegacyContractsV11 = true,
         pureCrypto,
         loggerFactory,

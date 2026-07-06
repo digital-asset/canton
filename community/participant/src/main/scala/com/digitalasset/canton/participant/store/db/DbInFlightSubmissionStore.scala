@@ -364,6 +364,8 @@ object DbInFlightSubmissionStore {
     import storage.api.*
     import storage.converters.*
 
+    private implicit val dbProfile: DbStorage.Profile = storage.profile
+
     override def kind: String = "in-flight submission"
 
     private implicit val setParameterTraceContext: SetParameter[SerializableTraceContext] =

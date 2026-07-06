@@ -111,6 +111,7 @@ class TransactionProcessor(
           packageResolver,
           ephemeral.contractStore,
           participantNodeParameters,
+          staticSynchronizerParameters.protocolVersion,
           crypto.pureCrypto,
           loggerFactory,
         ),

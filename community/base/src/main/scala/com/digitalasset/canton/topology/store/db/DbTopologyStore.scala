@@ -50,9 +50,10 @@ import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 import slick.jdbc.canton.SQLActionBuilder
-import slick.jdbc.{GetResult, SetParameter, TransactionIsolation}
+import slick.jdbc.{GetResult, TransactionIsolation}
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
 
@@ -100,10 +101,6 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     }
     import DbStorage.Implicits.BuilderChain.*
 
-    // No idea why but without this the compiler remained unhappy
-    implicit val setParameterArrayString: SetParameter[Array[String]] =
-      com.digitalasset.canton.resource.DbStorage.Implicits.setParameterArrayString
-
     val codesA = codes.toArray
     val nssA = nss.toArray
     val idsA = ids.toArray
@@ -143,27 +140,26 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   override def findLatestTransactionsAndProposalsByTxHash(hashes: Set[TxHash])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    if (hashes.isEmpty) FutureUnlessShutdown.pure(Seq.empty)
-    else {
-      logger.debug(s"Querying transactions for tx hashes ${LoggerUtil.limitForLogging(hashes)}")
-      MonadUtil.batchedSequentialTraverse(
-        parallelism = batchingConfig.parallelism,
-        chunkSize = batchingConfig.maxItemsInBatch,
-      )(hashes.toSeq) { batch =>
-        toStoredTopologyTransactions(
-          storage.query(
-            buildQueryForTransactions(
-              sql" AND (" ++ batch
-                .map(txHash => sql"tx_hash = ${txHash.hash}")
-                .toList
-                .intercalate(
-                  sql" OR "
-                ) ++ sql")" // TODO(#33913) - replace with toInClause after enhancing the machinery
-            ),
-            operationName = "transactionsByTxHash",
-          )
-        ).map(_.collectLatestByTxHash.result.map(_.transaction))
-      }
+    NonEmpty.from(hashes: immutable.Iterable[TxHash]) match {
+      case None =>
+        FutureUnlessShutdown.pure(Seq.empty)
+
+      case Some(neHashes) =>
+        logger.debug(s"Querying transactions for tx hashes ${LoggerUtil.limitForLogging(neHashes)}")
+
+        MonadUtil.batchedSequentialTraverseNE(
+          parallelism = batchingConfig.parallelism,
+          chunkSize = batchingConfig.maxItemsInBatch,
+        )(neHashes) { batch =>
+          toStoredTopologyTransactions(
+            storage.query(
+              buildQueryForTransactions(
+                sql" AND " ++ DbStorage.toInClause("tx_hash", batch.map(_.hash))
+              ),
+              operationName = "transactionsByTxHash",
+            )
+          ).map(_.collectLatestByTxHash.result.map(_.transaction))
+        }
     }
 
   override def findTransactionsForMapping(
@@ -175,22 +171,19 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     logger.debug(
       s"Querying transactions for mapping hashes ${LoggerUtil.limitForLogging(hashes)} as of $asOfExclusive"
     )
-    MonadUtil.batchedSequentialTraverse(
+
+    MonadUtil.batchedSequentialTraverseNE(
       parallelism = batchingConfig.parallelism,
       chunkSize = batchingConfig.maxItemsInBatch,
-    )(hashes.toSeq) { batch =>
+    )(hashes: NonEmpty[immutable.Iterable[MappingHash]]) { batch =>
       toSignedTopologyTransactions(
         storage.query(
           buildQueryForTransactions(
             asOfQuery(
               asOfExclusive.value,
               asOfInclusive = false,
-            ) ++ sql" AND is_proposal = false AND (" ++ batch
-              .map(mappingHash => sql"mapping_key_hash = ${mappingHash.hash}")
-              .toList
-              .intercalate(
-                sql" OR "
-              ) ++ sql")" // TODO(#33913) - replace with toInClause after enhancing the machinery
+            ) ++ sql" AND is_proposal = false AND " ++
+              DbStorage.toInClause("mapping_key_hash", batch.map(_.hash))
           ),
           operationName = "transactionsForMapping",
         )
@@ -1016,50 +1009,40 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    if (transactions.isEmpty) {
-      FutureUnlessShutdown.pure(Seq.empty)
-    } else {
-      // NOTE: The `transactions` sequence is most likely already pre-batched by the upstream outbox
-      // using `topologyConfig.broadcastBatchSize` (optimizing for gRPC network transmission).
-      // However, we apply a second layer of defensive batching here clamped to JDBC limits.
-      // This decouples database safety from network configurations, guaranteeing that an operator
-      // increasing the network batch size won't accidentally trigger JDBC parameter limits.
-      val safeChunkSize = batchingConfig.maxItemsInBatch.min(DbStorage.maxSqlParameters)
+    NonEmpty.from(transactions) match {
+      case None =>
+        FutureUnlessShutdown.pure(Seq.empty)
 
-      MonadUtil
-        .batchedSequentialTraverse(
-          parallelism = batchingConfig.parallelism,
-          chunkSize = safeChunkSize,
-        )(transactions) { batch =>
-          // NOTE: We use a batched OR chain instead of `DbStorage.toInClause (= ANY(?))`.
-          // Passing multidimensional binary arrays (Array[Array[Byte]]) via JDBC `Types.ARRAY` without
-          // explicit dialect-specific `createArrayOf` casting causes type coercion failures in both
-          // Postgres (`bytea[]`) and H2 (`Blob` arrays), returning 0 rows. The OR chain forces Slick
-          // to use its scalar column binder (`setParameterByteArray`) for each individual hash,
-          // guaranteeing correct binary matching across all supported SQL dialects.
-          val hashConditions = batch
-            .map(tx => sql"tx_hash = ${tx.hash.hash}")
-            .toList
-            .intercalate(
-              sql" OR "
-            ) // TODO(#33913) - remove with toInClause after enhancing the machinery
+      case Some(neTransactions) =>
+        // NOTE: The `transactions` sequence is most likely already pre-batched by the upstream outbox
+        // using `topologyConfig.broadcastBatchSize` (optimizing for gRPC network transmission).
+        // However, we apply a second layer of defensive batching.
 
-          val query = buildQueryForTransactions(sql" AND (" ++ hashConditions ++ sql")")
+        logger.debug(s"Filtering additional signatures for ${neTransactions.size} transactions")
 
-          toStoredTopologyTransactions(
-            storage.query(query, operationName = "filterProvidesAdditionalSignatures")
-          ).map { storedTxs =>
-            val latestInStore = storedTxs.result.iterator
-              .map(tx => tx.transaction.hash -> tx)
-              .toMap
+        MonadUtil
+          .batchedSequentialTraverseNE(
+            parallelism = batchingConfig.parallelism,
+            chunkSize = batchingConfig.maxItemsInBatch,
+          )(neTransactions) { batch =>
+            val query = buildQueryForTransactions(
+              sql" AND " ++ DbStorage.toInClause("tx_hash", batch.map(_.hash.hash))
+            )
 
-            batch.filter { tx =>
-              latestInStore.get(tx.hash).forall { inStore =>
-                TopologyStore.providesAdditionalSignatures(tx, inStore)
+            toStoredTopologyTransactions(
+              storage.query(query, operationName = "filterProvidesAdditionalSignatures")
+            ).map { storedTxs =>
+              val latestInStore = storedTxs.result.iterator
+                .map(tx => tx.transaction.hash -> tx)
+                .toMap
+
+              batch.filter { tx =>
+                latestInStore.get(tx.hash).forall { inStore =>
+                  TopologyStore.providesAdditionalSignatures(tx, inStore)
+                }
               }
             }
           }
-        }
     }
 
   override def findParticipantOnboardingTransactions(

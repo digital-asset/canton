@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver
 
+import cats.Eval
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.tls.TlsServerConfig
@@ -116,7 +117,7 @@ object ApiServiceOwner {
       apiLoggingConfig: ApiLoggingConfig,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
       externalCallHandler: ExternalCallHandler,
   )(implicit
       actorSystem: ActorSystem,

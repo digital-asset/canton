@@ -509,15 +509,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
 
     object GrpcMappings2 {
       val value: Seq[Mapping[?, ?]] = Seq(
-        Mapping[LegacyDTOs.GetTransactionByIdRequest, openapi.GetTransactionByIdRequest](
-          openapi.GetTransactionByIdRequest.fromJson
-        ),
-        Mapping[
-          LegacyDTOs.GetTransactionByOffsetRequest,
-          openapi.GetTransactionByOffsetRequest,
-        ](
-          openapi.GetTransactionByOffsetRequest.fromJson
-        ),
         Mapping[v2.update_service.GetUpdateByIdRequest, openapi.GetUpdateByIdRequest](
           openapi.GetUpdateByIdRequest.fromJson
         ),
@@ -618,9 +609,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[json.JsUpdate.OffsetCheckpoint, openapi.OffsetCheckpoint2](
           openapi.OffsetCheckpoint2.fromJson
         ),
-        Mapping[json.JsUpdateTree.OffsetCheckpoint, openapi.OffsetCheckpoint3](
-          openapi.OffsetCheckpoint3.fromJson
-        ),
         Mapping[v2.version_service.OffsetCheckpointFeature, openapi.OffsetCheckpointFeature](
           openapi.OffsetCheckpointFeature.fromJson
         ),
@@ -717,9 +705,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[json.js.PrefetchContractKey, openapi.PrefetchContractKey](
           openapi.PrefetchContractKey.fromJson
         ),
-        Mapping[json.JsUpdate.Reassignment, openapi.Reassignment1](
-          openapi.Reassignment1.fromJson
-        ),
         Mapping[v2.reassignment_commands.ReassignmentCommand, openapi.ReassignmentCommand](
           openapi.ReassignmentCommand.fromJson
         ),
@@ -810,9 +795,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         ),
         Mapping[json.JsUpdate.Transaction, openapi.Transaction](
           openapi.Transaction.fromJson
-        ),
-        Mapping[json.JsUpdateTree.TransactionTree, openapi.TransactionTree](
-          openapi.TransactionTree.fromJson
         ),
         Mapping[json.JsSchema.JsTreeEvent.TreeEvent, openapi.TreeEvent](
           openapi.TreeEvent.fromJson
@@ -1112,12 +1094,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           Mapping[json.JsGetEventsByContractIdResponse, openapi.JsGetEventsByContractIdResponse](
             openapi.JsGetEventsByContractIdResponse.fromJson
           ),
-          Mapping[json.JsGetTransactionResponse, openapi.JsGetTransactionResponse](
-            openapi.JsGetTransactionResponse.fromJson
-          ),
-          Mapping[json.JsGetTransactionTreeResponse, openapi.JsGetTransactionTreeResponse](
-            openapi.JsGetTransactionTreeResponse.fromJson
-          ),
           Mapping[json.JsGetUpdateResponse, openapi.JsGetUpdateResponse](
             openapi.JsGetUpdateResponse.fromJson
           ),
@@ -1135,9 +1111,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
 
     object JsMappings2 {
       val value: Seq[Mapping[?, ?]] = Seq(
-        Mapping[json.JsGetUpdateTreesResponse, openapi.JsGetUpdateTreesResponse](
-          openapi.JsGetUpdateTreesResponse.fromJson
-        ),
         Mapping[json.JsContractEntry.JsIncompleteAssigned, openapi.JsIncompleteAssigned](
           openapi.JsIncompleteAssigned.fromJson
         ),

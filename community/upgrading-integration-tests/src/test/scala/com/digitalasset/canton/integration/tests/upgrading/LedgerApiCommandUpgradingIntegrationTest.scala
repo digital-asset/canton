@@ -21,9 +21,11 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.Party
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.macros.syntax.lens.*
@@ -41,6 +43,9 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
 
   private val byPackageNameIdentifier: Identifier =
     Identifier.fromJavaProto(v1.upgrade.Upgrading.TEMPLATE_ID.toProto)
+
+  private def party(name: String)(implicit env: TestConsoleEnvironment): Party =
+    env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
 
   private var alice1: Party = _
   private var bob1: Party = _
@@ -122,6 +127,45 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
             Some(Ref.PackageId.assertFromString(v1.upgrade.Upgrading.PACKAGE_ID)),
         )(v1.upgrade.Upgrading.COMPANION)
       }
+    }
+
+    "commands are submitted by key with a package-name-scoped template id" should {
+      // Contract keys require Daml-LF >= 2.3 and protocol version >= 3.5, so this uses the keyed
+      // UpgradingCK template (part of the Upgrade package, which now targets LF 2.3) and is gated
+      // accordingly. The Upgrade V1/V2 DARs are already uploaded to participant1 in the setup.
+      "resolve ExerciseByKey to the newest uploaded package" onlyRunWithOrGreaterThan
+        ProtocolVersion.v35 in { implicit env =>
+          import env.*
+
+          val alice = party("alice1")
+          val bob = party("bob1")
+
+          // Create by specifying the package name; resolves to the newest uploaded package (V2).
+          new v1.upgrade.UpgradingCK(
+            alice.toProtoPrimitive,
+            alice.toProtoPrimitive,
+            0,
+          ).create.commands.asScala.toSeq
+            .map(_.withPackageName)
+            .pipe(
+              participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
+            )
+            .discard
+
+          // ExerciseByKey on the previously created contract, again by package name: the key is
+          // (issuer, field) == (alice, 0).
+          v1.upgrade.UpgradingCK
+            .byKey(new v1.da.types.Tuple2(alice.toProtoPrimitive, java.lang.Long.valueOf(0L)))
+            .exerciseChangeOwnerCK(bob.toProtoPrimitive)
+            .commands
+            .asScala
+            .toSeq
+            .map(_.withPackageName)
+            .pipe(
+              participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
+            )
+            .discard
+        }
     }
 
     "upgrading a disclosed contract" should {
@@ -326,11 +370,7 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
       .pipe(JavaDecodeUtil.decodeAllArchivedLedgerEffectsEvents(tc))
       .pipe(inside(_) { case Seq(cId) => cId shouldBe createUpgrading_byPackageName.id })
 
-    // TODO(#15114): Test ExerciseByKey
-    // CreateAndExercise command.
-    // A CreateAndExercise compiles to a Create plus an Exercise, i.e. a transaction with multiple
-    // root nodes, which the external-party ISS execute path rejects. Run this step only for local
-    // parties; create and exercise above already exercise the external path.
+    // CreateAndExercise command
     if (onlyLocalParty(MultiRootNodeSubmission)) {
       createAndExercise
         .map(_.withPackageName)
@@ -355,25 +395,24 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
   private implicit class CommandWithoutPackageId(commandJava: javaapi.data.Command) {
     def withPackageName: javaapi.data.Command = {
       val command = Command.fromJavaProto(commandJava.toProtoCommand)
+      val packageName = byPackageNameIdentifier.packageId
       val res = command.command match {
         case Command.Command.Empty => command
         case c: Command.Command.Create =>
           command.copy(command =
-            c.focus(_.value.templateId)
-              .modify(_.map(_ => byPackageNameIdentifier))
+            c.focus(_.value.templateId).modify(_.map(_.copy(packageId = packageName)))
           )
         case c: Command.Command.Exercise =>
           command.copy(command =
-            c.focus(_.value).modify(_.copy(templateId = Some(byPackageNameIdentifier)))
+            c.focus(_.value.templateId).modify(_.map(_.copy(packageId = packageName)))
           )
         case c: Command.Command.ExerciseByKey =>
           command.copy(command =
-            c.focus(_.value).modify(_.copy(templateId = Some(byPackageNameIdentifier)))
+            c.focus(_.value.templateId).modify(_.map(_.copy(packageId = packageName)))
           )
         case c: Command.Command.CreateAndExercise =>
           command.copy(command =
-            c.focus(_.value.templateId)
-              .modify(_.map(_ => byPackageNameIdentifier))
+            c.focus(_.value.templateId).modify(_.map(_.copy(packageId = packageName)))
           )
       }
       javaapi.data.Command.fromProtoCommand(toJavaProto(res))

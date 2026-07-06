@@ -3,14 +3,12 @@
 
 package com.digitalasset.canton.tea
 
-import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.tea.TrafficEnforcementApp.TeaGrpcServerName
 import com.digitalasset.canton.tea.projection.{EventSource, TeaProjection}
 import com.digitalasset.canton.time.Clock
 import io.grpc.inprocess.InProcessServerBuilder
@@ -24,8 +22,8 @@ import scala.concurrent.ExecutionContext
   * [[TrafficEnforcementServiceGrpc]].
   */
 class TrafficEnforcementApp(
+    config: TrafficEnforcementServerConfig.Internal,
     service: TrafficEnforcementService,
-    node: InstanceName,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 )(implicit system: ActorSystem[?])
@@ -35,7 +33,7 @@ class TrafficEnforcementApp(
   import system.executionContext
 
   private val server = InProcessServerBuilder
-    .forName(s"$TeaGrpcServerName-$node")
+    .forName(config.inProcessTeaServerName)
     .addService(new TrafficEnforcementServiceGrpc(service, loggerFactory))
     .build()
 
@@ -44,7 +42,7 @@ class TrafficEnforcementApp(
 
   override def onClosed(): Unit = {
     val toClose = List(
-      LifeCycle.toCloseableServer(server, logger, TeaGrpcServerName),
+      LifeCycle.toCloseableServer(server, logger, config.inProcessTeaServerName),
       LifeCycle.toCloseableActorSystem(system.classicSystem, logger, timeouts),
     )
     LifeCycle.close(toClose*)(logger)
@@ -52,11 +50,9 @@ class TrafficEnforcementApp(
 }
 
 object TrafficEnforcementApp {
-  val TeaGrpcServerName = "TeaGrpcInProcServer"
   type TeaAppBuilder = () => TrafficEnforcementApp
 
-  def internal(
-      forNode: InstanceName,
+  def apply(
       storage: Storage,
       config: TrafficEnforcementServerConfig.Internal,
       loggerFactory: NamedLoggerFactory,
@@ -64,7 +60,7 @@ object TrafficEnforcementApp {
       clock: Clock,
   )(implicit
       ec: ExecutionContext
-  ): TeaAppBuilder = { () =>
+  ): TrafficEnforcementApp = {
     // Pekko config to configure the TEA's actor system
     val pekkoConfig = config.pekkoConfig(storage)
     implicit val system: ActorSystem[Nothing] =
@@ -81,6 +77,6 @@ object TrafficEnforcementApp {
         timeouts,
       )
     val service = new TrafficEnforcementService(store, clock, loggerFactory)
-    new TrafficEnforcementApp(service, forNode, loggerFactory, timeouts)
+    new TrafficEnforcementApp(config, service, loggerFactory, timeouts)
   }
 }
