@@ -272,6 +272,7 @@ final class ExternalCallProtocolIntegrationTest
   private def createResponses(
       checkResult: ExternalCallCheck.Result,
       timeValidationResultE: Either[TimeValidator.TimeCheckFailure, Unit] = Right(()),
+      authorizationResult: Map[ViewPosition, String] = Map.empty,
   ): Seq[ConfirmationResponse] = {
     val example = factory.MultipleRoots
     val viewValidationResults = Map(
@@ -295,7 +296,7 @@ final class ExternalCallProtocolIntegrationTest
       workflowIdO = None,
       contractConsistencyResultE = Right(()),
       authenticationResult = Map.empty,
-      authorizationResult = Map.empty,
+      authorizationResult = authorizationResult,
       modelConformanceResultET =
         EitherT.rightT[FutureUnlessShutdown, ModelConformanceChecker.ErrorWithSubTransaction[
           ViewAbsoluteLedgerEffect
@@ -363,7 +364,7 @@ final class ExternalCallProtocolIntegrationTest
       }
     }
 
-    "prefer a rejection over the abstention when both apply" in {
+    "prefer a rejection from an earlier validation suite over the abstention" in {
       val ledgerTime = CantonTimestamp.Epoch
       val recordTime = CantonTimestamp.Epoch.plusSeconds(10)
       val maxDelta = NonNegativeFiniteDuration.tryOfSeconds(1)
@@ -382,6 +383,27 @@ final class ExternalCallProtocolIntegrationTest
             "LOCAL_VERDICT_LEDGER_TIME_OUT_OF_BOUND(2,0): Rejected transaction as delta of " +
             "the ledger time and the record time exceed the time tolerance " +
             s"ledgerTime=$ledgerTime, recordTime=$recordTime, maxDelta=$maxDelta"
+          parties shouldBe confirmers
+        }
+      }
+    }
+
+    "prefer the abstention over a rejection from a later validation suite" in {
+      // The shadowed authorization rejection is still logged, as a malformed-request alarm.
+      val responses = loggerFactory.assertLogs(
+        createResponses(
+          ExternalCallCheck.CannotValidate("extension service is not configured"),
+          authorizationResult = Map(leftViewPosition -> "no authorization"),
+        ),
+        _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.MalformedRequest),
+      )
+
+      responses should have size 2
+      forEvery(responses) { response =>
+        inside(response) { case ConfirmationResponse(_, abstain: LocalAbstain, parties) =>
+          abstain.reason.message shouldBe
+            "CANNOT_PERFORM_ALL_VALIDATIONS(9,0): " +
+            "Cannot perform all validations: extension service is not configured"
           parties shouldBe confirmers
         }
       }

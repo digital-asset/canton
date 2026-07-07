@@ -189,7 +189,8 @@ class TransactionConfirmationResponsesFactory(
                       requestId,
                       // Conceptually, a normal LocalReject for the admin party should suffice for rejecting replays.
                       // However, we nevertheless use a `Malformed` rejection here so that the rejection preference sorting
-                      // ensures that this rejection or something at least as strong will make it to the mediator.
+                      // ensures that this rejection, something at least as strong, or the external-call
+                      // abstention (which ranks earlier in the verdicts below) will make it to the mediator.
                       LocalRejectError.MalformedRejects.MalformedRequest.Reject(
                         err.format(viewPosition)
                       ),
@@ -246,12 +247,13 @@ class TransactionConfirmationResponsesFactory(
                   ).toLocalReject(protocolVersion)
                 )
 
-              // Rejections due to recorded external-call results that disagree (with each other
-              // across the request, or with the extension service on re-validation). The request
-              // is rejected on behalf of all hosted confirming parties; the rejections rank with
-              // the other consistency rejections, ahead of the authentication and conformance
-              // rejections.
-              val externalCallRejections =
+              // Verdicts due to the external-call check: recorded results that disagree (with
+              // each other across the request, or with the extension service on re-validation)
+              // reject the request on behalf of all hosted confirming parties; a recorded result
+              // that could not be re-validated abstains instead of approving, as the participant
+              // cannot vouch for the recorded result while the request is not provably wrong
+              // either.
+              val externalCallVerdicts =
                 externalCallCheckResult match {
                   case ExternalCallCheck.Rejected(description) =>
                     Some(
@@ -261,15 +263,6 @@ class TransactionConfirmationResponsesFactory(
                           .Reject(description),
                       ).toLocalReject(protocolVersion)
                     )
-                  case ExternalCallCheck.Passed | ExternalCallCheck.CannotValidate(_) => None
-                }
-
-              // Abstentions due to a recorded external-call result that could not be
-              // re-validated: the participant cannot vouch for the recorded result, but the
-              // request is not provably wrong either. Appended last to the verdicts below so that
-              // every rejection takes precedence over the abstention.
-              val externalCallAbstentions =
-                externalCallCheckResult match {
                   case ExternalCallCheck.CannotValidate(reason) =>
                     Some(
                       logged(
@@ -277,7 +270,7 @@ class TransactionConfirmationResponsesFactory(
                         LocalAbstainError.CannotPerformAllValidations.Abstain(reason),
                       ).toLocalAbstain(protocolVersion)
                     )
-                  case ExternalCallCheck.Passed | ExternalCallCheck.Rejected(_) => None
+                  case ExternalCallCheck.Passed => None
                 }
 
               // Approve if the consistency check succeeded, reject otherwise.
@@ -286,9 +279,9 @@ class TransactionConfirmationResponsesFactory(
 
               val localVerdicts: Seq[LocalVerdict] =
                 consistencyVerdicts.toList ++ timeValidationRejections ++ contractConsistencyRejections ++
-                  externalCallRejections ++ authenticationRejections ++ authorizationRejections ++
+                  externalCallVerdicts ++ authenticationRejections ++ authorizationRejections ++
                   modelConformanceRejections ++ internalConsistencyRejections ++
-                  replayRejections ++ externalCallAbstentions
+                  replayRejections
 
               val localVerdictAndPartiesO = localVerdicts
                 .collectFirst[(LocalVerdict, Set[LfPartyId])] {
