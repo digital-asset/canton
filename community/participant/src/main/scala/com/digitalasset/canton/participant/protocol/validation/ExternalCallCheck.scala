@@ -23,15 +23,16 @@ import scala.concurrent.ExecutionContext
   *
   * The check has two parts:
   *   - consistency: whether occurrences of the same external call recorded across the request agree
-  *     on their output ([[ExternalCallConsistencyChecker]]); every visible disagreement is alarmed,
+  *     on their output ([[ExternalCallConsistencyChecker]]),
   *   - re-validation: whether the (undisputed) recorded outputs agree with the extension service,
   *     re-executing each distinct call once ([[ExternalCallValidator]]).
   *
-  * The outcome is a single per-request `ExternalCallCheck.Result`: a disagreement from either part
-  * rejects the request on behalf of all hosted confirming parties, and a recorded result that
-  * cannot be re-validated leads to an abstention instead of an approval (see
-  * [[TransactionConfirmationResponsesFactory]]). Disagreements within the replay data of a single
-  * reinterpretation already surface as model-conformance errors independently of this check.
+  * Every disagreement found by either part is alarmed. The outcome is a single per-request
+  * `ExternalCallCheck.Result`: a disagreement from either part rejects the request on behalf of all
+  * hosted confirming parties, and a recorded result that cannot be re-validated leads to an
+  * abstention instead of an approval (see [[TransactionConfirmationResponsesFactory]]).
+  * Disagreements within the replay data of a single reinterpretation already surface as
+  * model-conformance errors independently of this check.
   *
   * @param externalCallValidator
   *   The validator used to re-run external calls against the extension service.
@@ -81,11 +82,9 @@ class ExternalCallCheck(
       // rejects the request, so only the party-independent visible inconsistencies are consulted.
       val consistency = ExternalCallConsistencyChecker.check(views, Set.empty)
 
-      consistency.visibleInconsistencies.foreach { inconsistency =>
-        ExternalCallValidationError.ExternalCallResultDisagreementAlarm
-          .Warn(s"Observed inconsistent external call results: ${inconsistency.description}")
-          .logWithContext(Map("requestId" -> requestId.toString))
-      }
+      // Every visible inconsistency is alarmed: only the first one is propagated into the
+      // rejection, so the confirmation-responses factory reports just that one.
+      consistency.visibleInconsistencies.foreach(alarmDisagreement(requestId, _))
 
       // The checker sorts the inconsistencies, so the reported disagreement is deterministic.
       consistency.visibleInconsistencies.headOption match {
@@ -94,7 +93,7 @@ class ExternalCallCheck(
         case None if !runValidation =>
           FutureUnlessShutdown.pure(Passed)
         case None =>
-          validateRecordedResults(recordedResults)
+          validateRecordedResults(requestId, recordedResults)
       }
     }
   }
@@ -106,7 +105,8 @@ class ExternalCallCheck(
     * deterministic.
     */
   private def validateRecordedResults(
-      recordedResults: Seq[(ViewPosition, ViewParticipantData.ViewExternalCallResult)]
+      requestId: RequestId,
+      recordedResults: Seq[(ViewPosition, ViewParticipantData.ViewExternalCallResult)],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -132,20 +132,25 @@ class ExternalCallCheck(
             .map(outcome => (key, occurrencesAndOutputs, recordedOutput, outcome))
       }
       .map { outcomes =>
-        val rejectionO = outcomes.collectFirst {
+        val mismatches = outcomes.collect {
           case (
                 key,
                 occurrencesAndOutputs,
                 recordedOutput,
                 validated: ExternalCallValidator.Mismatched,
               ) =>
-            val inconsistency = Inconsistency(
+            Inconsistency(
               key,
               Set(validated.computedOutput, recordedOutput),
               occurrencesAndOutputs.map { case (occurrence, _) => occurrence }.toSet,
             )
-            Rejected(inconsistency.description)
         }
+        // Mirrors the visible-inconsistency alarms in check: every disagreement with the
+        // extension service is suspicious, not only the first one.
+        mismatches.foreach(alarmDisagreement(requestId, _))
+
+        val rejectionO =
+          mismatches.headOption.map(inconsistency => Rejected(inconsistency.description))
         val abstentionO = outcomes.collectFirst {
           case (_, _, _, ExternalCallValidator.UnableToValidate(reason)) =>
             CannotValidate(reason)
@@ -153,6 +158,13 @@ class ExternalCallCheck(
         rejectionO.orElse(abstentionO).getOrElse(Passed)
       }
   }
+
+  private def alarmDisagreement(requestId: RequestId, inconsistency: Inconsistency)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    ExternalCallValidationError.ExternalCallResultDisagreementAlarm
+      .Warn(s"Observed inconsistent external call results: ${inconsistency.description}")
+      .logWithContext(Map("requestId" -> requestId.toString))
 }
 
 object ExternalCallCheck {

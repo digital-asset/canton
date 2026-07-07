@@ -195,7 +195,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "reject when re-validation returns a different output" in {
+    "reject and alarm when re-validation returns a different output" in {
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
@@ -204,10 +204,12 @@ final class ExternalCallProtocolIntegrationTest
           )
         )
       )
-      val result = runCheck(
-        validator,
-        views(leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter)))),
-      )
+      val result = assertDisagreementAlarm {
+        runCheck(
+          validator,
+          views(leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter)))),
+        )
+      }
 
       val expectedInconsistency = Inconsistency(
         externalCallKey,
