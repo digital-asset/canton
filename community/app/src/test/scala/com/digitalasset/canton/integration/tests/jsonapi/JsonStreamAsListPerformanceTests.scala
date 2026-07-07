@@ -15,7 +15,6 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import io.circe.parser.decode
 import io.circe.syntax.*
 import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
-import scalaz.syntax.tag.*
 
 import scala.concurrent.Future
 

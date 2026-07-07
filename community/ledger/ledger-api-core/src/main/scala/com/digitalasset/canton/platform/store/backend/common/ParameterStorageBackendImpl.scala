@@ -25,7 +25,6 @@ import com.digitalasset.canton.platform.store.backend.{
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
-import scalaz.syntax.tag.*
 
 import java.sql.Connection
 import scala.util.chaining.scalaUtilChainingOps

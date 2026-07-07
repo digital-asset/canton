@@ -96,6 +96,7 @@ class GrpcSynchronizerRegistry(
 ) extends SynchronizerRegistry
     with SynchronizerRegistryHelpers
     with FlagCloseable
+    with HasCloseContext
     with HasFutureSupervision
     with NamedLogging {
 
@@ -395,18 +396,38 @@ class GrpcSynchronizerRegistry(
     ): FutureUnlessShutdown[Unit] = {
       val sequencersInPool = connectionPool.getAllSequencerIds.keySet
 
-      def check(): Either[Unit, Unit] =
-        if (expectedSequencers.subsetOf(sequencersInPool))
-          logger.debug(s"Stopping the wait: all $expectedSequencers found in the pool").asRight
-        else if (wallClock.now >= waitUntil)
-          logger.debug("Stopping the wait because max waiting time is reached.").asRight
-        else if (isClosing)
-          logger.debug("Stopping the wait because of shutdown.").asRight
-        else ().asLeft
+      def check(logStopReason: Boolean): Either[Unit, Unit] = {
+        val stopReasonE =
+          if (expectedSequencers.subsetOf(sequencersInPool))
+            s"Stopping the wait: all $expectedSequencers found in the pool".asRight
+          else if (wallClock.now >= waitUntil)
+            "Stopping the wait because max waiting time is reached.".asRight
+          else if (isClosing)
+            "Stopping the wait because of shutdown.".asRight
+          else ().asLeft
 
-      Monad[FutureUnlessShutdown].tailRecM[Unit, Unit](()) { _ =>
-        wallClock.scheduleAfter(_ => check(), step.asJava)
+        stopReasonE.map { reason =>
+          if (logStopReason) logger.debug(reason)
+        }
       }
+
+      // immediately check whether we should wait in the first place, without logging the stop reason
+      check(logStopReason = false).fold(
+        _ /* start the waiting cycles */ => {
+          logger.debug(s"Handshake was successful. Starting to wait until $waitUntil")
+          Monad[FutureUnlessShutdown].tailRecM[Unit, Unit](()) { _ =>
+            wallClock.scheduleAfterCancelledOnShutdown(
+              _ => check(logStopReason = true),
+              s"${getClass.getName}: waiting",
+              step.asJava,
+            )
+          }
+        },
+        _ /* don't start the waiting cycle */ => {
+          logger.debug("Handshake was successful.")
+          FutureUnlessShutdown.unit
+        },
+      )
     }
 
     (for {
@@ -422,7 +443,6 @@ class GrpcSynchronizerRegistry(
         case Some(LsuHandshake(_, Some(minimumDuration), periodicCheck)) =>
           val waitUntil = wallClock.now.plus(minimumDuration.asJava)
 
-          logger.debug(s"Handshake was successful. Starting to wait until $waitUntil")
           EitherT.right[SynchronizerRegistryError](
             waiter(connectionPool, waitUntil, step = periodicCheck)
           )

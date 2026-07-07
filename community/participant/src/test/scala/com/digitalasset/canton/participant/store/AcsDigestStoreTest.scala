@@ -84,7 +84,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       rangeEnd: Offset,
   ): Unit = {
 
-    "pointwise 'lookup' calls should yield None" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "pointwise 'lookup' calls should yield None" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val emptyJournal = mkJournal()
       val firstSampleKey =
         sampleKeys.headOption.getOrElse(fail("sampleKeys shouldn't be empty"))
@@ -94,7 +94,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield result shouldBe Option.empty
     }
 
-    "batch 'bulkLookup' calls must return an empty map" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "batch 'bulkLookup' calls must return an empty map" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -102,7 +102,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield result shouldBe Map.empty
     }
 
-    "batch 'bulkLookup' with large key set should execute without failure" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "batch 'bulkLookup' with large key set should execute without failure" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -110,7 +110,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield result shouldBe Map.empty
     }
 
-    "requesting a pagination 'snapshot' should return empty page" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "requesting a pagination 'snapshot' should return empty page" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -124,7 +124,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "querying state 'changesBetween' ranges should yield completely empty page" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "querying state 'changesBetween' ranges should yield completely empty page" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -143,7 +143,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "verifying chain consistency via 'checkReplacesInvariant' must pass safely" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "verifying chain consistency via 'checkReplacesInvariant' must pass safely" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val emptyJournal = mkJournal()
 
       for {
@@ -171,27 +171,27 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
 
     val update1_K1T0 =
       AcsDigestUpdate(
-        AcsDigest(key1, offset0, t0, Some(digest1)),
+        AcsDigest(key1, offset0, t0, Some(digest1), None),
         replacesOffset = None,
       )
     val update2_K2T0 =
       AcsDigestUpdate(
-        AcsDigest(key2, offset0, t0, Some(digest2)),
+        AcsDigest(key2, offset0, t0, Some(digest2), None),
         replacesOffset = None,
       )
     // Update key1 at t1
     val update3_K1T1 = AcsDigestUpdate(
-      AcsDigest(key1, offset1, t1, Some(digest2)),
+      AcsDigest(key1, offset1, t1, Some(digest2), None),
       replacesOffset = Some(offset0),
     )
     // 'Archive' key2 at t1
     val tombstone_K2T1 = AcsDigestUpdate(
-      AcsDigest(key2, offset1, t1, None),
+      AcsDigest(key2, offset1, t1, None, None),
       replacesOffset = Some(offset0),
     )
 
     val update5_update_K1T1 = AcsDigestUpdate(
-      AcsDigest(key1, offset1, t1, None),
+      AcsDigest(key1, offset1, t1, None, None),
       replacesOffset = Some(offset0),
     )
 
@@ -201,11 +201,11 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       _ <- journal.checkReplacesInvariant(offset2)
     } yield succeed
 
-    "allow batch item insertion with upsertDigestUpdates" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "allow batch item insertion with upsertDigestUpdates" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       upsertUpdatesIn(mkJournal())
     }
 
-    "return precise historical states on pointwise lookup" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "return precise historical states on pointwise lookup" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
 
       val tMin = Offset.firstOffset
@@ -256,7 +256,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "after updating an entry, pointwise lookup still works well" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "after updating an entry, pointwise lookup still works well" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
 
       for {
@@ -272,7 +272,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "batch 'bulkLookup' call with empty keys return an empty map" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "batch 'bulkLookup' call with empty keys return an empty map" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
 
       for {
@@ -281,7 +281,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield result shouldBe Map.empty
     }
 
-    "evaluate range snapshots using pagination (2 digests on 1 page)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "evaluate range snapshots using pagination (2 digests on 1 page)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -298,7 +298,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "evaluate range snapshots using pagination (1 digest on 2 pages)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "evaluate range snapshots using pagination (1 digest on 2 pages)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -323,7 +323,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "isolate range updates using changesBetween boundaries (1 page)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "isolate range updates using changesBetween boundaries (1 page)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -347,7 +347,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "isolate range updates using changesBetween boundaries (2 pages)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "isolate range updates using changesBetween boundaries (2 pages)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
       for {
         _ <- upsertUpdatesIn(testJournal)
@@ -375,13 +375,13 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "catch 'future' link during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "catch 'future' link during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       // Intentionally insert a broken link at T2 that claims to replace an imaginary T99
       val testJournal = mkJournal()
       val offset99 = Offset.tryFromLong(99)
       val brokenUpdate =
         AcsDigestUpdate(
-          AcsDigest(key1, offset2, t2, Some(digest1)),
+          AcsDigest(key1, offset2, t2, Some(digest1), None),
           replacesOffset = Some(offset99),
         )
 
@@ -396,13 +396,13 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield succeed
     }
 
-    "catch empty link during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "catch empty link during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
       val update1_K1T1 =
-        AcsDigestUpdate(AcsDigest(key1, offset1, t1, Some(digest1)), replacesOffset = None)
+        AcsDigestUpdate(AcsDigest(key1, offset1, t1, Some(digest1), None), replacesOffset = None)
       // Not referencing to replace update1
       val update2_K1T2 =
-        AcsDigestUpdate(AcsDigest(key1, offset2, t2, None), replacesOffset = None)
+        AcsDigestUpdate(AcsDigest(key1, offset2, t2, None, None), replacesOffset = None)
 
       for {
         _ <- testJournal.upsertDigestUpdates(List(update1_K1T1, update2_K1T2))
@@ -415,13 +415,13 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield succeed
     }
 
-    "catch invalid past reference during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "catch invalid past reference during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testJournal = mkJournal()
       val update1_K1T0 =
-        AcsDigestUpdate(AcsDigest(key1, offset0, t0, Some(digest1)), replacesOffset = None)
+        AcsDigestUpdate(AcsDigest(key1, offset0, t0, Some(digest1), None), replacesOffset = None)
       // Referencing to replace a non existent past digest update
       val update2_K1T2 =
-        AcsDigestUpdate(AcsDigest(key1, offset2, t2, None), replacesOffset = Some(offset1))
+        AcsDigestUpdate(AcsDigest(key1, offset2, t2, None, None), replacesOffset = Some(offset1))
 
       for {
         _ <- testJournal.upsertDigestUpdates(List(update1_K1T0, update2_K1T2))
@@ -452,27 +452,27 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
     def checkReplacesIntervalCommonUpserts(store: AcsDigestStore) = {
       // key1 local order
       val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
       // key1 remote order
       val partyUpdate2AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
       // key1 local order reference to the T0 data
       val partyUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset1, t1, None),
+        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset1, t1, None, None),
         replacesOffset = Some(offset0),
       )
       // key1 remote order reference to the T0 data
       val partyUpdate2AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset1, t1, None),
+        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset1, t1, None, None),
         replacesOffset = Some(offset0),
       )
 
       val participantUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest)),
+        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest), None),
         replacesOffset = None,
       )
 
@@ -493,22 +493,22 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield ()
     }
 
-    s"properly retain data on 'deleteAfter' when there is data at the boundary" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    s"properly retain data on 'deleteAfter' when there is data at the boundary" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
       // key1 local order
       val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
       // key1 remote order
       val partyUpdate2AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
 
       val participantUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest)),
+        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest), None),
         replacesOffset = None,
       )
 
@@ -541,22 +541,22 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    s"properly retain data on 'deleteUpTo' when there is one update per key in the past" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    s"properly retain data on 'deleteUpTo' when there is one update per key in the past" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
       // key1 local order
       val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
       // key1 remote order
       val partyUpdate2AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
 
       val participantUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest)),
+        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest), None),
         replacesOffset = None,
       )
 
@@ -589,12 +589,12 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    s"properly execute global node boundaries across sub-journals" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    s"properly execute global node boundaries across sub-journals" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val pruningStore = mkStore()
 
       // key1 local order
       val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
       for {
@@ -609,11 +609,11 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield remainingParty shouldBe Some(partyUpdate1AtT0)
     }
 
-    s"'checkReplacesInvariant' check is successful when there is no broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    s"'checkReplacesInvariant' check is successful when there is no broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
       val participantUpdate1AtT2 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(participantId1, offset2, t2, None),
+        digestUpdate = AcsDigest(participantId1, offset2, t2, None, None),
         replacesOffset = Some(offset1),
       )
 
@@ -628,24 +628,24 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield result shouldBe ()
     }
 
-    s"'checkReplacesInvariant' check is successful when the first few updates has dangling reference (after pruning)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    s"'checkReplacesInvariant' check is successful when the first few updates has dangling reference (after pruning)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
       // key1 local order
       val partyUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset1, t1, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset1, t1, Some(rawDigest), None),
         // referring to a deleted digest update
         replacesOffset = Some(offset0),
       )
       // key1 remote order
       val partyUpdate2AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest)),
+        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
         // referring to a deleted digest update
         replacesOffset = Some(offset0),
       )
 
       val participantUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest)),
+        digestUpdate = AcsDigest(participantId1, offset1, t1, Some(participantDigest), None),
         // referring to a deleted digest update
         replacesOffset = Some(offset0),
       )
@@ -666,11 +666,11 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield result shouldBe ()
     }
 
-    s"'checkReplacesInvariant' check fails when there is a broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    s"'checkReplacesInvariant' check fails when there is a broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
       val brokenParticipantUpdate1AtT2 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(participantId1, offset2, t2, None),
+        digestUpdate = AcsDigest(participantId1, offset2, t2, None, None),
         // broken, should point back to t1 (see the earlier entries in checkReplacesIntervalCommonUpserts)
         replacesOffset = None,
       )
@@ -718,50 +718,53 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
     val cpAtT10 = (offset(10), t(10))
 
     val update1_K1T2 =
-      AcsDigestUpdate(AcsDigest(key1, offset(2), t(2), Some(digest1)), replacesOffset = None)
+      AcsDigestUpdate(AcsDigest(key1, offset(2), t(2), Some(digest1), None), replacesOffset = None)
     val update2_K2T4 =
-      AcsDigestUpdate(AcsDigest(key2, offset(4), t(4), Some(digest2)), replacesOffset = None)
+      AcsDigestUpdate(AcsDigest(key2, offset(4), t(4), Some(digest2), None), replacesOffset = None)
     val update3_K2T5 =
       AcsDigestUpdate(
-        AcsDigest(key2, offset(5), t(5), Some(digest1)),
+        AcsDigest(key2, offset(5), t(5), Some(digest1), None),
         replacesOffset = Some(offset(4)),
       )
 
     val update4_K1T6V0 =
       AcsDigestUpdate(
-        AcsDigest(key1, offset(6), t(6), Some(digest2)),
+        AcsDigest(key1, offset(6), t(6), Some(digest2), None),
         replacesOffset = Some(offset(2)),
       )
     // overwrite V0
     val update5_K1T6V1 =
       AcsDigestUpdate(
-        AcsDigest(key1, offset(6), t(6), Some(digest1)),
+        AcsDigest(key1, offset(6), t(6), Some(digest1), None),
         replacesOffset = Some(offset(2)),
       )
     // overwrite V1
     val update6_K1T6V2 = // Tombstone
       AcsDigestUpdate(
-        AcsDigest(key1, offset(6), t(6), None),
+        AcsDigest(key1, offset(6), t(6), None, None),
         replacesOffset = Some(offset(2)),
       )
 
     // Re-create key1
     val update7_K1T7 = AcsDigestUpdate(
-      AcsDigest(key1, offset(7), t(7), Some(digest1)),
+      AcsDigest(key1, offset(7), t(7), Some(digest1), None),
       replacesOffset = Some(offset(6)),
     )
     val update8_K2T9 =
       AcsDigestUpdate(
-        AcsDigest(key2, offset(9), t(9), Some(digest2)),
+        AcsDigest(key2, offset(9), t(9), Some(digest2), None),
         replacesOffset = Some(offset(5)),
       )
     val update9_K1T10 =
       AcsDigestUpdate(
-        AcsDigest(key1, offset(10), t(10), Some(digest2)),
+        AcsDigest(key1, offset(10), t(10), Some(digest2), None),
         replacesOffset = Some(offset(7)),
       )
     val update10_K2T11 = // Tombstone
-      AcsDigestUpdate(AcsDigest(key2, offset(11), t(11), None), replacesOffset = Some(offset(9)))
+      AcsDigestUpdate(
+        AcsDigest(key2, offset(11), t(11), None, None),
+        replacesOffset = Some(offset(9)),
+      )
 
     // batch insert all digest updates and checkpoints
     // we are interested about the final state not a realistic order of insertion
@@ -801,7 +804,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       _ <- testStore.checkReplacesInvariant()
     } yield succeed
 
-    "upsert -> insert checkpoints -> pointwise lookup verification" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "upsert -> insert checkpoints -> pointwise lookup verification" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -816,7 +819,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "upsert -> insert checkpoints -> bulk lookup verification" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "upsert -> insert checkpoints -> bulk lookup verification" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -831,7 +834,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       )
     }
 
-    "crash recovery (deleteAfter) rolling back to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "crash recovery (deleteAfter) rolling back to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -861,7 +864,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "pruning (deleteUpTo) safely scrubbing historical state up to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "pruning (deleteUpTo) safely scrubbing historical state up to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -902,7 +905,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       }
     }
 
-    "pruning (deleteUpTo) deletes last updates if they are tombstones" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+    "pruning (deleteUpTo) deletes last updates if they are tombstones" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val testStore = mkStore()
       val testJournal = mkJournal(testStore)
 
@@ -969,7 +972,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       (11_000 to 12_000).toList
 
     "an empty store" should {
-      "checkpointing: firstCheckpointAfter and latestCheckpointsUpTo calls yields None" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+      "checkpointing: firstCheckpointAfter and latestCheckpointsUpTo calls yields None" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
         val emptyStore = mkStore(executionContext)
 
         for {
@@ -1004,7 +1007,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
     }
 
     "a non empty store with only checkpointing" should {
-      "correctly index, retrieve boundaries, and return None when out of bounds" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+      "correctly index, retrieve boundaries, and return None when out of bounds" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
         val store = mkStore(executionContext)
 
         for {
@@ -1122,53 +1125,59 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
     val participantDigestB = genParticipantDigest(rawDigestB)
 
     val partyUpdateDigestAAtT1 =
-      AcsDigestUpdate(AcsDigest(partyKey, offset1, t1, Some(rawDigestA)), replacesOffset = None)
+      AcsDigestUpdate(
+        AcsDigest(partyKey, offset1, t1, Some(rawDigestA), None),
+        replacesOffset = None,
+      )
     val partyUpdateDigestAAtT2 =
       AcsDigestUpdate(
-        AcsDigest(partyKey, offset2, t2, Some(rawDigestA)),
+        AcsDigest(partyKey, offset2, t2, Some(rawDigestA), None),
         replacesOffset = Some(offset1),
       )
     val partyUpdateDigestAAtT3 =
       AcsDigestUpdate(
-        AcsDigest(partyKey, offset3, t3, Some(rawDigestA)),
+        AcsDigest(partyKey, offset3, t3, Some(rawDigestA), None),
         replacesOffset = Some(offset2),
       )
 
     val partyUpdateDigestBAtT1 =
-      AcsDigestUpdate(AcsDigest(partyKey, offset1, t1, Some(rawDigestB)), replacesOffset = None)
+      AcsDigestUpdate(
+        AcsDigest(partyKey, offset1, t1, Some(rawDigestB), None),
+        replacesOffset = None,
+      )
     val partyUpdateDigestBAtT2 =
       AcsDigestUpdate(
-        AcsDigest(partyKey, offset2, t2, Some(rawDigestB)),
+        AcsDigest(partyKey, offset2, t2, Some(rawDigestB), None),
         replacesOffset = Some(offset1),
       )
     val partyUpdateDigestBAtT3 =
       AcsDigestUpdate(
-        AcsDigest(partyKey, offset3, t3, Some(rawDigestB)),
+        AcsDigest(partyKey, offset3, t3, Some(rawDigestB), None),
         replacesOffset = Some(offset2),
       )
 
     val participantUpdateAAtT1 = AcsDigestUpdate(
-      AcsDigest(participantKey, offset1, t1, Some(participantDigestA)),
+      AcsDigest(participantKey, offset1, t1, Some(participantDigestA), None),
       replacesOffset = None,
     )
     val participantUpdateAAtT2 = AcsDigestUpdate(
-      AcsDigest(participantKey, offset2, t2, Some(participantDigestA)),
+      AcsDigest(participantKey, offset2, t2, Some(participantDigestA), None),
       replacesOffset = Some(offset1),
     )
     val participantUpdateAAtT3 = AcsDigestUpdate(
-      AcsDigest(participantKey, offset3, t3, Some(participantDigestA)),
+      AcsDigest(participantKey, offset3, t3, Some(participantDigestA), None),
       replacesOffset = Some(offset2),
     )
     val participantUpdateBAtT1 = AcsDigestUpdate(
-      AcsDigest(participantKey, offset1, t1, Some(participantDigestB)),
+      AcsDigest(participantKey, offset1, t1, Some(participantDigestB), None),
       replacesOffset = None,
     )
     val participantUpdateBAtT2 = AcsDigestUpdate(
-      AcsDigest(participantKey, offset2, t2, Some(participantDigestB)),
+      AcsDigest(participantKey, offset2, t2, Some(participantDigestB), None),
       replacesOffset = Some(offset1),
     )
     val participantUpdateBAtT3 = AcsDigestUpdate(
-      AcsDigest(participantKey, offset3, t3, Some(participantDigestB)),
+      AcsDigest(participantKey, offset3, t3, Some(participantDigestB), None),
       replacesOffset = Some(offset2),
     )
 
@@ -1208,7 +1217,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
       } yield succeed
 
     "a multi-synchronizer isolation" should {
-      "ensure checkpointing works properly" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+      "ensure checkpointing works properly" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)
@@ -1243,7 +1252,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
         }
       }
 
-      "ensure pagination works on range queries (snapshot, changesBetween)" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+      "ensure pagination works on range queries (snapshot, changesBetween)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)
@@ -1269,7 +1278,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
         }
       }
 
-      "ensure crash recovery works across synchronizer boundaries" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+      "ensure crash recovery works across synchronizer boundaries" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)
@@ -1307,7 +1316,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
         }
       }
 
-      "ensure pruning works across synchronizer boundaries" onlyRunWithOrGreaterThan ProtocolVersion.dev inUS {
+      "ensure pruning works across synchronizer boundaries" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
         // Provision two distinct stores with overlapping timelines
         val storeA = mkStore(executionContext, syncA)
         val storeB = mkStore(executionContext, syncB)

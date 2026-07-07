@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.http.json
 
+import cats.Show
 import io.circe.*
-import scalaz.Show
 
 object Circe {
   sealed abstract class Error extends Product with Serializable
@@ -12,20 +12,20 @@ object Circe {
   final case class JsonWriterError(value: Any, message: String) extends Error
 
   object Error {
-    implicit val show: Show[Error] = Show shows {
-      case a: JsonReaderError => JsonReaderError.ShowInstance.shows(a)
-      case a: JsonWriterError => JsonWriterError.ShowInstance.shows(a)
+    implicit val show: Show[Error] = Show.show {
+      case a: JsonReaderError => JsonReaderError.ShowInstance.show(a)
+      case a: JsonWriterError => JsonWriterError.ShowInstance.show(a)
     }
   }
 
   object JsonReaderError {
-    implicit val ShowInstance: Show[JsonReaderError] = Show shows { f =>
+    implicit val ShowInstance: Show[JsonReaderError] = Show.show { f =>
       s"JsonReaderError. Cannot read JSON: <${f.value}>. Cause: ${f.message}"
     }
   }
 
   object JsonWriterError {
-    implicit val ShowInstance: Show[JsonWriterError] = Show shows { f =>
+    implicit val ShowInstance: Show[JsonWriterError] = Show.show { f =>
       s"JsonWriterError. Cannot write value as JSON: <${f.value}>. Cause: ${f.message}"
     }
   }

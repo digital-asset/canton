@@ -36,12 +36,6 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
         "canton.participants.participant1.parameters.engine.contract-state-mode"
       )
     ),
-    (3, 5, 8) -> Transforms(
-      Seq(
-        // TODO(#33681): Remove this transform once the traffic enforcement configs have been ported to main
-        "canton.participants.participant1.traffic-enforcement"
-      )
-    ),
   )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking

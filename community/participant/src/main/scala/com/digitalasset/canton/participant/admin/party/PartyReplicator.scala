@@ -11,7 +11,12 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  LifeCycle,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.PartyReplicationArguments
@@ -94,6 +99,7 @@ final class PartyReplicator(
     executionContext: ExecutionContext,
     actorSystem: ActorSystem,
 ) extends FlagCloseable
+    with HasCloseContext
     with NamedLogging {
 
   // Party replications state must be modified only within the simple executionQueue.
@@ -1406,7 +1412,11 @@ final class PartyReplicator(
   )(code: => Unit)(implicit traceContext: TraceContext): Unit = {
     logger.debug(s"Scheduling next check in $delta")
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      clock.scheduleAfter(_ => code, delta.asJava),
+      clock.scheduleAfterCancelledOnShutdown(
+        _ => code,
+        s"${getClass.getName}: scheduled execution",
+        delta.asJava,
+      ),
       "party replicator progress scheduling",
     )
   }

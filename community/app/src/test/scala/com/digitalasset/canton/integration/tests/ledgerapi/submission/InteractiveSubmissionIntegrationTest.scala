@@ -23,7 +23,6 @@ import com.daml.ledger.javaapi.data.codegen.ContractId as CodeGenCID
 import com.daml.ledger.javaapi.data.{Command, DisclosedContract}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.admin.api.client.data.TemplateId
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -36,32 +35,15 @@ import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.Unkn
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.examples.java.trailingnone.TrailingNone
 import com.digitalasset.canton.examples.java.{cycle as M, trailingnone as T}
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  HasCycleUtils,
-  SharedEnvironment,
-}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
-import com.digitalasset.canton.topology.transaction.{
-  HostingParticipant,
-  MultiTransactionSignature,
-  NamespaceDelegation,
-  ParticipantPermission,
-  PartyToKeyMapping,
-  PartyToParticipant,
-  SignedTopologyTransaction,
-  SingleTransactionSignature,
-  TopologyChangeOp,
-  TopologyTransaction,
-}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ExternalParty, Namespace, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
@@ -1308,7 +1290,6 @@ class InteractiveSubmissionMultiSynchronizerIntegrationTest
   }
 }
 
-@UnstableTest // TODO(#20038)
 class InteractiveSubmissionIntegrationTestTimeouts
     extends InteractiveSubmissionIntegrationTestSetup {
   "timeout if CPN does not respond" in { implicit env =>

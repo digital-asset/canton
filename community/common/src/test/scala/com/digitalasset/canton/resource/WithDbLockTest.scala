@@ -78,7 +78,9 @@ trait WithDbLockTest extends FixtureAsyncWordSpec with BaseTest with HasExecutio
 
       // just delay long enough so un-synchronized calls would likely be noticed
       FutureUtil.doNotAwait(
-        clock.scheduleAfter(_ => promise.success(()), ofMillis(50)).failOnShutdown("delay"),
+        clock
+          .scheduleAfter(_ => promise.success(()), "WithDbLockTest", ofMillis(50))
+          .failOnShutdown("delay"),
         "delay",
       )
 

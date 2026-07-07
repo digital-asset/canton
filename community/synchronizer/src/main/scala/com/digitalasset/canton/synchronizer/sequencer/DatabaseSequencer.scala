@@ -13,7 +13,12 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeL
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.error.CantonBaseError
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  LifeCycle,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.{DbExceptionRetryPolicy, Storage}
@@ -169,7 +174,8 @@ class DatabaseSequencer(
       lsuSequencingBounds,
       disableSubmissionChecksForTesting,
     )
-    with FlagCloseable {
+    with FlagCloseable
+    with HasCloseContext {
 
   private val psid = cryptoApi.psid
   private val protocolVersion: ProtocolVersion = psid.protocolVersion
@@ -241,7 +247,11 @@ class DatabaseSequencer(
       offlineCutoffDuration: NonNegativeFiniteDuration,
   ): Unit = {
     def schedule(): Unit = {
-      val _ = clock.scheduleAfter(_ => markOffline(), checkInterval.unwrap)
+      val _ = clock.scheduleAfterCancelledOnShutdown(
+        _ => markOffline(),
+        s"${getClass.getName}: mark lagging sequencers offline",
+        checkInterval.unwrap,
+      )
     }
 
     def markOfflineF()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {

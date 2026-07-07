@@ -7,8 +7,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.tea.projection.db.{TeaDbProjection, TeaDbTrafficStore}
-import com.digitalasset.canton.tea.projection.memory.{TeaMemoryProjection, TeaMemoryTrafficStore}
+import com.digitalasset.canton.tea.projection.db.{TeaDbProjectionFactory, TeaDbTrafficStore}
+import com.digitalasset.canton.tea.projection.memory.{
+  TeaMemoryProjectionFactory,
+  TeaMemoryTrafficStore,
+}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.typed.{ActorSystem, Behavior}
@@ -28,7 +31,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * Single function that builds a projection from a stream source and handler The trait abstracts
   * over the in-memory and DB implementations
   */
-trait TeaProjection { this: NamedLogging =>
+trait TeaProjectionFactory { this: NamedLogging =>
 
   /** Build a projection behavior for a single ingestion stream, reusing the shared storage. */
   def projection(
@@ -106,7 +109,7 @@ trait TeaProjection { this: NamedLogging =>
     }
 }
 
-object TeaProjection {
+object TeaProjectionFactory {
 
   /** Open the shared storage once, based on the configured storage backend. */
   def create(
@@ -115,18 +118,18 @@ object TeaProjection {
       config: ProjectionConfig,
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
-  )(implicit system: ActorSystem[?]): (TeaProjection, TeaTrafficStore) = {
+  )(implicit system: ActorSystem[?]): (TeaProjectionFactory, TeaTrafficStore) = {
     import system.executionContext
 
     storage match {
       case db: DbStorage =>
         val store = new TeaDbTrafficStore(db, loggerFactory, timeouts)
-        val projection: TeaProjection =
-          new TeaDbProjection(db, loggerFactory, store, eventSource, config)
+        val projection: TeaProjectionFactory =
+          new TeaDbProjectionFactory(db, loggerFactory, store, eventSource, config)
         (projection, store)
       case _: MemoryStorage =>
         val store = new TeaMemoryTrafficStore()
-        val projection: TeaProjection = new TeaMemoryProjection(loggerFactory, store)
+        val projection: TeaProjectionFactory = new TeaMemoryProjectionFactory(loggerFactory, store)
         (projection, store)
     }
   }

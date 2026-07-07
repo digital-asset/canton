@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.http
 
+import cats.instances.option.*
+import cats.syntax.show.*
 import com.daml.grpc.adapter.PekkoExecutionSequencerPool
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.tls.TlsServerConfig
@@ -17,8 +19,6 @@ import com.digitalasset.canton.tracing.NoTracing
 import io.grpc.Channel
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
-import scalaz.std.option.*
-import scalaz.syntax.show.*
 
 import java.nio.file.Path
 
@@ -32,6 +32,7 @@ object HttpApiServer extends NoTracing {
       loggerFactory: NamedLoggerFactory,
       authInterceptor: AuthInterceptor,
       packagePreferenceBackend: PackagePreferenceBackend,
+      trafficEnforcementEnabled: Boolean,
       apiLoggingConfig: ApiLoggingConfig,
   )(implicit
       jsonApiMetrics: HttpApiMetrics
@@ -50,6 +51,7 @@ object HttpApiServer extends NoTracing {
           channel,
           packageSyncService,
           packagePreferenceBackend,
+          trafficEnforcementEnabled,
           apiLoggingConfig,
           loggerFactory,
         )(
@@ -67,7 +69,7 @@ object HttpApiServer extends NoTracing {
           s", port=${config.port}" +
           s", portFile=${config.portFile: Option[Path]}" +
           s", pathPrefix=${config.pathPrefix}" +
-          s", wsConfig=${config.websocketConfig.shows}" +
+          s", wsConfig=${config.websocketConfig.show}" +
           ")"
       )
     }

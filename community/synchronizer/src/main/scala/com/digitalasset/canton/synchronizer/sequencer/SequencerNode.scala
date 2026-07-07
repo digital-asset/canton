@@ -85,7 +85,8 @@ import com.digitalasset.canton.synchronizer.sequencing.service.{
 import com.digitalasset.canton.synchronizer.server.DynamicGrpcServer
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.PsidLookup
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreInitializationStatus.Initialized
+import com.digitalasset.canton.topology.admin.grpc.{PsidLookup, TopologyStoreInitializationStatus}
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
@@ -172,11 +173,15 @@ class SequencerNodeBootstrap(
   private val topologyClient = new SingleUseCell[SynchronizerTopologyClient]()
   private val synchronizerTimeTracker = new SingleUseCell[SynchronizerTimeTracker]()
 
-  override protected def sequencedTopologyStores: Seq[TopologyStore[SynchronizerStore]] =
-    synchronizerTopologyManager.get.map(_.store).toList
+  override protected def sequencedTopologyStores
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyStore]] =
+    synchronizerTopologyManager.get.map(mgr => Initialized(mgr.store)).toList
 
-  override protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager] =
-    synchronizerTopologyManager.get.toList
+  override protected def sequencedTopologyManagers
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyManager.Aux]] =
+    synchronizerTopologyManager.get
+      .map(Initialized[SynchronizerStore, TopologyManager.Aux](_))
+      .toList
 
   override protected def lookupTopologyClient(
       psid: PhysicalSynchronizerId

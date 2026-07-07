@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 
 object AuthenticationTokenManagerTest extends org.mockito.MockitoSugar with ArgumentMatchersSugar {
   val mockClock: Clock = mock[Clock]
-  when(mockClock.scheduleAt(any[CantonTimestamp => Unit], any[CantonTimestamp]))
+  when(mockClock.scheduleAt(any[CantonTimestamp => Unit], any[String], any[CantonTimestamp]))
     .thenReturn(FutureUnlessShutdown.unit)
   when(AuthenticationTokenManagerTest.mockClock.now).thenReturn(CantonTimestamp.Epoch)
 }
@@ -124,8 +124,8 @@ class AuthenticationTokenManagerTest extends AnyWordSpec with BaseTest with HasE
   "automatically renew token in due time" in {
     val clockMock = mock[Clock]
     val retryMe = new AtomicReference[Option[CantonTimestamp => Unit]](None)
-    when(clockMock.scheduleAt(any[CantonTimestamp => Unit], any[CantonTimestamp]))
-      .thenAnswer[CantonTimestamp => Unit, CantonTimestamp] { case (action, _) =>
+    when(clockMock.scheduleAt(any[CantonTimestamp => Unit], any[String], any[CantonTimestamp]))
+      .thenAnswer[CantonTimestamp => Unit, String, CantonTimestamp] { case (action, _, _) =>
         retryMe.getAndUpdate(_ => Some(action)) shouldBe empty
         FutureUnlessShutdown.unit
       }

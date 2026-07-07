@@ -801,16 +801,11 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       txSeq: Gen[Vector[Boolean]],
       codePath: Gen[FlatTransactionCodePath],
   ) = {
-    import com.daml.scalautil.TraverseFMSyntax.*
-    import scalaz.std.list.*
-    import scalaz.std.scalaFuture.*
-
     val trialData = Gen
       .listOfN(trials, Gen.zip(txSeq, codePath))
       .sample getOrElse sys.error("impossible Gen failure")
-
-    trialData
-      .traverseFM { case (boolSeq, cp) =>
+    com.digitalasset.canton.util.MonadUtil
+      .sequentialTraverse(trialData) { case (boolSeq, cp) =>
         for {
           from <- ledgerDao.lookupLedgerEnd()
           commands <- storeSync(boolSeq map (if (_) cp.makeMatching() else cp.makeNonMatching()))

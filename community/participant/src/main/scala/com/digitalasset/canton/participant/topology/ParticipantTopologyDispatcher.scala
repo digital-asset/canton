@@ -403,9 +403,11 @@ private class SynchronizerOnboardingOutbox(
         synchronizeWithClosing(functionFullName)(onlyApplicable(candidates))
       )
       converted <- synchronizeWithClosing(functionFullName)(
-        convertTransactions(applicable).leftMap[SynchronizerRegistryError](
-          SynchronizerRegistryError.TopologyConversionError.Error(_)
-        )
+        TopologySigningHelper
+          .convertTransactions(applicable, protocolVersion, crypto, topologyConfig)
+          .leftMap[SynchronizerRegistryError](
+            SynchronizerRegistryError.TopologyConversionError.Error(_)
+          )
       )
       _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(converted))
     } yield converted

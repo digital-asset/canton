@@ -377,12 +377,13 @@ sealed trait ToxiproxyBftSequencerConnectionsIntegrationTest
 
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           env.environment.clock.scheduleAfter(
-            { _ =>
+            action = { _ =>
               toxics.foreach(_.remove())
               blocking(lock.exclusive(availableProxies += pickedProxy))
               run(disrupter, iteration + 1)
             },
-            durationOfDisruption.asJava,
+            taskName = s"${getClass.getName}: disrupter",
+            delta = durationOfDisruption.asJava,
           ),
           "running toxics",
         )

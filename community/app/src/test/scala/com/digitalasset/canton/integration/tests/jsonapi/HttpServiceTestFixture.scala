@@ -26,7 +26,6 @@ import org.apache.pekko.http.scaladsl.model.*
 import org.apache.pekko.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.util.ByteString
-import scalaz.syntax.tag.*
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}

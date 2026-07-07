@@ -173,7 +173,11 @@ class SequencerConnectionPoolImpl private[sequencing] (
     }
 
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      wallClock.scheduleAfter(_ => signalTimeout(), initializationTimeout.asJavaApproximation),
+      wallClock.scheduleAfterCancelledOnShutdown(
+        _ => signalTimeout(),
+        s"${getClass.getName}: setup timeout",
+        initializationTimeout.asJavaApproximation,
+      ),
       s"connection-pool-initialization-timeout",
     )
   }
@@ -332,7 +336,12 @@ class SequencerConnectionPoolImpl private[sequencing] (
           s"Scheduling restart after ${LoggerUtil.roundDurationForHumans(delay.duration)}"
         )
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-          wallClock.scheduleAfter(_ => restart(), delay.duration),
+          wallClock
+            .scheduleAfterCancelledOnShutdown(
+              _ => restart(),
+              s"${getClass.getName}: scheduling restart",
+              delay.duration,
+            ),
           s"restart-connection-${connection.name}",
         )
       }

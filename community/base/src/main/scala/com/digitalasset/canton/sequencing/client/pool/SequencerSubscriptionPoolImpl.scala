@@ -215,7 +215,11 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
             logger.debug(
               s"Scheduling new check in ${LoggerUtil.roundDurationForHumans(delay.duration)}"
             )
-            wallClock.scheduleAfter(_ => adjustInternal(), delay.duration)
+            wallClock.scheduleAfterCancelledOnShutdown(
+              _ => adjustInternal(),
+              s"${getClass.getName}: schedule next adjustment",
+              delay.duration,
+            )
           },
           "adjustConnectionsIfNeeded",
         )

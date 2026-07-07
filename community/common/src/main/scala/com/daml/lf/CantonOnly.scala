@@ -11,9 +11,6 @@ import com.digitalasset.canton.protocol.{
   LfVersionedTransaction,
 }
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.Compiler
 
 /** As part of upstream Daml-LF refactoring, previously accessible capabilities have become
   * Canton-private. This enables Daml-LF to limit its API surface area while still allowing Canton
@@ -26,14 +23,4 @@ object CantonOnly {
       roots: ImmArray[LfNodeId],
   ): LfVersionedTransaction =
     LfSerializationVersion.asVersionedTransaction(LfTransaction(nodes, roots))
-
-  def tryBuildCompiledPackages(
-      darMap: Map[PackageId, Ast.Package],
-      enableLfDev: Boolean,
-  ): PureCompiledPackages =
-    PureCompiledPackages.assertBuild(
-      darMap,
-      if (enableLfDev) Compiler.Config.Dev
-      else Compiler.Config.Default,
-    )
 }

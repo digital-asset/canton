@@ -28,7 +28,7 @@ import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.
   PrepareRequest as PrepareRequestInternal,
 }
 import com.digitalasset.canton.ledger.api.validation.GetPreferredPackagesRequestValidator.PackageVettingRequirements
-import com.digitalasset.canton.ledger.api.{Commands as ApiCommands, PackageReference, SubmissionId}
+import com.digitalasset.canton.ledger.api.{Commands as ApiCommands, PackageReference}
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.{
   InteractiveSubmissionExecuteError,
   InteractiveSubmissionPreparationError,
@@ -178,7 +178,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         ErrorLoggingContext.fromOption(
           logger,
           loggingContext,
-          request.commands.submissionId.map(SubmissionId.unwrap),
+          request.commands.submissionId.map(_.unwrap),
         )
 
       if (config.enforceSingleRootNode && cmds.length > 1) {

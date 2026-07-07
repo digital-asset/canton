@@ -15,6 +15,9 @@ import org.scalatest.verbs.ShouldVerb
 object UpgradingBaseTest extends ShouldVerb {
   lazy val UpgradeV1: String = getResourcePath("Upgrade-1.0.0.dar")
   lazy val UpgradeV2: String = getResourcePath("Upgrade-2.0.0.dar")
+
+  lazy val UpgradeCKV1: String = getResourcePath("UpgradeCK-1.0.0.dar")
+  lazy val UpgradeCKV2: String = getResourcePath("UpgradeCK-2.0.0.dar")
   lazy val AppUpgradeV1: String = getResourcePath("AppUpgrade-1.0.0.dar")
   lazy val AppUpgradeV2: String = getResourcePath("AppUpgrade-2.0.0.dar")
 

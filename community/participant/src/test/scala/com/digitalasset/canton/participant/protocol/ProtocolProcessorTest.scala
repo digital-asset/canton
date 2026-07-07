@@ -28,6 +28,7 @@ import com.digitalasset.canton.lifecycle.{
   DefaultPromiseUnlessShutdownFactory,
   FlagCloseable,
   FutureUnlessShutdown,
+  LifeCycle,
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -93,8 +94,8 @@ import com.digitalasset.canton.{
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as isEq
-import org.scalatest.Tag
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{Assertion, Tag}
 
 import java.time.Duration
 import java.util.UUID
@@ -249,6 +250,37 @@ class ProtocolProcessorTest
       ] = None,
       submissionDataForTrackerO: Option[SubmissionTrackerData] = None,
       overrideInFlightSubmissionStoreO: Option[InFlightSubmissionStore] = None,
+  )(
+      test: (
+          (TestInstance, SyncPersistentState, SyncEphemeralState, ParticipantNodeEphemeralState)
+      ) => Assertion
+  ): Unit = {
+    val (sut, persistent, ephemeral, node) = buildTestEnv(
+      overrideConstructedPendingRequestDataO = overrideConstructedPendingRequestDataO,
+      startingPoints = startingPoints,
+      pendingSubmissionMap = pendingSubmissionMap,
+      sequencerClient = sequencerClient,
+      crypto = crypto,
+      overrideInFlightSubmissionSynchronizerTrackerO =
+        overrideInFlightSubmissionSynchronizerTrackerO,
+      submissionDataForTrackerO = submissionDataForTrackerO,
+      overrideInFlightSubmissionStoreO = overrideInFlightSubmissionStoreO,
+    )
+    test((sut, persistent, ephemeral, node))
+    LifeCycle.close(sut)(logger)
+  }
+
+  private def buildTestEnv(
+      overrideConstructedPendingRequestDataO: Option[TestPendingRequestData],
+      startingPoints: ProcessingStartingPoints,
+      pendingSubmissionMap: concurrent.Map[Int, Unit],
+      sequencerClient: SequencerClientSend,
+      crypto: SynchronizerCryptoClient,
+      overrideInFlightSubmissionSynchronizerTrackerO: Option[
+        InFlightSubmissionSynchronizerTracker
+      ],
+      submissionDataForTrackerO: Option[SubmissionTrackerData],
+      overrideInFlightSubmissionStoreO: Option[InFlightSubmissionStore],
   ): (
       TestInstance,
       SyncPersistentState,
@@ -473,15 +505,16 @@ class ProtocolProcessorTest
 
     "succeed without errors" in {
       val submissionMap = TrieMap[Int, Unit]()
-      val (sut, _persistent, _ephemeral, _) =
-        testProcessingSteps(pendingSubmissionMap = submissionMap)
-      sut
-        .submit(0, topologySnapshot)
-        .valueOrFailShutdown("submission")
-        .futureValue
-        .failOnShutdown("shutting down while test is running")
-        .futureValue shouldBe ()
-      submissionMap.get(0) shouldBe Some(()) // store the pending submission
+      testProcessingSteps(pendingSubmissionMap = submissionMap) {
+        case (sut, _persistent, _ephemeral, _) =>
+          sut
+            .submit(0, topologySnapshot)
+            .valueOrFailShutdown("submission")
+            .futureValue
+            .failOnShutdown("shutting down while test is running")
+            .futureValue shouldBe ()
+          submissionMap.get(0) shouldBe Some(()) // store the pending submission
+      }
     }
 
     "clean up the pending submissions when send request fails" in {
@@ -501,48 +534,50 @@ class ProtocolProcessorTest
         )(anyTraceContext, any[MetricsContext])
       )
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, Unit](sendError))
-      val (sut, _persistent, _ephemeral, _) =
-        testProcessingSteps(
-          sequencerClient = failingSequencerClient,
-          pendingSubmissionMap = submissionMap,
+
+      testProcessingSteps(
+        sequencerClient = failingSequencerClient,
+        pendingSubmissionMap = submissionMap,
+      ) { case (sut, _persistent, _ephemeral, _) =>
+        val submissionResult = loggerFactory.assertLogs(
+          sut.submit(0, topologySnapshot).futureValueUS,
+          _.warningMessage should include(s"Failed to submit submission due to"),
         )
 
-      val submissionResult = loggerFactory.assertLogs(
-        sut.submit(0, topologySnapshot).futureValueUS,
-        _.warningMessage should include(s"Failed to submit submission due to"),
-      )
-
-      submissionResult shouldEqual Left(TestProcessorError(SequencerRequestError(sendError)))
-      submissionMap.get(0) shouldBe None // remove the pending submission
+        submissionResult shouldEqual Left(TestProcessorError(SequencerRequestError(sendError)))
+        submissionMap.get(0) shouldBe None // remove the pending submission
+      }
     }
 
     "clean up the pending submissions when no request is received" in {
       val submissionMap = TrieMap[Int, Unit]()
-      val (sut, _persistent, _ephemeral, _) =
-        testProcessingSteps(pendingSubmissionMap = submissionMap)
 
-      sut
-        .submit(1, topologySnapshot)
-        .valueOrFailShutdown("submission")
-        .futureValue
-        .failOnShutdown("shutting down while test is running")
-        .futureValue shouldBe ()
-      submissionMap.get(1) shouldBe Some(())
-      val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
-      val asyncRes = sut
-        .processRequest(
-          afterDecisionTime,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
-      eventually() {
-        submissionMap.get(1) shouldBe None
+      testProcessingSteps(pendingSubmissionMap = submissionMap) {
+        case (sut, _persistent, _ephemeral, _) =>
+          sut
+            .submit(1, topologySnapshot)
+            .valueOrFailShutdown("submission")
+            .futureValue
+            .failOnShutdown("shutting down while test is running")
+            .futureValue shouldBe ()
+          submissionMap.get(1) shouldBe Some(())
+          val afterDecisionTime =
+            parameters.decisionTimeFor(CantonTimestamp.Epoch).value.plusMillis(1)
+          val asyncRes = sut
+            .processRequest(
+              afterDecisionTime,
+              rc,
+              requestSc,
+              someRequestBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue
+          waitForAsyncResult(asyncRes)
+          eventually() {
+            submissionMap.get(1) shouldBe None
+          }
       }
     }
 
@@ -552,30 +587,32 @@ class ProtocolProcessorTest
         loggerFactory,
         parameters.parameters,
       ).forOwnerAndSynchronizer(participant, psid)
-      val (sut, persistent, ephemeral, _) = testProcessingSteps(crypto = crypto2)
-      val topo2 = crypto2.currentSnapshotApproximation.futureValueUS.ipsSnapshot
-      val res = sut.submit(1, topo2).onShutdown(fail("submission shutdown")).value.futureValue
-      res shouldBe Left(TestProcessorError(NoMediatorError(CantonTimestamp.Epoch)))
+      testProcessingSteps(crypto = crypto2) { case (sut, _persistent, _ephemeral, _) =>
+        val topo2 = crypto2.currentSnapshotApproximation.futureValueUS.ipsSnapshot
+        val res = sut.submit(1, topo2).onShutdown(fail("submission shutdown")).value.futureValue
+        res shouldBe Left(TestProcessorError(NoMediatorError(CantonTimestamp.Epoch)))
+      }
     }
   }
 
   "process request" should {
 
     "succeed without errors" in {
-      val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
-      val asyncRes = sut
-        .processRequest(
-          requestId.unwrap,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
-      succeed
+      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
+        val asyncRes = sut
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
+          .onShutdown(fail())
+          .futureValue
+        waitForAsyncResult(asyncRes)
+        succeed
+      }
     }
 
     "transit to confirmed" in {
@@ -588,29 +625,31 @@ class ProtocolProcessorTest
         engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
         PublishUpdateViaRecordOrderPublisher.noop,
       )
-      val (sut, _persistent, ephemeral, _) =
-        testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd))
-      val before = ephemeral.requestJournal.query(rc).value.futureValueUS
-      before shouldEqual None
 
-      val requestTs = CantonTimestamp.Epoch
-      val asyncRes = sut
-        .processRequest(
-          requestTs,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
-      val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
-      requestState.value.state shouldEqual RequestState.Pending
-      ephemeral.phase37Synchronizer
-        .awaitConfirmed(TestPendingRequestDataType)(RequestId(requestTs))
-        .futureValueUS shouldBe RequestOutcome.Success(Wrapped(pd))
+      testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd)) {
+        case (sut, _persistent, ephemeral, _) =>
+          val before = ephemeral.requestJournal.query(rc).value.futureValueUS
+          before shouldEqual None
+
+          val requestTs = CantonTimestamp.Epoch
+          val asyncRes = sut
+            .processRequest(
+              requestTs,
+              rc,
+              requestSc,
+              someRequestBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue
+          waitForAsyncResult(asyncRes)
+          val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
+          requestState.value.state shouldEqual RequestState.Pending
+          ephemeral.phase37Synchronizer
+            .awaitConfirmed(TestPendingRequestDataType)(RequestId(requestTs))
+            .futureValueUS shouldBe RequestOutcome.Success(Wrapped(pd))
+      }
     }
 
     "leave the request state unchanged when doing a clean replay" in {
@@ -624,42 +663,41 @@ class ProtocolProcessorTest
           engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
           PublishUpdateViaRecordOrderPublisher.noop,
         )
-      val (sut, _persistent, ephemeral, _) =
-        testProcessingSteps(
-          overrideConstructedPendingRequestDataO = Some(pendingData),
-          startingPoints = ProcessingStartingPoints.tryCreate(
-            cleanReplay = MessageCleanReplayStartingPoint(
-              rc,
-              requestSc,
-              CantonTimestamp.Epoch.minusSeconds(20),
-            ),
-            processing = MessageProcessingStartingPoint(
-              rc + 1,
-              requestSc + 1,
-              CantonTimestamp.Epoch.minusSeconds(10),
-              CantonTimestamp.Epoch.minusSeconds(10),
-              RepairCounter.Genesis,
-            ),
+      testProcessingSteps(
+        overrideConstructedPendingRequestDataO = Some(pendingData),
+        startingPoints = ProcessingStartingPoints.tryCreate(
+          cleanReplay = MessageCleanReplayStartingPoint(
+            rc,
+            requestSc,
+            CantonTimestamp.Epoch.minusSeconds(20),
           ),
-        )
+          processing = MessageProcessingStartingPoint(
+            rc + 1,
+            requestSc + 1,
+            CantonTimestamp.Epoch.minusSeconds(10),
+            CantonTimestamp.Epoch.minusSeconds(10),
+            RepairCounter.Genesis,
+          ),
+        ),
+      ) { case (sut, _persistent, ephemeral, _) =>
+        val before = ephemeral.requestJournal.query(rc).value.futureValueUS
+        before shouldEqual None
 
-      val before = ephemeral.requestJournal.query(rc).value.futureValueUS
-      before shouldEqual None
-
-      val asyncRes = sut
-        .processRequest(
-          requestId.unwrap,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
-      val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
-      requestState shouldEqual None
+        val asyncRes = sut
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
+          .onShutdown(fail())
+          .futureValue
+        waitForAsyncResult(asyncRes)
+        val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
+        requestState shouldEqual None
+      }
     }
 
     "trigger a timeout when the result doesn't arrive" in {
@@ -672,46 +710,46 @@ class ProtocolProcessorTest
         engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
         PublishUpdateViaRecordOrderPublisher.noop,
       )
-      val (sut, _persistent, ephemeral, _) =
-        testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd))
+      testProcessingSteps(overrideConstructedPendingRequestDataO = Some(pd)) {
+        case (sut, _persistent, ephemeral, _) =>
+          val journal = ephemeral.requestJournal
 
-      val journal = ephemeral.requestJournal
+          val initialSTate = journal.query(rc).value.futureValueUS
+          initialSTate shouldEqual None
 
-      val initialSTate = journal.query(rc).value.futureValueUS
-      initialSTate shouldEqual None
+          // Process a request but never a corresponding response
+          val asyncRes = sut
+            .processRequest(
+              CantonTimestamp.Epoch,
+              rc,
+              requestSc,
+              someRequestBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue
+          waitForAsyncResult(asyncRes)
 
-      // Process a request but never a corresponding response
-      val asyncRes = sut
-        .processRequest(
-          CantonTimestamp.Epoch,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
+          ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
+            requestSc
+          ) shouldBe BeforeHead
 
-      ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
-        requestSc
-      ) shouldBe BeforeHead
+          // The request remains at Pending until the timeout is triggered
+          always() {
+            journal.query(rc).value.futureValueUS.value.state shouldEqual RequestState.Pending
+          }
 
-      // The request remains at Pending until the timeout is triggered
-      always() {
-        journal.query(rc).value.futureValueUS.value.state shouldEqual RequestState.Pending
-      }
+          // Trigger the timeout for the request
+          ephemeral.requestTracker.tick(
+            requestSc + 1,
+            parameters.decisionTimeFor(requestId.unwrap).value,
+          )
 
-      // Trigger the timeout for the request
-      ephemeral.requestTracker.tick(
-        requestSc + 1,
-        parameters.decisionTimeFor(requestId.unwrap).value,
-      )
-
-      eventually() {
-        val state = journal.query(rc).value.futureValueUS
-        state.value.state shouldEqual RequestState.Clean
+          eventually() {
+            val state = journal.query(rc).value.futureValueUS
+            state.value.state shouldEqual RequestState.Clean
+          }
       }
     }
 
@@ -741,22 +779,24 @@ class ProtocolProcessorTest
         isReceipt = false,
       )
 
-      val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
-      val asyncRes = loggerFactory.assertLogs(
-        sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            requestBatchWrongRH,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue,
-        _.warningMessage should include(s"Request $rc: Found malformed payload: WrongRootHash"),
-      )
-      waitForAsyncResult(asyncRes)
+      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
+        val asyncRes = loggerFactory.assertLogs(
+          sut
+            .processRequest(
+              requestId.unwrap,
+              rc,
+              requestSc,
+              requestBatchWrongRH,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue,
+          _.warningMessage should include(s"Request $rc: Found malformed payload: WrongRootHash"),
+        )
+        waitForAsyncResult(asyncRes)
+        succeed
+      }
     }
 
     "log decryption errors" in {
@@ -782,23 +822,24 @@ class ProtocolProcessorTest
         isReceipt = false,
       )
 
-      val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
-      val asyncRes = loggerFactory.assertLogs(
-        sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            requestBatchDecryptError,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue,
-        _.warningMessage should include(s"Request $rc: Decryption error: SyncCryptoDecryptError("),
-      )
-      waitForAsyncResult(asyncRes)
-      succeed
+      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
+        val asyncRes = loggerFactory.assertLogs(
+          sut
+            .processRequest(
+              requestId.unwrap,
+              rc,
+              requestSc,
+              requestBatchDecryptError,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue,
+          _.warningMessage should include(s"Request $rc: Decryption error: SyncCryptoDecryptError("),
+        )
+        waitForAsyncResult(asyncRes)
+        succeed
+      }
     }
 
     "check the declared mediator ID against the root hash message mediator" taggedAs {
@@ -818,24 +859,27 @@ class ProtocolProcessorTest
         isReceipt = false,
       )
 
-      val (sut, _persistent, _ephemeral, _) = testProcessingSteps()
-      loggerFactory
-        .assertLogs(
-          sut
-            .processRequest(
-              requestId.unwrap,
-              rc,
-              requestSc,
-              requestBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail()),
-          _.errorMessage should include(
-            s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
-          ),
-        )
-        .futureValue
+      testProcessingSteps() { case (sut, _persistent, _ephemeral, _) =>
+        loggerFactory
+          .assertLogs(
+            sut
+              .processRequest(
+                requestId.unwrap,
+                rc,
+                requestSc,
+                requestBatch,
+                publishNoop,
+                NonNegativeLong.zero,
+              )
+              .onShutdown(fail()),
+            _.errorMessage should include(
+              s"Mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} declared in views is not the recipient $otherMediatorGroup of the root hash message"
+            ),
+          )
+          .futureValue
+          .discard
+        succeed
+      }
 
     }
 
@@ -853,115 +897,119 @@ class ProtocolProcessorTest
         parameters.parameters,
       ).forOwnerAndSynchronizer(participant, psid)
 
-      val (sut, _persistent, _ephemeral, _) = testProcessingSteps(crypto = testCrypto)
-      loggerFactory
-        .assertLogs(
-          sut
-            .processRequest(
-              requestId.unwrap,
-              rc,
-              requestSc,
-              someRequestBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail()),
-          _.shouldBeCantonError(
-            SyncServiceAlarm,
-            _ shouldBe s"Request $rc: Chosen mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} is inactive at ${requestId.unwrap}. Skipping this request.",
-          ),
-        )
-        .futureValue
+      testProcessingSteps(crypto = testCrypto) { case (sut, _persistent, _ephemeral, _) =>
+        loggerFactory
+          .assertLogs(
+            sut
+              .processRequest(
+                requestId.unwrap,
+                rc,
+                requestSc,
+                someRequestBatch,
+                publishNoop,
+                NonNegativeLong.zero,
+              )
+              .onShutdown(fail()),
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe s"Request $rc: Chosen mediator ${MediatorGroupRecipient(MediatorGroupIndex.zero)} is inactive at ${requestId.unwrap}. Skipping this request.",
+            ),
+          )
+          .futureValue
+          .discard
+        succeed
+      }
     }
 
     "notify the in-flight submission tracker with the root hash when necessary" in {
-      val (sut, _persistent, _ephemeral, _) =
-        testProcessingSteps(
-          overrideInFlightSubmissionSynchronizerTrackerO =
-            Some(mockInFlightSubmissionSynchronizerTracker),
-          submissionDataForTrackerO = Some(
-            SubmissionTrackerData(
-              submittingParticipant = participant,
-              maxSequencingTime = requestId.unwrap.plusSeconds(10),
-            )
-          ),
-        )
 
-      val asyncRes = sut
-        .processRequest(
-          requestId.unwrap,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
+      testProcessingSteps(
+        overrideInFlightSubmissionSynchronizerTrackerO =
+          Some(mockInFlightSubmissionSynchronizerTracker),
+        submissionDataForTrackerO = Some(
+          SubmissionTrackerData(
+            submittingParticipant = participant,
+            maxSequencingTime = requestId.unwrap.plusSeconds(10),
+          )
+        ),
+      ) { case (sut, _persistent, _ephemeral, _) =>
+        val asyncRes = sut
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
+          .onShutdown(fail())
+          .futureValue
+        waitForAsyncResult(asyncRes)
 
-      verify(mockInFlightSubmissionSynchronizerTracker).observeSequencedRootHash(
-        isEq(someRequestBatch.rootHashMessage.rootHash),
-        isEq(SequencedSubmission(requestId.unwrap)),
-      )(anyTraceContext)
+        verify(mockInFlightSubmissionSynchronizerTracker).observeSequencedRootHash(
+          isEq(someRequestBatch.rootHashMessage.rootHash),
+          isEq(SequencedSubmission(requestId.unwrap)),
+        )(anyTraceContext)
+        succeed
+      }
     }
 
     "not notify the in-flight submission tracker when the message is a receipt" in {
-      val (sut, _persistent, _ephemeral, _) =
-        testProcessingSteps(
-          overrideInFlightSubmissionSynchronizerTrackerO =
-            Some(mockInFlightSubmissionSynchronizerTracker),
-          submissionDataForTrackerO = Some(
-            SubmissionTrackerData(
-              submittingParticipant = participant,
-              maxSequencingTime = requestId.unwrap.plusSeconds(10),
-            )
-          ),
-        )
+      testProcessingSteps(
+        overrideInFlightSubmissionSynchronizerTrackerO =
+          Some(mockInFlightSubmissionSynchronizerTracker),
+        submissionDataForTrackerO = Some(
+          SubmissionTrackerData(
+            submittingParticipant = participant,
+            maxSequencingTime = requestId.unwrap.plusSeconds(10),
+          )
+        ),
+      ) { case (sut, _persistent, _ephemeral, _) =>
+        val asyncRes = sut
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch.copy(isReceipt = true),
+            publishNoop,
+            NonNegativeLong.zero,
+          )
+          .onShutdown(fail())
+          .futureValue
+        waitForAsyncResult(asyncRes)
 
-      val asyncRes = sut
-        .processRequest(
-          requestId.unwrap,
-          rc,
-          requestSc,
-          someRequestBatch.copy(isReceipt = true),
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
-
-      verifyZeroInteractions(mockInFlightSubmissionSynchronizerTracker)
+        verifyZeroInteractions(mockInFlightSubmissionSynchronizerTracker)
+        succeed
+      }
     }
 
     "not notify the in-flight submission tracker when not submitting participant" in {
-      val (sut, _persistent, _ephemeral, _) =
-        testProcessingSteps(
-          overrideInFlightSubmissionSynchronizerTrackerO =
-            Some(mockInFlightSubmissionSynchronizerTracker),
-          submissionDataForTrackerO = Some(
-            SubmissionTrackerData(
-              submittingParticipant = otherParticipant,
-              maxSequencingTime = requestId.unwrap.plusSeconds(10),
-            )
-          ),
-        )
+      testProcessingSteps(
+        overrideInFlightSubmissionSynchronizerTrackerO =
+          Some(mockInFlightSubmissionSynchronizerTracker),
+        submissionDataForTrackerO = Some(
+          SubmissionTrackerData(
+            submittingParticipant = otherParticipant,
+            maxSequencingTime = requestId.unwrap.plusSeconds(10),
+          )
+        ),
+      ) { case (sut, _persistent, _ephemeral, _) =>
+        val asyncRes = sut
+          .processRequest(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch,
+            publishNoop,
+            NonNegativeLong.zero,
+          )
+          .onShutdown(fail())
+          .futureValue
+        waitForAsyncResult(asyncRes)
 
-      val asyncRes = sut
-        .processRequest(
-          requestId.unwrap,
-          rc,
-          requestSc,
-          someRequestBatch,
-          publishNoop,
-          NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-      waitForAsyncResult(asyncRes)
-
-      verifyZeroInteractions(mockInFlightSubmissionSynchronizerTracker)
+        verifyZeroInteractions(mockInFlightSubmissionSynchronizerTracker)
+        succeed
+      }
     }
 
     "override the sequencing time when a preplay loses the race with the normal notification" in {
@@ -984,7 +1032,7 @@ class ProtocolProcessorTest
       // This test checks this situation when the non-normal notification loses this race.
 
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
-      val (sut, _persistent, ephemeral, nodeEphemeral) = testProcessingSteps(
+      testProcessingSteps(
         submissionDataForTrackerO = Some(
           SubmissionTrackerData(
             submittingParticipant = participant,
@@ -992,108 +1040,108 @@ class ProtocolProcessorTest
           )
         ),
         overrideInFlightSubmissionStoreO = Some(inFlightSubmissionStore),
-      )
+      ) { case (sut, persistent, ephemeral, nodeEphemeral) =>
+        val ifst = ephemeral.inFlightSubmissionSynchronizerTracker
+        val subF = for {
+          // The participant registers the submission in the in-flight submission tracker
+          _ <- ifst
+            .register(unsequencedSubmission, DeduplicationDuration(Duration.ofSeconds(10)))
+            .valueOrFailShutdown("register submission")
 
-      val ifst = ephemeral.inFlightSubmissionSynchronizerTracker
-      val subF = for {
-        // The participant registers the submission in the in-flight submission tracker
-        _ <- ifst
-          .register(unsequencedSubmission, DeduplicationDuration(Duration.ofSeconds(10)))
-          .valueOrFailShutdown("register submission")
-
-        // Even though sequenced later, the normal notification wins the race
-        _ <- ifst
-          .observeSequencing(
-            Map(
-              unsequencedSubmission.messageId -> SequencedSubmission(
-                requestId.unwrap.plusSeconds(1)
+          // Even though sequenced later, the normal notification wins the race
+          _ <- ifst
+            .observeSequencing(
+              Map(
+                unsequencedSubmission.messageId -> SequencedSubmission(
+                  requestId.unwrap.plusSeconds(1)
+                )
               )
             )
-          )
-          .failOnShutdown
+            .failOnShutdown
 
-        // The preplay gets processed and notifies the in-flight submission tracker
-        _ <- sut
-          .processRequest(
-            requestId.unwrap,
-            rc,
-            requestSc,
-            someRequestBatch,
-            publishNoop,
-            NonNegativeLong.zero,
-          )
-          .onShutdown(fail())
-          .futureValue
-          .unwrap
-          .unwrap
+          // The preplay gets processed and notifies the in-flight submission tracker
+          _ <- sut
+            .processRequest(
+              requestId.unwrap,
+              rc,
+              requestSc,
+              someRequestBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail())
+            .futureValue
+            .unwrap
+            .unwrap
 
-        // Retrieve the submission from the in-flight submission tracker store to check its info
-        sub <- inFlightSubmissionStore.lookup(changeIdHash).getOrElse(fail()).failOnShutdown
-      } yield sub
+          // Retrieve the submission from the in-flight submission tracker store to check its info
+          sub <- inFlightSubmissionStore.lookup(changeIdHash).getOrElse(fail()).failOnShutdown
+        } yield sub
 
-      val sub = subF.futureValue
-      sub.sequencingInfo.isSequenced shouldBe true
-      sub.sequencingInfo match {
-        // The information corresponds to the preplay
-        case SequencedSubmission(ts) => ts shouldBe requestId.unwrap
-        case _ => fail(s"Bad information in in-flight submission tracker:\n$sub")
+        val sub = subF.futureValue
+        sub.sequencingInfo.isSequenced shouldBe true
+        sub.sequencingInfo match {
+          // The information corresponds to the preplay
+          case SequencedSubmission(ts) => ts shouldBe requestId.unwrap
+          case _ => fail(s"Bad information in in-flight submission tracker:\n$sub")
+        }
       }
     }
 
     "log a warning for future topology timestamps and replace them with request timestamps" in {
-      val (sut, _persistent, ephemeral, _) = testProcessingSteps()
+      testProcessingSteps() { case (sut, _persistent, ephemeral, _) =>
+        val submissionTopologyTimestamp = CantonTimestamp.MaxValue
 
-      val submissionTopologyTimestamp = CantonTimestamp.MaxValue
-
-      val maliciousRootHashMessage = RootHashMessage(
-        rootHash,
-        DefaultTestIdentities.physicalSynchronizerId,
-        TestViewType,
-        submissionTopologyTimestamp, // Crafted submission timestamp (far) in the future
-        SerializedRootHashMessagePayload.empty,
-      )
-
-      val maliciousBatch = RequestAndRootHashMessage(
-        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
-        maliciousRootHashMessage,
-        MediatorGroupRecipient(MediatorGroupIndex.zero),
-        isReceipt = false,
-      )
-
-      val asyncResult = loggerFactory
-        .assertLogs(
-          sut
-            .processRequest(
-              CantonTimestamp.Epoch,
-              rc,
-              requestSc,
-              maliciousBatch,
-              publishNoop,
-              NonNegativeLong.zero,
-            )
-            .onShutdown(fail()),
-          _.shouldBeCantonError(
-            SubmissionTopologyHelper.SubmissionTopologyErrors.TopologyAlarm,
-            _ shouldBe s"Received future-dated submission timestamp $submissionTopologyTimestamp. Falling back to request timestamp ${CantonTimestamp.Epoch}.",
-          ),
+        val maliciousRootHashMessage = RootHashMessage(
+          rootHash,
+          DefaultTestIdentities.physicalSynchronizerId,
+          TestViewType,
+          submissionTopologyTimestamp, // Crafted submission timestamp (far) in the future
+          SerializedRootHashMessagePayload.empty,
         )
-        .futureValue
-      // This awaits the full asynchronous completion of the request processing.
-      // If the future timestamp was not being replaced, this call would hang indefinitely.
-      waitForAsyncResult(asyncResult)
 
-      // BeforeHead confirms the TaskScheduler has successfully processed the event and advanced the queue pointer
-      ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
-        requestSc
-      ) shouldBe BeforeHead
+        val maliciousBatch = RequestAndRootHashMessage(
+          NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
+          maliciousRootHashMessage,
+          MediatorGroupRecipient(MediatorGroupIndex.zero),
+          isReceipt = false,
+        )
 
-      // Verify the request transitioned to the Pending state.
-      ephemeral.requestJournal
-        .query(rc)
-        .value
-        .futureValueUS
-        .value
-        .state shouldBe RequestState.Pending
+        val asyncResult = loggerFactory
+          .assertLogs(
+            sut
+              .processRequest(
+                CantonTimestamp.Epoch,
+                rc,
+                requestSc,
+                maliciousBatch,
+                publishNoop,
+                NonNegativeLong.zero,
+              )
+              .onShutdown(fail()),
+            _.shouldBeCantonError(
+              SubmissionTopologyHelper.SubmissionTopologyErrors.TopologyAlarm,
+              _ shouldBe s"Received future-dated submission timestamp $submissionTopologyTimestamp. Falling back to request timestamp ${CantonTimestamp.Epoch}.",
+            ),
+          )
+          .futureValue
+        // This awaits the full asynchronous completion of the request processing.
+        // If the future timestamp was not being replaced, this call would hang indefinitely.
+        waitForAsyncResult(asyncResult)
+
+        // BeforeHead confirms the TaskScheduler has successfully processed the event and advanced the queue pointer
+        ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
+          requestSc
+        ) shouldBe BeforeHead
+
+        // Verify the request transitioned to the Pending state.
+        ephemeral.requestJournal
+          .query(rc)
+          .value
+          .futureValueUS
+          .value
+          .state shouldBe RequestState.Pending
+      }
     }
   }
 
@@ -1179,75 +1227,76 @@ class ProtocolProcessorTest
     }
 
     "succeed without errors and transit to clean" in {
-      val (sut, persistent, ephemeral, _) = testProcessingSteps()
-      addRequestState(ephemeral)
+      testProcessingSteps() { case (sut, persistent, ephemeral, _) =>
+        addRequestState(ephemeral)
 
-      val taskScheduler = ephemeral.requestTracker.taskScheduler
-      // Check the initial state is clean
-      taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
+        val taskScheduler = ephemeral.requestTracker.taskScheduler
+        // Check the initial state is clean
+        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
 
-      setUpOrFail(persistent, ephemeral)
-      valueOrFail(performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut))(
-        "result processing failed"
-      ).futureValueUS
+        setUpOrFail(persistent, ephemeral)
+        valueOrFail(performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut))(
+          "result processing failed"
+        ).futureValueUS
 
-      val finalState = ephemeral.requestJournal.query(rc).value.futureValueUS
-      finalState.value.state shouldEqual RequestState.Clean
+        val finalState = ephemeral.requestJournal.query(rc).value.futureValueUS
+        finalState.value.state shouldEqual RequestState.Clean
 
-      taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
+        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
+      }
     }
 
     "wait for request processing to finish" in {
-      val (sut, _persistent, ephemeral, _) = testProcessingSteps()
+      testProcessingSteps() { case (sut, _persistent, ephemeral, _) =>
+        val taskScheduler = ephemeral.requestTracker.taskScheduler
+        val requestJournal = ephemeral.requestJournal
 
-      val taskScheduler = ephemeral.requestTracker.taskScheduler
-      val requestJournal = ephemeral.requestJournal
+        // Register request is called before request processing is triggered
+        val handle =
+          ephemeral.phase37Synchronizer
+            .registerRequest(sut.steps.requestType)(
+              requestId
+            )
+        ephemeral.submissionTracker
+          .register(rootHash, requestId)
+          .discard
 
-      // Register request is called before request processing is triggered
-      val handle =
-        ephemeral.phase37Synchronizer
-          .registerRequest(sut.steps.requestType)(
-            requestId
+        // Process the result message before the request
+        val processF = performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut)
+
+        // Processing should not complete as the request processing has not finished
+        always()(processF.value.isCompleted shouldEqual false)
+
+        // Check the result processing has not modified the request state
+        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
+        requestJournal.query(rc).value.futureValueUS shouldBe None
+
+        // Now process the request message. This should trigger the completion of the result processing.
+        sut
+          .processRequestInternal(
+            requestId.unwrap,
+            rc,
+            requestSc,
+            someRequestBatch,
+            handle,
+            freshOwnTimelyTxF = FutureUnlessShutdown.pure(true),
+            publishNoop,
+            trafficCost = NonNegativeLong.zero,
           )
-      ephemeral.submissionTracker
-        .register(rootHash, requestId)
-        .discard
+          .onShutdown(fail())
+          .futureValue
 
-      // Process the result message before the request
-      val processF = performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut)
-
-      // Processing should not complete as the request processing has not finished
-      always()(processF.value.isCompleted shouldEqual false)
-
-      // Check the result processing has not modified the request state
-      taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
-      requestJournal.query(rc).value.futureValueUS shouldBe None
-
-      // Now process the request message. This should trigger the completion of the result processing.
-      sut
-        .processRequestInternal(
-          requestId.unwrap,
-          rc,
-          requestSc,
-          someRequestBatch,
-          handle,
-          freshOwnTimelyTxF = FutureUnlessShutdown.pure(true),
-          publishNoop,
-          trafficCost = NonNegativeLong.zero,
-        )
-        .onShutdown(fail())
-        .futureValue
-
-      eventually() {
-        processF.value.futureValueUS shouldEqual Either.unit
-        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
-        requestJournal.query(rc).value.futureValueUS.value.state shouldBe RequestState.Clean
+        eventually() {
+          processF.value.futureValueUS shouldEqual Either.unit
+          taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
+          requestJournal.query(rc).value.futureValueUS.value.state shouldBe RequestState.Clean
+        }
       }
     }
 
     "succeed without errors on clean replay, not changing the request state" in {
 
-      val (sut, _persistent, ephemeral, _) = testProcessingSteps(
+      testProcessingSteps(
         startingPoints = ProcessingStartingPoints.tryCreate(
           MessageCleanReplayStartingPoint(rc, requestSc, CantonTimestamp.Epoch.minusSeconds(1)),
           MessageProcessingStartingPoint(
@@ -1258,58 +1307,58 @@ class ProtocolProcessorTest
             RepairCounter.Genesis,
           ),
         )
-      )
-
-      addRequestState(ephemeral)
-      ephemeral.phase37Synchronizer
-        .registerRequest(TestPendingRequestDataType)(requestId)
-        .complete(
-          Some(
-            CleanReplayData(
-              rc,
-              requestSc,
-              MediatorGroupRecipient(MediatorGroupIndex.one),
-              locallyRejectedF = FutureUnlessShutdown.pure(false),
-              abortEngine = _ => (),
-              engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
+      ) { case (sut, _persistent, ephemeral, _) =>
+        addRequestState(ephemeral)
+        ephemeral.phase37Synchronizer
+          .registerRequest(TestPendingRequestDataType)(requestId)
+          .complete(
+            Some(
+              CleanReplayData(
+                rc,
+                requestSc,
+                MediatorGroupRecipient(MediatorGroupIndex.one),
+                locallyRejectedF = FutureUnlessShutdown.pure(false),
+                abortEngine = _ => (),
+                engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
+              )
             )
           )
-        )
 
-      val before = ephemeral.requestJournal.query(rc).value.futureValueUS
-      before shouldEqual None
-      val taskScheduler = ephemeral.requestTracker.taskScheduler
-      taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
+        val before = ephemeral.requestJournal.query(rc).value.futureValueUS
+        before shouldEqual None
+        val taskScheduler = ephemeral.requestTracker.taskScheduler
+        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
 
-      valueOrFail(performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut))(
-        "result processing failed"
-      ).futureValueUS
+        valueOrFail(performResultProcessing(CantonTimestamp.Epoch.plusSeconds(10), sut))(
+          "result processing failed"
+        ).futureValueUS
 
-      val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
-      requestState shouldEqual None
-      taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
+        val requestState = ephemeral.requestJournal.query(rc).value.futureValueUS
+        requestState shouldEqual None
+        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
+      }
     }
 
     "give an error when decision time has elapsed" in {
-      val (sut, persistent, ephemeral, _) = testProcessingSteps()
+      testProcessingSteps() { case (sut, persistent, ephemeral, _) =>
+        addRequestState(ephemeral, decisionTime = CantonTimestamp.Epoch.plusSeconds(5))
 
-      addRequestState(ephemeral, decisionTime = CantonTimestamp.Epoch.plusSeconds(5))
+        val taskScheduler = ephemeral.requestTracker.taskScheduler
+        taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
 
-      val taskScheduler = ephemeral.requestTracker.taskScheduler
-      taskScheduler.readSequencerCounterQueue(resultSc) shouldBe NotInserted(None, None)
+        setUpOrFail(persistent, ephemeral)
+        val result = loggerFactory.suppressWarningsAndErrors(
+          leftOrFail(performResultProcessing(CantonTimestamp.Epoch.plusSeconds(5 * 60), sut))(
+            "result processing did not return a left"
+          ).futureValueUS
+        )
 
-      setUpOrFail(persistent, ephemeral)
-      val result = loggerFactory.suppressWarningsAndErrors(
-        leftOrFail(performResultProcessing(CantonTimestamp.Epoch.plusSeconds(5 * 60), sut))(
-          "result processing did not return a left"
-        ).futureValueUS
-      )
+        result match {
+          case TestProcessorError(DecisionTimeElapsed(_, _)) =>
+            taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
 
-      result match {
-        case TestProcessorError(DecisionTimeElapsed(_, _)) =>
-          taskScheduler.readSequencerCounterQueue(resultSc) shouldBe BeforeHead
-
-        case _ => fail()
+          case _ => fail()
+        }
       }
     }
   }

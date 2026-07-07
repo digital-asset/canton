@@ -101,6 +101,15 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- Expected error when the JSON Ledger API rejects an oversized request body; used for JsonMaxInboundMessageSizeTest -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.apache.pekko.actor.ActorSystemImpl</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>Error during processing of request</contains>
+            <contains>exceeded size limit</contains>
+            <testing>true</testing>
+        </rewrite>
+
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.auth.AuthInterceptor</logger>
             <maxLevel>INFO</maxLevel>

@@ -938,6 +938,66 @@ class PekkoUtilTest
     }
   }
 
+  "foldConcat" should {
+    "append the accumulation result at the end of the stream" in {
+      val source = Source(1 to 3)
+      val f = source.foldConcat(0)(_ + _)(i => Source.single(i))
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.futureValue shouldBe Seq(1, 2, 3, 6)
+    }
+
+    "fold right" in {
+      val letters = Seq("a", "b", "c")
+      val acc = letters.foldRight("")(_ + _)
+      val source = Source(letters)
+      val f = source.foldConcat("")(_ + _)(s => Source.single(s))
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.futureValue should contain theSameElementsInOrderAs (letters :+ acc)
+    }
+
+    "append values in place" in {
+      val source = Source(1 to 3)
+      val f =
+        source
+          .foldConcat(0)((_, elem) => elem)(i => Source(i to i + 2))
+          .concat(Source(Seq(6, 7)))
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.futureValue shouldBe Seq(1, 2, 3, 3, 4, 5, 6, 7)
+    }
+
+    "foldConcat from empty stream appends init" in {
+      val f = Source.empty[Int].foldConcat(0)(_ + _)(i => Source.single(i))
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.futureValue shouldBe Seq(0)
+    }
+
+    "not start the concatenated source until the first source is finished" in {
+      val continuationCalledPromise = Promise[Unit]()
+      val (source, probe) = Source
+        .queue[Int](bufferSize = 5)
+        .foldConcat(0)(_ + _) { i =>
+          continuationCalledPromise.success(())
+          Source.single(i)
+        }
+        .toMat(TestSink())(Keep.both)
+        .run()
+
+      source.offer(1)
+      source.offer(2)
+      source.offer(3)
+      probe.request(3)
+      probe.expectNext(1, 2, 3)
+      continuationCalledPromise.isCompleted shouldBe false
+
+      source.complete()
+      probe.request(1)
+      whenReady(continuationCalledPromise.future) { _ =>
+        probe.expectNext(6)
+      }
+      probe.expectComplete()
+    }
+  }
+
   "WithKillSwitch satisfies the SingletonTraverse laws" should {
     checkAllLaws(
       "WithKillSwitch",

@@ -512,13 +512,17 @@ class LedgerApiServer(
           )
           .afterReleased(noTracingLogger.info("JSON-API gRPC channel is released"))
         _ <- HttpApiServer(
-          jsonApiConfig,
+          jsonApiConfig.copy(
+            maxInboundMessageSize =
+              jsonApiConfig.maxInboundMessageSize.orElse(Some(serverConfig.maxInboundMessageSize))
+          ),
           serverConfig.tls,
           channel,
           packageSyncService,
           loggerFactory,
           authInterceptor,
           packagePreferenceBackend = packagePreferenceBackend,
+          trafficEnforcementEnabled = trafficEnforcementBackendO.isDefined,
           apiLoggingConfig,
         )(
           jsonApiMetrics

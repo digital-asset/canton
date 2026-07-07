@@ -17,6 +17,7 @@ import com.digitalasset.canton.health.{
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   HasRunOnClosing,
   OnShutdownRunner,
 }
@@ -64,7 +65,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
   * ID will be determined by consensus once trust-threshold-many connections (to different logical
   * sequencers) report the same synchronizer.
   */
-trait SequencerConnectionPool extends FlagCloseable with NamedLogging {
+trait SequencerConnectionPool extends FlagCloseable with HasCloseContext with NamedLogging {
   import SequencerConnectionPool.*
 
   /** Return the synchronizer ID to which the connections in the pool are connected. Empty if the

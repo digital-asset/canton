@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.admin.package_management_service.PackageManagement
 import com.daml.ledger.api.v2.admin.participant_pruning_service.ParticipantPruningServiceGrpc
 import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc
 import com.daml.ledger.api.v2.admin.user_management_service.UserManagementServiceGrpc
+import com.daml.ledger.api.v2.command_completion_service.CommandCompletionServiceGrpc
 import com.daml.ledger.api.v2.command_service.CommandServiceGrpc as CommandServiceGrpcV2
 import com.daml.ledger.api.v2.event_query_service.EventQueryServiceGrpc
 import com.daml.ledger.api.v2.package_service.PackageServiceGrpc as PackageServiceGrpcV2
@@ -25,6 +26,7 @@ import com.digitalasset.canton.ledger.client.configuration.{
 import com.digitalasset.canton.ledger.client.services.EventQueryServiceClient
 import com.digitalasset.canton.ledger.client.services.admin.*
 import com.digitalasset.canton.ledger.client.services.commands.CommandServiceClient
+import com.digitalasset.canton.ledger.client.services.completions.CompletionServiceClient
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
 import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
 import com.digitalasset.canton.ledger.client.services.updates.UpdateServiceClient
@@ -66,6 +68,11 @@ final class LedgerClient private (
 
   lazy val stateService = new StateServiceClient(
     StateServiceGrpc.stub(channel),
+    config.token,
+  )
+
+  lazy val completionService = new CompletionServiceClient(
+    CommandCompletionServiceGrpc.stub(channel),
     config.token,
   )
 

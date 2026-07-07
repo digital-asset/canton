@@ -75,6 +75,7 @@ create table par_acs_party_running_digest (
     -- record time of the change_offset
     ts bigint not null,
     digest bytea,
+    trace_data varchar collate "C",
     -- link to the last version of the digest that has the same party_order_id
     replaces_offset bigint
 );
@@ -105,6 +106,7 @@ select
     change_offset,
     debug.canton_timestamp(ts) as ts,
     lower(encode(digest, 'hex')) as digest,
+    trace_data :: json,
     replaces_offset
 from par_acs_party_running_digest;
 
@@ -125,6 +127,7 @@ create table par_acs_participant_running_digest (
     ts bigint not null,
     digest bytea,
     hashed_digest bytea,
+    trace_data varchar collate "C",
     -- link to the last version of the digest that has the same (counter) participant_id
     replaces_offset bigint
 );
@@ -137,6 +140,7 @@ select
     debug.canton_timestamp(ts) as ts,
     lower(encode(digest, 'hex')) as digest,
     lower(encode(hashed_digest, 'hex')) as hashed_digest,
+    trace_data :: json,
     replaces_offset
 from par_acs_participant_running_digest;
 

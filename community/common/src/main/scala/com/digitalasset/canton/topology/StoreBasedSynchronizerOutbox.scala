@@ -242,7 +242,14 @@ class StoreBasedSynchronizerOutbox(
         val ret = for {
           pendingAndApplicable <- EitherT.right(pendingAndApplicableF)
           (pending, applicable) = pendingAndApplicable
-          converted <- synchronizeWithClosing(functionFullName)(convertTransactions(applicable))
+          converted <- synchronizeWithClosing(functionFullName)(
+            TopologySigningHelper.convertTransactions(
+              applicable,
+              protocolVersion,
+              crypto,
+              topologyConfig,
+            )
+          )
           _ = lastDispatched.set(converted.lastOption)
           // dispatch to synchronizer
           responses <- dispatch(synchronizerAlias, transactions = converted)

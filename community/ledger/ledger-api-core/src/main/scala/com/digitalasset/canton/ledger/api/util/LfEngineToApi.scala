@@ -3,15 +3,13 @@
 
 package com.digitalasset.canton.ledger.api.util
 
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.value as api
 import com.digitalasset.daml.lf.data.{Numeric, Ref}
 import com.digitalasset.daml.lf.value.Value as Lf
 import com.digitalasset.daml.lf.value.Value.ValueOptional
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
-import scalaz.std.either.*
-import scalaz.std.list.*
-import scalaz.syntax.traverse.*
 
 import java.time.Instant
 
@@ -103,7 +101,7 @@ object LfEngineToApi {
           }
           .map(list => api.Value(api.Value.Sum.GenMap(api.GenMap(list))))
       case Lf.ValueList(vs) =>
-        vs.toImmArray.toList.traverseU(lfValueToApiValue(verbose, _)) map { xs =>
+        vs.toImmArray.toList.traverse(lfValueToApiValue(verbose, _)) map { xs =>
           api.Value(api.Value.Sum.List(api.List(xs)))
         }
       case Lf.ValueVariant(tycon, variant, v) =>
@@ -141,7 +139,7 @@ object LfEngineToApi {
           // to ensure that pre-Canton 3.3 values are normalized as well
           .take(fields.length - trailingNonesSize)
           .toList
-          .traverseU { case (mbLabel, value) =>
+          .traverse { case (mbLabel, value) =>
             lfValueToApiValue(verbose, value) map { x =>
               api.RecordField(
                 label = if (verbose) mbLabel.getOrElse("") else "",

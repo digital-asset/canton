@@ -26,6 +26,7 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -34,6 +35,7 @@ import DbStorage.Implicits.BuilderChain.*
 class DbAcsDigestStore(
     indexedSynchronizer: IndexedSynchronizer,
     stringInterning: StringInterning,
+    releaseProtocolVersion: ReleaseProtocolVersion,
     override protected val storage: DbStorage,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val timeouts: ProcessingTimeout,
@@ -54,6 +56,7 @@ class DbAcsDigestStore(
       prettyKey = _.map(stringInterning.party.externalize).toString,
       journalTable = PartyJournalTable,
       createJournalImplicitsF = PartyJournalImplicits(_),
+      releaseProtocolVersion,
     )
   override protected val participant_
       : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] =
@@ -65,6 +68,7 @@ class DbAcsDigestStore(
       prettyKey = stringInterning.participantId.externalize,
       journalTable = ParticipantJournalTable,
       createJournalImplicitsF = ParticipantJournalImplicits(_),
+      releaseProtocolVersion,
     )
 
   override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit

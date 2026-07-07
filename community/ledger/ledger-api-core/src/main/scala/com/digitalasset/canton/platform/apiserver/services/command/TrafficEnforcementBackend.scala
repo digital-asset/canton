@@ -20,10 +20,13 @@ import scala.concurrent.ExecutionContext
 /** Service used for enforcing user-level traffic limits on the participant node, as part of
   * submission requests in the Phase 1 of the Canton protocol.
   *
+  * @param enforceCostOnSubmissions
+  *   Whether to enforce traffic cost on submissions.
   * @param trafficServiceClient
   *   The traffic service client used to communicate with the traffic enforcement server.
   */
 class TrafficEnforcementBackend(
+    enforceCostOnSubmissions: Boolean,
     val trafficServiceClient: RichTrafficServiceClient,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
@@ -51,7 +54,8 @@ class TrafficEnforcementBackend(
     for {
       accountResponse <- trafficServiceClient.getAccount(GetAccountRequest(accountId))
       _ <-
-        if (accountResponse.balance >= trafficCost) FutureUnlessShutdown.pure(())
+        if (!enforceCostOnSubmissions || accountResponse.balance >= trafficCost)
+          FutureUnlessShutdown.pure(())
         else
           FutureUnlessShutdown.failed(
             TrafficAccountValidationFailed
@@ -67,12 +71,12 @@ class TrafficEnforcementBackend(
     *
     * @param actAs
     *   The command's actAs parties, which should contain exactly one party for traffic enforcement,
-    *   otherwise the request is rejected
+    *   otherwise the traffic validation for the request is skipped and an information message is
+    *   logged
     * @param trafficCost
     *   The expected traffic cost of the submission request
     * @return
-    *   A failed future if the account has insufficient balance, if the actAs parties are not
-    *   exactly one, or if the request to the traffic service fails, otherwise a successful future
+    *   Success if validation is successful
     */
   def validateTraffic(
       actAs: Seq[LfPartyId],
@@ -81,24 +85,20 @@ class TrafficEnforcementBackend(
     logger.debug(
       s"Validating traffic enforcement for actAs parties: $actAs, trafficCost: $trafficCost"
     )
-    for {
-      singletonActAs <-
-        actAs match {
-          case hd :: Nil => FutureUnlessShutdown.pure(hd)
-          case nonSingletonActAs =>
-            FutureUnlessShutdown.failed(
-              TrafficAccountValidationFailed
-                .Reject(
-                  show"Traffic enforcement requires exactly one actAs party for a submission. Got instead $nonSingletonActAs"
-                )
-                .asGrpcError
-            )
-        }
 
-      // In Canton 3.5, the account ID is bound to the submitter party
-      accountId = singletonActAs
-      _ <- validateTraffic(accountId, trafficCost)
-    } yield ()
+    actAs match {
+      case singleActAs :: Nil =>
+        validateTraffic(
+          // In Canton 3.5, the account ID is bound to the submitter party
+          accountId = singleActAs,
+          trafficCost = trafficCost,
+        )
+      case nonSingletonActAs =>
+        logger.info(
+          show"Skipping traffic enforcement validation due to non-singleton actAs parties: $nonSingletonActAs"
+        )
+        FutureUnlessShutdown.unit
+    }
   }
 
   override def onClosed(): Unit =
@@ -107,6 +107,7 @@ class TrafficEnforcementBackend(
 
 object TrafficEnforcementBackend {
   def apply(
+      enforceCostOnSubmissions: Boolean,
       trafficEnforcementServerConfig: TrafficEnforcementServerConfig,
       processingTimeout: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -122,6 +123,11 @@ object TrafficEnforcementBackend {
         )
     }
 
-    new TrafficEnforcementBackend(trafficServiceClient, processingTimeout, loggerFactory)
+    new TrafficEnforcementBackend(
+      enforceCostOnSubmissions,
+      trafficServiceClient,
+      processingTimeout,
+      loggerFactory,
+    )
   }
 }

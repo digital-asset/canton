@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
+import cats.syntax.bifunctor.*
 import com.daml.ledger.api.v2.value as api
 import com.daml.ledger.api.v2.value.Value.Sum
 import com.digitalasset.canton.ledger.api.Value
@@ -11,8 +12,6 @@ import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.value.Value as Lf
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueUnit}
 import io.grpc.StatusRuntimeException
-import scalaz.std.either.*
-import scalaz.syntax.bifunctor.*
 
 abstract class ValueValidator {
 

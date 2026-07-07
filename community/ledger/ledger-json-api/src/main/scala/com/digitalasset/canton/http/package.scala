@@ -6,12 +6,11 @@ package com.digitalasset.canton
 import com.digitalasset.canton.ledger.api.refinements.ApiTypes as lar
 import com.digitalasset.daml.lf
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 import org.apache.pekko.http.scaladsl.model.StatusCode
 
-package object http {
+import scala.concurrent.duration.Duration
 
-  import scalaz.{@@, Tag}
+package object http {
 
   type LfValue = lf.value.Value
   type Party = lar.Party
@@ -21,23 +20,17 @@ package object http {
   type UserId = lar.UserId
   val UserId = lar.UserId
 
-  type RetryInfoDetailDuration = scala.concurrent.duration.Duration @@ RetryInfoDetailDurationTag
-  val RetryInfoDetailDuration = Tag.of[RetryInfoDetailDurationTag]
-
-  type Base64 = ByteString @@ Base64Tag
-  val Base64 = Tag.of[Base64Tag]
-
 }
 
 package http {
 
-  sealed trait Base64Tag
+  final case class RetryInfoDetailDuration(unwrap: Duration) extends AnyVal {
+    override def toString: String = unwrap.toString
+  }
 
   sealed abstract class SyncResponse[+R] extends Product with Serializable {
     def status: StatusCode
   }
-
-  sealed trait RetryInfoDetailDurationTag
 
   // Important note: when changing this ADT, adapt the custom associated JsonFormat codec in JsonProtocol
   sealed trait ErrorDetail extends Product with Serializable
@@ -56,7 +49,7 @@ package http {
         case ErrorDetails.ErrorInfoDetail(errorCodeId, metadata) =>
           http.ErrorInfoDetail(errorCodeId, metadata)
         case ErrorDetails.RetryInfoDetail(duration) =>
-          http.RetryInfoDetail(http.RetryInfoDetailDuration(duration))
+          http.RetryInfoDetail(RetryInfoDetailDuration(duration))
         case ErrorDetails.RequestInfoDetail(correlationId) =>
           http.RequestInfoDetail(correlationId)
       }

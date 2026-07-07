@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.http.json
 
+import cats.Show
+import cats.syntax.either.*
+import cats.syntax.show.*
 import com.digitalasset.canton.http.json.ResponseFormats
 import io.circe.Json
 import org.apache.pekko.actor.ActorSystem
@@ -16,8 +19,6 @@ import org.scalatest.compatible.Assertion
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
-import scalaz.syntax.show.*
-import scalaz.{Show, \/}
 
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -41,11 +42,11 @@ class ResponseFormatsTest
   ) { (input, warnings) =>
     val jsValWarnings: Option[Json] = warnings.map(ws => Json.arr(ws.map(w => Json.fromString(w))*))
     val (failures, successes): (Vector[Json], Vector[Json]) =
-      input.toVector.partitionMap(_.leftMap(e => Json.fromString(e.shows)).toEither)
+      input.toVector.partitionMap(_.leftMap(e => Json.fromString(e.show)))
 
     val (wantResponse, wantStatus) = expectedResult(failures, successes, jsValWarnings)
 
-    val jsValSource = Source[DummyError \/ Json](input)
+    val jsValSource = Source[Either[DummyError, Json]](input)
 
     val resultF: Future[Assertion] = ResponseFormats
       .resultJsObject(jsValSource, jsValWarnings)
@@ -85,9 +86,9 @@ class ResponseFormatsTest
     (Json.fromFields(map1 ++ map2), status)
   }
 
-  private lazy val errorOrJsNumber: Gen[DummyError \/ Json] = Gen.frequency(
-    1 -> dummyErrorGen.map(\/.left),
-    5 -> jsNumberGen.map(\/.right),
+  private lazy val errorOrJsNumber: Gen[Either[DummyError, Json]] = Gen.frequency(
+    1 -> dummyErrorGen.map(Left(_): Either[DummyError, Json]),
+    5 -> jsNumberGen.map(Right(_): Either[DummyError, Json]),
   )
 
   private lazy val dummyErrorGen: Gen[DummyError] = Gen.identifier.map(DummyError.apply)
@@ -98,7 +99,7 @@ class ResponseFormatsTest
 final case class DummyError(message: String)
 
 object DummyError {
-  implicit val ShowInstance: Show[DummyError] = Show shows { e =>
+  implicit val ShowInstance: Show[DummyError] = Show.show { e =>
     s"DummyError(${e.message})"
   }
 }

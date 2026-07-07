@@ -30,7 +30,7 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
     */
   protected trait Backend {
     def store: TeaTrafficStore
-    def newProjection(): TeaProjection
+    def newProjection(): TeaProjectionFactory
   }
 
   def additionalPekkoConfig: Config = ConfigFactory.empty()

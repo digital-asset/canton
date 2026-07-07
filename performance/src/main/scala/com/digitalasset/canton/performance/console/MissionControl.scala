@@ -211,7 +211,11 @@ class MissionControl(
   private def scheduleEvent(index: Int): Unit = {
     val event = events(index)
     logger.info(s"""Scheduling event "${event.name}" in ${event.interval}""")
-    val _ = clock.scheduleAfter(_ => runEvent(index), JDuration.ofMillis(event.interval.toMillis))
+    val _ = clock.scheduleAfter(
+      action = _ => runEvent(index),
+      taskName = s"${getClass.getName}: scheduled event",
+      delta = JDuration.ofMillis(event.interval.toMillis),
+    )
   }
 
   private def startSchedulingEvents(): Unit =

@@ -317,6 +317,9 @@ object ProtocolVersion {
   lazy val v36: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(36)
 
+  // TODO(#33849): remove and replace with the target protocol version
+  lazy val acsCommitmentRedesign: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
+
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v34
 
@@ -334,6 +337,11 @@ final case class ReleaseProtocolVersion(v: ProtocolVersion) extends AnyVal
 
 object ReleaseProtocolVersion {
   val latest: ReleaseProtocolVersion = ReleaseProtocolVersion(ProtocolVersion.latest)
+
+  // TODO(#33849): remove and replace with the target protocol version
+  val acsCommitmentRedesign: ReleaseProtocolVersion = ReleaseProtocolVersion(
+    ProtocolVersion.acsCommitmentRedesign
+  )
 }
 
 final case class ProtoVersion(v: Int)

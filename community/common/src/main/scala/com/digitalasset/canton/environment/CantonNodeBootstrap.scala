@@ -77,12 +77,14 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreInitializationStatus.Initialized
 import com.digitalasset.canton.topology.admin.grpc.{
   GrpcIdentityInitializationService,
   GrpcTopologyAggregationService,
   GrpcTopologyManagerReadService,
   GrpcTopologyManagerWriteService,
   PsidLookup,
+  TopologyStoreInitializationStatus,
 }
 import com.digitalasset.canton.topology.admin.v30 as adminV30
 import com.digitalasset.canton.topology.client.{
@@ -351,9 +353,11 @@ abstract class CantonNodeBootstrapImpl[
     * topology stores which are only available in a later startup stage (sequencer and mediator
     * nodes) or in the node runtime itself (participant connected synchronizer)
     */
-  protected def sequencedTopologyStores: Seq[TopologyStore[SynchronizerStore]]
+  protected def sequencedTopologyStores
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyStore]]
 
-  protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager]
+  protected def sequencedTopologyManagers
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyManager.Aux]]
 
   protected val bootstrapStageCallback: BootstrapStage.Callback = new BootstrapStage.Callback {
     override def loggerFactory: NamedLoggerFactory = CantonNodeBootstrapImpl.this.loggerFactory
@@ -1116,7 +1120,8 @@ abstract class CantonNodeBootstrapImpl[
                 .bindService(
                   new GrpcTopologyManagerReadService(
                     member(nodeId),
-                    temporaryStoreRegistry.stores() ++ sequencedTopologyStores :+ authorizedStore,
+                    sequencedTopologyStores ++
+                      (temporaryStoreRegistry.stores() :+ authorizedStore).map(Initialized(_)),
                     topologyClientLookup = lookupTopologyClient,
                     lookupSynchronizerTimeTracker,
                     lookupActivePsid,
@@ -1131,8 +1136,9 @@ abstract class CantonNodeBootstrapImpl[
               adminV30.TopologyManagerWriteServiceGrpc
                 .bindService(
                   new GrpcTopologyManagerWriteService(
-                    temporaryStoreRegistry
-                      .managers() ++ sequencedTopologyManagers :+ topologyManager,
+                    sequencedTopologyManagers ++
+                      (temporaryStoreRegistry.managers() :+ topologyManager)
+                        .map(Initialized[TopologyStoreId, TopologyManager.Aux](_)),
                     lookupActivePsid,
                     temporaryStoreRegistry,
                     bootstrapStageCallback.loggerFactory,
@@ -1145,8 +1151,13 @@ abstract class CantonNodeBootstrapImpl[
               adminV30.TopologyAggregationServiceGrpc.bindService(
                 new GrpcTopologyAggregationService(
                   sequencedTopologyStores.mapFilter(
-                    TopologyStoreId.select[TopologyStoreId.SynchronizerStore]
+                    TopologyStoreId
+                      .select[
+                        TopologyStoreId.SynchronizerStore,
+                        TopologyStoreInitializationStatus.Aux,
+                      ]
                   ),
+                  lookupActivePsid,
                   ips,
                   bootstrapStageCallback.loggerFactory,
                 ),

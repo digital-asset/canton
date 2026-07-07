@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.admin
 
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.ledger.api.v2.admin.user_management_service.{
   CreateUserResponse,
@@ -36,9 +37,6 @@ import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
-import scalaz.std.either.*
-import scalaz.std.list.*
-import scalaz.syntax.traverse.*
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64

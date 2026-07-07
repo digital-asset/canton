@@ -28,7 +28,6 @@ import io.circe.syntax.*
 import io.circe.{Json, parser}
 import org.apache.pekko.http.scaladsl.model.Uri.Query
 import org.apache.pekko.http.scaladsl.model.{HttpHeader, StatusCodes, Uri}
-import scalaz.syntax.tag.*
 
 import java.io.File
 import scala.concurrent.Future

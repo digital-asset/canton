@@ -1043,6 +1043,7 @@ object BuildCommon {
           postgres,
           pprint,
           scaffeine,
+          scalapb_json4s,
           slick_hikaricp,
           scalatest % "test",
         ),
@@ -2352,6 +2353,18 @@ object BuildCommon {
             "com.digitalasset.canton.damltests.upgrade.v2",
           ),
           (
+            // Keyed template on LF 2.3, kept in a dedicated package so the shared Upgrade
+            // package can stay on LF 2.1 (see CantonUpgradeCK).
+            (Test / sourceDirectory).value / "daml" / "CantonUpgradeCK" / "V1",
+            (Test / damlDarOutput).value / "UpgradeCK-1.0.0.dar",
+            "com.digitalasset.canton.damltests.upgradeck.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonUpgradeCK" / "V2",
+            (Test / damlDarOutput).value / "UpgradeCK-2.0.0.dar",
+            "com.digitalasset.canton.damltests.upgradeck.v2",
+          ),
+          (
             (Test / sourceDirectory).value / "daml" / "NonConforming" / "V1",
             (Test / damlDarOutput).value / "NonConforming-1.0.0.dar",
             "com.digitalasset.canton.damltests.nonconforming.v1",
@@ -2733,7 +2746,6 @@ object BuildCommon {
           scalacheck,
           scalatest,
           scalatestScalacheck,
-          scalaz_core,
         ),
       )
 
@@ -3032,7 +3044,7 @@ object BuildCommon {
       .settings(
         libsScalaSettings,
         libraryDependencies ++= Seq(
-          scalaz_core,
+          cats,
           scalatest % Test,
         ),
         enablePublishLibrary,
@@ -3097,8 +3109,7 @@ object BuildCommon {
         enablePublishLibrary,
         Test / scalacOptions ++= Seq("--release", "17"),
         libraryDependencies ++= Seq(
-          scalatest % Test,
-          scalaz_core,
+          scalatest % Test
         ),
       )
 
@@ -3131,7 +3142,6 @@ object BuildCommon {
           auth0_java,
           auth0_jwks,
           scalatest % Test,
-          scalaz_core,
           slf4j_api,
           circe_core,
           circe_generic,

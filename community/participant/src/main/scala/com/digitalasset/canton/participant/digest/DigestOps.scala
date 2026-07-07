@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.participant.digest
 
-import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.AcsUpdate
+import com.digitalasset.canton.participant.commitment.{SingleTrace, TracedLtHash16Blake3}
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   LocalPartyFirst,
   PartyAndOrder,
+  PartyOrder,
   RemotePartyFirst,
 }
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
@@ -20,6 +21,7 @@ object DigestOps {
   def computeDeltas(
       thisParticipantId: LedgerParticipantId,
       acsUpdate: AcsUpdate,
+      traceChanges: Boolean,
   ): Seq[DigestDelta] = {
     val stakeholderIds = acsUpdate.stakeholders.keySet
     val locallyHostedStakeholderIds =
@@ -38,6 +40,8 @@ object DigestOps {
         reassignmentCounter = acsUpdate.rc,
         partyId1 = fromParty,
         partyId2 = toParty,
+        isActivation = acsUpdate.isActivation,
+        traceChanges = traceChanges,
       )
     }.toMap
 
@@ -71,9 +75,7 @@ object DigestOps {
 
     val participantDeltas: Seq[DigestDelta] = partiesByParticipant.map {
       case (counterParticipant, parties) =>
-        val partyOrder =
-          if (thisParticipantId < counterParticipant) LocalPartyFirst
-          else RemotePartyFirst
+        val partyOrder = PartyOrder.orderFor(thisParticipantId, counterParticipant)
 
         val digestsForCounterParticipant = parties.view.map { party =>
           partyDeltas(PartyAndOrder(party, partyOrder)).digest
@@ -93,8 +95,8 @@ object DigestOps {
     partyDeltas.values.toSeq ++ participantDeltas
   }
 
-  def combineDigests(allDigests: Iterable[LtHash16Blake3]): LtHash16Blake3 =
-    allDigests.foldLeft(LtHash16Blake3.empty) { case (acc, digest) =>
+  def combineDigests(allDigests: Iterable[TracedLtHash16Blake3]): TracedLtHash16Blake3 =
+    allDigests.foldLeft(TracedLtHash16Blake3.empty) { case (acc, digest) =>
       acc.union(digest)
       acc
     }
@@ -104,10 +106,16 @@ object DigestOps {
       reassignmentCounter: ReassignmentCounter,
       partyId1: LfPartyId,
       partyId2: LfPartyId,
-  ): LtHash16Blake3 = {
-    val hash = LtHash16Blake3.empty
-    hash.add(singleDigestByteArray(contractId, reassignmentCounter, partyId1, partyId2))
-
+      isActivation: Boolean,
+      traceChanges: Boolean,
+  ): TracedLtHash16Blake3 = {
+    val hash = TracedLtHash16Blake3.empty
+    hash.add(
+      singleDigestByteArray(contractId, reassignmentCounter, partyId1, partyId2),
+      Option.when(traceChanges)(
+        SingleTrace(contractId, reassignmentCounter, partyId1, partyId2, isActivation)
+      ),
+    )
     hash
   }
 
@@ -139,7 +147,7 @@ object DigestOperation {
 }
 
 sealed trait DigestDelta extends Product with Serializable {
-  def digest: LtHash16Blake3
+  def digest: TracedLtHash16Blake3
   def operation: DigestOperation
 }
 
@@ -147,13 +155,13 @@ object DigestDelta {
 
   final case class Party(
       partyAndOrder: PartyAndOrder[LfPartyId],
-      digest: LtHash16Blake3,
+      digest: TracedLtHash16Blake3,
       operation: DigestOperation,
   ) extends DigestDelta
 
   final case class Participant(
       participantId: LedgerParticipantId,
-      digest: LtHash16Blake3,
+      digest: TracedLtHash16Blake3,
       operation: DigestOperation,
   ) extends DigestDelta
 }

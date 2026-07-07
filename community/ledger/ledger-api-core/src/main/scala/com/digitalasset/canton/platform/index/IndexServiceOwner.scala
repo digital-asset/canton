@@ -221,7 +221,7 @@ final class IndexServiceOwner(
         ledgerDao
           .lookupParticipantId()
           .flatMap {
-            case Some(`participantId`) =>
+            case Some(ParticipantId(`participantId`)) =>
               logger.info(s"Found existing participant with ID: $participantId`")
               Future.unit
             case Some(foundParticipantId) =>

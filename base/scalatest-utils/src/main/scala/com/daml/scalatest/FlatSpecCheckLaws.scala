@@ -8,16 +8,16 @@ import org.scalactic.{Prettifier, source}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatestplus.scalacheck.Checkers
 
-/** Integration of Scalatest [[org.scalatest.flatspec.AnyFlatSpec]] with Scalaz law checkers, or any
-  * other purely Scalacheck-defined tests, for that matter. Each invocation should go in a separate
-  * `behavior of` category, as test names will collide otherwise.
+/** Integration of Scalatest [[org.scalatest.flatspec.AnyFlatSpec]] with cats-laws law checkers, or
+  * any other purely Scalacheck-defined tests, for that matter. Each invocation should go in a
+  * separate `behavior of` category, as test names will collide otherwise.
   *
   * Usage:
   *
   * {{{
   *  behavior of "Blah Functor"
   *
-  *  checkLaws(ScalazProperties.functor.laws[Blah])
+  *  checkLaws(FunctorTests[Blah].functor[Int, Int, Int].all)
   * }}}
   */
 trait FlatSpecCheckLaws extends Checkers { this: AnyFlatSpec =>

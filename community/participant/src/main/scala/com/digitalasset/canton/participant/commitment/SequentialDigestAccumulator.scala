@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.*
+import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.digest.{DigestDelta, DigestOperation, DigestOps}
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
@@ -32,6 +33,7 @@ class SequentialDigestAccumulator(
     acsDigestStore: AcsDigestStore,
     stringInterning: StringInterning,
     hashOps: HashOps,
+    tracingMode: AcsDigestTracingMode,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit traceContext: TraceContext, ec: ExecutionContext)
     extends NamedLogging {
@@ -49,7 +51,12 @@ class SequentialDigestAccumulator(
       case ProcessingContext(_, _, NotCheckpointFence(_, classification)) =>
         classification match {
           case update: AcsUpdate =>
-            val deltas = DigestOps.computeDeltas(thisLfParticipant, update)
+            val deltas = DigestOps.computeDeltas(
+              thisLfParticipant,
+              update,
+              // if tracing is enabled, track the changes coming from the deltas
+              traceChanges = tracingMode != AcsDigestTracingMode.Disabled,
+            )
             MonadUtil
               .sequentialTraverse_(deltas) {
                 case DigestDelta.Party(partyAndOrder, digestDelta, operation) =>
@@ -115,7 +122,7 @@ class SequentialDigestAccumulator(
       offset: Offset,
       recordTime: CantonTimestamp,
       key: Key,
-      update: LtHash16Blake3,
+      update: TracedLtHash16Blake3,
       operation: DigestOperation,
   )(
       toLtHash16Blake3: V => LtHash16Blake3,
@@ -127,24 +134,33 @@ class SequentialDigestAccumulator(
         val (existingDigestO, existingOffsetO) = acsDigestUpdateO.flatMap { digest =>
           digest.digestUpdate.digestO
             .map { rawDigest =>
+              val isIncrementalChangeForSameOffset = digest.digestUpdate.offset == offset
               val replacesOffset =
                 // if the offset of the digest update from the store is the same as the offset currently being processed,
                 // then this is another update to the digest at the same offset and we need to retain the "replaces_offset" value.
-                if (digest.digestUpdate.offset == offset) digest.replacesOffset
+                if (isIncrementalChangeForSameOffset) digest.replacesOffset
                 // otherwise, this update is a new link in the replacement chain.
                 else Some(digest.digestUpdate.offset)
-              toLtHash16Blake3(rawDigest) -> replacesOffset
+              val trace =
+                // check whether the existing trace that was loaded from the store must be propagated
+                if (
+                  tracingMode == AcsDigestTracingMode.Full ||
+                  (tracingMode == AcsDigestTracingMode.Incremental && isIncrementalChangeForSameOffset)
+                ) digest.digestUpdate.trace
+                // otherwise, clear the previous tracing data for the new digest
+                else None
+              TracedLtHash16Blake3(toLtHash16Blake3(rawDigest), trace) -> replacesOffset
             }
         }.unzip
 
-        val updatedDigest = existingDigestO.getOrElse(LtHash16Blake3.empty)
+        val updatedDigest = existingDigestO.getOrElse(TracedLtHash16Blake3.empty)
         operation match {
           case DigestOperation.Add =>
             updatedDigest.union(update)
           case DigestOperation.Remove =>
             updatedDigest.removeAll(update)
         }
-        if (existingDigestO.isEmpty && updatedDigest.isEmpty) {
+        if (existingDigestO.isEmpty && updatedDigest.digest.isEmpty) {
           // if there was no previous journal entry and the computed digest is empty,
           // then there's no need to store anything
           FutureUnlessShutdown.unit
@@ -152,7 +168,13 @@ class SequentialDigestAccumulator(
           journal.upsertDigestUpdates(
             Seq(
               AcsDigestUpdate(
-                AcsDigest(key, offset, recordTime, Some(toV(updatedDigest))),
+                AcsDigest(
+                  key,
+                  offset,
+                  recordTime,
+                  Some(toV(updatedDigest.digest)),
+                  updatedDigest.trace,
+                ),
                 replacesOffset = existingOffsetO.flatten,
               )
             )
@@ -176,7 +198,7 @@ class SequentialDigestAccumulator(
     val internedPid = stringInterning.participantId.internalize(participant)
     val partyKey = PartyAndOrder(
       stringInterning.party.internalize(party),
-      if (participant < thisLfParticipant) LocalPartyFirst else RemotePartyFirst,
+      PartyOrder.orderFor(thisLfParticipant, participant),
     )
     for {
       partyDigestUpdateO <- acsDigestStore.party.lookup(partyKey, offset)
@@ -186,12 +208,16 @@ class SequentialDigestAccumulator(
         .filter(!_.isEmpty)
 
       // only update the participant hash if there is a non-empty party hash
-      _ <- nonEmptyPartyDigestO.traverse_(partyDigest =>
+      _ <- nonEmptyPartyDigestO.traverse_ { partyDigest =>
+        val partyTraceO = partyDigestUpdateO.flatMap(_.digestUpdate.trace)
+        val tracedPartyDigest = TracedLtHash16Blake3(partyDigest, partyTraceO)
         updateDigest(acsDigestStore.participant)(
           offset,
           recordTime,
           internedPid,
-          update = partyDigest,
+          update =
+            if (isAddition) tracedPartyDigest.asBulkAddition(s"onboarded $party")
+            else tracedPartyDigest.asBulkRemoval(s"offboarded $party"),
           if (isAddition) DigestOperation.Add else DigestOperation.Remove,
         )(
           { case (digest, _hash) => LtHash16Blake3.tryCreate(digest) },
@@ -204,7 +230,7 @@ class SequentialDigestAccumulator(
                 .getCryptographicEvidence,
             ),
         )
-      )
+      }
     } yield ()
   }
 }

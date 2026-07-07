@@ -24,8 +24,9 @@ object SchedulerTestUtil {
           override def isCancelled: Boolean = cancelled.get()
         }
         val _ = clock.scheduleAfter(
-          _ => if (!cancelled.get()) runnable.run(),
-          delay.toJava,
+          action = _ => if (!cancelled.get()) runnable.run(),
+          taskName = s"${getClass.getName}: scheduled task",
+          delta = delay.toJava,
         )
         cancellable
       }

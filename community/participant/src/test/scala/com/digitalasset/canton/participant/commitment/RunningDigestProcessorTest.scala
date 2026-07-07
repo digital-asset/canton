@@ -30,6 +30,7 @@ import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
   PartyRemovedFromParticipant,
   ProcessingContext,
 }
+import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
@@ -127,6 +128,7 @@ class RunningDigestProcessorTest
       mock[StringInterning],
       mock[HashOps],
       PositiveInt.tryCreate(counterpartyBatchSize),
+      AcsDigestTracingMode.Disabled,
       loggerFactory,
     )
   }

@@ -10,7 +10,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   TrafficControlParameters,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -27,6 +26,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.{
@@ -37,13 +37,6 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.util.OnboardsNewSequencerNode
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.admin.AdminWorkflowServices
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
@@ -61,17 +54,10 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
-import com.digitalasset.canton.topology.transaction.{
-  MultiTransactionSignature,
-  SignedTopologyTransaction,
-  SynchronizerTrustCertificate,
-  TopologyTransaction,
-  VettedPackage,
-  VettedPackages,
-}
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, Member, Party}
 import com.digitalasset.canton.{TestPredicateFiltersFixtureAnyWordSpec, config}
 import com.digitalasset.nonempty.NonEmpty
@@ -1007,7 +993,6 @@ trait TrafficControlTest
     )
 }
 
-@UnstableTest // TOOD(#31976)
 class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,
@@ -1020,7 +1005,6 @@ class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-@UnstableTest // TOOD(#32073)
 class TrafficControlTestBftOrderingH2 extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,

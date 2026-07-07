@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.client
 
+import cats.data.OneAnd
 import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
@@ -16,7 +17,6 @@ import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.ManagedChannel
-import scalaz.OneAnd
 
 final class LedgerClientIT extends CantonFixture {
   registerPlugin(NoAuthPlugin(loggerFactory))

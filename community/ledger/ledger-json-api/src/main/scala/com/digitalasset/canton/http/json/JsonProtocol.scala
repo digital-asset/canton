@@ -10,8 +10,6 @@ import com.google.protobuf.struct.Struct
 import io.circe.generic.semiauto.*
 import io.circe.{Decoder, DecodingFailure, Encoder, Json}
 import org.apache.pekko.http.scaladsl.model.StatusCode
-import scalaz.syntax.tag.*
-import scalaz.{@@, Tag}
 
 import scala.concurrent.duration.*
 import scala.util.Try
@@ -23,15 +21,10 @@ object JsonProtocol {
     encodeStruct,
   }
 
-  // Helpers for tagged types
-  private def taggedEncoder[A: Encoder, T]: Encoder[A @@ T] =
-    Tag.subst(implicitly(Encoder[A]))
-
-  private def taggedDecoder[A: Decoder, T]: Decoder[A @@ T] =
-    Tag.subst(implicitly(Decoder[A]))
-
-  implicit val PartyEncoder: Encoder[http.Party] = taggedEncoder
-  implicit val PartyDecoder: Decoder[http.Party] = taggedDecoder
+  implicit val PartyEncoder: Encoder[http.Party] =
+    Encoder.encodeString.contramap[http.Party](_.unwrap)
+  implicit val PartyDecoder: Decoder[http.Party] =
+    Decoder.decodeString.map(http.Party(_))
 
   implicit val HexStringDecoder: Decoder[Ref.HexString] =
     Decoder.decodeString.emap(s => Ref.HexString.fromString(s).left.map(_.toString))

@@ -160,7 +160,7 @@ on_exit() {
             err "REPORT_TO_DATADOG is enabled, but DATADOG_API_KEY is not set"
             exit 1
           else
-            python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
+            python3 ./scripts/ci/report_failing_tests.py "SBT exited with code $CODE ($HINT_MSG)"
           fi
         else
           info "REPORT_TO_DATADOG is disabled, skipping Datadog reporting"

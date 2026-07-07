@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.test.protocontinuity.v30;
+
+import "com/digitalasset/canton/test/protocontinuity/v30/dependency.proto";
+import "scalapb/scalapb.proto";
+
+service ProtoContinuityService {
+  rpc Endpoint(EndpointRequest) returns (EndpointResponse);
+  rpc Endpoint2(Endpoint2Request) returns (Endpoint2Request.Endpoint2Response);
+}
+
+message Endpoint2Request {
+  message Endpoint2Response { }
+}
+
+
+message EndpointRequest {
+  Storage0 storage0 = 1;
+  ReqResp rr = 2;
+}
+
+message EndpointResponse {
+  enum EnumResp {
+    ENUM_RESP_UNSPECIFIED = 0;
+    ENUM_RESP_OK = 1;
+  }
+
+  ReqResp rr = 1;
+  EnumResp e = 2;
+}
+
+message ReqResp {
+  message Msg2 {
+    message Msg4 {}
+
+    Stable2 s2 = 1;
+  }
+
+  Msg2 m2 = 1;
+  Msg2.Msg4 m4 = 2;
+}
+
+message Storage0 {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  message Storage1 {
+    bool b1 = 1;
+  }
+
+  message OneOf {
+    oneof kind {
+      Stable1 s1 = 1;
+      Storage1 storage1 = 2;
+    }
+  }
+
+  Msg0 m0 = 1;
+  OneOf o = 2;
+  bool b1 = 3;
+}
+
+message Stable2 {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  Msg3 m3 = 1;
+}
+
+message Msg3 {}
+
+message Alpha {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+}

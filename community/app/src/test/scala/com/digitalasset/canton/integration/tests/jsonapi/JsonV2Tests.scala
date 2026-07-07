@@ -93,7 +93,6 @@ import org.apache.pekko.http.scaladsl.model.Uri.Query
 import org.apache.pekko.http.scaladsl.model.ws.{Message, TextMessage}
 import org.apache.pekko.http.scaladsl.model.{HttpHeader, HttpMethods, StatusCodes, Uri}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
-import scalaz.syntax.tag.*
 
 import java.nio.file.{Files, Paths}
 import java.util.UUID

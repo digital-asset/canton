@@ -92,10 +92,6 @@ import scala.util.{Failure, Success}
   *
   * TODO(i12904): Update description
   */
-// Unstable for now, as committing after failed activeness check is not supported and
-// can have surprising consequences.
-// TODO(i12904): Mark stable, once this is supported.
-@UnstableTest
 abstract sealed class LedgerConsistencyIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -1439,6 +1435,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 }
 
 // Need to test all storage backends to cover all relevant code paths.
+@UnstableTest // TODO(i32414): remove this once the test is no longer flaky
 final class LedgerConsistencyIntegrationTestPostgres extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -1446,6 +1443,7 @@ final class LedgerConsistencyIntegrationTestPostgres extends LedgerConsistencyIn
 }
 
 // Need to test all storage backends to cover all relevant code paths.
+@UnstableTest // TODO(i33784): remove this once the test is no longer flaky
 final class LedgerConsistencyIntegrationTestH2 extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -1453,6 +1451,7 @@ final class LedgerConsistencyIntegrationTestH2 extends LedgerConsistencyIntegrat
 }
 
 // Need to test all storage backends to cover all relevant code paths.
+@UnstableTest // TODO(i32467): remove this once the test is no longer flaky
 final class LedgerConsistencyIntegrationTestInMemory extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))

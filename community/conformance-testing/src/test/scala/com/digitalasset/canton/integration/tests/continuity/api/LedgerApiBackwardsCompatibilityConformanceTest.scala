@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.continuity.api
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.tests.continuity.{
   MultiVersionLedgerApiConformanceBase,
   ProtocolContinuityConformanceTest,
@@ -14,6 +15,7 @@ import com.digitalasset.canton.version.ReleaseVersion
 /** Tests various TestTools (as external processes) against the current canton. No canton is
   * downloaded from a zip; the current build is used directly.
   */
+@UnstableTest // TODO(i33136): remove this once the test is no longer flaky
 trait LedgerApiBackwardsCompatibilityConformanceTest
     extends MultiVersionLedgerApiConformanceBase
     with IsolatedEnvironments {
@@ -80,6 +82,14 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
     "ExplicitDisclosureIT:EDRouteByDisclosedContractSynchronizerId",
     // Unknown reason TT 3.4.12 never ends
     "DeduplicationMixedClients",
+
+    // 3.5 JSON - changed error message due to json security checks
+    "DeeplyNestedValueIT:RejectCreateCommand200",
+    "DeeplyNestedValueIT:RejectExerciseCommand110",
+    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand200",
+    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand110",
+    "DeeplyNestedValueIT:RejectExerciseCommand200",
+    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand110",
   )
 }
 

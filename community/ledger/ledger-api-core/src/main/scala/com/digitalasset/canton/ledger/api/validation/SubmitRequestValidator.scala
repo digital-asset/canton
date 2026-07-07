@@ -26,7 +26,6 @@ import com.digitalasset.canton.topology.{PartyId as TopologyPartyId, Synchronize
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.version.HashingSchemeVersion.{V2, V3, V4}
 import io.grpc.StatusRuntimeException
-import scalaz.syntax.tag.*
 
 import java.time.{Duration, Instant}
 

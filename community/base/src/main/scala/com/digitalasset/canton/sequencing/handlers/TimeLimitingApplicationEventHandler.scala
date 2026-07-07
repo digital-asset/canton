@@ -62,7 +62,11 @@ class TimeLimitingApplicationEventHandler(
             )
             val trigger = ApplicationEventHandlerTimeoutTrigger(logger, exitOnTimeout, data)
             val (timeoutFuture, timeoutHandle) =
-              clock.scheduleAtCancellable(trigger.trigger, deadline)
+              clock.scheduleAtCancellable(
+                trigger.trigger,
+                s"${getClass.getName}: trigger application event timeout",
+                deadline,
+              )
             timeoutFuture.discard[FutureUnlessShutdown[Unit]]
             handler(boxedEnvelopes).transform {
               case Success(Outcome(async)) =>

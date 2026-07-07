@@ -43,7 +43,7 @@ object LedgerConnection {
       executionSequencerFactory: ExecutionSequencerFactory,
   ): LedgerClient = {
     val clientConfig = LedgerClientConfiguration(
-      userId = UserId.unwrap(userId),
+      userId = userId.unwrap,
       commandClient = commandClientConfiguration,
       token = () => tokenDispenser.map(_.getCurrentToken.secret),
     )

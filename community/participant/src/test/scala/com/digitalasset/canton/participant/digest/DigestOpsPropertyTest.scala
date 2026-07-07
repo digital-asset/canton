@@ -71,6 +71,7 @@ class DigestOpsPropertyTest
         .computeDeltas(
           input.participant,
           updateOnParticipant,
+          traceChanges = false,
         )
         .collectFirst {
           case delta: DigestDelta.Participant if delta.participantId == input.counterParticipant =>
@@ -81,6 +82,7 @@ class DigestOpsPropertyTest
         .computeDeltas(
           input.counterParticipant,
           updateOnCounterParticipant,
+          traceChanges = false,
         )
         .collectFirst {
           case delta: DigestDelta.Participant if delta.participantId == input.participant => delta

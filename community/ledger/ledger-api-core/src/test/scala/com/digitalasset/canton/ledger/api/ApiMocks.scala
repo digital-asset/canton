@@ -8,7 +8,6 @@ import com.daml.ledger.api.v2.value.Value.Sum
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
 import com.digitalasset.daml.lf.value.Value as Lf
-import scalaz.@@
 
 object ApiMocks {
 
@@ -19,21 +18,21 @@ object ApiMocks {
     Ref.QualifiedName.assertFromString("module:entity"),
   )
 
-  val commandId: IdString.LedgerString @@ CommandIdTag = CommandId(
+  val commandId: CommandId = CommandId(
     Ref.LedgerString.assertFromString("commandId")
   )
 
-  val submissionId: IdString.LedgerString @@ SubmissionIdTag = SubmissionId(
+  val submissionId: SubmissionId = SubmissionId(
     Ref.LedgerString.assertFromString("submissionId")
   )
 
-  val updateId: IdString.LedgerString @@ UpdateIdTag = UpdateId(
+  val updateId: UpdateId = UpdateId(
     Ref.LedgerString.assertFromString("deadbeef")
   )
 
   val userId: IdString.UserId = Ref.UserId.assertFromString("userId")
 
-  val workflowId: IdString.LedgerString @@ WorkflowIdTag = WorkflowId(
+  val workflowId: WorkflowId = WorkflowId(
     Ref.LedgerString.assertFromString("workflowId")
   )
 

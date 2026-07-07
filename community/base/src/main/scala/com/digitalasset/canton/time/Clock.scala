@@ -84,8 +84,11 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
   }
   protected def warnIfClockRunsBackwards: Boolean = false
 
-  protected class Queued[A](val action: CantonTimestamp => A, val timestamp: CantonTimestamp)
-      extends ClockHandle[A] {
+  protected class Queued[A](
+      val action: CantonTimestamp => A,
+      val timestamp: CantonTimestamp,
+      val taskName: String,
+  ) extends ClockHandle[A] {
 
     private[Clock] val promise: Promise[UnlessShutdown[A]] = Promise[UnlessShutdown[A]]()
 
@@ -124,6 +127,7 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
       if (state.compareAndSet(false, true)) {
         // Won the race: successfully transitioned from Queued to RunningOrDone
         // Guaranteed that cancel() and failTasks() haven't succeeded and won't succeed
+        logger.debug(s"Running queued action: $taskName")(TraceContext.empty)
         promise.complete(Try(UnlessShutdown.Outcome(action(now))))
       } else {
         // Lost the race: cancel() or failTasks() already transitioned to RunningOrDone
@@ -182,12 +186,16 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     * If the provided `delta` is not positive the action skips queueing and is executed immediately.
     *
     * Same as other schedule method, except it expects a differential time amount
+    *
+    * Prefer to use [[scheduleAfterCancellable]] or [[scheduleAfterCancelledOnShutdown]] as they
+    * clean up the task queue on shutdown of the closing context.
     */
   def scheduleAfter[A](
       action: CantonTimestamp => A,
+      taskName: String,
       delta: Duration,
   ): FutureUnlessShutdown[A] =
-    scheduleAfterCancellable(action, delta)._1
+    scheduleAfterCancellable(action, taskName, delta)._1
 
   /** Schedule an action to be performed after the given duration. Returns the future result and a
     * handle for cancelling the scheduled task.
@@ -204,15 +212,19 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     */
   def scheduleAfterCancellable[A](
       action: CantonTimestamp => A,
+      taskName: String,
       delta: Duration,
   ): (FutureUnlessShutdown[A], ClockHandle[A]) =
-    scheduleAtCancellable(action, now.add(delta))
+    scheduleAtCancellable(action, taskName, now.add(delta))
 
   /** Thread-safely schedule an action to be executed in the future actions need not execute in the
     * order of their timestamps.
     *
     * If the provided timestamp is before `now`, the action skips queueing and is executed
     * immediately.
+    *
+    * Prefer to use [[scheduleAtCancellable]] or [[scheduleAtCancelledOnShutdown]] as they clean up
+    * the task queue on shutdown of the closing context.
     *
     * @param action
     *   action to run at the given timestamp (passing in the timestamp for when the task was
@@ -224,9 +236,10 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     */
   def scheduleAt[A](
       action: CantonTimestamp => A,
+      taskName: String,
       timestamp: CantonTimestamp,
   ): FutureUnlessShutdown[A] =
-    scheduleAtCancellable(action, timestamp)._1
+    scheduleAtCancellable(action, taskName, timestamp)._1
 
   /** Schedule an action to be performed at the given timestamp. Returns the future result and a
     * handle for cancelling the scheduled task.
@@ -244,9 +257,10 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
     */
   def scheduleAtCancellable[A](
       action: CantonTimestamp => A,
+      taskName: String,
       timestamp: CantonTimestamp,
   ): (FutureUnlessShutdown[A], ClockHandle[A]) = {
-    val queued = new Queued(action, timestamp)
+    val queued = new Queued(action, timestamp, taskName)
     val nowTime = now
     if (!nowTime.isBefore(timestamp)) {
       queued.run(nowTime)
@@ -279,7 +293,7 @@ abstract class Clock() extends TimeProvider with AutoCloseable with NamedLogging
       timestamp: CantonTimestamp,
   )(implicit ec: ExecutionContext, closeContext: CloseContext): FutureUnlessShutdown[A] = {
 
-    val (f, handle) = scheduleAtCancellable(action, timestamp)
+    val (f, handle) = scheduleAtCancellable(action, taskName, timestamp)
 
     val cancelTask = new RunOnClosing {
       override def name: String = s"cancel-$taskName"

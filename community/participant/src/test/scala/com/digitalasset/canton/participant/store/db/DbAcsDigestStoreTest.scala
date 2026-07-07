@@ -11,13 +11,10 @@ import com.digitalasset.canton.participant.store.AcsDigestStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
-trait DbAcsDigestStoreTest extends AsyncWordSpec with BaseTest with AcsDigestStoreTest {
-  self: DbTest =>
-
-  private val defaultSync = indexedSynchronizer(1, "synchronizer")
-
+trait BaseDbAcsDigestStoreTest { self: DbTest =>
   override def cleanDb(
       storage: DbStorage
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
@@ -32,11 +29,23 @@ trait DbAcsDigestStoreTest extends AsyncWordSpec with BaseTest with AcsDigestSto
     )
   }
 
+}
+
+trait DbAcsDigestStoreTest
+    extends AsyncWordSpec
+    with BaseDbAcsDigestStoreTest
+    with BaseTest
+    with AcsDigestStoreTest {
+  self: DbTest =>
+
+  private val defaultSync = indexedSynchronizer(1, "synchronizer")
+
   "DbAcsDigestStore" should {
     behave like acsDigestSingleStoreTests((ec) =>
       new DbAcsDigestStore(
         indexedSynchronizer = defaultSync,
         mockStringInterning,
+        ReleaseProtocolVersion.acsCommitmentRedesign,
         storage,
         loggerFactory,
         timeouts,
@@ -46,6 +55,7 @@ trait DbAcsDigestStoreTest extends AsyncWordSpec with BaseTest with AcsDigestSto
       new DbAcsDigestStore(
         indexedSynchronizer = indexedSynchronizer,
         mockStringInterning,
+        ReleaseProtocolVersion.acsCommitmentRedesign,
         storage,
         loggerFactory,
         timeouts,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.extension
 
 import com.daml.tls.{ServerAuthRequirementConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PemFile, PositiveFiniteDuration}
 import com.digitalasset.canton.http.HttpService
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{CopyOnWriteArrayList, CountDownLatch, TimeUnit}
 import scala.concurrent.ExecutionContext
 
+@UnstableTest // TODO(i33886): remove this once the test is no longer flaky
 class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   "HttpExtensionServiceClient" should {

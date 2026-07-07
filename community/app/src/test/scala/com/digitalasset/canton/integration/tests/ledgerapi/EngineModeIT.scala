@@ -50,13 +50,12 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
 
   private[this] def ledgerClientConfiguration =
     LedgerClientConfiguration(
-      userId = UserId.unwrap(userId),
+      userId = userId.unwrap,
       commandClient = CommandClientConfiguration.default,
       token = () => None,
     )
 
   private[this] def buildRequest(pkgId: String, party: String) = {
-    import scalaz.syntax.tag.*
     val tmplId = Some(Identifier(pkgId, "UnitMod", "Box"))
     val cmd = Command.defaultInstance.withCreate(
       CreateCommand(

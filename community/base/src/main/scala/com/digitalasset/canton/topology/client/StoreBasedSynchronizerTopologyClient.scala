@@ -11,6 +11,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   LifeCycle,
   UnlessShutdown,
 }
@@ -38,7 +39,7 @@ import scala.math.Ordering.Implicits.*
 import scala.util.Success
 import scala.util.control.NonFatal
 
-trait TopologyAwaiter extends FlagCloseable {
+trait TopologyAwaiter extends FlagCloseable with HasCloseContext {
 
   this: SynchronizerTopologyClientWithInit =>
 
@@ -94,8 +95,9 @@ trait TopologyAwaiter extends FlagCloseable {
     if (!isClosing) {
       if (timeout.isFinite) {
         clock
-          .scheduleAfter(
+          .scheduleAfterCancelledOnShutdown(
             _ => waiter.promise.trySuccess(UnlessShutdown.Outcome(false)).discard,
+            s"${getClass.getName}: scheduled await",
             JDuration.ofMillis(timeout.toMillis),
           )
           .discard

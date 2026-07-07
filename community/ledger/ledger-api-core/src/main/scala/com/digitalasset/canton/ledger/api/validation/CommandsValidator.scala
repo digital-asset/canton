@@ -39,7 +39,6 @@ import com.google.protobuf.duration.Duration as DurationP
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.StatusRuntimeException
 import io.scalaland.chimney.dsl.*
-import scalaz.syntax.tag.*
 
 import java.time.{Duration, Instant}
 import scala.Ordering.Implicits.infixOrderingOps

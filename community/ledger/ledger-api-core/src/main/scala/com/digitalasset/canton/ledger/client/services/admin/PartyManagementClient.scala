@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.client.services.admin
 
+import cats.data.OneAnd
 import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
 import com.daml.ledger.api.v2.admin.party_management_service.{
   AllocatePartyRequest,
@@ -17,7 +18,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
-import scalaz.OneAnd
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -41,14 +41,11 @@ object PartyManagementClient {
       filterParty = filterParty,
     )
 
-  private def getPartiesRequest(parties: OneAnd[Set, Ref.Party]) = {
-    import scalaz.std.iterable.*
-    import scalaz.syntax.foldable.*
+  private def getPartiesRequest(parties: OneAnd[Set, Ref.Party]) =
     GetPartiesRequest(
-      parties = parties.toList,
+      parties = parties.head :: parties.tail.toList,
       identityProviderId = "",
     )
-  }
 }
 
 @SuppressWarnings(Array("com.digitalasset.canton.DirectGrpcServiceInvocation"))

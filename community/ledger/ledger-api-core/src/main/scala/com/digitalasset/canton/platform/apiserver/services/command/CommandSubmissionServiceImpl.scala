@@ -5,10 +5,10 @@ package com.digitalasset.canton.platform.apiserver.services.command
 
 import cats.data.EitherT
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
+import com.digitalasset.canton.ledger.api.Commands as ApiCommands
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
-import com.digitalasset.canton.ledger.api.{Commands as ApiCommands, SubmissionId}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
@@ -110,7 +110,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
         ErrorLoggingContext.fromOption(
           logger,
           loggingContext,
-          request.commands.submissionId.map(SubmissionId.unwrap),
+          request.commands.submissionId.map(_.unwrap),
         )
 
       val evaluatedCommand =

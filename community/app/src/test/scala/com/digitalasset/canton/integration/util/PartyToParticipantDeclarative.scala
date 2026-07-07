@@ -85,6 +85,7 @@ sealed trait PartyToParticipantDeclarativeCommon[P] extends PartyTopologyUtils {
       participant: ParticipantReference
   ): Map[P, Map[PhysicalSynchronizerId, (Serial, PartyHostingState)]] =
     synchronizerIds
+      .filter(participant.synchronizers.is_connected(_))
       .flatMap { synchronizerId =>
         val preferredHashingScheme = HashingSchemeVersion
           .getHashingSchemeVersionsForProtocolVersion(synchronizerId.protocolVersion)

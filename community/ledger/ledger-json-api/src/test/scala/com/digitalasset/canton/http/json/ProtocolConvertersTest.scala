@@ -6,33 +6,23 @@ package com.digitalasset.canton.http.json
 import cats.implicits.toFunctorOps
 import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.value.{Identifier, Record, Value}
-import com.daml.scalatest.Equalz.convertToAnyShouldWrapper
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.GetUpdateTreesResponse.Update
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.TreeEvent.Kind
 import com.digitalasset.canton.http.json.v2.{
   LegacyDTOs,
+  MockSchemaProcessor,
+  MockTranscodePackageIdResolver,
   ProtocolConverter,
   ProtocolConverters,
-  SchemaProcessors,
-  TranscodePackageIdResolver,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{
-  BaseTest,
-  HasExecutionContext,
-  LfPackageId,
-  LfPackageName,
-  LfPartyId,
-}
-import com.digitalasset.daml.lf.data.Ref.IdString
-import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
 import com.google.rpc.Code
 import magnolify.scalacheck.semiauto.ArbitraryDerivation
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.AppendedClues.convertToClueful
+import org.scalatest.matchers.should.Matchers.convertToAnyShouldWrapper
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -51,21 +41,7 @@ class ProtocolConvertersTest extends AnyWordSpec with BaseTest with HasExecution
   }
 
   private val mockSchemaProcessor = new MockSchemaProcessor()
-  private val packageNameResolver = new TranscodePackageIdResolver {
-    implicit def ec: ExecutionContext = executorService
-
-    override def loggerFactory: NamedLoggerFactory = ProtocolConvertersTest.this.loggerFactory
-
-    override def resolvePackageNamesInternal(
-        packageNames: NonEmpty[Set[LfPackageName]],
-        party: LfPartyId,
-        packageIdSelectionPreferences: Set[LfPackageId],
-        synchronizerIdO: Option[String],
-    )(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Map[LfPackageName, LfPackageId]] =
-      FutureUnlessShutdown.pure(Map.empty)
-  }
+  private val packageNameResolver = new MockTranscodePackageIdResolver(loggerFactory)
   private val converters = new ProtocolConverters(mockSchemaProcessor, packageNameResolver)
 
   import magnolify.scalacheck.auto.*
@@ -99,26 +75,9 @@ class ProtocolConvertersTest extends AnyWordSpec with BaseTest with HasExecution
 
 object Arbitraries {
 
+  import com.digitalasset.canton.http.json.v2.ProtocolConvertersMocks.*
   import StdGenerators.*
   import magnolify.scalacheck.auto.*
-
-  val defaultJsValue: ujson.Value = ujson.Obj("key" -> ujson.Str("value"))
-  val defaultLapiRecord: com.daml.ledger.api.v2.value.Record = Record(fields =
-    Seq(
-      com.daml.ledger.api.v2.value.RecordField(value =
-        Some(
-          com.daml.ledger.api.v2.value
-            .Value(com.daml.ledger.api.v2.value.Value.Sum.Text("quantumly-random"))
-        )
-      )
-    )
-  )
-  val defaultLapiValue: com.daml.ledger.api.v2.value.Value =
-    Value(sum = Value.Sum.Record(value = defaultLapiRecord))
-
-  val defaultKeyJsValue: ujson.Value = ujson.Obj("key" -> ujson.Str("contract-key-marker"))
-  val defaultKeyLapiValue: com.daml.ledger.api.v2.value.Value =
-    Value(sum = Value.Sum.Text("contract-key-marker"))
 
   def smallSeqArbitrary[T](implicit arbT: Arbitrary[T]): Arbitrary[Seq[T]] =
     Arbitrary(Gen.choose(0, 5).flatMap(n => Gen.listOfN(n, arbT.arbitrary)))
@@ -353,58 +312,6 @@ object Arbitraries {
       )
   }
 
-}
-
-class MockSchemaProcessor()(implicit val executionContext: ExecutionContext)
-    extends SchemaProcessors {
-
-  val simpleJsValue = Future.successful(Arbitraries.defaultJsValue)
-  val simpleLapiValue =
-    Future.successful(Arbitraries.defaultLapiValue)
-
-  val contractKeyJsValue: Future[ujson.Value] = Future.successful(Arbitraries.defaultKeyJsValue)
-  val contractKeyLapiValue: Future[Value] = Future.successful(Arbitraries.defaultKeyLapiValue)
-
-  override def contractArgFromJsonToProto(template: Identifier, jsonArgsValue: ujson.Value)(implicit
-      traceContext: TraceContext
-  ): Future[Value] = simpleLapiValue
-
-  override def contractArgFromProtoToJson(template: Identifier, protoArgs: Record)(implicit
-      traceContext: TraceContext
-  ): Future[ujson.Value] = simpleJsValue
-
-  override def choiceArgsFromJsonToProto(
-      template: Identifier,
-      choiceName: IdString.Name,
-      jsonArgsValue: ujson.Value,
-  )(implicit traceContext: TraceContext): Future[Value] = simpleLapiValue
-
-  override def choiceArgsFromProtoToJson(
-      template: Identifier,
-      choiceName: IdString.Name,
-      protoArgs: Value,
-  )(implicit traceContext: TraceContext): Future[ujson.Value] = simpleJsValue
-
-  override def keyArgFromProtoToJson(template: Identifier, protoArgs: Value)(implicit
-      traceContext: TraceContext
-  ): Future[ujson.Value] = contractKeyJsValue
-
-  override def keyArgFromJsonToProto(template: Identifier, jsonArgsValue: ujson.Value)(implicit
-      traceContext: TraceContext
-  ): Future[Value] = contractKeyLapiValue
-
-  override def exerciseResultFromProtoToJson(
-      template: Identifier,
-      choiceName: IdString.Name,
-      v: Value,
-  )(implicit traceContext: TraceContext): Future[ujson.Value] = simpleJsValue
-
-  override def exerciseResultFromJsonToProto(
-      template: Identifier,
-      choiceName: IdString.Name,
-      value: ujson.Value,
-  )(implicit traceContext: TraceContext): Future[Option[Value]] =
-    simpleLapiValue.map(Some(_))
 }
 
 final case class JsMapping[LAPI, JS](converter: ProtocolConverter[LAPI, JS])(implicit
