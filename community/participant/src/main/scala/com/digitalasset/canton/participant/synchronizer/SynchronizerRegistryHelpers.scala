@@ -359,23 +359,20 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       ec: ExecutionContextExecutor,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
-    synchronizeWithClosing("check-for-synchronizer-topology-initialization")(
-      EitherT.right[SynchronizerRegistryError](connectivityStatusStore.isTopologyInitialized())
-    ).flatMap {
-      case true =>
-        EitherT.right[SynchronizerRegistryError](FutureUnlessShutdown.unit)
-      case false =>
-        new StoreBasedSynchronizerTopologyInitializationCallback()
-          .callback(
-            topologySnapshotValidator,
-            topologyClient,
-            sequencerClient,
-            staticParameters.protocolVersion,
-          )
-          .leftMap[SynchronizerRegistryError](
-            SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
-          )
-          .semiflatMap(_ => connectivityStatusStore.setTopologyInitialized())
+    if (connectivityStatusStore.isTopologyInitialized) {
+      EitherT.right[SynchronizerRegistryError](FutureUnlessShutdown.unit)
+    } else {
+      new StoreBasedSynchronizerTopologyInitializationCallback()
+        .callback(
+          topologySnapshotValidator,
+          topologyClient,
+          sequencerClient,
+          staticParameters.protocolVersion,
+        )
+        .leftMap[SynchronizerRegistryError](
+          SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
+        )
+        .semiflatMap(_ => connectivityStatusStore.setTopologyInitialized())
     }
 
   // if participant has provided synchronizer id previously, compare and make sure the synchronizer being
@@ -520,34 +517,32 @@ object SynchronizerRegistryHelpers {
     EitherT.right(
       predecessorSyncStateO
         .traverse_ { case (predecessor, predecessorSyncState) =>
-          for {
-            isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized()
+          val isTopologyInitialized = persistentState.connectivityStatusStore.isTopologyInitialized
+          val shouldCopyTopology = !isTopologyInitialized && !predecessor.isLateUpgrade
+          val copyAction = if (shouldCopyTopology) {
+            for {
+              _ <- persistentState.topologyStore
+                .copyFromPredecessorSynchronizerStore(
+                  predecessorSyncState.topologyStore
+                )
 
-            shouldCopyTopology = !isTopologyInitialized && !predecessor.isLateUpgrade
-            _ <-
-              if (shouldCopyTopology) {
-                for {
-                  _ <- persistentState.topologyStore
-                    .copyFromPredecessorSynchronizerStore(
-                      predecessorSyncState.topologyStore
-                    )
+              _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
+            } yield ()
+          } else {
+            if (predecessor.isLateUpgrade)
+              loggingContext.info(
+                s"LSU to ${persistentState.psid.suffix}: Topology will not be copied because of late upgrade"
+              )
 
-                  _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
-                } yield ()
-              } else {
-                if (predecessor.isLateUpgrade)
-                  loggingContext.info(
-                    s"LSU to ${persistentState.psid.suffix}: Topology will not be copied because of late upgrade"
-                  )
+            FutureUnlessShutdown.unit
+          }
 
-                FutureUnlessShutdown.unit
-              }
-
-            _ = metrics.setLsuStatus(
+          copyAction.thereafter(_ =>
+            metrics.setLsuStatus(
               ParticipantMetrics.LsuStatus.LocalCopyDone,
               persistentState.psid,
             )
-          } yield ()
+          )
         }
     )
   }

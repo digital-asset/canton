@@ -269,19 +269,6 @@ final class BftBlockOrderer(
       loggerFactory,
     )
 
-  val partitionManager: Option[
-    (PartitionManager.PartitionCreator[PekkoEnv], PartitionManager.PartitionPruner[PekkoEnv])
-  ] =
-    awaitFuture(
-      PartitionManager.create(localStorage, timeouts, loggerFactory),
-      "initialize partition management",
-    )(TraceContext.empty)
-
-  private val epochStore = EpochStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
-  private val outputStore = OutputMetadataStore(localStorage, timeouts, loggerFactory)
-  private val pruningSchedulerStore =
-    BftOrdererPruningSchedulerStore(localStorage, timeouts, loggerFactory)
-
   private val sequencerSnapshotAdditionalInfo = sequencerSnapshotInfo.map { snapshot =>
     implicit val traceContext: TraceContext = TraceContext.empty
     SequencerSnapshotAdditionalInfo
@@ -298,6 +285,28 @@ final class BftBlockOrderer(
         },
       )
   }
+
+  val partitionManager: Option[
+    (PartitionManager.PartitionCreator[PekkoEnv], PartitionManager.PartitionPruner[PekkoEnv])
+  ] = {
+    // If this is a newly onboarded node, the partition manager needs to be initialized knowing the initial epochNumber
+    // to start partitions from. Otherwise, it will start from the beginning.
+    val onboardedSequencerEpochNumberO = for {
+      info <- sequencerSnapshotAdditionalInfo
+      nodeActiveAt <- info.nodeActiveAt.get(thisNode)
+      epochNumber <- nodeActiveAt.startEpochNumber
+    } yield epochNumber
+    awaitFuture(
+      PartitionManager
+        .create(localStorage, timeouts, loggerFactory, onboardedSequencerEpochNumberO),
+      "Initializing partition management",
+    )(TraceContext.empty)
+  }
+
+  private val epochStore = EpochStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
+  private val outputStore = OutputMetadataStore(localStorage, timeouts, loggerFactory)
+  private val pruningSchedulerStore =
+    BftOrdererPruningSchedulerStore(localStorage, timeouts, loggerFactory)
 
   private val isOrdererHealthy = new AtomicBoolean(true)
 
@@ -329,6 +338,7 @@ final class BftBlockOrderer(
       createNetworkManager,
       exitOnFatalFailures,
       isOrdererHealthy,
+      config.initTimeout,
       metrics,
       loggerFactory,
     )
@@ -373,7 +383,7 @@ final class BftBlockOrderer(
         for {
           size <-
             if (overwrite) store.clearAllEndpoints().map(_ => 0)
-            else store.listEndpoints.map(_.size)
+            else store.listEndpoints().map(_.size)
           _ <-
             if (size == 0)
               PekkoFutureUnlessShutdown.sequence(
@@ -383,7 +393,7 @@ final class BftBlockOrderer(
               )
             else PekkoFutureUnlessShutdown.pure(())
         } yield (),
-        "init endpoints",
+        "Storing P2P endpoints",
       )
       if (overwrite) {
         logger.info("BFT P2P endpoints from configuration written to the store (overwriting mode)")
@@ -536,7 +546,11 @@ final class BftBlockOrderer(
             ServerInterceptors.intercept(
               BftOrderingServiceGrpc.bindService(
                 new P2PGrpcBftOrderingService(
-                  createPeerReceiverForIncomingConnection,
+                  sendingStreamObserver =>
+                    TraceContext.withNewTraceContext("p2p-incoming-connection") {
+                      implicit traceContext =>
+                        createPeerReceiverForIncomingConnection(sendingStreamObserver)
+                    },
                   loggerFactory,
                 ),
                 executionContext,
@@ -661,7 +675,7 @@ final class BftBlockOrderer(
     FutureUnlessShutdown.pure(outputPreviousStoredBlock.getBlockNumberAndBftTime.map(_._2))
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    logger.debug("Beginning async BFT block orderer shutdown")(TraceContext.empty)
+    logger.info("Beginning async BFT block orderer shutdown")(TraceContext.empty)
 
     // Shutdown the P2P network client portion and module system
     SyncCloseable(
@@ -847,8 +861,8 @@ final class BftBlockOrderer(
   private def awaitFuture[T](f: PekkoFutureUnlessShutdown[T], description: String)(implicit
       traceContext: TraceContext
   ): T = {
-    logger.debug(description)
-    timeouts.default
+    logger.info(description)
+    config.initTimeout
       .await(s"${getClass.getSimpleName} $description")(
         f.futureUnlessShutdown().failOnShutdownToAbortException(description)
       )(ErrorLoggingContext.fromTracedLogger(logger))

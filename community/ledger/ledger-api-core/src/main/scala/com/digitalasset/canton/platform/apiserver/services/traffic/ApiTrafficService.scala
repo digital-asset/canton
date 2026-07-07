@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.traffic
 
+import cats.Eval
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient
@@ -24,7 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * [[com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient]].
   */
 class ApiTrafficService(
-    client: RichTrafficServiceClient,
+    client: Eval[RichTrafficServiceClient],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends TrafficService
@@ -33,12 +34,12 @@ class ApiTrafficService(
 
   override def getAccount(request: GetAccountRequest): Future[GetAccountResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    client.getAccount(request).asGrpcFuture
+    client.value.getAccount(request).asGrpcFuture
   }
 
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    client.updateAccount(request).asGrpcFuture
+    client.value.updateAccount(request).asGrpcFuture
   }
 
   override def bindService(): ServerServiceDefinition =

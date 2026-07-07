@@ -28,7 +28,7 @@ abstract class GenericInMemoryP2PEndpointsStore[E <: Env[E]](
 
   protected def createFuture[A](action: String)(x: () => Try[A]): E#FutureUnlessShutdownT[A]
 
-  override final def listEndpoints(implicit
+  override final def listEndpoints()(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Seq[P2PEndpoint]] =
     lock.exclusive {

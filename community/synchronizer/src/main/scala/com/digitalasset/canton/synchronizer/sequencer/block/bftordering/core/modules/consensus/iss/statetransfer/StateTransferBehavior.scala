@@ -50,7 +50,7 @@ import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import scala.util.{Failure, Random, Success}
+import scala.util.{Failure, Success}
 
 /** A state transfer behavior for [[IssConsensusModule]]. There are 2 types of state transfer:
   * onboarding (for new nodes) and catch-up (for lagging-behind nodes). These two types work
@@ -92,7 +92,6 @@ final class StateTransferBehavior[E <: Env[E]](
     clock: Clock,
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
-    random: Random,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -126,7 +125,6 @@ final class StateTransferBehavior[E <: Env[E]](
       thisNode,
       dependencies,
       epochStore,
-      random,
       metrics,
       loggerFactory,
     )()
@@ -145,8 +143,10 @@ final class StateTransferBehavior[E <: Env[E]](
   private[iss] var maybeLastReceivedEpochTopology: Option[Consensus.NewEpochTopology[E]] =
     None
 
-  override def ready(self: ModuleRef[Consensus.Message[E]]): Unit =
-    self.asyncSendNoTrace(Consensus.Init.KickOff)
+  override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
+      traceContext: TraceContext
+  ): Unit =
+    self.asyncSend(Consensus.Init.KickOff)
 
   override protected def receiveInternal(
       message: Consensus.Message[E]
@@ -479,29 +479,27 @@ final class StateTransferBehavior[E <: Env[E]](
         latestCompletedEpoch,
         sequencerSnapshotAdditionalInfo = None,
       )
-    val consensusBehavior =
-      new IssConsensusModule[E](
-        consensusInitialState,
-        epochStore,
-        clock,
+    val consensusBehavior = new IssConsensusModule[E](
+      consensusInitialState,
+      epochStore,
+      clock,
+      metrics,
+      segmentModuleRefFactory,
+      new RetransmissionsManager[E](
+        thisNode,
+        dependencies.p2pNetworkOut,
+        abort,
+        previousEpochsCommitCerts = Map.empty,
         metrics,
-        segmentModuleRefFactory,
-        new RetransmissionsManager[E](
-          thisNode,
-          dependencies.p2pNetworkOut,
-          abort,
-          previousEpochsCommitCerts = Map.empty,
-          metrics,
-          clock,
-          loggerFactory,
-        ),
-        random,
-        dependencies,
+        clock,
         loggerFactory,
-        timeouts,
-        futurePbftMessageQueue = initialState.pbftMessageQueue,
-        postponedConsensusMessageQueue = Some(postponedConsensusMessages),
-      )()(catchupDetector)
+      ),
+      dependencies,
+      loggerFactory,
+      timeouts,
+      futurePbftMessageQueue = initialState.pbftMessageQueue,
+      postponedConsensusMessageQueue = Some(postponedConsensusMessages),
+    )(initTraceContext = traceContext)(catchupDetector)
 
     context.become(consensusBehavior)
 

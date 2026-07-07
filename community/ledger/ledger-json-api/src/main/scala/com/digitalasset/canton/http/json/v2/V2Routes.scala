@@ -25,6 +25,7 @@ import org.apache.pekko.util.ByteString
 import sttp.model.{Header, StatusCode, StatusText}
 import sttp.tapir.model.{ConnectionInfo, ServerRequest}
 import sttp.tapir.server.interceptor.RequestInterceptor.RequestResultTransform
+import sttp.tapir.server.interceptor.decodefailure.DefaultDecodeFailureHandler.FailureMessages
 import sttp.tapir.server.interceptor.{RequestInterceptor, RequestResult}
 import sttp.tapir.server.pekkohttp.{PekkoHttpServerInterpreter, PekkoHttpServerOptions}
 
@@ -44,6 +45,7 @@ class V2Routes(
     userManagementService: JsUserManagementService,
     versionService: JsVersionService,
     metadataServiceIfEnabled: Option[JsDamlDefinitionsService],
+    trafficServiceIfEnabled: Option[JsTrafficService],
     versionClient: VersionClient,
     requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
@@ -57,7 +59,10 @@ class V2Routes(
       .endpoints() ++ stateService.endpoints() ++ updateService.endpoints() ++ userManagementService
       .endpoints() ++ identityProviderService
       .endpoints() ++ interactiveSubmissionService
-      .endpoints() ++ metadataServiceIfEnabled.toList.flatMap(_.endpoints()) ++ jsHealthService
+      .endpoints() ++ metadataServiceIfEnabled.toList.flatMap(
+      _.endpoints()
+    ) ++ trafficServiceIfEnabled.toList
+      .flatMap(_.endpoints()) ++ jsHealthService
       .endpoints() ++ contractService.endpoints()
 
   private val docs =
@@ -83,6 +88,7 @@ object V2Routes {
   def apply(
       ledgerClient: LedgerClient,
       metadataServiceEnabled: Boolean,
+      trafficEnforcementEnabled: Boolean,
       packageSyncService: PackageSyncService,
       packagePreferenceBackend: PackagePreferenceBackend,
       executionContext: ExecutionContext,
@@ -158,6 +164,9 @@ object V2Routes {
         new DamlDefinitionsView(packageSyncService.getPackageMetadataSnapshot(_))
       new JsDamlDefinitionsService(damlDefinitionsService, requestLogger, loggerFactory)
     }
+    val trafficServiceIfEnabled = Option.when(trafficEnforcementEnabled) {
+      new JsTrafficService(ledgerClient, requestLogger, loggerFactory)
+    }
     val jsHealthService = new JsHealthService(
       healthService = healthService,
       requestLogger = requestLogger,
@@ -177,6 +186,7 @@ object V2Routes {
       userManagementService,
       versionService,
       damlDefinitionsServiceIfEnabled,
+      trafficServiceIfEnabled,
       ledgerClient.versionClient,
       requestLogger,
       loggerFactory,
@@ -311,7 +321,7 @@ class RequestInterceptors(
           )
           Future.successful(result)
         case RequestResult.Failure(fails) =>
-          val error = fails.map(_.failure.toString).mkString("; ")
+          val error = fails.map(FailureMessages.failureMessage).mkString("; ")
           auditLogger.logResponseStatus(
             callMetadata,
             ResponseKind.MinorError,

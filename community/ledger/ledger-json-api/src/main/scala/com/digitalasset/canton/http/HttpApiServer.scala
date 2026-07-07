@@ -32,6 +32,7 @@ object HttpApiServer extends NoTracing {
       loggerFactory: NamedLoggerFactory,
       authInterceptor: AuthInterceptor,
       packagePreferenceBackend: PackagePreferenceBackend,
+      trafficEnforcementEnabled: Boolean,
       apiLoggingConfig: ApiLoggingConfig,
   )(implicit
       jsonApiMetrics: HttpApiMetrics
@@ -50,6 +51,7 @@ object HttpApiServer extends NoTracing {
           channel,
           packageSyncService,
           packagePreferenceBackend,
+          trafficEnforcementEnabled,
           apiLoggingConfig,
           loggerFactory,
         )(

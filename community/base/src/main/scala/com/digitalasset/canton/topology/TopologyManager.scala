@@ -51,6 +51,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.{
 }
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction.GenericValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.{
+  HasTopologyStoreId,
   TopologyStore,
   TopologyStoreId,
   ValidatedTopologyTransaction,
@@ -345,9 +346,12 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyManagerStatus
+    with HasTopologyStoreId[StoreID]
     with NamedLogging
     with FlagCloseable
     with HasCloseContext {
+
+  override def storeId: StoreID = store.storeId
 
   /** The timestamp that will be used for validating the topology transactions before submitting
     * them for sequencing to a synchronizer or storing it in the local store.
@@ -1216,6 +1220,12 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
 }
 
 object TopologyManager {
+
+  /** Helper type to make the type `TopologyManager` easier to pass as a type constructor (.i.e.:
+    * `F[+_ <: * TopologyStoreId]`).
+    */
+  type Aux[+StoreId <: TopologyStoreId] = TopologyManager[StoreId, ? <: BaseCrypto]
+
   sealed trait Version {
     def validation: ProtocolVersionValidation
     def serialization: ProtocolVersion

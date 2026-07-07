@@ -79,7 +79,7 @@ final class DbP2PEndpointsStore(
 
   private val profile = storage.profile
 
-  override def listEndpoints(implicit
+  override def listEndpoints()(implicit
       traceContext: TraceContext
   ): PekkoEnv#FutureUnlessShutdownT[Seq[P2PEndpoint]] =
     queryUnlessShutdown(

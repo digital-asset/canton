@@ -155,6 +155,33 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     ) extends CantonError.Impl(
           cause = "No synchronizer store available."
         )
+        with TopologyManagerError
+
+    final case class MultipleSynchronizerStoresFound(storeIds: Seq[TopologyStoreId])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Multiple topology stores found for the provided storeId: ${storeIds.mkString(", ")}."
+        )
+        with TopologyManagerError
+
+  }
+
+  @Explanation(
+    "This error indicates that the topology has not yet been initialized or is in the process of being initialized."
+  )
+  @Resolution(
+    "The failed operation can be retried after the store has been fully initialized, for example after the logical synchronizer upgrade has completed."
+  )
+  object TopologyStoreNotInitialized
+      extends ErrorCode(
+        id = "TOPOLOGY_STORE_NOT_INITIALIZED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Failure(storeId: TopologyStoreId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = s"Topology store '$storeId' is not yet initialized.")
+        with TopologyManagerError
   }
 
   @Explanation(
@@ -271,14 +298,6 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"Invalid synchronizer $invalid"
-        )
-        with TopologyManagerError
-
-    final case class MultipleSynchronizerStoresFound(storeIds: Seq[TopologyStoreId])(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause =
-            s"Multiple synchronizer stores found for the provided storeId: ${storeIds.mkString(", ")}."
         )
         with TopologyManagerError
   }

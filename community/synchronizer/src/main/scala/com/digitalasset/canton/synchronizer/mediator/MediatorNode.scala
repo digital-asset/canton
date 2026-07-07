@@ -66,7 +66,8 @@ import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
 import com.digitalasset.canton.synchronizer.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.time.{Clock, HasUptime, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.PsidLookup
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreInitializationStatus.Initialized
+import com.digitalasset.canton.topology.admin.grpc.{PsidLookup, TopologyStoreInitializationStatus}
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{
   InitialTopologySnapshotValidator,
@@ -237,11 +238,13 @@ class MediatorNodeBootstrap(
   private def synchronizerTopologyManager: Option[SynchronizerTopologyManager] =
     getNode.flatMap(_.replicaManager.mediatorRuntime).map(_.mediator.topologyManager)
 
-  override protected def sequencedTopologyStores: Seq[TopologyStore[SynchronizerStore]] =
-    synchronizerTopologyManager.map(_.store).toList
+  override protected def sequencedTopologyStores
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyStore]] =
+    synchronizerTopologyManager.map(_.store).toList.map(Initialized(_))
 
-  override protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager] =
-    synchronizerTopologyManager.toList
+  override protected def sequencedTopologyManagers
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyManager.Aux]] =
+    synchronizerTopologyManager.toList.map(Initialized[SynchronizerStore, TopologyManager.Aux](_))
 
   override protected def lookupTopologyClient(
       psid: PhysicalSynchronizerId

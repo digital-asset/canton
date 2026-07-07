@@ -69,7 +69,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 import java.time.Instant
-import scala.util.{Failure, Random, Success}
+import scala.util.{Failure, Success}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 final class IssConsensusModule[E <: Env[E]](
@@ -79,7 +79,6 @@ final class IssConsensusModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
     retransmissionsManager: RetransmissionsManager[E],
-    random: Random,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -93,6 +92,7 @@ final class IssConsensusModule[E <: Env[E]](
     //  to avoid two different constructor calls depending on whether the test want to customize it or not.
     customOnboardingAndServerStateTransferManager: Option[StateTransferManager[E]] = None,
     private var activeTopologyInfo: OrderingTopologyInfo[E] = initialState.topologyInfo,
+    initTraceContext: TraceContext,
 )(
     private var catchupDetector: CatchupDetector = new DefaultCatchupDetector(
       activeTopologyInfo.currentMembership,
@@ -109,7 +109,7 @@ final class IssConsensusModule[E <: Env[E]](
 
   logger.info(
     s"Consensus module instantiated with epoch length ${initialState.topologyInfo.currentMembership.orderingTopology.epochLength}"
-  )(TraceContext.empty)
+  )(initTraceContext)
 
   private val thisNode = initialState.topologyInfo.thisNode
 
@@ -120,7 +120,6 @@ final class IssConsensusModule[E <: Env[E]](
         thisNode,
         dependencies,
         epochStore,
-        random,
         metrics,
         loggerFactory,
       )()
@@ -133,7 +132,7 @@ final class IssConsensusModule[E <: Env[E]](
       s"membership = ${initialState.topologyInfo.currentMembership}, " +
       s"latest completed epoch = ${initialState.latestCompletedEpoch.info}, " +
       s"current epoch = ${initialState.epochState.epoch.info} (completed: ${initialState.epochState.epochCompletionStatus.isComplete})"
-  )(TraceContext.empty)
+  )(initTraceContext)
 
   private var latestCompletedEpoch: EpochStore.Epoch = initialState.latestCompletedEpoch
   @VisibleForTesting
@@ -159,7 +158,9 @@ final class IssConsensusModule[E <: Env[E]](
   private[iss] def getActiveTopologyInfo: OrderingTopologyInfo[E] = activeTopologyInfo
 
   // TODO(#16761) resend locally-led ordered blocks (PrePrepare) in activeEpoch in case my node crashed
-  override def ready(self: ModuleRef[Consensus.Message[E]]): Unit = ()
+  override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
+      traceContext: TraceContext
+  ): Unit = ()
 
   override protected def receiveInternal(message: Consensus.Message[E])(implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -730,6 +731,7 @@ final class IssConsensusModule[E <: Env[E]](
             completedBlocks = Seq.empty,
             pbftMessagesForIncompleteBlocks = Seq.empty,
           ),
+          traceContext,
         ),
         completedBlocks = Seq.empty,
         loggerFactory = loggerFactory,
@@ -886,7 +888,6 @@ final class IssConsensusModule[E <: Env[E]](
       clock,
       metrics,
       segmentModuleRefFactory,
-      random,
       dependencies,
       loggerFactory,
       timeouts,
@@ -908,7 +909,10 @@ final class IssConsensusModule[E <: Env[E]](
     val epochSnapshot = EpochStore.Epoch(epochInfo, epochState.lastBlockCommitMessages)
 
     if (sync) {
-      context.blockingAwait(epochStore.completeEpoch(epochInfo.number))
+      context.blockingAwait(
+        epochStore.completeEpoch(epochInfo.number),
+        config.blockingDbReadTimeout,
+      )
     } else {
       pipeToSelf(epochStore.completeEpoch(epochInfo.number)) {
         case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)

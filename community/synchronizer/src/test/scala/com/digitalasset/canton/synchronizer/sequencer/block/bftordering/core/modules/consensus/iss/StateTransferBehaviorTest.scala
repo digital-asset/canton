@@ -65,8 +65,6 @@ import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.util.Random
-
 class StateTransferBehaviorTest
     extends AsyncWordSpec
     with BftSequencerBaseTest
@@ -83,7 +81,9 @@ class StateTransferBehaviorTest
       "init" in {
         val (context, stateTransferBehavior) = createStateTransferBehavior()
 
-        stateTransferBehavior.ready(context.self)
+        stateTransferBehavior.ready(context.self)(
+          TraceContext.createNew("state_transfer_behavior_test")
+        )
 
         context.extractSelfMessages() shouldBe Seq(Consensus.Init.KickOff)
       }
@@ -546,6 +546,7 @@ class StateTransferBehaviorTest
             failingCryptoProvider,
             latestCompletedEpochFromStore.lastBlockCommits,
             epochStore.loadEpochProgress(latestEpochFromStore.info)(TraceContext.empty)(),
+            traceContext,
           )
           new EpochState[ProgrammableUnitTestEnv](
             epoch,
@@ -579,7 +580,6 @@ class StateTransferBehaviorTest
         clock,
         metrics,
         moduleRefFactory,
-        new Random(4),
         dependencies,
         loggerFactory,
         timeouts,
@@ -596,6 +596,7 @@ class StateTransferBehaviorTest
           cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
           latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
           epochInProgress: EpochStore.EpochInProgress,
+          _traceContext: TraceContext,
       )(
           segmentState: SegmentState,
           metricsAccumulator: EpochMetricsAccumulator,

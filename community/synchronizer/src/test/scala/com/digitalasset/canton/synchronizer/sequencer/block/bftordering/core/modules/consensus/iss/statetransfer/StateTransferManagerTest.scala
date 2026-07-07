@@ -66,8 +66,6 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.util.Random
-
 class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   import StateTransferManagerTest.*
 
@@ -103,7 +101,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       assertBlockTransferRequestHasBeenSent(
         p2pNetworkOutRef,
         blockTransferRequest,
-        to = otherId,
+        possibleRecipients = Seq(otherId),
         numberOfTimes = 1,
       )
 
@@ -145,7 +143,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       assertBlockTransferRequestHasBeenSent(
         p2pNetworkOutRef,
         blockTransferRequest,
-        to = otherId,
+        possibleRecipients = Seq(otherId),
         numberOfTimes = 1,
       )
     }
@@ -184,7 +182,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       assertBlockTransferRequestHasBeenSent(
         p2pNetworkOutRef,
         blockTransferRequest,
-        to = otherId,
+        possibleRecipients = Seq(otherId),
         numberOfTimes = 2, // +1 from start
       )
     }
@@ -504,7 +502,6 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       myId,
       dependencies,
       epochStore,
-      new Random(4),
       metrics,
       loggerFactory,
     )(maybeCustomTimeoutManager)
@@ -513,7 +510,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   private def assertBlockTransferRequestHasBeenSent(
       p2pNetworkOutRef: ModuleRef[P2PNetworkOut.Message],
       blockTransferRequest: SignedMessage[StateTransferMessage.BlockTransferRequest],
-      to: BftNodeId,
+      possibleRecipients: Seq[BftNodeId],
       numberOfTimes: Int,
   )(implicit context: ContextType): Unit = {
     // Should have scheduled a retry.
@@ -526,9 +523,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       .verify(p2pNetworkOutRef, times(numberOfTimes))
       .asyncSend(
         eqTo(
-          P2PNetworkOut.send(
+          P2PNetworkOut.SendToRandomAuthenticated(
             P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(blockTransferRequest),
-            to,
+            possibleRecipients,
           )
         )
       )(any[TraceContext], any[MetricsContext])

@@ -7,7 +7,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.store.db.{DbTest, H2Test, MigrationMode, PostgresTest}
+import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tea.projection.TeaTrafficStoreTest
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
@@ -41,12 +41,6 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
   }
 }
 
-class DbTeaTrafficStorePostgresTest extends DbTeaTrafficStoreTest with PostgresTest {
-  // TODO(i33278): remove when migrations are stable
-  override def migrationMode: MigrationMode = MigrationMode.DevVersion
-}
+class DbTeaTrafficStorePostgresTest extends DbTeaTrafficStoreTest with PostgresTest
 
-class DbTeaTrafficStoreH2Test extends DbTeaTrafficStoreTest with H2Test {
-  // TODO(i33278): remove when migrations are stable
-  override def migrationMode: MigrationMode = MigrationMode.DevVersion
-}
+class DbTeaTrafficStoreH2Test extends DbTeaTrafficStoreTest with H2Test

@@ -1,4 +1,3 @@
-
 # Release of Canton CANTON_VERSION
 
 Canton CANTON_VERSION has been released on RELEASE_DATE.
@@ -15,25 +14,22 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
-### New `GetCompletions` endpoint on the command completion service
-#### Background
-The command completion service only offered `CompletionStream`, which always filters by a single user and a non-empty set of parties. There was no way to stream completions across all parties.
-
-#### Specific Changes
-A new completion streaming endpoint is introduced: `GetCompletions` (gRPC) or `/commands/command-completions` (JSON API). This endpoint offers more flexible filtering semantics compared to the existing `CompletionStream`, `/commands/completions` endpoint. It filters by `parties` only; there is no user filtering:
-- A non-empty `parties` filters to those parties and requires `ReadAs` (or `ActAs`) for each.
-- An empty `parties` returns completions for all parties and requires `ReadAsAnyParty` (or `ActAsAnyParty`).
-
-In all other respects it behaves like `CompletionStream`, which becomes deprecated.
-
-#### Impact and Migration
-This is an additive change. `CompletionStream` is unchanged, so no migration is required.
-
 ### Minor Improvements
-- Added latency metrics for signing and decryption operations.
-- Updated nix package to source from GHCR and bump dpm version to 1.0.20 for remote dar support
-- Fixed a BFT ordering sequencer crash-recovery issue affecting freshly onboarded nodes. If such a node crashed and restarted while still within its onboarding start epoch, on restart it could attempt to recover the output module from a block below its durable lower bound (a block that was never stored by this node), which could leave the node stuck. The onboarding boundary block is now persisted with its BFT time to seed BFT-time computation across a restart, the node's own activation time is reconstructed when needed for crash recovery, and output-module recovery is clamped to the durable lower bound.
-- LSU: improved handshake between a sequencer and its successor: the physical synchronizer id and sequencer id are now validated.
+- Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
+- The JSON Ledger API endpoint `GET /v2/interactive-submission/preferred-package-version` is now marked as deprecated in the OpenAPI specification as well (previoulsy it was marked as deprecated only in the textual description). Use `POST /v2/interactive-submission/preferred-packages` instead. The endpoint remains functional and will be removed in Canton 3.6.
+- Improved log trace correlation in the BFT ordering layer: `TraceContext` is now propagated through module lifecycle calls (`setModule`, `become`, `ready`) and across several modules (`AvailabilityModule`, `IssConsensusModule`, `IssSegmentModule`, `PreIssConsensusModule`, `SegmentClosingBehaviour`, `P2PNetworkOutModule`, `StateTransferBehavior`) instead of using an empty trace context.
+
+#### Improvements to `TopologyManagerReadService` and `TopologyAggregationService`
+- The services return the error `TOPOLOGY_STORE_NOT_INITIALIZED` in case the the topology store hasn't been initialized yet.
+  This can happen in two cases:
+  - When onboarding to a synchronizer, before the download and the processing of the initial topology state has completed,
+  - During a logical synchronizer upgrade, before the the successor store has been initialized either through the local topology copy or the download of the topology state from the successor sequencers.
+- The services return the error `TOPOLOGY_STORE_NOT_FOUND` when requesting topology data for a synchronizer that is not known to the node.
+- The services now only return data for all active synchronizers when no synchronizers are specified in the request.
+  Previously, data for all synchronizers was returned, including the inactive predecessor synchronizers after an LSU.
+
+#### Improvements to database connection error reporting
+- If a database call takes more time than the configured `postgres_data_source.network_timeout` a new, more specific `INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR` will be logged. This replaces the previously raised `INDEX_DB_SQL_NON_TRANSIENT_ERROR`.
 
 ### Preview Features
 - preview feature

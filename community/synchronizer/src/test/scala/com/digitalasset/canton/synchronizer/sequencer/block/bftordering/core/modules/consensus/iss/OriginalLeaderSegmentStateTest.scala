@@ -51,7 +51,14 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
       val slots = NonEmpty.apply(Seq, 0L, 1L, 2L, 3L, 4L, 5L, 6L).map(BlockNumber(_))
       val segmentState = createSegmentState(slots)
       val leaderSegmentState =
-        new OriginalLeaderSegmentState(segmentState, epoch, Seq.empty, Seq.empty, loggerFactory)
+        new OriginalLeaderSegmentState(
+          segmentState,
+          epoch,
+          Seq.empty,
+          Seq.empty,
+          loggerFactory,
+          traceContext,
+        )
       // Emulate the first epoch behavior
       val initialCommits = Seq.empty
 
@@ -117,6 +124,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
             completedBlocks,
             initialCurrentViewPrePrepareBlockNumbers = Seq.empty,
             loggerFactory,
+            traceContext,
           )
 
         segmentState.isSegmentComplete shouldBe false
@@ -172,6 +180,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
             completedBlocks,
             currentViewPrePrepareBlockNumbers,
             loggerFactory,
+            traceContext,
           )
 
         segmentState.isSegmentComplete shouldBe false
@@ -221,6 +230,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
             completedBlocks,
             initialCurrentViewPrePrepareBlockNumbers = Seq.empty,
             loggerFactory,
+            traceContext,
           )
 
         segmentState.isSegmentComplete shouldBe false
@@ -243,7 +253,14 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
           loggerFactory,
         )
       val leaderSegmentState =
-        new OriginalLeaderSegmentState(segmentState, epoch, Seq.empty, Seq.empty, loggerFactory)
+        new OriginalLeaderSegmentState(
+          segmentState,
+          epoch,
+          Seq.empty,
+          Seq.empty,
+          loggerFactory,
+          traceContext,
+        )
 
       val orderedBlock = leaderSegmentState.assignToSlot(
         OrderingBlock.empty,
@@ -278,7 +295,14 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
           loggerFactory,
         )
       val leaderSegmentState =
-        new OriginalLeaderSegmentState(segmentState, epoch, Seq.empty, Seq.empty, loggerFactory)
+        new OriginalLeaderSegmentState(
+          segmentState,
+          epoch,
+          Seq.empty,
+          Seq.empty,
+          loggerFactory,
+          traceContext,
+        )
 
       val anotherNodeSegment =
         epoch.segments

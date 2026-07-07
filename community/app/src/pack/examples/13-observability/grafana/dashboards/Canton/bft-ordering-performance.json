@@ -5388,7 +5388,7 @@
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile($percentile, sum(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{reporting_sequencer=\"$reporting_sequencer\", ordering_stage=~\"state-transfer-total-epoch-transfer-latency\"}[$__rate_interval])))",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\", ordering_stage=~\"state-transfer-total-epoch-transfer-latency\"}[$__rate_interval])))",
               "legendFormat": "Data transfer",
               "range": true,
               "refId": "A"
@@ -5399,7 +5399,7 @@
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile($percentile, sum(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{reporting_sequencer=\"$reporting_sequencer\", ordering_stage=~\"state-transfer-store-epochs\"}[$__rate_interval])))",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\", ordering_stage=~\"state-transfer-store-epochs\"}[$__rate_interval])))",
               "hide": false,
               "legendFormat": "Complete + start DB query",
               "range": true,
