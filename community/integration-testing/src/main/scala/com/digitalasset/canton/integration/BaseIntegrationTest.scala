@@ -4,7 +4,9 @@
 package com.digitalasset.canton.integration
 
 import com.daml.ledger.javaapi.data.Event
+import com.digitalasset.canton.config.SharedCantonConfig
 import com.digitalasset.canton.console.{BufferedProcessLogger, CommandFailure, ParticipantReference}
+import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{
@@ -24,9 +26,9 @@ import scala.jdk.CollectionConverters.*
 /** A highly opinionated base trait for writing integration tests interacting with a canton
   * environment using console commands. Tests must mixin a further [[EnvironmentSetup]]
   * implementation to define when the canton environment is setup around the individual tests:
-  *   - [[IsolatedEnvironments]] will construct a fresh environment for each test.
-  *   - [[SharedEnvironment]] will construct only a single environment and reuse this for each test
-  *     executed in the test class.
+  *   - [[BaseIsolatedEnvironments]] will construct a fresh environment for each test.
+  *   - [[BaseSharedEnvironment]] will construct only a single environment and reuse this for each
+  *     test executed in the test class.
   *
   * Test classes must override [[HasEnvironmentDefinition.environmentDefinition]] to describe how
   * they would like their environment configured.
@@ -53,15 +55,15 @@ import scala.jdk.CollectionConverters.*
   * All integration tests must be located in package [[com.digitalasset.canton.integration.tests]]
   * or a subpackage thereof. This is required to correctly compute unit test coverage.
   */
-private[integration] trait BaseIntegrationTest
+trait BaseIntegrationTest[C <: SharedCantonConfig[C], E <: Environment[C]]
     extends FixtureAnyWordSpec
     with BaseTest
     with RepeatableTestSuiteTest
     with PartyTopologyUtils
     with TestPredicateFiltersFixtureAnyWordSpec {
-  self: EnvironmentSetup =>
+  self: EnvironmentSetup[C, E] =>
 
-  type FixtureParam = TestConsoleEnvironment
+  type FixtureParam = BaseTestConsoleEnvironment[C, E]
 
   override protected def withFixture(test: OneArgTest): Outcome = {
     val integrationTestPackage = "com.digitalasset.canton.integration.tests"

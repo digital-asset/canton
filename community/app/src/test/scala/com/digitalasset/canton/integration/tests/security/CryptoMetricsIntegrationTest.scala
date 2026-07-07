@@ -10,8 +10,8 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.security.kms.KmsCryptoWithPreDefinedKeysIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpKmsCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
-  EnvironmentSetup,
   SharedEnvironment,
 }
 
@@ -22,7 +22,7 @@ import com.digitalasset.canton.integration.{
   * KMS-related metrics.
   */
 trait CryptoMetricsIntegrationTest extends KmsCryptoWithPreDefinedKeysIntegrationTest {
-  self: CommunityIntegrationTest & EnvironmentSetup =>
+  self: CommunityIntegrationTest & CantonEnvironmentSetup =>
 
   override lazy val protectedNodes: Set[String] = Set("participant1")
 

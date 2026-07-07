@@ -6,13 +6,13 @@ package com.digitalasset.canton.integration.tests.security.kms.mock
 import com.digitalasset.canton.crypto.kms.mock.v1.MockKmsDriverFactory.mockKmsDriverName
 import com.digitalasset.canton.integration.plugins.UseKmsDriver
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
 }
 
 trait MockEncryptedCryptoPrivateStoreTestBase {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected def setupPlugins(
       protectedNodes: Set[String],

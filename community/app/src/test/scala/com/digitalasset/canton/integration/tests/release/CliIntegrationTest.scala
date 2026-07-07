@@ -162,7 +162,7 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
 
       val expectedLine =
         // user-manual-entry-begin: LogNumThreads
-        "INFO  c.d.canton.environment.Environment - Deriving 12 as number of threads from '-Dscala.concurrent.context.numThreads'."
+        "INFO  c.d.c.environment.CantonEnvironment - Deriving 12 as number of threads from '-Dscala.concurrent.context.numThreads'."
       // user-manual-entry-end: LogNumThreads
 
       forAtLeast(1, logLines)(_ should endWith(expectedLine))

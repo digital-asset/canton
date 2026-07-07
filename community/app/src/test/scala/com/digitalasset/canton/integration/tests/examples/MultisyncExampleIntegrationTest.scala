@@ -14,7 +14,7 @@ import com.digitalasset.canton.integration.bootstrap.{
 }
 import com.digitalasset.canton.integration.util.MultiSynchronizerFeatureFlag
 import com.digitalasset.canton.integration.{
-  BaseIntegrationTest,
+  CantonBaseIntegrationTest,
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
@@ -26,7 +26,7 @@ import org.slf4j.event.Level
 import scala.sys.process.Process
 
 class MultisyncExampleIntegrationTest
-    extends BaseIntegrationTest
+    extends CantonBaseIntegrationTest
     with IsolatedEnvironments
     with CommunityIntegrationTest {
 

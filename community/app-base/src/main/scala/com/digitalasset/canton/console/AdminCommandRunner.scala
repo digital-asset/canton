@@ -5,7 +5,7 @@ package com.digitalasset.canton.console
 
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.{CantonConfig, NonNegativeDuration}
+import com.digitalasset.canton.config.{NonNegativeDuration, SharedCantonConfig}
 import com.digitalasset.canton.console.CommandErrors.ConsoleTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap}
@@ -103,7 +103,7 @@ trait FeatureFlagFilter extends NamedLogging {
 
   protected def consoleEnvironment: ConsoleEnvironment
 
-  protected def cantonConfig: CantonConfig = consoleEnvironment.environment.config
+  protected def cantonConfig: SharedCantonConfig[?] = consoleEnvironment.environment.config
 
   protected def check[T](flag: FeatureFlag)(command: => T): T =
     FeatureFlagFilter.checkEnabled(noTracingLogger)(

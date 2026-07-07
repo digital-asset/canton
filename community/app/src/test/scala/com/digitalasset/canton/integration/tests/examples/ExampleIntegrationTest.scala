@@ -8,9 +8,9 @@ import com.digitalasset.canton.ConsoleScriptRunner
 import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.environment.Environment
+import com.digitalasset.canton.environment.CantonEnvironment
 import com.digitalasset.canton.integration.{
-  BaseIntegrationTest,
+  CantonBaseIntegrationTest,
   ConfigTransform,
   EnvironmentDefinition,
   IsolatedEnvironments,
@@ -20,7 +20,7 @@ import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.ShowUtil.*
 
 abstract class ExampleIntegrationTest(configPaths: File*)
-    extends BaseIntegrationTest
+    extends CantonBaseIntegrationTest
     with IsolatedEnvironments
     with HasConsoleScriptRunner {
 
@@ -73,7 +73,7 @@ abstract class ExampleIntegrationTest(configPaths: File*)
 trait HasConsoleScriptRunner { this: NamedLogging =>
   import org.scalatest.EitherValues.*
 
-  def runScript(scriptPath: File)(implicit env: Environment): Unit =
+  def runScript(scriptPath: File)(implicit env: CantonEnvironment): Unit =
     ConsoleScriptRunner.run(env, scriptPath.toJava, logger = logger).value.discard
 }
 

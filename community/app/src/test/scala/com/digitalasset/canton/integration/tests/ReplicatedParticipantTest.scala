@@ -29,10 +29,10 @@ import com.digitalasset.canton.integration.bootstrap.{
 }
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -113,7 +113,7 @@ trait ReplicatedNodeHelper { self: CommunityIntegrationTest =>
 }
 
 trait ReplicatedParticipantTestSetup extends ReplicatedNodeHelper {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected def setupPlugins(
       storagePlugin: EnvironmentSetupPlugin,

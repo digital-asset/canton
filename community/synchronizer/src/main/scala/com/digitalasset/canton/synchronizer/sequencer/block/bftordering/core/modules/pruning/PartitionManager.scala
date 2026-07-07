@@ -345,7 +345,7 @@ object PartitionManager {
       val currentEpochPartitionNumber = newEpochNumber / partitionSize
       val lastEpochNumber = EpochNumber((currentEpochPartitionNumber + 1) * partitionSize - 1)
       if (newEpochNumber == lastEpochNumber) {
-        val partitionNames = (batchesTable +: epochPartitionedTables).map(tableName =>
+        val partitionNames = (batchesTable +: epochPartitionedTablesForPruning).map(tableName =>
           s"${tableName}_p$currentEpochPartitionNumber"
         )
         val _ = partitionNames.map(partitionName =>
@@ -372,7 +372,7 @@ object PartitionManager {
           // run successfully.
           conn.setAutoCommit(true)
           // spread out the vacuuming work a bit
-          stmt.execute("set vacuum_cost_limit = 500").discard
+          stmt.execute("set vacuum_cost_limit = 200").discard
           stmt.execute("set vacuum_cost_delay = 10").discard
           // immediately freeze all rows, including very recent ones
           stmt.execute("set vacuum_freeze_min_age = 0").discard
@@ -533,7 +533,8 @@ object PartitionManager {
               )
               .map { _ =>
                 latestPrunedPartitionNumbers = prunedPartitionNumbers
-                s"Pruned ${partitionNames.size} partitions at epoch $epochNumberInclusive"
+                s"Pruned ${partitionNames.size} partitions at epoch $epochNumberInclusive: ${partitionNames
+                    .mkString(", ")}"
               }
           } else
             FutureUnlessShutdown.pure(

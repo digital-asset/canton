@@ -26,7 +26,7 @@ object ProgrammableSequencerPolicies {
   /*
     Delay the specified messages by some duration.
    */
-  def delay(environment: Environment)(
+  def delay(environment: Environment[?])(
       confirmationResponses: Map[ParticipantId, NonNegativeFiniteDuration] = Map.empty,
       mediatorMessages: Option[NonNegativeFiniteDuration] = None,
   ): SendPolicy = {

@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.integration
 
-import com.digitalasset.canton.environment.{CommunityEnvironmentFactory, EnvironmentFactory}
+import com.digitalasset.canton.environment.{CantonEnvironmentFactory, CommunityEnvironmentFactory}
 
-trait CommunityIntegrationTest extends BaseIntegrationTest {
-  this: EnvironmentSetup =>
+trait CommunityIntegrationTest extends CantonBaseIntegrationTest {
+  this: CantonEnvironmentSetup =>
 
-  override protected val environmentFactory: EnvironmentFactory = CommunityEnvironmentFactory
+  override protected val environmentFactory: CantonEnvironmentFactory =
+    CommunityEnvironmentFactory
 }

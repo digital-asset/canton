@@ -19,7 +19,7 @@ import com.digitalasset.canton.time.{RemoteClock, SimClock}
   * Check contributing/kms.md on how to run the tests
   */
 trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   // Defines which nodes will run an external KMS.
   protected lazy val protectedNodes: Set[String] = Set("participant1")
