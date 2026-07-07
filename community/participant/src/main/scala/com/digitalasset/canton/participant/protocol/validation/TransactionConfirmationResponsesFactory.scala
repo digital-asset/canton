@@ -264,6 +264,22 @@ class TransactionConfirmationResponsesFactory(
                   case ExternalCallCheck.Passed | ExternalCallCheck.CannotValidate(_) => None
                 }
 
+              // Abstentions due to a recorded external-call result that could not be
+              // re-validated: the participant cannot vouch for the recorded result, but the
+              // request is not provably wrong either. Appended last to the verdicts below so that
+              // every rejection takes precedence over the abstention.
+              val externalCallAbstentions =
+                externalCallCheckResult match {
+                  case ExternalCallCheck.CannotValidate(reason) =>
+                    Some(
+                      logged(
+                        requestId,
+                        LocalAbstainError.CannotPerformAllValidations.Abstain(reason),
+                      ).toLocalAbstain(protocolVersion)
+                    )
+                  case ExternalCallCheck.Passed | ExternalCallCheck.Rejected(_) => None
+                }
+
               // Approve if the consistency check succeeded, reject otherwise.
               val consistencyVerdicts =
                 verdictsForView(viewValidationResult, hostedConfirmingParties)
@@ -272,13 +288,13 @@ class TransactionConfirmationResponsesFactory(
                 consistencyVerdicts.toList ++ timeValidationRejections ++ contractConsistencyRejections ++
                   externalCallRejections ++ authenticationRejections ++ authorizationRejections ++
                   modelConformanceRejections ++ internalConsistencyRejections ++
-                  replayRejections
+                  replayRejections ++ externalCallAbstentions
 
               val localVerdictAndPartiesO = localVerdicts
                 .collectFirst[(LocalVerdict, Set[LfPartyId])] {
                   case malformed: LocalReject if malformed.isMalformed => malformed -> Set.empty
-                  case localReject: LocalReject if hostedConfirmingParties.nonEmpty =>
-                    localReject -> hostedConfirmingParties
+                  case nonPositive: NonPositiveLocalVerdict if hostedConfirmingParties.nonEmpty =>
+                    nonPositive -> hostedConfirmingParties
                 }
                 .orElse(
                   Option.when(hostedConfirmingParties.nonEmpty)(
@@ -286,25 +302,7 @@ class TransactionConfirmationResponsesFactory(
                   )
                 )
 
-              // A recorded external-call result that could not be re-validated downgrades an
-              // approval to an abstention: the participant cannot vouch for the recorded result,
-              // but the request is not provably wrong either.
-              val localVerdictAndPartiesWithAbstentionO = localVerdictAndPartiesO.map {
-                case (approve: LocalApprove, parties) =>
-                  externalCallCheckResult match {
-                    case ExternalCallCheck.CannotValidate(reason) =>
-                      logged(
-                        requestId,
-                        LocalAbstainError.CannotPerformAllValidations.Abstain(reason),
-                      ).toLocalAbstain(protocolVersion) -> parties
-                    case _ => approve -> parties
-                  }
-                case other => other
-              }
-
-              localVerdictAndPartiesWithAbstentionO.map { case (localVerdict, parties) =>
-                // The abstention above preserves the tryCreate invariant: it is not malformed,
-                // and it keeps the approval's non-empty party set.
+              localVerdictAndPartiesO.map { case (localVerdict, parties) =>
                 checked(
                   ConfirmationResponse
                     .tryCreate(
