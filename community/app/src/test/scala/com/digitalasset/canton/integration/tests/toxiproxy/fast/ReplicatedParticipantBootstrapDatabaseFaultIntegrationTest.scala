@@ -124,7 +124,9 @@ class ParticipantBootstrapDatabaseFaultIntegrationTestPostgres
             // once in the active transition method)
             _.warningMessage should include(
               "Scheduler unexpectedly already started. Stopping old executor"
-            )
+            ),
+            // Health checks can overlap with this section.
+            _.warningMessage should include("Locked connection was lost, trying to rebuild"),
           ),
         ),
       )

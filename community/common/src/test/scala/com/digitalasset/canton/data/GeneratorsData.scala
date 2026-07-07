@@ -10,7 +10,6 @@ import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
   ExerciseActionDescription,
   FetchActionDescription,
-  LookupByKeyActionDescription,
 }
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndex}
@@ -22,7 +21,8 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.SeqUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GeneratorsLf, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
-import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.daml.lf.transaction.{CreationTime, ExternalCallResult}
 import com.digitalasset.daml.lf.value.Value.ValueInt64
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -160,17 +160,70 @@ final class GeneratorsData(
     )
   )
 
-  private def createActionDescriptionGenFor(): Gen[CreateActionDescription] =
-    for {
-      // Contract IDs in action descriptions are always relative
-      contractId <- relativeLfContractIdArb.arbitrary
-      seed <- Arbitrary.arbitrary[LfHash]
-    } yield CreateActionDescription(contractId, seed)
+  private val viewExternalCallResultsGen: Gen[Seq[ViewParticipantData.ViewExternalCallResult]] =
+    if (protocolVersion >= ProtocolVersion.dev) {
+      boundedListGen {
+        for {
+          extensionId <- Gen.identifier
+          functionId <- Gen.identifier
+          config <- Gen.alphaStr
+          input <- Gen.alphaStr
+          output <- Gen.alphaStr
+          exerciseIndex <- Gen.choose(1, 10).map(NonNegativeInt.tryCreate)
+          checkingParties <- boundedSetGen[LfPartyId]
+        } yield (
+          ExternalCallResult(
+            extensionId = extensionId,
+            functionId = functionId,
+            config = Bytes.fromStringUtf8(config),
+            input = Bytes.fromStringUtf8(input),
+            output = Bytes.fromStringUtf8(output),
+          ),
+          exerciseIndex,
+          checkingParties,
+        )
+      }.map(results =>
+        results.zipWithIndex.map { case ((result, exerciseIndex, checkingParties), callIndex) =>
+          ViewParticipantData.ViewExternalCallResult(
+            result = result,
+            exerciseIndex = exerciseIndex,
+            callIndex = NonNegativeInt.tryCreate(callIndex),
+            checkingParties = checkingParties,
+          )
+        }
+      )
+    } else Gen.const(Seq.empty)
 
-  private def exerciseActionDescriptionGenFor(): Gen[ExerciseActionDescription] =
+  val createViewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
     for {
-      // Input contract IDs in exercise descriptions are always suffixed, but not necessarily absolute
-      inputContractId <- suffixedLfContractIdArb.arbitrary
+      seed <- Arbitrary.arbitrary[LfHash]
+      rollbackContext <- rollbackContextArb.arbitrary
+      contract <- generatorsProtocol
+        .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
+        .arbitrary
+      salt <- Arbitrary.arbitrary[Salt]
+      createdContractRolledBack <- createdContractRolledBackArb.arbitrary
+      createdContract = CreatedContract.tryCreate(
+        contract,
+        consumedInCore = false,
+        rolledBack = createdContractRolledBack,
+      )
+      actionDescription = CreateActionDescription(contract.contractId, seed)
+    } yield ViewParticipantData.tryCreate(TestHash)(
+      coreInputs = Map.empty,
+      createdCore = Seq(createdContract),
+      createdInSubviewArchivedInCore = Set.empty,
+      keyResolution = Map.empty,
+      actionDescription = actionDescription,
+      rollbackContext = rollbackContext,
+      salt = salt,
+      externalCallResults = Seq.empty,
+      protocolVersion = protocolVersion,
+    )
+  )
+
+  val exerciseViewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
+    for {
 
       templateId <- Arbitrary.arbitrary[LfTemplateId]
 
@@ -182,188 +235,47 @@ final class GeneratorsData(
 
       // We consider only this specific value because the goal is not exhaustive testing of LF (de)serialization
       chosenValue <- Gen.long.map(ValueInt64.apply)
+
       version <- Arbitrary.arbitrary[LfSerializationVersion]
 
       actors <- boundedSetGen[LfPartyId]
       seed <- Arbitrary.arbitrary[LfHash]
-      byKey <- Gen.oneOf(true, false)
-      failed <- Gen.oneOf(true, false)
+      targetContract <- generatorsProtocol
+        .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
+        .arbitrary
 
-    } yield ExerciseActionDescription.tryCreate(
-      inputContractId,
-      templateId,
-      choice,
-      interfaceId,
-      packagePreference,
-      LfVersioned(version, chosenValue),
-      actors,
-      byKey,
-      seed,
-      failed,
-    )
+      byKey <-
+        if (targetContract.contractKeyWithMaintainers.isDefined) byKeyArb.arbitrary
+        else Gen.const(false)
 
-  private def fetchActionDescriptionGenFor(): Gen[FetchActionDescription] =
-    for {
-      // Input contract IDs in fetch action descriptions are always suffixed, but not necessarily absolute
-      inputContractId <- suffixedLfContractIdArb.arbitrary
-      actors <- boundedSetGen[LfPartyId]
-      byKey <- Gen.oneOf(true, false)
-      templateId <- Arbitrary.arbitrary[LfTemplateId]
-      interfaceId <- Gen.option(Arbitrary.arbitrary[LfInterfaceId])
-    } yield FetchActionDescription(inputContractId, actors, byKey, templateId, interfaceId)
-
-  // If this pattern match is not exhaustive anymore, update the method below
-  {
-    ((_: ActionDescription) match {
-      case _: CreateActionDescription => ()
-      case _: ExerciseActionDescription => ()
-      case _: FetchActionDescription => ()
-      case _: LookupByKeyActionDescription => ()
-    }).discard
-  }
-
-  private def lookupByKeyActionDescriptionGenFor(): Gen[LookupByKeyActionDescription] =
-    for {
-      key <- Arbitrary.arbitrary[LfVersioned[LfGlobalKey]]
-    } yield LookupByKeyActionDescription.tryCreate(key)
-
-  implicit val actionDescriptionArb: Arbitrary[ActionDescription] = Arbitrary {
-
-    if (protocolVersion >= ProtocolVersion.v35) {
-      Gen.oneOf(
-        createActionDescriptionGenFor(),
-        exerciseActionDescriptionGenFor(),
-        fetchActionDescriptionGenFor(),
+      otherContracts <- boundedListGen(
+        generatorsProtocol
+          .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
+          .arbitrary
       )
-    } else {
-      Gen.oneOf(
-        createActionDescriptionGenFor(),
-        exerciseActionDescriptionGenFor(),
-        fetchActionDescriptionGenFor(),
-        lookupByKeyActionDescriptionGenFor(),
-      )
-    }
-  }
 
-  implicit val viewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
-    for {
-      actionDescription <- actionDescriptionArb.arbitrary
+      inputContracts = targetContract :: otherContracts
 
-      coreInputs <- actionDescription match {
-        case ex: ExerciseActionDescription =>
-          for {
-            inputContract <- Gen
-              .zip(
-                generatorsProtocol
-                  .contractInstanceArb(
-                    canHaveEmptyKey = false,
-                    genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
-                    overrideContractId = Some(ex.inputContractId),
-                  )
-                  .arbitrary,
-                Gen.oneOf(true, false),
-              )
-              .map(InputContract.apply tupled)
-            metadataList <- boundedListGen(contractMetadataArb(canHaveEmptyKey = true))
+      coreInputs <- Gen
+        .listOfN(inputContracts.size, Gen.oneOf(true, false))
+        .map(consumed => inputContracts.zip(consumed).map(InputContract.apply tupled))
 
-            legacyOthers <- for {
-              metadata <- Gen.oneOf(metadataList)
-              consumed <- Gen.oneOf(true, false)
-              contract <- generatorsProtocol
-                .contractInstanceWithGivenMetadataArb(metadata)
-                .arbitrary
-            } yield List((contract, consumed))
-
-            nuckOthers <- boundedListGen(
-              Gen.zip(
-                generatorsProtocol
-                  .contractInstanceWithMetadataArb(
-                    metadataList,
-                    genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
-                  )
-                  .arbitrary,
-                Gen.oneOf(true, false),
-              )
-            )
-
-            others = if (protocolVersion >= ProtocolVersion.v35) nuckOthers else legacyOthers
-            otherInputContracts = others.map(InputContract.apply tupled)
-
-          } yield (inputContract +: otherInputContracts).groupBy(_.contractId).flatMap {
-            case (_, contracts) =>
-              contracts.headOption
-          }
-
-        case fetch: FetchActionDescription =>
-          generatorsProtocol
-            .contractInstanceArb(
-              canHaveEmptyKey = false,
-              genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
-              overrideContractId = Some(fetch.inputContractId),
-            )
-            .arbitrary
-            .map(c => List(InputContract(c, consumed = false)))
-
-        case _: CreateActionDescription => Gen.const(List.empty)
-
-        case _: LookupByKeyActionDescription => Gen.const(List.empty)
-      }
-
-      createdCore <- actionDescription match {
-        case created: CreateActionDescription =>
-          Gen
-            .zip(
-              generatorsProtocol
-                .contractInstanceArb(
-                  canHaveEmptyKey = false,
-                  genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
-                  overrideContractId = Some(created.contractId),
-                )
-                .arbitrary,
-              Gen.oneOf(true, false),
-            )
-            .map { case (c, rolledBack) =>
-              List(
-                CreatedContract.tryCreate(
-                  c,
-                  consumedInCore = false,
-                  rolledBack = rolledBack,
-                )
-              )
-            }
-
-        case _: ExerciseActionDescription =>
-          boundedListGen(
-            Gen.zip(
-              generatorsProtocol
-                .contractInstanceArb(
-                  canHaveEmptyKey = false,
-                  genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
-                )
-                .arbitrary,
-              Gen.oneOf(true, false),
-              Gen.oneOf(true, false),
-            )
+      createdCore <-
+        boundedListGen(
+          Gen.zip(
+            generatorsProtocol
+              .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
+              .arbitrary,
+            Gen.oneOf(true, false),
+            createdContractRolledBackArb.arbitrary,
           )
-            .map(_.map(CreatedContract.tryCreate tupled))
-            // Deduplicating on contract id
-            .map(
-              _.groupBy(_.contract.contractId).flatMap { case (_, contracts) =>
-                contracts.headOption
-              }
-            )
-
-        case _: FetchActionDescription | _: LookupByKeyActionDescription => Gen.const(List.empty)
-      }
-
-      notTransient = (createdCore.map(_.contract.contractId) ++ coreInputs.map(_.contractId)).toSet
+        )
+          .map(_.map(CreatedContract.tryCreate tupled))
 
       createdInSubviewArchivedInCore <- boundedSetGen[LfContractId]
-        // createdInSubviewArchivedInCore and notTransient should be disjoint
-        .map(_ -- notTransient)
 
-      resolvedKeys <- actionDescription match {
-        case _: ExerciseActionDescription if protocolVersion >= ProtocolVersion.v35 =>
+      keyResolution <-
+        if (protocolVersion >= ProtocolVersion.v35) {
           val keyedInputs =
             coreInputs.map(c => (c.contract.contractKeyWithMaintainers, c)).collect {
               case (Some(key), contract) => key -> contract
@@ -382,38 +294,91 @@ final class GeneratorsData(
               )
             )
           }
+        } else Gen.const(Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]])
 
-        case ad: LookupByKeyActionDescription =>
-          // TODO(#31527): SPM populate with maintainers or contract ids
-          Gen.const(
-            Map(
-              ad.key.unversioned -> LfVersioned(
-                ad.key.version,
-                KeyResolutionWithMaintainers(Seq.empty, Set.empty),
-              )
-            )
-          )
-
-        case _ =>
-          Gen.const(Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]])
-
-      }
-
-      rollbackContext <- Arbitrary.arbitrary[RollbackContext]
+      rollbackContext <- rollbackContextArb.arbitrary
       salt <- Arbitrary.arbitrary[Salt]
+      externalCallResults <- viewExternalCallResultsGen
+      failed <- Gen.oneOf(true, false)
 
-      hashOps = TestHash // Not used for serialization
-    } yield ViewParticipantData.tryCreate(hashOps)(
-      coreInputs.map(contract => (contract.contractId, contract)).toMap,
-      createdCore.toSeq,
-      createdInSubviewArchivedInCore,
-      resolvedKeys,
-      actionDescription,
-      rollbackContext,
-      salt,
-      protocolVersion,
+      actionDescription = ExerciseActionDescription.tryCreate(
+        targetContract.contractId,
+        templateId,
+        choice,
+        interfaceId,
+        packagePreference,
+        LfVersioned(version, chosenValue),
+        actors,
+        byKey,
+        seed,
+        failed,
+      )
+
+    } yield ViewParticipantData.tryCreate(TestHash)(
+      coreInputs = coreInputs.map(contract => (contract.contractId, contract)).toMap,
+      createdCore = createdCore,
+      createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
+      keyResolution = keyResolution,
+      actionDescription = actionDescription,
+      rollbackContext = rollbackContext,
+      salt = salt,
+      externalCallResults = externalCallResults,
+      protocolVersion = protocolVersion,
     )
   )
+
+  val fetchViewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(
+    for {
+      contract <- generatorsProtocol
+        .contractInstanceArb(genTime = Arbitrary.arbitrary[CreationTime.CreatedAt])
+        .arbitrary
+      actors <- boundedSetGen[LfPartyId]
+      byKey <-
+        if (contract.contractKeyWithMaintainers.isDefined) byKeyArb.arbitrary else Gen.const(false)
+      templateId <- Arbitrary.arbitrary[LfTemplateId]
+      interfaceId <- Gen.option(Arbitrary.arbitrary[LfInterfaceId])
+      rollbackContext <- rollbackContextArb.arbitrary
+      salt <- Arbitrary.arbitrary[Salt]
+
+      keyResolution = contract.contractKeyWithMaintainers match {
+        case Some(key) if byKey =>
+          Map(
+            key.globalKey -> LfVersioned(
+              contract.inst.version,
+              KeyResolutionWithMaintainers(Vector(contract.contractId), key.maintainers),
+            )
+          )
+        case _ => Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]
+      }
+
+      actionDescription = FetchActionDescription(
+        contract.contractId,
+        actors,
+        byKey,
+        templateId,
+        interfaceId,
+      )
+
+    } yield ViewParticipantData.tryCreate(TestHash)(
+      coreInputs = Map(contract.contractId -> InputContract(contract, consumed = false)),
+      createdCore = Seq.empty,
+      createdInSubviewArchivedInCore = Set.empty,
+      keyResolution = keyResolution,
+      actionDescription = actionDescription,
+      rollbackContext = rollbackContext,
+      salt = salt,
+      externalCallResults = Seq.empty,
+      protocolVersion = protocolVersion,
+    )
+  )
+
+  implicit val viewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary {
+    Gen.oneOf(
+      createViewParticipantDataArb.arbitrary,
+      exerciseViewParticipantDataArb.arbitrary,
+      fetchViewParticipantDataArb.arbitrary,
+    )
+  }
 
   // If this pattern match is not exhaustive anymore, update the generator below
   {
@@ -706,7 +671,7 @@ final class GeneratorsData(
     )
   )
 
-  private var unblindedSubviewHashesForLightTransactionTree: Seq[ViewHashAndKey] = _
+  private var unblindedSubviewHashesForLightTransactionTree: Seq[SubviewReferenceAndKey] = _
 
   private val transactionViewForLightTransactionTreeArb: Arbitrary[TransactionView] = Arbitrary(
     for {
@@ -719,14 +684,15 @@ final class GeneratorsData(
         .apply(Seq(transactionViewWithEmptySubview))(protocolVersion, hashOps)
       subviewHashes = subviews.trySubviewHashes
       pureCrypto = ExampleTransactionFactory.pureCrypto
-      subviewHashesAndKeys = subviewHashes.map { hash =>
-        ViewHashAndKey(
-          hash,
+      // TODO(#32393): test the (de)serialization of a LightTransactionTree with ciphertextIDs instead of view hashes
+      subviewReferencesAndKeys = subviewHashes.map { viewHash =>
+        SubviewReferenceAndKey(
+          ByViewHash(viewHash),
           pureCrypto.generateSecureRandomness(pureCrypto.defaultSymmetricKeyScheme.keySizeInBytes),
         )
       }
     } yield {
-      unblindedSubviewHashesForLightTransactionTree = subviewHashesAndKeys
+      unblindedSubviewHashesForLightTransactionTree = subviewReferencesAndKeys
       TransactionView.tryCreate(hashOps)(
         viewCommonData = viewCommonData,
         viewParticipantData = viewParticipantData,

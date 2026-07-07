@@ -19,7 +19,6 @@ import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
-  GlobalKey,
   Node,
   SerializationVersion as LfSerializationVersion,
 }
@@ -278,17 +277,12 @@ class ContractStoreBasedMaximumLedgerTimeServiceSpec
         ): Future[Option[FatContract]] =
           throw new UnsupportedOperationException
 
-        override def lookupContractKey(readers: Set[Party], key: GlobalKey)(implicit
-            loggingContext: LoggingContextWithTrace
-        ): Future[Option[ContractId]] =
-          throw new UnsupportedOperationException
-
         override def lookupContractState(contractId: ContractId)(implicit
             loggingContext: LoggingContextWithTrace
         ): Future[ContractState] =
           Future.successful(fixtureMap(contractId))
 
-        override def lookupNonUniqueContractKey(
+        override def lookupContractKey(
             readers: Set[Party],
             key: Key,
             pageToken: Option[Long],

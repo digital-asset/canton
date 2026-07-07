@@ -15,7 +15,7 @@ import com.google.protobuf.ByteString
 import org.scalactic.Uniformity
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.ByteArrayInputStream
+import java.io.{ByteArrayInputStream, IOException}
 import java.nio.charset.Charset
 
 // Herein contained compressed test data conforms to pre-Java 16
@@ -189,6 +189,34 @@ class ByteStringUtilTest extends AnyWordSpec with BaseTest with GzipCompressionT
         withClue(eg.toString) {
           out.toByteString.size shouldBe eg.numBytesCopied
         }
+      }
+    }
+
+    "boundedInputStream" should {
+      def input(n: Int) = new ByteArrayInputStream(Array.fill[Byte](n)(46))
+
+      "pass through reads within the limit" in {
+        val in = ByteStringUtil.boundedInputStream(input(10), maxBytes = 10)
+        ByteString.readFrom(in).size shouldBe 10
+      }
+
+      "throw when buffered reads exceed the limit" in {
+        val in = ByteStringUtil.boundedInputStream(input(10), maxBytes = 9)
+        val ex = the[IOException] thrownBy ByteString.readFrom(in)
+        ex.getMessage should include("Decompressed size exceeds the limit of 9 bytes")
+      }
+
+      "throw when single-byte reads exceed the limit" in {
+        val in = ByteStringUtil.boundedInputStream(input(3), maxBytes = 2)
+        in.read() shouldBe 46
+        in.read() shouldBe 46
+        an[IOException] should be thrownBy in.read()
+      }
+
+      "not count end-of-stream as bytes read" in {
+        val in = ByteStringUtil.boundedInputStream(input(2), maxBytes = 2)
+        ByteString.readFrom(in).size shouldBe 2
+        in.read() shouldBe -1
       }
     }
 

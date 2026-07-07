@@ -56,7 +56,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     crypto: SynchronizerCryptoClient,
     timeTracker: SynchronizerTimeTracker,
     val mediatorState: MediatorState,
-    asynchronousProcessing: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
     batchingConfig: BatchingConfig,
@@ -70,21 +69,17 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
   private val psid = crypto.psid
 
-  val processingQueue: ProcessingQueue[RequestId] =
-    if (asynchronousProcessing) new ShardedSequentialProcessingQueue
-    else new SynchronousProcessingQueue
+  val processingQueue: ShardedSequentialProcessingQueue[RequestId] =
+    new GarbageCollectedShardedSequentialProcessingQueue()
 
   override def observeTimestampWithoutEvent(sequencingTimestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): HandlerResult =
-    if (asynchronousProcessing) handleTimeouts(sequencingTimestamp)
-    else HandlerResult.synchronous(handleTimeouts(sequencingTimestamp).flatMap(_.unwrap))
+  ): HandlerResult = handleTimeouts(sequencingTimestamp)
 
   override def handleMediatorEvent(
       event: MediatorEvent
   )(implicit traceContext: TraceContext): HandlerResult =
-    if (asynchronousProcessing) handleMediatorEventAsynchronous(event)
-    else handleMediatorEventSynchronous(event)
+    handleMediatorEventAsynchronous(event)
 
   private def handleMediatorEventAsynchronous(
       event: MediatorEvent
@@ -93,19 +88,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       asyncTimeoutHandling <- handleTimeouts(event.sequencingTimestamp)
       asyncEventHandling <- doHandleMediatorEvent(event)
     } yield asyncEventHandling |+| asyncTimeoutHandling
-
-  private def handleMediatorEventSynchronous(
-      event: MediatorEvent
-  )(implicit traceContext: TraceContext): HandlerResult = {
-    // to process synchronously, we inline the async results before continuing on to the next step
-    val future = for {
-      asyncTimeoutHandling <- handleTimeouts(event.sequencingTimestamp)
-      _ <- asyncTimeoutHandling.unwrap
-      asyncEventHandling <- doHandleMediatorEvent(event)
-      unthrottledAsync <- asyncEventHandling.unwrap
-    } yield unthrottledAsync
-    HandlerResult.synchronous(future)
-  }
 
   private def doHandleMediatorEvent(
       event: MediatorEvent
@@ -146,7 +128,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
             //   inner future: finalizedPromise — completes only after the verdict is persisted to DB
             HandlerResult.asynchronous(
               processingQueue
-                .enqueueForProcessing(event.requestId)(
+                .executeUS(event.requestId)(
                   processRequest(
                     event.requestId,
                     counter,
@@ -155,7 +137,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                     requestEnvelope,
                     rootHashMessages,
                     batchAlsoContainsTopologyTransaction,
-                  )
+                  ),
+                  "process request",
                 )
             )
           case MediatorEvent.Response(
@@ -166,7 +149,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                 recipients,
               ) =>
             HandlerResult.asynchronousUnit(
-              processingQueue.enqueueForProcessing(responses.message.requestId)(
+              processingQueue.executeUS(responses.message.requestId)(
                 processResponses(
                   responseTimestamp,
                   counter,
@@ -175,7 +158,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                   responses,
                   topologyTimestamp,
                   recipients,
-                )
+                ),
+                "process response",
               )
             )
         }
@@ -203,20 +187,22 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       requestId: RequestId,
       timestamp: CantonTimestamp,
   ): FutureUnlessShutdown[Unit] = {
+
+    // the event causing the timeout is likely unrelated to the transaction we're actually timing out,
+    // so use the original request trace context
+    implicit val traceContext =
+      mediatorState.getPending(requestId).fold(TraceContext.empty)(_.requestTraceContext)
+
     def pendingRequestNotFound: FutureUnlessShutdown[Unit] = {
       // This is logged at trace, because otherwise this would be logged for each request on DEBUG, which is actually not very helpful and just noise.
-      noTracingLogger.trace(
+      logger.trace(
         s"Pending aggregation for request [$requestId] not found. This implies the request has been finalized since the timeout was scheduled."
       )
       FutureUnlessShutdown.unit
     }
 
-    processingQueue.enqueueForProcessing(requestId)(
+    processingQueue.executeUS(requestId)(
       mediatorState.getPending(requestId).fold(pendingRequestNotFound) { responseAggregation =>
-        // the event causing the timeout is likely unrelated to the transaction we're actually timing out,
-        // so use the original request trace context
-        implicit val traceContext: TraceContext = responseAggregation.requestTraceContext
-
         logger.info(
           s"Phase 6: Request ${requestId.unwrap}: Timeout in state ${responseAggregation.state} at $timestamp"
         )
@@ -227,7 +213,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         MonadUtil.whenM(mediatorState.replace(responseAggregation, timedOut))(
           sendResultIfDone(timedOut, responseAggregation.decisionTime)
         )
-      }
+      },
+      "handle timeout",
     )
   }
 
@@ -339,7 +326,13 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                       decisionTime,
                     )
                   _ <- mediatorState.add(
-                    FinalizedResponse(requestId, request, requestId.unwrap, verdict)(traceContext)
+                    FinalizedResponse(
+                      requestId,
+                      request,
+                      requestId.unwrap,
+                      verdict,
+                      firstResponseReceived = None,
+                    )(traceContext)
                   )
                 } yield UnthrottledAsync.immediate // Already persisted above; nothing more to wait for
 

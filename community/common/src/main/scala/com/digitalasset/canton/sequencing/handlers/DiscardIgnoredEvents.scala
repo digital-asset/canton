@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.handlers
 import cats.syntax.alternative.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.protocol.Envelope
+import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope}
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
   BoxedEnvelope,
@@ -19,7 +19,6 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
 }
-import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Forwards only [[com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent]]s to
@@ -38,20 +37,17 @@ class DiscardIgnoredEvents[Env <: Envelope[?], +A](
 
   override def name: String = handler.name
 
-  override def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
-  )(implicit
+  override def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = handler.subscriptionStartsAt(start, synchronizerTimeTracker)
+  ): FutureUnlessShutdown[Unit] = handler.subscriptionStartsAt(start)
 
   override def apply(
       tracedEvents: BoxedEnvelope[PossiblyIgnoredEnvelopeBox, Env]
   ): GenericHandlerResult[A] = {
     val filtered = tracedEvents.mapWithTraceContext { implicit batchTraceContext => events =>
       val classified = events.map {
-        case e: OrdinarySequencedEvent[Env] => Right(e)
-        case e: IgnoredSequencedEvent[Env] => Left(e)
+        case e: OrdinarySequencedEvent[Batch[Env]] => Right(e)
+        case e: IgnoredSequencedEvent[Batch[Env]] => Left(e)
       }
       val (ignored, ordinary) = classified.separate
       // We merely log a warning for now rather than fail the application handler.

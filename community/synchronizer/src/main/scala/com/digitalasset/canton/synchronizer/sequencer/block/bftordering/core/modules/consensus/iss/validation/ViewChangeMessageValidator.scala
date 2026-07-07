@@ -7,8 +7,6 @@ import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BlockNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.PrepareCertificate
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
@@ -16,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   NewView,
   ViewChange,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 class ViewChangeMessageValidator(
     membership: Membership,

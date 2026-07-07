@@ -39,8 +39,14 @@ ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.spee
 ERROR c\.d\.d\.lf - LF internal error in com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run: exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported
 ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run\): exception: java\.lang\.UnsupportedOperationException: by-key operation are not supported
 
-# TODO (#31441) substitute mechanism for missing artifacts
-# Ignore expected download failures from ledger-api-test-tool (older versions may not be available)
-ERROR c\.d\.c\.i\.p\.UseLedgerApiTestTool.*Failed to download from.*
+# Warning sometimes produced by netty during shutdown
+WARN  i\.g\.n\.s\.i\.n\.c\.ChannelInitializer - Failed to initialize a channel. Closing: \[id: 0x.*, L:/.* - R:/.*\]
+
+# Intermittent, benign shutdown races in MediatorReplayBenchmark teardown. Both patterns are
+# scoped to the benchmark via its logger tag (:MediatorReplayBenchmark/), so the same warnings
+# still fail the log check in any other test.
+# TODO(#29833): drop the first pattern once BFT orderer shutdown is improved.
+WARN  c\.d\.c\.s\.s\.DynamicGrpcServer:MediatorReplayBenchmark/.*\(PublicServer\): shutdown did not complete gracefully in allotted .* seconds\.
+WARN  c\.d\.c\.s\.c\.PeriodicAcknowledgements:MediatorReplayBenchmark/.* - Failed to acknowledge clean timestamp \(usually because sequencer is down\):
 
 # Make sure to have a trailing newline

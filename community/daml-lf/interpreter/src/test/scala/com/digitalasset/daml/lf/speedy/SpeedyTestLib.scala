@@ -13,7 +13,12 @@ import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, PackageInterface
 import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, NeedKeyProgression, SubmittedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  GlobalKey,
+  NeedKeyProgression,
+  SubmittedTransaction,
+}
 import com.digitalasset.daml.lf.validation.{Validation, ValidationError}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -39,8 +44,7 @@ private[speedy] object SpeedyTestLib {
       machine: Speedy.Machine[Question.Update],
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
-        PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
   ): Either[SError.SError, SValue] = {
@@ -75,7 +79,10 @@ private[speedy] object SpeedyTestLib {
         val (returned, hasStarted) =
           NeedKeyProgression.takeN(canContinue, n, getKeys.lift(key).getOrElse(Vector.empty))
         discard(
-          callback(returned, hasStarted)
+          callback(
+            returned.map(coinst => (coinst, hashingMethod(coinst.contractId), _ => true)),
+            hasStarted,
+          )
         )
     }
     runTxQ(onQuestion, machine) match {
@@ -89,8 +96,7 @@ private[speedy] object SpeedyTestLib {
       machine: Speedy.UpdateMachine,
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
-        PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
   ): Either[SError.SError, SubmittedTransaction] =
     run(machine, getPkg, getContract, getKeys, getTime) match {
@@ -103,8 +109,7 @@ private[speedy] object SpeedyTestLib {
       machine: Speedy.UpdateMachine,
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] =
-        PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
   ): Either[SError.SError, SubmittedTransaction] =
     run(machine, getPkg, getContract, getKeys, getTime) match {
@@ -118,7 +123,7 @@ private[speedy] object SpeedyTestLib {
       machine: Speedy.Machine[Q],
   ): Either[SError.SError, SValue] = {
     @tailrec
-    def loop: Either[SError.SError, SValue] = {
+    def loop: Either[SError.SError, SValue] =
       machine.run() match {
         case SResultQuestion(question) =>
           onQuestion(question)
@@ -130,7 +135,6 @@ private[speedy] object SpeedyTestLib {
         case SResultError(err) =>
           Left(err)
       }
-    }
     loop
   }
 

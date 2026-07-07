@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
@@ -21,6 +22,7 @@ import com.daml.ledger.test.java.model.test.{
   BranchingControllers,
   BranchingSignatories,
   Dummy,
+  MultiPartyContract,
   WithObservers,
 }
 import com.daml.test.evidence.tag.EvidenceTag
@@ -35,10 +37,10 @@ import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
-class TransactionServiceVisibilityIT extends LedgerTestSuite {
+class TransactionServiceVisibilityIT(testDars: TestDars) extends LedgerTestSuite {
 
   import com.digitalasset.canton.BigDecimalImplicits.*
-  import CompanionImplicits.*
+  import testDars.companionImplicits.*
 
   implicit val iouTransferCompanion
       : ContractCompanion.WithoutKey[IouTransfer.Contract, IouTransfer.ContractId, IouTransfer] =
@@ -46,6 +48,11 @@ class TransactionServiceVisibilityIT extends LedgerTestSuite {
   implicit val iouTradeCompanion
       : ContractCompanion.WithoutKey[IouTrade.Contract, IouTrade.ContractId, IouTrade] =
     IouTrade.COMPANION
+  implicit val multiPartyContractCompanion: ContractCompanion.WithoutKey[
+    MultiPartyContract.Contract,
+    MultiPartyContract.ContractId,
+    MultiPartyContract,
+  ] = MultiPartyContract.COMPANION
 
   def eventually[A](
       assertionName: String
@@ -376,13 +383,16 @@ class TransactionServiceVisibilityIT extends LedgerTestSuite {
   )(implicit ec => {
     case p @ Participants(Participant(alpha, Seq(submitter)), Participant(beta, Seq(listener))) =>
       for {
-        (id, _) <- alpha.createAndGetUpdateId(
-          submitter,
-          new AgreementFactory(listener, submitter),
-        )
+        (id, _) <- alpha.createAndGetUpdateId(submitter, new AgreementFactory(listener, submitter))
+        // add more creates to push out of IMFO in case of tiny buffers test
+        _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+        _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+        _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
         _ <- p.synchronize
         tx <- beta.transactionById(id, Seq(listener), LedgerEffects)
         txsFromStream <- beta.transactions(LedgerEffects, listener)
+        txSubmitter <- alpha.transactionById(id, Seq(submitter), LedgerEffects)
+        txsSubmitterFromStream <- alpha.transactions(LedgerEffects, submitter)
       } yield {
         assert(
           tx.commandId.isEmpty,
@@ -390,14 +400,29 @@ class TransactionServiceVisibilityIT extends LedgerTestSuite {
         )
 
         assert(
-          txsFromStream.sizeIs == 1,
-          s"One transaction expected but got ${txsFromStream.size} instead.",
+          txSubmitter.commandId.nonEmpty,
+          s"The command identifier for the transaction queries by the submitter was supposed to be present but it's empty instead.",
+        )
+
+        assert(
+          txsFromStream.sizeIs == 4,
+          s"Four transactions expected but got ${txsFromStream.size} instead.",
         )
 
         val txFromStreamCommandId = txsFromStream.headOption.value.commandId
         assert(
           txFromStreamCommandId.isEmpty,
           s"The command identifier for the transaction was supposed to be empty but it's `$txFromStreamCommandId` instead.",
+        )
+
+        assert(
+          txsSubmitterFromStream.sizeIs == 4,
+          s"Four transactions expected but got ${txsSubmitterFromStream.size} instead.",
+        )
+
+        assert(
+          txsSubmitterFromStream.headOption.value.commandId.nonEmpty,
+          s"The command identifier for the transaction queries by the submitter was supposed to be present but it's empty instead.",
         )
       }
   })
@@ -418,9 +443,15 @@ class TransactionServiceVisibilityIT extends LedgerTestSuite {
           submitter,
           new AgreementFactory(listener, submitter),
         )
+        // add more creates to push out of IMFO in case of tiny buffers test
+        _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+        _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+        _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
         _ <- p.synchronize
         tx <- beta.transactionById(id, Seq(listener), AcsDelta)
+        txSubmitter <- alpha.transactionById(id, Seq(submitter), AcsDelta)
         txsFromStream <- beta.transactions(AcsDelta, listener)
+        txsSubmitterFromStream <- alpha.transactions(AcsDelta, submitter)
       } yield {
 
         assert(
@@ -429,8 +460,13 @@ class TransactionServiceVisibilityIT extends LedgerTestSuite {
         )
 
         assert(
-          txsFromStream.sizeIs == 1,
-          s"One transaction expected but got ${txsFromStream.size} instead.",
+          txSubmitter.commandId.nonEmpty,
+          s"The command identifier for the transaction queries by the submitter was supposed to be present but it's empty instead.",
+        )
+
+        assert(
+          txsFromStream.sizeIs == 4,
+          s"Four transactions expected but got ${txsFromStream.size} instead.",
         )
 
         val txFromStreamCommandId = txsFromStream.headOption.value.commandId
@@ -438,7 +474,186 @@ class TransactionServiceVisibilityIT extends LedgerTestSuite {
           txFromStreamCommandId.isEmpty,
           s"The command identifier for the transaction was supposed to be empty but it's `$txFromStreamCommandId` instead.",
         )
+
+        assert(
+          txsSubmitterFromStream.sizeIs == 4,
+          s"Four transactions expected but got ${txsSubmitterFromStream.size} instead.",
+        )
+
+        assert(
+          txsSubmitterFromStream.headOption.value.commandId.nonEmpty,
+          s"The command identifier for the transaction queries by the submitter was supposed to be present but it's empty instead.",
+        )
       }
+  })
+
+  test(
+    "TXLedgerEffectsShowCommandIdToSubmittingStakeholders",
+    "A ledger effects transaction with a command identifier should be visible to a submitting stakeholder",
+    allocate(TwoParties),
+    tags = privacyHappyCase(
+      asset = "Ledger Effects Transaction",
+      happyCase =
+        "A ledger effects transaction and command id is visible to a submitting stakeholder",
+    ),
+  )(implicit ec => { case p @ Participants(Participant(alpha, Seq(submitter, submitter2))) =>
+    for {
+      id <- alpha
+        .submitAndWaitForTransaction(
+          alpha.submitAndWaitForTransactionRequest(
+            actAs = List(submitter, submitter2),
+            readAs = List.empty,
+            commands = new MultiPartyContract(
+              List(submitter, submitter2).map(_.getValue).asJava,
+              "",
+            ).create.commands,
+            transactionShape = LedgerEffects,
+          )
+        )
+        .map(_.getTransaction.updateId)
+      tx <- alpha.transactionById(id, Seq(submitter2), LedgerEffects)
+      txsFromStream <- alpha.transactions(LedgerEffects, submitter2)
+    } yield {
+      assert(
+        tx.commandId.nonEmpty,
+        s"The command identifier for the transaction was supposed to be present but it's empty instead.",
+      )
+
+      assert(
+        txsFromStream.sizeIs == 1,
+        s"One transaction expected but got ${txsFromStream.size} instead.",
+      )
+
+      val txFromStreamCommandId = txsFromStream.headOption.value.commandId
+      assert(
+        txFromStreamCommandId.nonEmpty,
+        s"The command identifier for the transaction was supposed to be present but it's empty instead.",
+      )
+    }
+  })
+
+  test(
+    "TXAcsDeltaShowCommandIdToSubmittingStakeholders",
+    "An ACS delta transaction with a command identifier should be visible to a submitting stakeholder",
+    allocate(TwoParties),
+    tags = privacyHappyCase(
+      asset = "Acs Delta Transaction",
+      happyCase = "An ACS delta transaction and command id is visible to a submitting stakeholder",
+    ),
+  )(implicit ec => { case p @ Participants(Participant(alpha, Seq(submitter, submitter2))) =>
+    for {
+      id <- alpha
+        .submitAndWaitForTransaction(
+          alpha.submitAndWaitForTransactionRequest(
+            actAs = List(submitter, submitter2),
+            readAs = List.empty,
+            commands = new MultiPartyContract(
+              List(submitter, submitter2).map(_.getValue).asJava,
+              "",
+            ).create.commands,
+            transactionShape = AcsDelta,
+          )
+        )
+        .map(_.getTransaction.updateId)
+      tx <- alpha.transactionById(id, Seq(submitter2), AcsDelta)
+      txsFromStream <- alpha.transactions(AcsDelta, submitter2)
+    } yield {
+      assert(
+        tx.commandId.nonEmpty,
+        s"The command identifier for the transaction was supposed to be present but it's empty instead.",
+      )
+
+      assert(
+        txsFromStream.sizeIs == 1,
+        s"One transaction expected but got ${txsFromStream.size} instead.",
+      )
+
+      val txFromStreamCommandId = txsFromStream.headOption.value.commandId
+      assert(
+        txFromStreamCommandId.nonEmpty,
+        s"The command identifier for the transaction was supposed to be present but it's empty instead.",
+      )
+    }
+  })
+
+  test(
+    "TXLedgerEffectsHideCommandIdToNonSubmittingSameParticipantStakeholders",
+    "A ledger effects transaction should be visible to a non-submitting stakeholder on the same participant but its command identifier should be empty",
+    allocate(TwoParties),
+    tags = privacyHappyCase(
+      asset = "Ledger Effects Transaction",
+      happyCase =
+        "A ledger effects transaction is visible to a non-submitting stakeholder on the same participant but its command identifier should be empty",
+    ),
+  )(implicit ec => { case p @ Participants(Participant(alpha, Seq(submitter, listener))) =>
+    for {
+      (id, _) <- alpha.createAndGetUpdateId(submitter, new AgreementFactory(listener, submitter))
+      // add more creates to push out of IMFO in case of tiny buffers test
+      _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+      _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+      _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+      _ <- p.synchronize
+      tx <- alpha.transactionById(id, Seq(listener), LedgerEffects)
+      txsFromStream <- alpha.transactions(LedgerEffects, listener)
+    } yield {
+      assert(
+        tx.commandId.isEmpty,
+        s"The command identifier for the transaction was supposed to be empty but it's `${tx.commandId}` instead.",
+      )
+
+      assert(
+        txsFromStream.sizeIs == 4,
+        s"One transaction expected but got ${txsFromStream.size} instead.",
+      )
+
+      val txFromStreamCommandId = txsFromStream.headOption.value.commandId
+      assert(
+        txFromStreamCommandId.isEmpty,
+        s"The command identifier for the transaction was supposed to be empty but it's `$txFromStreamCommandId` instead.",
+      )
+    }
+  })
+
+  test(
+    "TXAcsDeltaHideCommandIdToNonSubmittingSameParticipantStakeholders",
+    "An acs delta transaction should be visible to a non-submitting stakeholder on the same participant but its command identifier should be empty",
+    allocate(TwoParties),
+    tags = privacyHappyCase(
+      asset = "Acs Delta Transaction",
+      happyCase =
+        "An acs delta transaction is visible to a non-submitting stakeholder on the same participant but its command identifier is empty",
+    ),
+  )(implicit ec => { case p @ Participants(Participant(alpha, Seq(submitter, listener))) =>
+    for {
+      (id, _) <- alpha.createAndGetUpdateId(
+        submitter,
+        new AgreementFactory(listener, submitter),
+      )
+      // add more creates to push out of IMFO in case of tiny buffers test
+      _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+      _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+      _ <- alpha.create(submitter, new AgreementFactory(listener, submitter))
+      _ <- p.synchronize
+      tx <- alpha.transactionById(id, Seq(listener), AcsDelta)
+      txsFromStream <- alpha.transactions(AcsDelta, listener)
+    } yield {
+
+      assert(
+        tx.commandId.isEmpty,
+        s"The command identifier for the flat transaction was supposed to be empty but it's `${tx.commandId}` instead.",
+      )
+
+      assert(
+        txsFromStream.sizeIs == 4,
+        s"One transaction expected but got ${txsFromStream.size} instead.",
+      )
+
+      val txFromStreamCommandId = txsFromStream.headOption.value.commandId
+      assert(
+        txFromStreamCommandId.isEmpty,
+        s"The command identifier for the transaction was supposed to be empty but it's `$txFromStreamCommandId` instead.",
+      )
+    }
   })
 
   test(

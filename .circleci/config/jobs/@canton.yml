@@ -21,11 +21,7 @@ package_community:
     - run:
         name: "Remember version info"
         command: |
-          set -eo pipefail
-          . scripts/daml.sh
-          DAML_VERSION=$(fetch_daml_version $PWD)
-          GIT_SHA=$(git rev-parse HEAD)
-          echo "daml_version=$DAML_VERSION sha=$GIT_SHA" | tee info.properties
+          .ci/nix-exec scripts/ci/generate_info_properties.sh
     - persist_to_workspace:
         root: .
         paths:
@@ -113,14 +109,6 @@ package_kms_driver:
     - obtain_release_suffix:
         is_nightly_workflow: << parameters.is_nightly_workflow >>
         is_manual: << parameters.is_manual >>
-    - package:
-        cmd: "kms-driver-api/package kms-driver-api/packageSrc kms-driver-api/packageDoc kms-driver-api/makePom"
-        location: "community/kms-driver-api/target/scala-2.13"
-        artifact_suffix: ".{jar,pom}"
-    - package:
-        cmd: "kms-driver-testing-lib/package kms-driver-testing-lib/packageSrc kms-driver-testing-lib/packageDoc kms-driver-testing-lib/makePom"
-        location: "kms-driver-testing-lib/target/scala-2.13"
-        artifact_suffix: ".{jar,pom}"
     - package:
         cmd: "aws-kms-driver/assembly aws-kms-driver/packageSrc aws-kms-driver/packageDoc aws-kms-driver/makePom"
         location: "community/aws-kms-driver/target/scala-2.13"

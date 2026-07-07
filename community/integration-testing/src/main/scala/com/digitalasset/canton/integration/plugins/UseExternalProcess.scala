@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.plugins
 import better.files.File
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.integration.plugins.UseExternalProcess.{RunVersion, ShutdownPhase}
+import com.digitalasset.canton.integration.plugins.UseExternalProcess.{ReleasePath, ShutdownPhase}
 import com.digitalasset.canton.integration.{ConfigTransform, EnvironmentSetupPlugin}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.{ParticipantNodeConfig, RemoteParticipantConfig}
@@ -91,19 +91,32 @@ class UseExternalProcess(
   private def makeCommand(
       name: String,
       config: NodeConfig,
-      runVersionO: Option[RunVersion] = None,
+      releasePathO: Option[ReleasePath] = None,
+      failOnUnknownConfigKeys: Boolean = true,
   ): Seq[String] = {
-    val command = runVersionO match {
-      case Some(RunVersion.Release(binaryPath)) => Seq(binaryPath) ++ threadingProps ++ loggingProps
+    val command = releasePathO match {
+      case Some(ReleasePath(binaryPath)) =>
+        Seq(binaryPath) ++ threadingProps ++ loggingProps
       case _ =>
         Seq(
           "java"
         ) ++ classpathProps ++ threadingProps ++ loggingProps :+ "com.digitalasset.canton.CantonCommunityApp"
     }
+
+    val additionalConfigFlags =
+      if (!failOnUnknownConfigKeys)
+        Seq(
+          "-C",
+          "canton.parameters.non-standard-config=true",
+          "-C",
+          "canton.parameters.fail-on-unknown-config-keys=false",
+        )
+      else Nil
+
     command ++ cantonInvocationArgs(
       logFile(name, config).toString,
       configFile(name, config).toString,
-    )
+    ) ++ additionalConfigFlags
   }
 
   def configureAndStore(
@@ -290,14 +303,31 @@ class UseExternalProcess(
     handler.tryStart(instanceName)
   }
 
-  /** Start a specific Canton version */
-  def start(instanceName: String, cantonVersion: RunVersion): Unit = {
+  /** Start a specific Canton version
+    * @param instanceName
+    *   Name of the instance.
+    * @param releasePath
+    *   Path to the binary.
+    * @param failOnUnknownConfigKeys
+    *   If true, fail if the config contains unknown keys.
+    */
+  def start(
+      instanceName: String,
+      releasePath: ReleasePath,
+      failOnUnknownConfigKeys: Boolean,
+  ): Unit = {
     val nodeConfig = config(instanceName)
     val nameInConfig = instanceNameInConfig(instanceName)
     handler.stopAndRemove(instanceName)
+
     handler.tryAdd(
       instanceName,
-      makeCommand(nameInConfig, nodeConfig, Some(cantonVersion)),
+      makeCommand(
+        nameInConfig,
+        nodeConfig,
+        Some(releasePath),
+        failOnUnknownConfigKeys = failOnUnknownConfigKeys,
+      ),
       addEnvironment,
       nodeConfig,
       manualStart = false,
@@ -325,12 +355,5 @@ object UseExternalProcess {
     case object AfterEnvironment extends ShutdownPhase
   }
 
-  sealed trait RunVersion
-  object RunVersion {
-    case object Main extends RunVersion
-    final case class Release(binaryPath: String) extends RunVersion {
-      val cantonExampleDarPath: File =
-        File(binaryPath).parent.parent / "dars" / "CantonExamples.dar"
-    }
-  }
+  final case class ReleasePath(binaryPath: String)
 }

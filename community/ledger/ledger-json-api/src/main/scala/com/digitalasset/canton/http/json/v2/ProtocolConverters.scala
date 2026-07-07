@@ -153,7 +153,7 @@ class ProtocolConverters(
                 jsonArgsValue = cmd.choiceArgument,
               )
             contractKey <-
-              schemaProcessors.contractArgFromJsonToProto(
+              schemaProcessors.keyArgFromJsonToProto(
                 template = cmd.templateId.withDecodingPackageId,
                 jsonArgsValue = cmd.contractKey,
               )
@@ -443,6 +443,13 @@ class ProtocolConverters(
               .map(Hash.assertFromByteArray)
               .map(_.toHexString),
           )
+          .withFieldComputed(
+            _.transactionHash,
+            _.transactionHash
+              .map(_.toByteArray)
+              .map(Hash.assertFromByteArray)
+              .map(_.toHexString),
+          )
           .transform
       }
 
@@ -456,6 +463,10 @@ class ProtocolConverters(
       .withFieldComputed(
         _.externalTransactionHash,
         _.externalTransactionHash.map(ByteString.fromHex),
+      )
+      .withFieldComputed(
+        _.transactionHash,
+        _.transactionHash.map(ByteString.fromHex),
       )
       .transform
   }
@@ -1513,6 +1524,7 @@ class ProtocolConverters(
     } yield obj
       .into[js.PrefetchContractKey]
       .withFieldConst(_.contractKey, toCirce(contractKey.getOrElse(ujson.Null)))
+      .withFieldConst(_.limit, obj.limit)
       .transform
   }
 
@@ -1539,15 +1551,22 @@ class ProtocolConverters(
 }
 
 object IdentifierConverter extends ConversionErrorSupport {
-  def fromJson(jsIdentifier: String): lapi.value.Identifier =
+  private[v2] val expectedFormat = "<package>:<moduleName>:<entityName>"
+
+  def fromJsonEither(jsIdentifier: String): Either[String, lapi.value.Identifier] =
     jsIdentifier.split(":").toSeq match {
       case Seq(packageId, moduleName, entityName) =>
-        lapi.value.Identifier(
-          packageId = packageId,
-          moduleName = moduleName,
-          entityName = entityName,
+        Right(
+          lapi.value.Identifier(
+            packageId = packageId,
+            moduleName = moduleName,
+            entityName = entityName,
+          )
         )
-      case _ => invalidArgument(jsIdentifier, "<package>:<moduleName>:<entityName>")
+      case _ =>
+        Left(
+          s"Invalid identifier format ($jsIdentifier) not matching the expected format ($expectedFormat)"
+        )
     }
 
   def toJson(lapiIdentifier: lapi.value.Identifier): String =

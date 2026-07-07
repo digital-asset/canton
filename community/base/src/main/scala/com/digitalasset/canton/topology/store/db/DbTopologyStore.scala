@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.store.db
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
@@ -45,14 +44,16 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 import slick.jdbc.canton.SQLActionBuilder
-import slick.jdbc.{GetResult, SetParameter, TransactionIsolation}
+import slick.jdbc.{GetResult, TransactionIsolation}
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
 
@@ -100,10 +101,6 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     }
     import DbStorage.Implicits.BuilderChain.*
 
-    // No idea why but without this the compiler remained unhappy
-    implicit val setParameterArrayString: SetParameter[Array[String]] =
-      com.digitalasset.canton.resource.DbStorage.Implicits.setParameterArrayString
-
     val codesA = codes.toArray
     val nssA = nss.toArray
     val idsA = ids.toArray
@@ -143,25 +140,26 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   override def findLatestTransactionsAndProposalsByTxHash(hashes: Set[TxHash])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    if (hashes.isEmpty) FutureUnlessShutdown.pure(Seq.empty)
-    else {
-      logger.debug(s"Querying transactions for tx hashes ${LoggerUtil.limitForLogging(hashes)}")
-      MonadUtil.batchedSequentialTraverse(
-        parallelism = batchingConfig.parallelism,
-        chunkSize = batchingConfig.maxItemsInBatch,
-      )(hashes.toSeq) { batch =>
-        toStoredTopologyTransactions(
-          storage.query(
-            buildQueryForTransactions(
-              sql" AND (" ++ batch
-                .map(txHash => sql"tx_hash = ${txHash.hash}")
-                .toList
-                .intercalate(sql" OR ") ++ sql")"
-            ),
-            operationName = "transactionsByTxHash",
-          )
-        ).map(_.collectLatestByTxHash.result.map(_.transaction))
-      }
+    NonEmpty.from(hashes: immutable.Iterable[TxHash]) match {
+      case None =>
+        FutureUnlessShutdown.pure(Seq.empty)
+
+      case Some(neHashes) =>
+        logger.debug(s"Querying transactions for tx hashes ${LoggerUtil.limitForLogging(neHashes)}")
+
+        MonadUtil.batchedSequentialTraverseNE(
+          parallelism = batchingConfig.parallelism,
+          chunkSize = batchingConfig.maxItemsInBatch,
+        )(neHashes) { batch =>
+          toStoredTopologyTransactions(
+            storage.query(
+              buildQueryForTransactions(
+                sql" AND " ++ DbStorage.toInClause("tx_hash", batch.map(_.hash))
+              ),
+              operationName = "transactionsByTxHash",
+            )
+          ).map(_.collectLatestByTxHash.result.map(_.transaction))
+        }
     }
 
   override def findTransactionsForMapping(
@@ -173,20 +171,19 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     logger.debug(
       s"Querying transactions for mapping hashes ${LoggerUtil.limitForLogging(hashes)} as of $asOfExclusive"
     )
-    MonadUtil.batchedSequentialTraverse(
+
+    MonadUtil.batchedSequentialTraverseNE(
       parallelism = batchingConfig.parallelism,
       chunkSize = batchingConfig.maxItemsInBatch,
-    )(hashes.toSeq) { batch =>
+    )(hashes: NonEmpty[immutable.Iterable[MappingHash]]) { batch =>
       toSignedTopologyTransactions(
         storage.query(
           buildQueryForTransactions(
             asOfQuery(
               asOfExclusive.value,
               asOfInclusive = false,
-            ) ++ sql" AND is_proposal = false AND (" ++ batch
-              .map(mappingHash => sql"mapping_key_hash = ${mappingHash.hash}")
-              .toList
-              .intercalate(sql" OR ") ++ sql")"
+            ) ++ sql" AND is_proposal = false AND " ++
+              DbStorage.toInClause("mapping_key_hash", batch.map(_.hash))
           ),
           operationName = "transactionsForMapping",
         )
@@ -413,7 +410,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   @VisibleForTesting
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     // Helper case class to produce comparable output to the InMemoryStore
@@ -1007,6 +1004,47 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     ).map(_.result.lastOption)
   }
 
+  override def filterProvidesAdditionalSignatures(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
+    NonEmpty.from(transactions) match {
+      case None =>
+        FutureUnlessShutdown.pure(Seq.empty)
+
+      case Some(neTransactions) =>
+        // NOTE: The `transactions` sequence is most likely already pre-batched by the upstream outbox
+        // using `topologyConfig.broadcastBatchSize` (optimizing for gRPC network transmission).
+        // However, we apply a second layer of defensive batching.
+
+        logger.debug(s"Filtering additional signatures for ${neTransactions.size} transactions")
+
+        MonadUtil
+          .batchedSequentialTraverseNE(
+            parallelism = batchingConfig.parallelism,
+            chunkSize = batchingConfig.maxItemsInBatch,
+          )(neTransactions) { batch =>
+            val query = buildQueryForTransactions(
+              sql" AND " ++ DbStorage.toInClause("tx_hash", batch.map(_.hash.hash))
+            )
+
+            toStoredTopologyTransactions(
+              storage.query(query, operationName = "filterProvidesAdditionalSignatures")
+            ).map { storedTxs =>
+              val latestInStore = storedTxs.result.iterator
+                .map(tx => tx.transaction.hash -> tx)
+                .toMap
+
+              batch.filter { tx =>
+                latestInStore.get(tx.hash).forall { inStore =>
+                  TopologyStore.providesAdditionalSignatures(tx, inStore)
+                }
+              }
+            }
+          }
+    }
+
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,
       synchronizerId: SynchronizerId,
@@ -1416,12 +1454,8 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   }
 
   override def deleteDataChunk(
-      chunkSize: Int
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
-    // We materialize the full chunk rather than using a subquery, as the update statement must be idempotent
-    val queryChunkIds =
-      sql"select id from common_topology_transactions where store_id = $storeIndex limit $chunkSize"
-        .as[Long]
+      chunkSize: PositiveInt
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     for {
       // There can be at most one of these rows, so we don't include it in our chunking.
       _ <- storage.update(
@@ -1429,22 +1463,39 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         functionFullName,
       )
 
-      chunkIds <- storage.query(queryChunkIds, functionFullName)
-      // The return value of the update is not reliable with an interpolated literal.
-      _ <-
-        if (chunkIds.nonEmpty) {
-          val deleteChunk =
-            sql"delete from common_topology_transactions where id IN (#${chunkIds.mkString(",")})".asUpdate
-          storage.update(deleteChunk, functionFullName)
-        } else FutureUnlessShutdown.pure(0)
+      // We materialize the last chunk key rather than using a subquery within the delete statement, as the update must
+      // be idempotent. We use `(store_id, valid_from, batch_idx)` as the key because the table has this as a unique
+      // constraint which implies an internal index allowing efficient range access. The primary key, `id` did not share
+      // any index with `store_id` so would not have had an efficient lookup.
+      lastKeyInChunk <- storage.query(
+        sql"""
+        select valid_from, batch_idx from (
+          select valid_from, batch_idx from common_topology_transactions where store_id = $storeIndex
+          order by valid_from ASC, batch_idx ASC #${storage.limit(chunkSize.value)}
+        ) as chunk
+        order by valid_from DESC, batch_idx DESC #${storage.limit(1)}
+        """.as[(Long, Int)].headOption,
+        functionFullName,
+      )
+      deleted <-
+        lastKeyInChunk match {
+          case Some((validFrom, batchIdx)) =>
+            storage.update(
+              sql"""delete from common_topology_transactions
+                    where store_id = $storeIndex
+                    and (valid_from, batch_idx) <= ( $validFrom, $batchIdx )
+                    """.asUpdate,
+              functionFullName,
+            )
+          case None => FutureUnlessShutdown.pure(0)
+        }
     } yield {
       logger.info(
-        if (chunkIds.nonEmpty) s"Deleted chunk of ${chunkIds.size} from topology store $storeId."
-        else s"No chunk to delete from topology store $storeId."
+        if (deleted > 0) s"Deleted chunk of $deleted from topology store"
+        else s"No chunk to delete from topology store."
       )
-      chunkIds.nonEmpty
+      deleted > 0
     }
-  }
 
   override def findEffectiveStateChanges(
       fromEffectiveInclusive: CantonTimestamp,

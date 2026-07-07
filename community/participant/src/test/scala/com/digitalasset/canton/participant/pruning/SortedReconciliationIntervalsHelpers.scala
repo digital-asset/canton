@@ -7,7 +7,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.protocol.messages.CommitmentPeriod
+import com.digitalasset.canton.protocol.messages.LegacyCommitmentPeriod
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
@@ -90,10 +90,10 @@ trait SortedReconciliationIntervalsHelpers {
   protected def fromEpochSecond(seconds: Long): CantonTimestampSecond =
     CantonTimestampSecond.ofEpochSecond(seconds)
 
-  protected def mkCommitmentPeriod(times: (Long, Long)): CommitmentPeriod = {
+  protected def mkCommitmentPeriod(times: (Long, Long)): LegacyCommitmentPeriod = {
     val (after, beforeAndAt) = times
 
-    CommitmentPeriod
+    LegacyCommitmentPeriod
       .create(
         CantonTimestampSecond.ofEpochSecond(after),
         CantonTimestampSecond.ofEpochSecond(beforeAndAt),

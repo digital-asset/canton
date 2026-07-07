@@ -12,6 +12,7 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficConfig,
@@ -58,6 +59,7 @@ class ReferenceSequencerWithTrafficControlApiTestPostgres
           synchronizerSyncCryptoApi: SynchronizerCryptoClient,
           protocolVersion: ProtocolVersion,
           trafficConfig: SequencerTrafficConfig,
+          lsuSequencingBounds: Option[LsuSequencingBounds],
       ): SequencerRateLimitManager = rateLimitManager
     }
 }

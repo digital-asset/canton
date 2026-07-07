@@ -6,18 +6,18 @@ package speedy
 package compiler
 
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Struct, Time}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{LanguageVersion, LookupError, PackageInterface}
-import com.digitalasset.daml.lf.speedy.compiler.ClosureConversion.closureConvert
-import com.digitalasset.daml.lf.speedy.compiler.Anf.flattenToAnf
-import com.digitalasset.daml.lf.speedy.compiler.PhaseOne.{Env, Position}
 import com.digitalasset.daml.lf.speedy.Profile.LabelModule
-import com.digitalasset.daml.lf.speedy.SBuiltinFun._
-import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.speedy.{SExpr => t}
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 => s}
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
+import com.digitalasset.daml.lf.speedy.SExpr as t
+import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.compiler.Anf.flattenToAnf
+import com.digitalasset.daml.lf.speedy.compiler.ClosureConversion.closureConvert
+import com.digitalasset.daml.lf.speedy.compiler.PhaseOne.{Env, Position}
+import com.digitalasset.daml.lf.speedy.compiler.SExpr0 as s
 import com.digitalasset.daml.lf.stablepackages.{StablePackages, StablePackagesV2}
 import com.digitalasset.daml.lf.validation.{Validation, ValidationError}
 import org.slf4j.LoggerFactory
@@ -25,15 +25,14 @@ import org.slf4j.LoggerFactory
 import scala.annotation.nowarn
 import scala.collection.immutable.ArraySeq
 
-/** Compiles LF expressions into Speedy expressions.
-  * This includes:
-  *  - Translating variable references into de Bruijn levels.
-  *  - Closure conversion: EAbs turns into SEMakeClo, which creates a closure by copying free variables into a closure object.
-  *   - Rewriting of update into applications of builtin functions that take an "effect" token.
+/** Compiles LF expressions into Speedy expressions. This includes:
+  *   - Translating variable references into de Bruijn levels.
+  *   - Closure conversion: EAbs turns into SEMakeClo, which creates a closure by copying free
+  *     variables into a closure object.
+  *     - Rewriting of update into applications of builtin functions that take an "effect" token.
   *
-  * If you're working on the code here note that there's
-  * a pretty-printer defined in lf.speedy.Pretty, which
-  * is exposed via ':speedy' command in the REPL.
+  * If you're working on the code here note that there's a pretty-printer defined in
+  * lf.speedy.Pretty, which is exposed via ':speedy' command in the REPL.
   */
 private[lf] object Compiler {
 
@@ -42,7 +41,7 @@ private[lf] object Compiler {
   final case class LanguageVersionError(
       packageId: Ref.PackageId,
       languageVersion: language.LanguageVersion,
-      allowedLanguageVersions: VersionRange[language.LanguageVersion],
+      allowedLanguageVersions: Seq[language.LanguageVersion],
   ) extends RuntimeException(s"Disallowed language version $languageVersion", null, true, false)
   final case class PackageNotFound(pkgId: PackageId, context: language.Reference)
       extends RuntimeException(
@@ -68,7 +67,7 @@ private[lf] object Compiler {
   case object FullPackageValidation extends PackageValidationMode
 
   final case class Config(
-      allowedLanguageVersions: VersionRange[LanguageVersion],
+      allowedLanguageVersions: Seq[LanguageVersion],
       packageValidation: PackageValidationMode,
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
@@ -77,14 +76,14 @@ private[lf] object Compiler {
   object Config {
     def Default =
       Config(
-        allowedLanguageVersions = LanguageVersion.stableLfVersionsRange,
+        allowedLanguageVersions = LanguageVersion.stableLfVersions,
         packageValidation = FullPackageValidation,
         profiling = NoProfile,
         stacktracing = NoStackTrace,
       )
 
     def Dev = Config(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       packageValidation = FullPackageValidation,
       profiling = NoProfile,
       stacktracing = NoStackTrace,
@@ -123,7 +122,7 @@ private[lf] final class Compiler(
     config: Compiler.Config,
 ) {
 
-  import Compiler._
+  import Compiler.*
 
   // Compilation entry points...
 
@@ -151,18 +150,16 @@ private[lf] final class Compiler(
   def unsafeCompilePackage(
       pkgId: PackageId,
       pkg: Package,
-  ): Iterable[(t.SDefinitionRef, SDefinition)] = {
+  ): Iterable[(t.SDefinitionRef, SDefinition)] =
     compilePackage(pkgId, pkg)
-  }
 
   @throws[PackageNotFound]
   @throws[CompilationError]
   def unsafeCompileModule( // called by script-service
       pkgId: PackageId,
       module: Module,
-  ): Iterable[(t.SDefinitionRef, SDefinition)] = {
+  ): Iterable[(t.SDefinitionRef, SDefinition)] =
     compileModule(pkgId, module)
-  }
 
   @throws[PackageNotFound]
   @throws[CompilationError]
@@ -222,7 +219,7 @@ private[lf] final class Compiler(
       contract: s.SExpr,
   )(
       body: Env => s.SExpr
-  ): s.SExpr = {
+  ): s.SExpr =
     let(env, s.SEApp(s.SEVal(t.TemplatePreConditionDefRef(templateId)), List(contract))) {
       (preConditionCheck, env) =>
         s.SECase(
@@ -242,7 +239,6 @@ private[lf] final class Compiler(
           ),
         )
     }
-  }
 
   private[this] def unaryFunction(env: Env)(f: (Position, Env) => s.SExpr): s.SEAbs =
     f(env.nextPosition, env.pushVar) match {
@@ -390,7 +386,6 @@ private[lf] final class Compiler(
       tmpl.key.foreach { tmplKey =>
         addDef(compileContractKeyWithMaintainers(tmplId, tmpl, tmplKey))
         addDef(compileFetchByKey(tmplId, tmplKey))
-        addDef(compileLookupByKey(tmplId, tmplKey))
         addDef(compileQueryNByKey(tmplId, tmplKey))
         tmpl.choices.values.foreach { x =>
           addDef(compileChoiceByKey(tmplId, tmpl, tmplKey, x))
@@ -422,10 +417,11 @@ private[lf] final class Compiler(
 
   /** Validates and compiles all the definitions in the package provided.
     *
-    * Fails with [[PackageNotFound]] if the package or any of the packages it refers
-    * to are not in the [[pkgInterface]].
+    * Fails with [[PackageNotFound]] if the package or any of the packages it refers to are not in
+    * the [[pkgInterface]].
     *
-    * @throws ValidationError if the package does not pass validations.
+    * @throws ValidationError
+    *   if the package does not pass validations.
     */
   private def compilePackage(pkgId: PackageId, pkg: Package) = {
     logger.trace(s"compilePackage: Compiling $pkgId...")
@@ -484,7 +480,7 @@ private[lf] final class Compiler(
       cidPos: Position,
       mbKey: Option[Position], // defined for byKey operation
       tokenPos: Position,
-  ): s.SExpr = {
+  ): s.SExpr =
     let(
       env,
       SBFetchTemplate(tmplId)(
@@ -532,7 +528,6 @@ private[lf] final class Compiler(
         }
       }
     }
-  }
 
   // TODO https://github.com/digital-asset/daml/issues/12051
   //   Try to factorise this with compileChoiceBody above.
@@ -546,7 +541,7 @@ private[lf] final class Compiler(
       cidPos: Position,
       choiceArgPos: Position,
       tokenPos: Position,
-  ): s.SExpr = {
+  ): s.SExpr =
     let(env, SBFetchInterface(ifaceId)(env.toSEVar(cidPos))) { (payloadPos, _env) =>
       val env =
         _env.bindExprVar(param, payloadPos).bindExprVar(choice.argBinder._1, choiceArgPos)
@@ -598,7 +593,6 @@ private[lf] final class Compiler(
         }
       }
     }
-  }
 
   private[this] def compileInterfaceChoice(
       ifaceId: TypeConId,
@@ -707,7 +701,7 @@ private[lf] final class Compiler(
       cidPos: Position,
       mbKey: Option[Position], // defined for byKey operation
       tokenPos: Position,
-  ): s.SExpr = {
+  ): s.SExpr =
     SBUInsertFetchNode(
       tmplId,
       byKey = mbKey.isDefined,
@@ -715,7 +709,6 @@ private[lf] final class Compiler(
     )(
       env.toSEVar(cidPos)
     )
-  }
 
   private[this] def compileFetchTemplate(
       tmplId: Identifier
@@ -836,23 +829,21 @@ private[lf] final class Compiler(
       interfaceInstanceDefRef: t.InterfaceInstanceDefRef,
       tmplParam: Name,
       method: InterfaceInstanceMethod,
-  ): (t.SDefinitionRef, SDefinition) = {
+  ): (t.SDefinitionRef, SDefinition) =
     topLevelFunction1(t.InterfaceInstanceMethodDefRef(interfaceInstanceDefRef, method.name)) {
       (tmplArgPos, env) =>
         translateExp(env.bindExprVar(tmplParam, tmplArgPos), method.value)
     }
-  }
 
   // Compile the implementation of an interface view.
   private[this] def compileInterfaceInstanceView(
       interfaceInstanceDefRef: t.InterfaceInstanceDefRef,
       tmplParam: Name,
       body: Expr,
-  ): (t.SDefinitionRef, SDefinition) = {
+  ): (t.SDefinitionRef, SDefinition) =
     topLevelFunction1(t.InterfaceInstanceViewDefRef(interfaceInstanceDefRef)) { (tmplArgPos, env) =>
       translateExp(env.bindExprVar(tmplParam, tmplArgPos), body)
     }
-  }
 
   private[this] def translateCreateBody(
       templateId: Identifier,
@@ -869,7 +860,7 @@ private[lf] final class Compiler(
   // Note that this cannot be called for Arithmetic exception, as this is constructed without the need for its package
   private[this] def compileThrowExceptionAsFailureStatus(
       exceptionId: Identifier
-  ): (t.SDefinitionRef, SDefinition) = {
+  ): (t.SDefinitionRef, SDefinition) =
     topLevelFunction1(t.ThrowExceptionAsFailureStatusDefRef(exceptionId))((exceptionPos, env) =>
       let(env, s.SEVal(t.ExceptionMessageDefRef(exceptionId))) { (getMessagePos, env) =>
         let(env, s.SEApp(env.toSEVar(getMessagePos), List(env.toSEVar(exceptionPos)))) {
@@ -883,7 +874,6 @@ private[lf] final class Compiler(
         }
       }
     )
-  }
 
   // Convenience function for creating a call to the above ThrowExceptionAsFailureStatusDefRef
   def throwExceptionAsFailureStatusSExpr(
@@ -898,7 +888,7 @@ private[lf] final class Compiler(
   private[this] def compileCreate(
       tmplId: Identifier,
       tmpl: Template,
-  ): (t.SDefinitionRef, SDefinition) = {
+  ): (t.SDefinitionRef, SDefinition) =
     // Translates 'create Foo with <params>' into:
     // CreateDefRef(tmplId) = \ <tmplArg> <token> ->
     //   let _ = checkPreCondition(tmplId, <tmplArg>)
@@ -906,16 +896,14 @@ private[lf] final class Compiler(
     topLevelFunction2(t.CreateDefRef(tmplId))((tmplArgPos, _, env) =>
       translateCreateBody(tmplId, tmpl, tmplArgPos, env)
     )
-  }
 
   private[this] def compileTemplatePreCondition(
       tmplId: Identifier,
       tmpl: Template,
-  ): (t.SDefinitionRef, SDefinition) = {
+  ): (t.SDefinitionRef, SDefinition) =
     topLevelFunction1(t.TemplatePreConditionDefRef(tmplId))((tmplArgPos, env) =>
       translateExp(env.bindExprVar(tmpl.param, tmplArgPos), tmpl.precond)
     )
-  }
 
   private[this] def translateCreateAndExercise(
       env: Env,
@@ -947,24 +935,6 @@ private[lf] final class Compiler(
     topLevelFunction1(t.ContractKeyWithMaintainersDefRef(tmplId)) { (tmplArg, env) =>
       let(env, translateExp(env.bindExprVar(tmpl.param, tmplArg), tmplKey.body)) { (keyPos, env) =>
         translateKeyWithMaintainers(env, keyPos, tmplKey)
-      }
-    }
-
-  private[this] def compileLookupByKey(
-      tmplId: Identifier,
-      tmplKey: TemplateKey,
-  ): (t.SDefinitionRef, SDefinition) =
-    // compile a template with key into
-    // LookupByKeyDefRef(tmplId) = \ <key> <token> ->
-    //    let <keyWithM> = { key = <key> ; maintainers = [tmplKey.maintainers] <key> }
-    //        <mbCid> = $lookupKey(tmplId) <keyWithM>
-    //    in <mbCid>
-    topLevelFunction2(t.LookupByKeyDefRef(tmplId)) { (keyPos, _, env) =>
-      let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
-        (keyWithMPos, env) =>
-          let(env, SBULookupKey(tmplId)(env.toSEVar(keyWithMPos))) { (maybeCidPos, env) =>
-            env.toSEVar(maybeCidPos)
-          }
       }
     }
 
@@ -1050,8 +1020,6 @@ private[lf] final class Compiler(
           choice,
           choiceArg,
         )
-      case Command.LookupByKey(templateId, contractKey) =>
-        t.LookupByKeyDefRef(templateId)(s.SEValue(contractKey))
     }
     SBUSetLastCommand(cmd)(body)
   }

@@ -4,12 +4,12 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error.Upgrade.TranslationFailed
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{LookupError, TypeDestructor}
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 
 import scala.collection.immutable.ArraySeq
 
@@ -59,7 +59,7 @@ private[lf] final class ValueTranslator(
       ty: Type,
       value: Value,
   ): SValue = {
-    import TypeDestructor.SerializableTypeF._
+    import TypeDestructor.SerializableTypeF.*
     val Destructor = TypeDestructor(pkgInterface)
 
     def go(ty0: Type, value0: Value, nesting: Int): SValue =
@@ -100,7 +100,7 @@ private[lf] final class ValueTranslator(
             val dScale = Numeric.scale(d)
             if (dScale != s)
               typeError(
-                s"Non-normalized Numeric: the type expects scale $s, but the value has scale ${dScale}"
+                s"Non-normalized Numeric: the type expects scale $s, but the value has scale $dScale"
               )
             Numeric.fromBigDecimal(s, d) match {
               case Right(value) => SValue.SNumeric(value)
@@ -178,7 +178,7 @@ private[lf] final class ValueTranslator(
               invalidValueError(s"Unexpected type id ${mbId.get} in record value.")
             sourceElements.foreach { case (mbLabel, _) =>
               mbLabel.foreach(label =>
-                invalidValueError(s"Unexpected label ${label} in record value.")
+                invalidValueError(s"Unexpected label $label in record value.")
               )
             }
             if (forbidTrailingNones && sourceElements.toSeq.lastOption.exists(_._2 == ValueNone)) {

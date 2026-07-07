@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxParallelTraverse_
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.UnassignmentData.{
@@ -15,7 +14,12 @@ import com.digitalasset.canton.data.UnassignmentData.{
   ReassignmentGlobalOffset,
   UnassignmentGlobalOffset,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  ContractsReassignmentBatch,
+  Offset,
+  UnassignmentData,
+}
 import com.digitalasset.canton.ledger.participant.state.{Reassignment, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
@@ -25,12 +29,13 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
 import com.digitalasset.canton.platform.indexer.parallel.ReassignmentOffsetPersistence
-import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId}
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{CheckedT, EitherTUtil, MonadUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -144,6 +149,7 @@ object ReassignmentStore {
         }
         .groupBy { case (event, _) => event.reassignmentInfo.targetSynchronizer }
         .toList
+        // TODO(#24573): add and use a parallelism limit (DB write)
         .parTraverse_ { case (targetSynchronizer, eventsForSynchronizer) =>
           lazy val updates = eventsForSynchronizer
             .map { case (event, offset) =>
@@ -267,7 +273,7 @@ object ReassignmentStore {
   final case class ReassignmentEntry(
       reassignmentId: ReassignmentId,
       sourceSynchronizer: Source[SynchronizerId],
-      contracts: NonEmpty[Seq[ContractInstance]],
+      stakeholders: NonEmpty[Set[LfPartyId]],
       unassignmentData: Option[UnassignmentData],
       reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
       unassignmentTs: CantonTimestamp,
@@ -288,7 +294,7 @@ object ReassignmentStore {
       ReassignmentEntry(
         unassignmentData.reassignmentId,
         unassignmentData.sourcePsid.map(_.logical),
-        unassignmentData.contractsBatch.contracts.map(_.contract),
+        stakeholdersOf(unassignmentData.reassignmentId, unassignmentData.contractsBatch),
         Some(unassignmentData),
         reassignmentGlobalOffset,
         unassignmentData.unassignmentTs,
@@ -304,12 +310,24 @@ object ReassignmentStore {
       ReassignmentEntry(
         assignmentData.reassignmentId,
         assignmentData.sourceSynchronizer,
-        assignmentData.contracts.contracts.map(_.contract),
+        stakeholdersOf(assignmentData.reassignmentId, assignmentData.contracts),
         None,
         reassignmentGlobalOffset,
         unassignmentTs,
         tsCompletion,
       )
+
+    private def stakeholdersOf(
+        reassignmentId: ReassignmentId,
+        contracts: ContractsReassignmentBatch,
+    ): NonEmpty[Set[LfPartyId]] =
+      NonEmpty
+        .from(contracts.stakeholders.all)
+        .getOrElse(
+          throw new IllegalStateException(
+            s"Reassignment $reassignmentId has a contract without stakeholders"
+          )
+        )
   }
 }
 

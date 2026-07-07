@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology
 
 import cats.kernel.Order
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConversionError}
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String3, String300}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -20,6 +19,7 @@ import com.digitalasset.canton.topology.admin.v30 as adminProtoV30
 import com.digitalasset.canton.topology.admin.v30.Synchronizer.Kind
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ProtoDeserializationError}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import io.circe.Encoder
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
@@ -187,6 +187,7 @@ object Synchronizer {
 
   /** Parses a string protobuf field to either a logical or physical synchronizer ID. Fails if the
     * string can't be parsed to either.
+    *
     * @param value
     *   value to parse
     * @param fieldName
@@ -202,6 +203,16 @@ object Synchronizer {
         PhysicalSynchronizerId
           .fromProtoPrimitive(value, fieldName)
       )
+
+  implicit val getResultSynchronizer: GetResult[Synchronizer] = GetResult { r =>
+    val str = r.nextString()
+    fromLogicalOrPhysicalString(str, "synchronizer_id").valueOr(err =>
+      throw new DbDeserializationException(err.message)
+    )
+  }
+
+  implicit val setParameterSynchronizer: SetParameter[Synchronizer] = (v: Synchronizer, pp) =>
+    pp >> v.toProtoPrimitive
 }
 
 final case class SynchronizerId(uid: UniqueIdentifier) extends Synchronizer with Identity {
@@ -270,9 +281,9 @@ final case class PhysicalSynchronizerId(
   override def toProtoPrimitive: String = toLengthLimitedString.unwrap
 
   override protected def pretty: Pretty[PhysicalSynchronizerId] =
-    prettyOfString(_ =>
-      logical.show ++ PhysicalSynchronizerId.primaryDelimiter ++ protocolVersion.show ++
-        PhysicalSynchronizerId.secondaryDelimiter ++ serial.show
+    prettyOfString(id =>
+      id.logical.show ++ PhysicalSynchronizerId.primaryDelimiter ++ id.protocolVersion.show ++
+        PhysicalSynchronizerId.secondaryDelimiter ++ id.serial.show
     )
 
   def incrementSerial: PhysicalSynchronizerId = this.copy(serial = serial.increment.toNonNegative)

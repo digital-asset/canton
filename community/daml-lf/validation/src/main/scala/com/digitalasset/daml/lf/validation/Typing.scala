@@ -304,6 +304,8 @@ private[validation] object Typing {
         alpha.name -> KStar,
         TText ->: TFailureCategory ->: TText ->: TTextMap(TText) ->: alpha,
       ),
+      // External Call
+      BExternalCall -> (TText ->: TText ->: TText ->: TText ->: TUpdate(TText)),
     )
   }
 
@@ -1326,11 +1328,6 @@ private[validation] object Typing {
         Ret(
           keyType ->:
             TUpdate(TTuple2(TContractId(TTyCon(templateId)), TTyCon(templateId)))
-        )
-      case UpdateLookupByKey(templateId) =>
-        val keyType = handleLookup(ctx, pkgInterface.lookupTemplateKey(templateId)).typ
-        Ret(
-          keyType ->: TUpdate(TOptional(TContractId(TTyCon(templateId))))
         )
       case UpdateQueryNByKey(templateId) =>
         val keyType = handleLookup(ctx, pkgInterface.lookupTemplateKey(templateId)).typ

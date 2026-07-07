@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.daml.metrics.api.{HistogramInventory, MetricName}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -29,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerThroug
 import com.digitalasset.canton.synchronizer.sequencer.block.SchedulerTestUtil.mockScheduler
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.matchers.{MatchResult, Matcher}
 import org.scalatest.wordspec.AsyncWordSpec

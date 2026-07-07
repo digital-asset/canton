@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey, SignatureCheckError}
@@ -19,6 +18,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   PositiveTopologyTransaction,
   TxHash,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait TopologyTransactionRejection extends PrettyPrinting with Product with Serializable {
   def asString: String
@@ -295,7 +295,7 @@ object TopologyTransactionRejection {
     final case class AnnouncedLsuTopologyFreeze(synchronizerId: SynchronizerId)
         extends TopologyTransactionRejection {
       override def asString: String =
-        s"The topology state of synchronizer $synchronizerId is frozen due to an announced LSU and no more topology changes are allowed."
+        s"The topology state of synchronizer $synchronizerId is frozen due to an announced LSU. No more topology changes are allowed until upgrade completion."
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.AnnouncedLsuTopologyFreeze.Reject(synchronizerId)

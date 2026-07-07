@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
@@ -25,12 +26,19 @@ class TestVerdictSender(
     mediatorId: MediatorId,
     sequencerSend: SequencerClientSend,
     loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends DefaultVerdictSender(
       sequencerSend,
       crypto,
       mediatorId,
-      BatchingConfig(),
+      VerdictSenderParameters(
+        enableDelay = true,
+        livenessMargin = NonNegativeInt.zero,
+        immediateBeforeDeadline = config.NonNegativeFiniteDuration.ofSeconds(1),
+        initialDelay = config.NonNegativeFiniteDuration.ofSeconds(1),
+        delay = config.NonNegativeFiniteDuration.ofSeconds(1),
+        parallelism = PositiveInt.two,
+      ),
       loggerFactory,
     ) {
 

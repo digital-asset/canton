@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.integration.util
 
-import cats.data.{EitherT, OptionT}
-import cats.syntax.alternative.*
+import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.completion.Completion
@@ -22,16 +20,14 @@ import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantRe
 import com.digitalasset.canton.crypto.{RandomOps, SaltSeed}
 import com.digitalasset.canton.data.{DeduplicationPeriod, LedgerTimeBoundaries}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
-import com.digitalasset.canton.integration.util.TestSubmissionService.{
-  CommandsWithMetadata,
-  TestKeyResolver,
-}
+import com.digitalasset.canton.integration.util.TestSubmissionService.*
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   ValidateUpgradingPackageResolutions,
 }
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -39,12 +35,11 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.participant.ParticipantNode
-import com.digitalasset.canton.platform.apiserver.SeedService.WeakRandom
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.daml.lf.command.ApiCommands
@@ -62,12 +57,14 @@ import com.digitalasset.daml.lf.engine.{
   ResultError,
   ResultInterruption,
   ResultNeedContract,
+  ResultNeedExternalCall,
   ResultNeedKey,
   ResultNeedPackage,
   ResultPrefetch,
 }
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine, *}
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import io.grpc.stub.StreamObserver
 import org.scalatest.OptionValues.*
@@ -88,7 +85,7 @@ class TestSubmissionService(
     packageResolver: PackageResolver,
     syncService: SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
-    contractStateMode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.default,
+    interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -146,14 +143,13 @@ class TestSubmissionService(
       commands: CommandsWithMetadata,
       transaction: SubmittedTransaction,
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
-      globalKeyInputs: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[Completion] = {
     val submitterInfo = commands.submitterInfo(maxDeduplicationDuration.duration)
     val meta = commands.transactionMeta(transaction, nodeSeeds)
     waitForCompletion(
       submittingParticipant,
       commands,
-      submitTransaction_(submitterInfo, meta, transaction, globalKeyInputs),
+      submitTransaction_(submitterInfo, meta, transaction),
     )
   }
 
@@ -225,7 +221,6 @@ class TestSubmissionService(
           submitterInfo,
           meta,
           transaction,
-          metadata.globalKeyMapping,
         )
       )
     } yield result
@@ -234,9 +229,8 @@ class TestSubmissionService(
       submitterInfo: SubmitterInfo,
       meta: TransactionMeta,
       transaction: SubmittedTransaction,
-      keyMapping: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[Unit] =
-    submitTransaction(submitterInfo, meta, transaction, keyMapping).map {
+    submitTransaction(submitterInfo, meta, transaction).map {
       case SubmissionResult.Acknowledged => ()
       case error: SubmissionResult.SynchronousError => throw error.exception
     }
@@ -245,7 +239,6 @@ class TestSubmissionService(
       submitterInfo: SubmitterInfo,
       meta: TransactionMeta,
       transaction: SubmittedTransaction,
-      keyMapping: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[SubmissionResult] =
     for {
       routingSynchronizerState <- syncService.getRoutingSynchronizerState
@@ -271,7 +264,6 @@ class TestSubmissionService(
           transactionMeta = meta,
           transaction = transaction,
           _estimatedInterpretationCost = 0,
-          keyResolver = keyMapping,
           processedDisclosedContracts = ImmArray.Empty, // TODO(#9795) wire proper value
         )
     } yield submissionResult
@@ -283,6 +275,10 @@ class TestSubmissionService(
       actAs = commands.actAs,
       apiCommands = commands.apiCommands(),
       readAs = commands.readAs,
+      disclosedContracts = commands.disclosedContracts.map { case (cid, c) => cid -> c.inst },
+      disclosedKeyContracts = commands.disclosedKeyContracts.map { case (cid, contracts) =>
+        cid -> contracts.map(_.inst)
+      },
       submissionSeed = commands.submissionSeed,
       packagePreferenceOverride = commands.packagePreferenceOverride,
       packageMapOverride = commands.packageMapOverride,
@@ -292,7 +288,9 @@ class TestSubmissionService(
       actAs: Seq[PartyId],
       apiCommands: ApiCommands,
       readAs: Seq[PartyId],
-      submissionSeed: crypto.Hash = WeakRandom.nextSeed(),
+      disclosedContracts: Map[LfContractId, FatContractInstance],
+      disclosedKeyContracts: Map[GlobalKey, Vector[FatContractInstance]],
+      submissionSeed: crypto.Hash = SubmissionSeed.generate(randomOps),
       packageMapOverride: Option[
         Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]
       ] = None,
@@ -327,14 +325,16 @@ class TestSubmissionService(
         prefetchKeys = Seq.empty,
         submissionSeed = submissionSeed,
         contractIdVersion = ContractIdVersion.V1,
-        contractStateMode = contractStateMode,
+        interpretationConfig = interpretationConfig,
       )
 
-    txOrErr <- resolve(result)
+    txOrErr <- resolve(disclosedContracts, disclosedKeyContracts, result)
   } yield txOrErr)
 
   private def resolve(
-      result: Result[(SubmittedTransaction, Transaction.Metadata)]
+      disclosedContracts: Map[LfContractId, FatContractInstance],
+      disclosedKeyContracts: Map[GlobalKey, Vector[FatContractInstance]],
+      result: Result[(SubmittedTransaction, Transaction.Metadata)],
   )(implicit
       traceContext: TraceContext
   ): Future[Either[Error, (SubmittedTransaction, Transaction.Metadata)]] = {
@@ -352,15 +352,24 @@ class TestSubmissionService(
 
       case ResultNeedContract(acoid, resume) =>
         for {
-          contractOpt <- contractResolver(acoid)(traceContext)
+          contractOpt <- disclosedContracts.get(acoid) match {
+            case Some(contract) => Future.successful(Some(contract))
+            case None => contractResolver(acoid)(traceContext)
+          }
           response: Response =
             contractOpt match {
               case Some(contract) =>
-                Response.ContractFound(contract, Hash.HashingMethod.UpgradeFriendly, _ => true)
+                val hashingMethod = CantonContractIdVersion
+                  .extractCantonContractIdVersion(acoid)
+                  .valueOr(err =>
+                    throw new IllegalArgumentException(s"Invalid contract id version: $err")
+                  )
+                  .contractHashingMethod
+                Response.ContractFound(contract, hashingMethod, _ => true)
               case None =>
                 Response.ContractNotFound
             }
-          r <- resolve(resume(response))
+          r <- resolve(disclosedContracts, disclosedKeyContracts, resume(response))
         } yield r
 
       case ResultNeedPackage(packageId, resume) =>
@@ -370,22 +379,68 @@ class TestSubmissionService(
             .failOnShutdownToAbortException(
               "TestSubmissionService"
             )
-          r <- resolve(resume(pckgO))
+          r <- resolve(disclosedContracts, disclosedKeyContracts, resume(pckgO))
         } yield r
 
-      case ResultNeedKey(key, _, _, resume) =>
-        // TODO(#31857) review this code once engine really support NUCK
-
+      case ResultNeedKey(key, n, mbToken, resume) =>
         for {
-          cidO <- keyResolver.resolveKey(key)(traceContext)
-          contracts <- cidO.toList.parTraverse(contractResolver(_)(traceContext))
-          r <- resolve(resume(contracts.flatten.toVector, NeedKeyProgression.Finished))
+          keyContracts <- mbToken match {
+            case NeedKeyProgression.Unstarted =>
+              disclosedKeyContracts.get(key) match {
+                case Some(contract) => Future.successful(contract)
+                case None =>
+                  keyResolver
+                    .lookupKey(key)
+                    .failOnShutdownToAbortException("test submit transaction")
+              }
+            case NeedKeyProgression.InProgress(ContinuationToken(rest)) => Future.successful(rest)
+            case _ => throw new IllegalStateException("unexpected continuation token")
+          }
+          (result, rest) = keyContracts.splitAt(n)
+          hasStarted: NeedKeyProgression.HasStarted =
+            if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
+            else NeedKeyProgression.Finished
+          r <- resolve(
+            disclosedContracts,
+            disclosedKeyContracts,
+            resume(
+              ResultNeedKey.Response(
+                result
+                  .map(fci =>
+                    ResultNeedKey.Response.AuthenticableFatContractInstance(
+                      fci,
+                      Hash.HashingMethod.TypedNormalForm,
+                      _ => true,
+                    )
+                  ),
+                hasStarted,
+              )
+            ),
+          )
         } yield r
 
       case ResultInterruption(continue, _) =>
-        resolve(iterateOverInterrupts(continue))
+        resolve(disclosedContracts, disclosedKeyContracts, iterateOverInterrupts(continue))
 
-      case ResultPrefetch(_, _, resume) => resolve(resume())
+      case ResultPrefetch(_, _, resume) =>
+        resolve(disclosedContracts, disclosedKeyContracts, resume())
+
+      // TODO(https://github.com/digital-asset/canton/issues/513): Double-check whether
+      // tests using this helper can safely skip external calls, or whether this should
+      // mock the external-call response instead.
+      case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>
+        Future.successful(
+          Left(
+            Error.Interpretation(
+              Error.Interpretation.Internal(
+                "test",
+                s"External calls are not supported in TestSubmissionService: extension=$extensionId, function=$functionId",
+                None,
+              ),
+              None,
+            )
+          )
+        )
     }
   }
 }
@@ -416,12 +471,7 @@ object TestSubmissionService {
       customKeyResolver: Option[TestKeyResolver] = None,
       checkAuthorization: Boolean = true,
       enableLfDev: Boolean = false,
-      contractStateMode: NextGenContractStateMachine.Mode =
-        NextGenContractStateMachine.Mode.devDefault,
-      resolveContractOverride: LfContractId => OptionT[
-        Future,
-        FatContractInstance,
-      ] = _ => OptionT[Future, FatContractInstance](Future.successful(None)),
+      interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
   )(implicit env: TestConsoleEnvironment): TestSubmissionService = {
     import env.*
 
@@ -432,9 +482,9 @@ object TestSubmissionService {
       EngineConfig(
         allowedLanguageVersions =
           if (enableLfDev)
-            LanguageVersion.allLfVersionsRange
+            LanguageVersion.allLfVersions
           else
-            LanguageVersion.stableLfVersionsRange,
+            LanguageVersion.stableLfVersions,
         checkAuthorization = checkAuthorization,
       ),
       loggerFactory,
@@ -443,14 +493,10 @@ object TestSubmissionService {
     def resolveContract(
         coid: LfContractId
     )(traceContext: TraceContext): Future[Option[FatContractInstance]] =
-      resolveContractOverride(coid)
-        .orElse(
-          participantNode.sync.participantNodePersistentState.value.contractStore
-            .lookupFatContract(coid)(traceContext)
-            .mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("TestSubmissionService"))
-            .widen[FatContractInstance]
-        )
+      participantNode.sync.participantNodePersistentState.value.contractStore
+        .lookupFatContract(coid)(traceContext)
         .value
+        .failOnShutdownToAbortException("TestSubmissionService")
 
     val keyResolver = customKeyResolver.getOrElse(ActiveKeyResolver(participant))
 
@@ -465,7 +511,7 @@ object TestSubmissionService {
       packageResolver,
       participantNode.sync,
       mkPackageMap(participantNode)(_),
-      contractStateMode,
+      interpretationConfig,
       loggerFactory,
     )
   }
@@ -501,9 +547,9 @@ object TestSubmissionService {
   /** Strategy to resolve a contract key for use by DAML engine.
     */
   trait TestKeyResolver {
-    def resolveKey(key: LfGlobalKey)(implicit
+    def lookupKey(key: LfGlobalKey)(implicit
         traceContext: TraceContext
-    ): Future[Option[LfContractId]]
+    ): FutureUnlessShutdown[Vector[FatContractInstance]]
   }
 
   /** Resolves a key to the first that matches:
@@ -518,42 +564,40 @@ object TestSubmissionService {
       executionContext: ExecutionContext
   ) extends TestKeyResolver {
 
-    override def resolveKey(
-        globalKey: LfGlobalKey
-    )(implicit traceContext: TraceContext): Future[Option[LfContractId]] = {
+    def lookupKey(key: LfGlobalKey)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Vector[FatContractInstance]] = {
       val syncService = participant.underlying.value.sync
       val contractStore = syncService.syncPersistentStateManager.contractStore.value
 
       for {
-        idsBySynchronizer <-
-          syncService.syncPersistentStateManager.getAll.toList
-            .parTraverse { case (_, state) =>
+        contracts <-
+          syncService.syncPersistentStateManager.getAll.values.toSeq
+            .parTraverse { state =>
               for {
-                allContracts <- contractStore
-                  .find(None, None, None, Int.MaxValue)
-                  .failOnShutdownToAbortException("resolveKey")
-                contractsWithKey = allContracts.filter(
-                  _.contractKeyWithMaintainers.map(_.globalKey).contains(globalKey)
+                allContracts <- contractStore.find(
+                  None,
+                  None,
+                  None,
+                  Int.MaxValue,
                 )
-                allContractIds = contractsWithKey.map(_.contractId)
-                // At this stage, the ledger api server would filter out divulged contracts that are invisible to all submitters.
-                activeContractIds <- contractsWithKey.parTraverseFilter { contract =>
-                  for {
-                    contractState <- state.activeContractStore
-                      .fetchStates(Seq(contract.contractId))(traceContext)
-                      .map(_.get(contract.contractId))
-                      .failOnShutdownToAbortException("resolveKey")
-                  } yield contractState.filter(_.status.isActive).map(_ => contract.contractId)
-                }
-              } yield (activeContractIds, allContractIds)
+                contractsWithKey = allContracts.filter(
+                  _.contractKeyWithMaintainers.map(_.globalKey).contains(key)
+                )
+                allContractIds = contractsWithKey.map(_.contractId).toSet
+                contractStates <- state.activeContractStore.fetchStates(allContractIds)
+
+              } yield {
+                val activeContractIds = contractStates.collect {
+                  case (id, s) if s.status.isActive => id
+                }.toSet
+                val filterIds =
+                  if (resolveToActive) activeContractIds else allContractIds -- activeContractIds
+                allContracts.filter(c => filterIds(c.contractId))
+              }
             }
       } yield {
-        val (activeContractIds, allContractIds) = idsBySynchronizer.separate
-        activeContractIds.flatten.headOption match {
-          case Some(activeContractId) => Some(activeContractId)
-          case None if resolveToActive => None
-          case None => allContractIds.flatten.headOption
-        }
+        contracts.flatMap(_.map(_.inst)).toVector
       }
     }
   }
@@ -580,10 +624,9 @@ object TestSubmissionService {
 
   /** Resolves every key to `None`. */
   case object EmptyKeyResolver extends TestKeyResolver {
-    override def resolveKey(key: LfGlobalKey)(implicit
+    override def lookupKey(key: LfGlobalKey)(implicit
         traceContext: TraceContext
-    ): Future[None.type] =
-      Future.successful(None)
+    ): FutureUnlessShutdown[Vector[FatContractInstance]] = FutureUnlessShutdown.pure(Vector.empty)
   }
 
   private val randomOps: RandomOps = (length: Int) => {
@@ -601,11 +644,13 @@ object TestSubmissionService {
       submissionId: String = UUID.randomUUID().toString,
       deduplicationPeriodO: Option[DeduplicationPeriod] = None,
       ledgerTime: Time.Timestamp = Time.Timestamp.now(),
-      submissionSeed: crypto.Hash = WeakRandom.nextSeed(),
+      submissionSeed: crypto.Hash = SubmissionSeed.generate(randomOps),
       transactionSeed: SaltSeed = SaltSeed.generate()(randomOps),
       transactionUuid: UUID = UUID.randomUUID(),
       packageMapOverride: Option[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]] = None,
       packagePreferenceOverride: Option[Set[Ref.PackageId]] = None,
+      disclosedContracts: Map[LfContractId, GenContractInstance] = Map.empty,
+      disclosedKeyContracts: Map[GlobalKey, Vector[GenContractInstance]] = Map.empty,
   ) {
 
     def parties: Seq[PartyId] = (actAs ++ readAs).distinct
@@ -636,6 +681,7 @@ object TestSubmissionService {
         deduplicationPeriod,
         SubmissionId.fromString(submissionId).toOption,
         externallySignedSubmission = None,
+        transactionHash = None,
       )
     }
 
@@ -698,4 +744,7 @@ object TestSubmissionService {
       includeTopologyEvents = None,
     )
   }
+
+  private final case class ContinuationToken(rest: Vector[FatContractInstance])
+      extends NeedKeyProgression.Token
 }

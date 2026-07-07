@@ -35,7 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
   TopologyTransaction,
 }
-import com.digitalasset.canton.util.GrpcStreamingUtils
+import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
@@ -43,7 +43,7 @@ import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{Context, ManagedChannel}
 
-import java.io.ByteArrayInputStream
+import java.io.{ByteArrayInputStream, InputStream}
 import java.time.Instant
 import scala.concurrent.Future
 import scala.reflect.ClassTag
@@ -373,6 +373,38 @@ object TopologyAdminCommands {
           .leftMap(_.toString)
     }
 
+    final case class ListSequencingParametersState(
+        query: BaseQuery,
+        filterSynchronizerId: String,
+    ) extends BaseCommand[
+          v30.ListSequencingParametersStateRequest,
+          v30.ListSequencingParametersStateResponse,
+          Seq[ListSequencingParametersStateResult],
+        ] {
+
+      override protected def createRequest()
+          : Either[String, v30.ListSequencingParametersStateRequest] =
+        Right(
+          v30.ListSequencingParametersStateRequest(
+            baseQuery = Some(query.toProtoV1),
+            filterSynchronizerId = filterSynchronizerId,
+          )
+        )
+
+      override protected def submitRequest(
+          service: TopologyManagerReadServiceStub,
+          request: v30.ListSequencingParametersStateRequest,
+      ): Future[v30.ListSequencingParametersStateResponse] =
+        service.listSequencingParametersState(request)
+
+      override protected def handleResponse(
+          response: v30.ListSequencingParametersStateResponse
+      ): Either[String, Seq[ListSequencingParametersStateResult]] =
+        response.results
+          .traverse(ListSequencingParametersStateResult.fromProtoV30)
+          .leftMap(_.toString)
+    }
+
     final case class ListMediatorSynchronizerState(
         query: BaseQuery,
         filterSynchronizerId: String,
@@ -522,6 +554,7 @@ object TopologyAdminCommands {
         response.storeIds.traverse(TopologyStoreId.fromProtoV30(_, "store_ids")).leftMap(_.message)
     }
 
+    @deprecated("Use ListAllV2 instead", since = "3.5")
     final case class ListAll(
         query: BaseQuery,
         excludeMappings: Seq[String],
@@ -555,6 +588,45 @@ object TopologyAdminCommands {
             StoredTopologyTransactions.fromProtoV30(collection).leftMap(_.toString)
           }
     }
+
+    final case class ListAllV2(
+        query: BaseQuery,
+        includeMappings: Seq[String],
+        filterNamespace: String,
+    ) extends BaseCommand[
+          v30.ListAllV2Request,
+          v30.ListAllV2Response,
+          GenericStoredTopologyTransactions,
+        ] {
+      override protected def createRequest(): Either[String, v30.ListAllV2Request] =
+        Right(
+          new v30.ListAllV2Request(
+            baseQuery = Some(query.toProtoV1),
+            includeMappings = includeMappings,
+            filterNamespace = filterNamespace,
+          )
+        )
+
+      override protected def submitRequest(
+          service: TopologyManagerReadServiceStub,
+          request: v30.ListAllV2Request,
+      ): Future[v30.ListAllV2Response] = service.listAllV2(request)
+
+      override protected def handleResponse(
+          response: v30.ListAllV2Response
+      ): Either[String, GenericStoredTopologyTransactions] =
+        response.result
+          .fold[Either[String, GenericStoredTopologyTransactions]](
+            Right(StoredTopologyTransactions.empty)
+          ) { collection =>
+            StoredTopologyTransactions.fromProtoV30(collection).leftMap(_.toString)
+          }
+    }
+
+    @deprecated(
+      "Use ExportTopologySnapshotV2 instead",
+      since = "3.5",
+    )
     final case class ExportTopologySnapshot(
         observer: StreamObserver[ExportTopologySnapshotResponse],
         query: BaseQuery,
@@ -627,6 +699,10 @@ object TopologyAdminCommands {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
+    @deprecated(
+      "Use GenesisStateV2 instead",
+      since = "3.5",
+    )
     final case class GenesisState(
         observer: StreamObserver[GenesisStateResponse],
         synchronizerStore: Option[TopologyStoreId.Synchronizer],
@@ -845,6 +921,10 @@ object TopologyAdminCommands {
       ): Either[String, Unit] =
         Either.unit
     }
+    @deprecated(
+      "Use ImportTopologySnapshotV2 instead",
+      since = "3.5",
+    )
     final case class ImportTopologySnapshot(
         topologySnapshot: ByteString,
         store: TopologyStoreId,
@@ -886,36 +966,34 @@ object TopologyAdminCommands {
     }
 
     final case class ImportTopologySnapshotV2(
-        topologySnapshot: ByteString,
+        topologySnapshotStream: InputStream,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
     ) extends BaseWriteCommand[
-          ImportTopologySnapshotV2Request,
+          Unit,
           ImportTopologySnapshotV2Response,
           Unit,
         ] {
-      override protected def createRequest(): Either[String, ImportTopologySnapshotV2Request] =
-        Right(
-          ImportTopologySnapshotV2Request(
-            topologySnapshot,
-            Some(store.toProtoV30),
-            waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
-          )
-        )
+      override protected def createRequest(): Either[String, Unit] =
+        Right(())
+
       override protected def submitRequest(
           service: TopologyManagerWriteServiceStub,
-          request: ImportTopologySnapshotV2Request,
+          request: Unit,
       ): Future[ImportTopologySnapshotV2Response] =
-        GrpcStreamingUtils.streamToServer(
-          service.importTopologySnapshotV2,
-          bytes =>
-            ImportTopologySnapshotV2Request(
-              ByteString.copyFrom(bytes),
-              Some(store.toProtoV30),
-              waitToBecomeEffective.map(_.toProtoPrimitive),
-            ),
-          new ByteArrayInputStream(topologySnapshot.toByteArray),
-        )
+        ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
+          GrpcStreamingUtils.streamToServer(
+            service.importTopologySnapshotV2,
+            bytes =>
+              ImportTopologySnapshotV2Request(
+                ByteString.copyFrom(bytes),
+                Some(store.toProtoV30),
+                waitToBecomeEffective.map(_.toProtoPrimitive),
+              ),
+            inputStream,
+          )
+        }
+
       override protected def handleResponse(
           response: ImportTopologySnapshotV2Response
       ): Either[String, Unit] = Either.unit

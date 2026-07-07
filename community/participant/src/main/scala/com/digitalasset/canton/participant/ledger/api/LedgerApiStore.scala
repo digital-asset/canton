@@ -9,7 +9,6 @@ import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{ProcessingTimeout, StorageConfig}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
@@ -21,9 +20,7 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   SequentialIdBatch,
   SynchronizerOffset,
 }
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
-import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterningView
@@ -36,8 +33,7 @@ import com.digitalasset.canton.{LedgerParticipantId, config}
 import com.google.common.annotations.VisibleForTesting
 
 import java.sql.Connection
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 
 class LedgerApiStore(
     val ledgerApiDbSupport: DbSupport,
@@ -96,67 +92,6 @@ class LedgerApiStore(
     )
 
   @VisibleForTesting
-  def lockPruning(
-      releaseLock: Promise[Unit],
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
-    val locked = Promise[Unit]()
-    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingLockPruning")) {
-      QueryStrategy.withoutNetworkTimeout { connection =>
-        eventStorageBackend.lockExclusivelyPruningProcessingTable(connection)
-        locked.trySuccess(()).discard
-        Await.result(releaseLock.future, timeout)
-      }(_, noTracingLogger)
-    }
-    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
-  }
-
-  @VisibleForTesting
-  def readLockContract(
-      internalContractId: Long,
-      releaseLock: Promise[Unit],
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
-    val locked = Promise[Unit]()
-    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingReadLockContract")) {
-      QueryStrategy.withoutNetworkTimeout { connection =>
-        eventStorageBackend.readLockInternalContractIds(Set(internalContractId))(connection).discard
-        locked.trySuccess(()).discard
-        Await.result(releaseLock.future, timeout)
-      }(_, noTracingLogger)
-    }
-    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
-  }
-
-  @VisibleForTesting
-  def writeLockContract(
-      internalContractId: Long,
-      releaseLock: Promise[Unit],
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[FutureUnlessShutdown[Unit]] = {
-    val locked = Promise[Unit]()
-    val released = executeSqlUS(DatabaseMetrics.ForTesting("onlyForTestingWriteLockContract")) {
-      QueryStrategy.withoutNetworkTimeout { connection =>
-        eventStorageBackend
-          .writeLockInternalContractIds(cSQL"= $internalContractId")(connection)
-          .discard
-        locked.trySuccess(()).discard
-        Await.result(releaseLock.future, timeout)
-      }(_, noTracingLogger)
-    }
-    FutureUnlessShutdown.outcomeF(locked.future).map(_ => released)
-  }
-
-  @VisibleForTesting
   def numberOfAcceptedTransactionsFor(synchronizerId: SynchronizerId)(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -166,23 +101,33 @@ class LedgerApiStore(
     )
 
   /** The latest SynchronizerIndex for a synchronizerId until all events are processed fully and
-    * published to the Ledger API DB.
+    * published to the Ledger API DB and in memory state.
+    *
+    * Reads the in-memory cache, so it's only fresh if a live indexer is attached to keep it
+    * updated. Use [[cleanSynchronizerIndexFromDb]] otherwise (in tests, lightweight helpers or
+    * inspection code where the caller isn't backed by a live indexer keeping the cache up to date).
     */
-  def cleanSynchronizerIndex(synchronizerId: SynchronizerId)(implicit
+  def cleanSynchronizerIndex(
+      synchronizerId: SynchronizerId
+  ): Option[SynchronizerIndex] =
+    ledgerEndCache().flatMap(_.synchronizerIndices.get(synchronizerId))
+
+  /** Like [[cleanSynchronizerIndex]], but reads fresh from the database instead of the cache. Use
+    * this in tests/inspection classes if the caller isn't backed by a live indexer keeping the
+    * cache up to date.
+    */
+  @VisibleForTesting
+  def cleanSynchronizerIndexFromDb(
+      synchronizerId: SynchronizerId
+  )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): FutureUnlessShutdown[Option[SynchronizerIndex]] =
-    executeSqlUS(metrics.index.db.getCleanSynchronizerIndex)(
-      parameterStorageBackend.cleanSynchronizerIndex(synchronizerId)
-    )
-
-  def ledgerEnd(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[Option[LedgerEnd]] =
-    executeSqlUS(metrics.index.db.getLedgerEnd)(
+    executeSqlUS(DatabaseMetrics.ForTesting("cleanSynchronizerIndexFromDb"))(
       parameterStorageBackend.ledgerEnd
-    )
+    ).map(_.flatMap(_.synchronizerIndices.get(synchronizerId)))
+
+  def ledgerEnd: Option[LedgerEnd] = ledgerEndCache()
 
   def topologyPartyEventBatch(eventSequentialIds: SequentialIdBatch)(implicit
       traceContext: TraceContext
@@ -280,10 +225,8 @@ class LedgerApiStore(
   ): FutureUnlessShutdown[Option[LastSynchronizerOffset]] =
     executeSqlUS(metrics.index.db.lastSynchronizerOffsetBeforeOrAtRecordTime)(connection =>
       for {
-        ledgerEnd <- parameterStorageBackend.ledgerEnd(connection)
-        synchronizerIndex <- parameterStorageBackend.cleanSynchronizerIndex(synchronizerId)(
-          connection
-        )
+        ledgerEnd <- ledgerEndCache()
+        synchronizerIndex <- ledgerEnd.synchronizerIndices.get(synchronizerId)
         lastSynchronizerOffset = eventStorageBackend.lastSynchronizerOffsetBeforeOrAtRecordTime(
           synchronizerId,
           beforeOrAtRecordTimeInclusive.underlying,
@@ -315,7 +258,9 @@ class LedgerApiStore(
       executionContext: ExecutionContext,
   ): FutureUnlessShutdown[Unit] =
     for {
-      currentLedgerEnd <- ledgerEnd
+      currentLedgerEnd <- executeSqlUS(metrics.index.db.getLedgerEnd)(
+        parameterStorageBackend.ledgerEnd
+      )
       _ <- FutureUnlessShutdown.outcomeF(
         stringInterningView.update(
           currentLedgerEnd.map(_.lastStringInterningId)

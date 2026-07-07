@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.implicits.{toBifunctorOps, toTraverseOps}
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -26,8 +25,8 @@ import com.digitalasset.canton.participant.pruning.{
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
   CommitmentPeriodState,
+  Digest,
   ReceivedAcsCommitment,
   SentAcsCommitment,
   SynchronizerSearchCommitmentPeriod,
@@ -45,6 +44,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.StreamObserver
 
 import java.io.OutputStream
@@ -417,12 +417,14 @@ class GrpcParticipantInspectionService(
   override def openCommitment(
       request: v30.OpenCommitmentRequest,
       responseObserver: StreamObserver[v30.OpenCommitmentResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => openCommitment(request, out),
       responseObserver,
       byteString => v30.OpenCommitmentResponse(byteString),
     )
+  }
 
   private def openCommitment(
       request: v30.OpenCommitmentRequest,
@@ -526,8 +528,8 @@ class GrpcParticipantInspectionService(
         )
 
         requestCommitment <- EitherT.fromEither[FutureUnlessShutdown](
-          AcsCommitment
-            .hashedCommitmentTypeFromByteString(request.commitment)
+          Digest
+            .hashedDigestTypeFromByteString(request.commitment)
             .leftMap[RpcError](err =>
               ParticipantInspectionServiceError.IllegalArgumentError
                 .Error(s"Failed to parse commitment hash: $err")
@@ -605,12 +607,14 @@ class GrpcParticipantInspectionService(
   override def inspectCommitmentContracts(
       request: v30.InspectCommitmentContractsRequest,
       responseObserver: StreamObserver[v30.InspectCommitmentContractsResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => inspectCommitmentContracts(request, out),
       responseObserver,
       byteString => v30.InspectCommitmentContractsResponse(byteString),
     )
+  }
 
   private def inspectCommitmentContracts(
       request: v30.InspectCommitmentContractsRequest,

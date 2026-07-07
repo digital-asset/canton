@@ -3,13 +3,11 @@
 
 package com.digitalasset.canton.topology
 
-import cats.data.{EitherT, OptionT}
-import cats.syntax.parallel.*
+import cats.data.EitherT
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -20,11 +18,11 @@ import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyTransaction}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
-import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, retry}
+import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, MonadUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -41,19 +39,6 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
 
   protected def topologyConfig: TopologyConfig
 
-  protected def convertTransactions(transactions: Seq[GenericSignedTopologyTransaction])(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, String, Seq[GenericSignedTopologyTransaction]]
-
-  protected def filterTransactions(
-      transactions: Seq[GenericSignedTopologyTransaction],
-      predicate: GenericSignedTopologyTransaction => FutureUnlessShutdown[Boolean],
-  )(implicit
-      executionContext: ExecutionContext
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    transactions.parFilterA(tx => predicate(tx))
-
   protected def topologyTransaction(
       tx: GenericSignedTopologyTransaction
   ): PrettyPrinting = tx.transaction
@@ -64,6 +49,65 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
     FutureUnlessShutdown.pure(
       transactions.filter(x => x.mapping.restrictedToSynchronizer.forall(_ == psid.logical))
     )
+
+  /** Re-signs the given transactions for the synchronizer's protocol version if they are not
+    * already in it, using the keys that authorized the original transaction. Fails if any such key
+    * is unavailable on this node.
+    */
+  protected def convertTransactions(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Seq[GenericSignedTopologyTransaction]] =
+    MonadUtil.parTraverseWithLimit(topologyConfig.broadcastBatchSize)(transactions)(
+      convertTransaction
+    )
+
+  private def convertTransaction(
+      tx: GenericSignedTopologyTransaction
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, GenericSignedTopologyTransaction] =
+    if (tx.transaction.isEquivalentTo(protocolVersion)) {
+      EitherT.rightT(tx)
+    } else {
+      val authorizingKeys = tx.signatures.map(_.authorizingLongTermKey)
+      for {
+        _ <- MonadUtil.sequentialTraverse_(authorizingKeys.forgetNE.toSeq)(fingerprint =>
+          crypto.cryptoPrivateStore
+            .existsSigningKey(fingerprint)
+            .leftMap(err => s"Failed to check availability of signing key $fingerprint: $err")
+            .subflatMap(exists =>
+              Either.cond(
+                exists,
+                (),
+                s"Signing key $fingerprint for topology transaction ${tx.mapping} is not available " +
+                  s"on this node to re-sign it for protocol version $protocolVersion",
+              )
+            )
+        )
+        converted = TopologyTransaction(
+          tx.transaction.operation,
+          tx.transaction.serial,
+          tx.transaction.mapping,
+          protocolVersion,
+        )
+        resigned <- SignedTopologyTransaction
+          .signAndCreate(
+            converted,
+            authorizingKeys,
+            tx.isProposal,
+            crypto.privateCrypto,
+            protocolVersion,
+          )
+          .leftMap(err =>
+            s"Failed to re-sign topology transaction ${tx.mapping} for protocol version " +
+              s"$protocolVersion: $err"
+          )
+      } yield resigned
+    }
 
   protected def isFailedState(response: TopologyTransactionsBroadcast.State): Boolean =
     response == TopologyTransactionsBroadcast.State.Failed
@@ -77,60 +121,6 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
 trait StoreBasedSynchronizerOutboxDispatchHelper extends SynchronizerOutboxDispatchHelper {
 
   def authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore]
-
-  override protected def convertTransactions(
-      transactions: Seq[GenericSignedTopologyTransaction]
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, /*SynchronizerRegistryError*/ String, Seq[
-    GenericSignedTopologyTransaction
-  ]] =
-    transactions
-      .parTraverse { tx =>
-        if (tx.transaction.isEquivalentTo(protocolVersion)) {
-          // Transaction already in the correct version, nothing to do here
-          EitherT.rightT[FutureUnlessShutdown, String](tx)
-        } else {
-          // First try to find if the topology transaction already exists in the correct version in the topology store
-          OptionT(
-            authorizedStore.findStoredForVersion(
-              CantonTimestamp.MaxValue,
-              tx.transaction,
-              protocolVersion,
-            )
-          )
-            .map(_.transaction)
-            .toRight("")
-            .leftFlatMap { _ =>
-              // We did not find a topology transaction with the correct version, so we try to convert and resign
-              SignedTopologyTransaction
-                .asVersion(tx, protocolVersion)(crypto)
-            }
-        }
-      }
-
-}
-
-trait QueueBasedSynchronizerOutboxDispatchHelper extends SynchronizerOutboxDispatchHelper {
-  override protected def convertTransactions(
-      transactions: Seq[GenericSignedTopologyTransaction]
-  )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, /*SynchronizerRegistryError*/ String, Seq[
-    GenericSignedTopologyTransaction
-  ]] =
-    transactions
-      .parTraverse { tx =>
-        if (tx.transaction.isEquivalentTo(protocolVersion)) {
-          // Transaction already in the correct version, nothing to do here
-          EitherT.rightT[FutureUnlessShutdown, String](tx)
-        } else {
-          SignedTopologyTransaction
-            .asVersion(tx, protocolVersion)(crypto)
-        }
-      }
 }
 
 trait SynchronizerOutboxDispatch extends NamedLogging with FlagCloseable {
@@ -150,13 +140,9 @@ trait SynchronizerOutboxDispatch extends NamedLogging with FlagCloseable {
   protected def notAlreadyPresent(
       transactions: Seq[GenericSignedTopologyTransaction]
   )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = {
-    val doesNotAlreadyExistPredicate = (tx: GenericSignedTopologyTransaction) =>
-      targetStore.providesAdditionalSignatures(tx)
-    filterTransactions(transactions, doesNotAlreadyExistPredicate)
-  }
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
+    targetStore.filterProvidesAdditionalSignatures(transactions)
 
   protected def dispatch(
       synchronizerAlias: SynchronizerAlias,

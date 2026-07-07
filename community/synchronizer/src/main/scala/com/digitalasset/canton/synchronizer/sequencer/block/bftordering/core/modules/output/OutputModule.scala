@@ -7,7 +7,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.protocol.AllMembersOfSynchronizer
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
@@ -21,6 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.HasDelayedInit
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStoreReader
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.BlocksRecoveredFromConsensusMessages.LoadPoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.{
   BlocksRecoveredFromConsensusMessages,
   DefaultRequestInspector,
@@ -40,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.snapshot.SequencerSnapshotAdditionalInfoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PartitionManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -65,6 +67,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   GetAdditionalInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output.{
+  AddMessageChunkFromRestart,
   AsyncException,
   BlockDataFetched,
   BlockDataStored,
@@ -72,6 +75,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Message,
   MetadataStoredForNewEpoch,
   NoTopologyAvailable,
+  ProcessNewEpochTopologyMessagesIfPossible,
   SequencerSnapshotMessage,
   Start,
   TopologyFetched,
@@ -85,6 +89,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   BlockSubscription,
+  CancellableEvent,
   Env,
   ModuleRef,
   PureFun,
@@ -95,9 +100,10 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.{Span, Tracer}
 
-import java.time.Instant
+import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{Failure, Success}
 
@@ -125,6 +131,7 @@ class OutputModule[E <: Env[E]](
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // For testing
     // Passed from BftBlockOrderer to allow a near-0 latency `GetTime` implementation
     private[bftordering] val previousStoredBlock: PreviousStoredBlock = new PreviousStoredBlock,
+    partitionCreator: Option[(PartitionManager.PartitionCreator[E])] = None,
 )(implicit
     override val config: BftBlockOrdererConfig,
     synchronizerProtocolVersion: ProtocolVersion,
@@ -206,7 +213,17 @@ class OutputModule[E <: Env[E]](
 
   private val blockSpanMap: mutable.Map[BlockNumber, (Span, TraceContext)] = mutable.Map()
 
-  private val blocksRecoveredFromConsensus = new BlocksRecoveredFromConsensusMessages[E]
+  @VisibleForTesting
+  private[output] val blocksRecoveredFromConsensus =
+    new BlocksRecoveredFromConsensusMessages[E](
+      epochStoreReader,
+      config.outputSizeOfChunkOfEpochsToLoadAtStart,
+      loggerFactory,
+    )
+
+  private var backPressureStartInstant: Option[Instant] = None
+
+  private var backPressureDelayedEvent: Option[CancellableEvent] = None
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def receiveInternal(message: Message[E])(implicit
@@ -216,6 +233,7 @@ class OutputModule[E <: Env[E]](
     message match {
 
       case Start =>
+        logger.info("Output module starting initialization")
         startupState.initialLowerBound.foreach { case (epochNumber, blockNumber) =>
           context
             .blockingAwait(
@@ -225,12 +243,40 @@ class OutputModule[E <: Env[E]](
             .fold(error => abort(error), _ => ())
         }
 
+        startupState.previousBftTimeForOnboarding.foreach { previousBftTime =>
+          val boundaryBlockNumber = startupState.initialHeightToProvide - 1
+          if (boundaryBlockNumber >= BlockNumber.First) {
+            logger.info(
+              s"Onboarding: persisting boundary block $boundaryBlockNumber with BFT time $previousBftTime " +
+                "to seed BFT-time computation if we crash and restart within the onboarding start epoch"
+            )
+            context.blockingAwait(
+              store.insertBlockIfMissing(
+                OutputBlockMetadata(
+                  epochNumber =
+                    EpochNumber(startupState.initialEpochWeHaveLeaderSelectionStateFor - 1),
+                  blockNumber = BlockNumber(boundaryBlockNumber),
+                  blockBftTime = previousBftTime,
+                )
+              ),
+              config.blockingDbReadTimeout,
+            )
+          }
+        }
+
         val lastStoredOutputBlockMetadata =
           context.blockingAwait(
             store.getLastNonSequentialBlockMetadataStored,
             config.blockingDbReadTimeout,
           )
         val lastStoredBlockNumber = lastStoredOutputBlockMetadata.map(_.blockNumber)
+
+        // The durable lower bound is the first block (inclusive) this node ever supports serving, set either by
+        //  pruning or, for an onboarded node, when it was onboarded (see `saveOnboardedNodeLowerBound`). We must
+        //  never try to recover from a block below it: such blocks were either pruned or, in the onboarding case,
+        //  never stored by this node at all (it only ever had blocks from its onboarding height onwards).
+        val lowerBound =
+          context.blockingAwait(store.getLowerBound(), config.blockingDbReadTimeout)
 
         // The logic to compute `recoverFromBlockNumber` takes into account the following scenarios:
         //
@@ -272,7 +318,7 @@ class OutputModule[E <: Env[E]](
             ),
           ).min
 
-        val recoverFromBlockNumber = {
+        val (recoverFromBlockNumber, startingEpochNumberO) = {
           val firstBlockO = for {
             blockMetadata <- context.blockingAwait(
               store.getBlock(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch),
@@ -287,13 +333,26 @@ class OutputModule[E <: Env[E]](
           } yield {
             logger.info(
               s"Output module bootstrap wanted to recover from block $recoverFromBlockNumberThatCouldBeInMiddleOfEpoch " +
+                s"= min(ack: $lastAcknowledgedBlockNumber, stored: $lastStoredBlockNumber, leader: ${leaderSelectionPolicy.firstBlockWeNeedToAdd}) " +
                 s"which is in epoch $startEpochNumber; " +
                 s"we adjust to first block of that epoch which is $startBlockNumber}"
             )
-            startBlockNumber
+            (startBlockNumber, Some(startEpochNumber))
           }
 
-          firstBlockO.getOrElse(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch)
+          firstBlockO.getOrElse {
+            lowerBound
+              .filter(_.blockNumber > recoverFromBlockNumberThatCouldBeInMiddleOfEpoch)
+              .map { lb =>
+                logger.info(
+                  s"Output module bootstrap wanted to recover from block $recoverFromBlockNumberThatCouldBeInMiddleOfEpoch " +
+                    s"= min(ack: $lastAcknowledgedBlockNumber, stored: $lastStoredBlockNumber, leader: ${leaderSelectionPolicy.firstBlockWeNeedToAdd}) " +
+                    s"which is not stored; recovering instead from the lower bound block ${lb.blockNumber} in epoch ${lb.epochNumber}"
+                )
+                lb.blockNumber -> Some(lb.epochNumber)
+              }
+              .getOrElse(recoverFromBlockNumberThatCouldBeInMiddleOfEpoch -> None)
+          }
         }
 
         logger.info(
@@ -329,17 +388,51 @@ class OutputModule[E <: Env[E]](
           logger.info(
             s"Output module bootstrap: [re-]starting, [re-]processing blocks from $recoverFromBlockNumber"
           )
-          val orderedBlocksToProcess =
+          val startEpochNumber =
+            startingEpochNumberO.getOrElse(EpochNumber.First)
+
+          val targetEpochToLoadO =
             context.blockingAwait(
-              epochStoreReader.loadOrderedBlocks(recoverFromBlockNumber),
+              epochStoreReader.lastEpochWithCompletedBlock(startEpochNumber),
               config.blockingDbReadTimeout,
             )
-          val startEpochNumber =
-            orderedBlocksToProcess.headOption // Ordered blocks to process, if any, always start with the recover block
-              .map(_.orderedBlock.metadata.epochNumber)
-              .getOrElse(EpochNumber.First)
+          logger.info(
+            "Output module bootstrap: " + {
+              targetEpochToLoadO match {
+                case Some(value) => s"[re-]processing blocks up and until epoch $value"
+                case None => "no previous completed block to reprocess"
+              }
+            }
+          )
+          val orderedBlocksToProcess =
+            context.blockingAwait(
+              epochStoreReader.loadOrderedBlocks(
+                startEpochNumber,
+                config.outputSizeOfChunkOfEpochsToLoadAtStart,
+              ),
+              config.blockingDbReadTimeout,
+            )
           logger.info(s"Output module bootstrap: [re-]starting from epoch $startEpochNumber")
           blocksRecoveredFromConsensus.addMessages(orderedBlocksToProcess)
+
+          targetEpochToLoadO.foreach { targetEpochToLoad =>
+            val limit = config.outputSizeOfChunkOfEpochsToLoadAtStart
+            // we pick the next load point to be the halfway point, so when should have already loaded the next chunk
+            // when output module finish processing the chunk. But we will only have at most 1.5 chunks loaded at any
+            // given time
+            val nextWhenToLoad = EpochNumber(startEpochNumber + limit / 2)
+            val nextWhereToLoadFrom = EpochNumber(startEpochNumber + limit)
+            if (nextWhereToLoadFrom <= targetEpochToLoad) {
+              // we only set target if the next load would be before, otherwise all the blocks to be loaded can fit in a
+              // single chunk and there's no need for further loading
+              blocksRecoveredFromConsensus.setTargetEpoch(
+                target = targetEpochToLoad,
+                nextWhenToLoad = nextWhenToLoad,
+                nextWhereToLoadFrom = nextWhereToLoadFrom,
+              )
+            }
+          }
+
           // Rehydrate the transient local state containing the previous stored block information (if any)
           //  to ensure that the BFT time is computed correctly even when restarting blocks with
           //  adjusted BFT time.
@@ -352,6 +445,21 @@ class OutputModule[E <: Env[E]](
               previousStoredBlock.update(
                 previousBlock.blockNumber,
                 previousBlock.blockBftTime,
+              )
+            }
+
+          // The previous block might have been pruned (but in that case we do have the current block we try to recover
+          // from). It is okay to set initial even if we set the previous, as long as we set one of them (or we are in
+          // genesis).
+          context
+            .blockingAwait(
+              store.getBlock(BlockNumber(recoverFromBlockNumber)),
+              config.blockingDbReadTimeout,
+            )
+            .foreach { initialBlock =>
+              previousStoredBlock.setInitial(
+                initialBlock.blockNumber,
+                initialBlock.blockBftTime,
               )
             }
           val epochMetadata =
@@ -418,11 +526,28 @@ class OutputModule[E <: Env[E]](
           blocksRecoveredFromConsensus.releaseMessagesForEpoch(startEpochNumber)
         }
 
+        scheduleBackpressureCheck(context)
         initCompleted(receiveInternal)
+        logger.info("Output module initialization complete, ready to process messages")
 
       case _ =>
         ifInitCompleted(message) {
           case Start =>
+            logger.info(
+              "Output module received Start message, but initialization is already complete, ignoring"
+            )
+
+          case ProcessNewEpochTopologyMessagesIfPossible =>
+            scheduleBackpressureCheck(context)
+            val isSequencerCoreSlow = blockSubscription.isSequencerCoreSlow
+            val backpressureBufferSize = blockSubscription.bufferSize
+            logger.info(
+              "Checking if sequencer core is still slow or if we can process new epoch topology messages " +
+                s"(backPressureStartInstant = $backPressureStartInstant, " +
+                s"from block subscription: isSequencerCoreSlow = $isSequencerCoreSlow, " +
+                s"bufferSize = $backpressureBufferSize)"
+            )
+            processNewEpochTopologyMessagesIfPossible()
 
           // From local consensus
           case BlockOrdered(
@@ -518,12 +643,30 @@ class OutputModule[E <: Env[E]](
             //  be unable to provide it to us.
             // We fetch the topology once the last block is stored as, based on the returned topology, the last block
             //  might need to be updated with pending topology changes.
-            if (orderedBlockData.orderedBlockForOutput.isLastInEpoch)
+            if (orderedBlockData.orderedBlockForOutput.isLastInEpoch) {
               fetchNewEpochTopologyIfNeeded(
                 orderedBlockData,
                 orderedBlockBftTime,
                 epochCouldAlterOrderingTopology,
               )
+
+              partitionCreator.foreach { creator =>
+                context.pipeToSelf(creator.createPartitionsIfNeeded(epochNumber)) {
+                  case Success(partitionsCreated) =>
+                    if (partitionsCreated > 0)
+                      logger.info(
+                        s"Created $partitionsCreated partitions at epoch $epochNumber and block $orderedBlockNumber"
+                      )
+                    None
+                  case Failure(exception) =>
+                    logger.error(
+                      s"Failed to create partitions at epoch $epochNumber and block $orderedBlockNumber",
+                      exception,
+                    )
+                    None
+                }
+              }
+            }
 
             // This is just a defensive check, as the block subscription will have the head correctly set to the
             //  initial height and will ignore blocks before that, but we cannot check nor enforce this assumption
@@ -564,7 +707,7 @@ class OutputModule[E <: Env[E]](
                   "to sequencer subscription"
               )(blockTraceContext)
 
-              blockSubscription.receiveBlock(
+              val fullyAssembledBlock =
                 BlockFormat.Block(
                   orderedBlockNumber,
                   orderedBlockBftTime.toMicros,
@@ -575,7 +718,8 @@ class OutputModule[E <: Env[E]](
                       .toMicros
                   ),
                 )
-              )(blockTraceContext)
+
+              blockSubscription.receiveBlock(fullyAssembledBlock)(blockTraceContext, mc)
             }
 
           case UpdateLeaderSelection(topologyFetched) =>
@@ -639,6 +783,9 @@ class OutputModule[E <: Env[E]](
           case snapshotMessage: SequencerSnapshotMessage =>
             handleSnapshotMessage(snapshotMessage)
 
+          case AddMessageChunkFromRestart(messages) =>
+            blocksRecoveredFromConsensus.addMessages(messages)
+
           case AsyncException(exception) =>
             abort(s"Failed to retrieve new epoch's topology", exception)
 
@@ -646,6 +793,44 @@ class OutputModule[E <: Env[E]](
             logger.info("No topology snapshot available due to either shutting down or testing")
         }
     }
+
+  private def scheduleBackpressureCheck(
+      context: E#ActorContextT[Message[E]]
+  )(implicit traceContext: TraceContext): Unit = {
+    val interval = OutputModule.SequencerCoreSlowCheckInterval
+    backPressureDelayedEvent.foreach { cancellableEvent =>
+      if (cancellableEvent.cancel())
+        logger.debug(s"Backpressure check was already scheduled, cancelled it")
+    }
+    logger.info(s"Scheduling backpressure check in $interval")
+    backPressureDelayedEvent = Some(
+      context
+        .delayedEvent(
+          interval,
+          ProcessNewEpochTopologyMessagesIfPossible,
+        )
+    )
+  }
+
+  private def emitBackpressureMetrics(): Unit = {
+    val now = Instant.now()
+    locally {
+      import metrics.output.*
+      backPressureStartInstant.fold {
+        currentSequencerCoreBackpressureDelayMillis.updateValue(0L)
+      } { startInstant =>
+        currentSequencerCoreBackpressureDelayMillis.updateValue(
+          Duration.between(startInstant, now).toMillis
+        )
+      }
+    }
+    import metrics.performance.orderingStageLatency.*
+    emitOrderingStageLatency(
+      labels.stage.values.output.Backpressure,
+      startInstant = backPressureStartInstant,
+      endInstant = now,
+    )
+  }
 
   private def processFetchedBlocks()(implicit
       context: E#ActorContextT[Message[E]],
@@ -817,7 +1002,7 @@ class OutputModule[E <: Env[E]](
 
     val epochEndBftTime = BftTime.epochEndBftTime(epochLastBlockBftTime, lastBlockInEpoch)
 
-    val lastBlockMode = lastBlockForOutput.mode
+    val lastBlockMode = lastBlockForOutput.orderingMode
     val newEpochNumber = EpochNumber(completedEpochNumber + 1)
 
     maybeNewEpochTopologyMessagePeanoQueue
@@ -885,13 +1070,18 @@ class OutputModule[E <: Env[E]](
       context: E#ActorContextT[Message[E]],
       traceContext: TraceContext,
   ): Unit = {
-
     val orderingTopology =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochOrderingTopology)(_._1)
     val newEpochLeaders = leaderSelectionPolicy.getLeaders(orderingTopology, newEpochNumber)
-    val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders)
+    val newEpochBlacklisted =
+      leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber)
+    val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders, newEpochBlacklisted)
     val cryptoProvider =
       newOrderingTopologyAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
+
+    if (epochMetadataStored)
+      setEpochMetadataStoredCache(newEpochNumber)
+    cleanupEpochMetadataStoredCache(newEpochNumber)
 
     logger.debug(
       s"Inserting NewEpochTopology message for epoch $newEpochNumber into Peano queue, " +
@@ -901,48 +1091,103 @@ class OutputModule[E <: Env[E]](
       newEpochNumber,
       Consensus.NewEpochTopology(newEpochNumber, newMembership, cryptoProvider),
     )
-    val newEpochTopologyMessages = newEpochTopologyMessagePeanoQueue.pollAvailable()
-    logger.debug(
-      s"Polled NewEpochTopology messages: $newEpochTopologyMessages from Peano queue"
-    )
 
-    newEpochTopologyMessages.foreach { newEpochTopologyMessage =>
-      // It is safe to use and change epoch-related mutable state in this block because:
-      //  - New epoch messages are processed sequentially and in order.
-      //  - Ordered blocks processing, which uses and changes epoch-related mutable state:
-      //    - Also happens sequentially and in order.
-      //    - Furthermore, only blocks for the current epoch are processed.
-      val newEpochNumber = newEpochTopologyMessage.epochNumber
-      logger.debug(s"Setting up new epoch $newEpochNumber")
-      currentEpochCouldAlterOrderingTopology = false
-      if (epochMetadataStored)
-        setEpochMetadataStoredCache(newEpochNumber)
-      cleanupEpochMetadataStoredCache(newEpochNumber)
-      processingFetchedBlocksInEpoch = Some(newEpochNumber)
+    processNewEpochTopologyMessagesIfPossible()
+  }
 
-      currentEpochOrderingTopology = newEpochTopologyMessage.membership.orderingTopology
-      currentEpochCryptoProvider = newEpochTopologyMessage.cryptoProvider
-      val pendingTopologyChanges = currentEpochOrderingTopology.areTherePendingCantonTopologyChanges
+  private def processNewEpochTopologyMessagesIfPossible()(implicit
+      context: E#ActorContextT[Message[E]],
+      traceContext: TraceContext,
+  ): Unit = {
+    emitBackpressureMetrics()
+    // We check directly the subscriptions state, rather than using a notification mechanism through actor messages,
+    //  because the subscription state update is multithreaded and pause/resume messages may be reordered due
+    //  to thread scheduling, potentially causing a deadlock.
+    //  In addition to reading the state, we also get notified by the subscription when processing may be able to
+    //  be resumed via `ProcessNewEpochTopologyMessagesIfPossible` messages; this allows to always and timely
+    //  resume ordering.
+    val isSequencerCoreSlow = blockSubscription.isSequencerCoreSlow
+    val backpressureBufferSize = blockSubscription.bufferSize
+    if (
+      isSequencerCoreSlow && backpressureBufferSize > OutputModule.BackpressureBufferResumeThreshold
+    ) {
+      backPressureStartInstant.fold {
+        logger.info(
+          s"Not processing new epoch topology messages because the sequencer core is slow to consume blocks " +
+            s"and the backpressure buffer size is $backpressureBufferSize, " +
+            s"which is above the resume threshold of ${OutputModule.BackpressureBufferResumeThreshold}"
+        )
+        backPressureStartInstant = Some(Instant.now())
+      } { startInstant =>
+        val duration = Duration.between(startInstant, Instant.now())
+        logger.info(
+          s"The sequencer core is still slow after $duration, not processing new epoch topology messages yet"
+        )
+      }
+    } else {
+      if (isSequencerCoreSlow)
+        logger.info(
+          "The subscription reported that the sequencer core is slow but " +
+            "the buffer size is below our resume threshold, processing new epoch topology messages regardless"
+        )
+
+      if (backPressureStartInstant.isDefined) {
+        logger.info(
+          s"The sequencer core has caught up enough, processing new epoch topology messages"
+        )
+        backPressureStartInstant = None
+      }
+
+      // Not using the accessor because this gets called periodically and may not be set
+      //  for a period of time after init.
+      val newEpochTopologyMessages =
+        maybeNewEpochTopologyMessagePeanoQueue.get.fold(Seq.empty[NewEpochTopology[E]])(
+          _.pollAvailable()
+        )
       logger.debug(
-        s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
-      )
-      currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
-
-      metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
-      logger.debug(
-        s"Sending topology $currentEpochOrderingTopology of a new epoch $newEpochNumber " +
-          s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
+        s"Polled NewEpochTopology messages: $newEpochTopologyMessages from Peano queue"
       )
 
-      consensus.asyncSend(newEpochTopologyMessage)
-      epochChecker.check(
-        thisNode,
-        newEpochNumber,
-        newEpochTopologyMessage.membership,
+      logger.info(
+        s"Processing ${newEpochTopologyMessages.size} new epoch topology messages"
       )
-      blocksRecoveredFromConsensus.releaseMessagesForEpoch(newEpochNumber)
 
-      processFetchedBlocks()
+      newEpochTopologyMessages.foreach { newEpochTopologyMessage =>
+        // It is safe to use and change epoch-related mutable state in this block because:
+        //  - New epoch messages are processed sequentially and in order.
+        //  - Ordered blocks processing, which uses and changes epoch-related mutable state:
+        //    - Also happens sequentially and in order.
+        //    - Furthermore, only blocks for the current epoch are processed.
+        val newEpochNumber = newEpochTopologyMessage.epochNumber
+        logger.debug(s"Setting up new epoch $newEpochNumber")
+        currentEpochCouldAlterOrderingTopology = false
+        processingFetchedBlocksInEpoch = Some(newEpochNumber)
+
+        currentEpochOrderingTopology = newEpochTopologyMessage.membership.orderingTopology
+        currentEpochCryptoProvider = newEpochTopologyMessage.cryptoProvider
+        val pendingTopologyChanges =
+          currentEpochOrderingTopology.areTherePendingCantonTopologyChanges
+        logger.debug(
+          s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
+        )
+        currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
+
+        metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
+        logger.debug(
+          s"Sending topology $currentEpochOrderingTopology of a new epoch $newEpochNumber " +
+            s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
+        )
+
+        consensus.asyncSend(newEpochTopologyMessage)
+        epochChecker.check(
+          thisNode,
+          newEpochNumber,
+          newEpochTopologyMessage.membership,
+        )
+        blocksRecoveredFromConsensus.releaseMessagesForEpoch(newEpochNumber)
+
+        processFetchedBlocks()
+      }
     }
   }
 
@@ -1004,8 +1249,15 @@ object OutputModule {
 
   private[bftordering] final class PreviousStoredBlock {
 
+    private val initialBlockAndBftTimeRef =
+      new AtomicReference[Option[(BlockNumber, CantonTimestamp)]](None)
+
     private val blockNumberAndBftTimeRef =
       new AtomicReference[Option[(BlockNumber, CantonTimestamp)]](None)
+
+    private[bftordering] def getInitialBlockNumberAndBftTime
+        : Option[(BlockNumber, CantonTimestamp)] =
+      initialBlockAndBftTimeRef.get()
 
     private[bftordering] def getBlockNumberAndBftTime: Option[(BlockNumber, CantonTimestamp)] =
       blockNumberAndBftTimeRef.get()
@@ -1016,16 +1268,25 @@ object OutputModule {
         .map(b => s"(block number = ${b._1}, BFT time = ${b._2})")
         .getOrElse("undefined")
 
+    def setInitial(blockNumber: BlockNumber, blockBftTime: CantonTimestamp): Unit =
+      initialBlockAndBftTimeRef.set(Some(blockNumber -> blockBftTime))
+
     @VisibleForTesting
     private[output] def update(blockNumber: BlockNumber, blockBftTime: CantonTimestamp): Unit =
       blockNumberAndBftTimeRef.set(Some(blockNumber -> blockBftTime))
 
     private[OutputModule] def computeBlockBftTime(orderedBlock: OrderedBlock): CantonTimestamp =
-      BftTime.blockBftTime(
-        orderedBlock.canonicalCommitSet,
-        previousBlockBftTime =
-          blockNumberAndBftTimeRef.get().map(_._2).getOrElse(CantonTimestamp.Epoch),
-      )
+      initialBlockAndBftTimeRef
+        .get()
+        .filter(_._1 == orderedBlock.metadata.blockNumber)
+        .map(_._2)
+        .getOrElse(
+          BftTime.blockBftTime(
+            orderedBlock.canonicalCommitSet,
+            previousBlockBftTime =
+              blockNumberAndBftTimeRef.get().map(_._2).getOrElse(CantonTimestamp.Epoch),
+          )
+        )
   }
 
   trait RequestInspector {
@@ -1084,10 +1345,39 @@ object OutputModule {
       result
   }
 
-  class BlocksRecoveredFromConsensusMessages[E <: Env[E]] {
-    private val blocksToRelease = mutable.Map.empty[EpochNumber, Seq[OrderedBlockForOutput]]
+  class BlocksRecoveredFromConsensusMessages[E <: Env[E]](
+      epochStoreReader: EpochStoreReader[E],
+      limit: Int,
+      override val loggerFactory: NamedLoggerFactory,
+  ) extends NamedLogging {
 
-    def addMessages(messages: Seq[OrderedBlockForOutput]): Unit = {
+    private val blocksToRelease = mutable.Map.empty[EpochNumber, Seq[OrderedBlockForOutput]]
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    private var targetEpochO: Option[EpochNumber] = None
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    private var nextLoadPointO: Option[LoadPoint] = None
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    private var highestReleaseEpoch: Option[EpochNumber] = None
+
+    def setTargetEpoch(
+        target: EpochNumber,
+        nextWhenToLoad: EpochNumber,
+        nextWhereToLoadFrom: EpochNumber,
+    ): Unit = {
+      require(targetEpochO.isEmpty)
+      require(nextWhenToLoad <= nextWhereToLoadFrom)
+      require(nextWhereToLoadFrom <= target)
+      targetEpochO = Some(target)
+      nextLoadPointO = Some(
+        LoadPoint(nextWhenToLoad, nextWhereToLoadFrom)
+      )
+    }
+
+    def addMessages(messages: Seq[OrderedBlockForOutput])(implicit
+        context: E#ActorContextT[Output.Message[E]],
+        traceContext: TraceContext,
+        metricsContext: MetricsContext,
+    ): Unit = {
       val epochToMessageMap = messages.groupBy(_.orderedBlock.metadata.epochNumber)
       epochToMessageMap.foreach { case (epochNumber, orderedBlocks) =>
         blocksToRelease
@@ -1097,6 +1387,7 @@ object OutputModule {
           }
           .discard
       }
+      highestReleaseEpoch.foreach(epochNumber => releaseMessagesForEpoch(epochNumber))
     }
 
     def releaseMessagesForEpoch(
@@ -1111,6 +1402,47 @@ object OutputModule {
       orderedBlocksToProcess.foreach(orderedBlockForOutput =>
         context.self.asyncSend(BlockOrdered(orderedBlockForOutput))
       )
+      highestReleaseEpoch = Some(epochNumber)
+
+      nextLoadPointO.foreach { nextLoadPoint =>
+        if (nextLoadPoint.whenToLoad == epochNumber) {
+          nextLoadPointO = nextLoadPoint.computeNextLoadPoint(targetEpochO, limit)
+          context.pipeToSelf(
+            epochStoreReader
+              .loadOrderedBlocks(nextLoadPoint.loadFrom, limit)
+          ) {
+            case Failure(exception) =>
+              logger.error("Could not load blocks", exception)
+              context.abort(exception)
+            case Success(value) =>
+              Some(AddMessageChunkFromRestart(value))
+          }
+        }
+      }
+    }
+
+    @VisibleForTesting
+    private[output] def nextLoadPoint: Option[LoadPoint] = nextLoadPointO
+  }
+  object BlocksRecoveredFromConsensusMessages {
+
+    private[output] final case class LoadPoint(whenToLoad: EpochNumber, loadFrom: EpochNumber) {
+
+      def computeNextLoadPoint(targetEpochO: Option[EpochNumber], limit: Int): Option[LoadPoint] = {
+        val nextWhenLoad = bumpWithLimit(whenToLoad, limit)
+        val nextLoadFrom = bumpWithLimit(loadFrom, limit)
+        if (targetEpochO.exists(nextLoadFrom <= _)) {
+          Some(LoadPoint(nextWhenLoad, nextLoadFrom))
+        } else {
+          None
+        }
+      }
+
+      private def bumpWithLimit(epochNumber: EpochNumber, limit: Int): EpochNumber =
+        EpochNumber(epochNumber + limit)
     }
   }
+
+  private val SequencerCoreSlowCheckInterval = 10.seconds
+  private val BackpressureBufferResumeThreshold = 1_000
 }

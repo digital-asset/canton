@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -45,6 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -382,7 +382,7 @@ class PbftMessageValidatorImplTest extends AnyWordSpec with BftSequencerBaseTest
           aMembership,
           aMembership,
           Left(
-            "The proof of availability for batch BatchId(SHA-256:d624dc8a1022...) " +
+            "The proof of availability for batch BatchId(1220d624dc8a10220e0cd82eb3f65b1567fcbfe652c490b65977f689d1f07642e122) " +
               "in PrePrepare for block (epochNumber=1, blockNumber=12) " +
               "has 0 dissemination acknowledgements, but it should have at least 1"
           ),
@@ -458,7 +458,7 @@ class PbftMessageValidatorImplTest extends AnyWordSpec with BftSequencerBaseTest
           aMembership,
           aMembership,
           Left(
-            "The proof of availability for batch BatchId(SHA-256:d624dc8a1022...) " +
+            "The proof of availability for batch BatchId(1220d624dc8a10220e0cd82eb3f65b1567fcbfe652c490b65977f689d1f07642e122) " +
               "in PrePrepare for block (epochNumber=1, blockNumber=12) has duplicated dissemination acknowledgements"
           ),
         ),
@@ -472,7 +472,7 @@ class PbftMessageValidatorImplTest extends AnyWordSpec with BftSequencerBaseTest
           aMembership,
           aMembership,
           Left(
-            "The dissemination acknowledgement for batch BatchId(SHA-256:d624dc8a1022...) from 'otherId' is invalid " +
+            "The dissemination acknowledgement for batch BatchId(1220d624dc8a10220e0cd82eb3f65b1567fcbfe652c490b65977f689d1f07642e122) from 'otherId' is invalid " +
               "because 'otherId' is not in the current topology (epoch 1, nodes Set(self))"
           ),
         ),
@@ -486,7 +486,7 @@ class PbftMessageValidatorImplTest extends AnyWordSpec with BftSequencerBaseTest
           aMembership,
           aMembershipWithoutKeys,
           Left(
-            "The dissemination acknowledgement for batch BatchId(SHA-256:d624dc8a1022...) from 'self' is invalid " +
+            "The dissemination acknowledgement for batch BatchId(1220d624dc8a10220e0cd82eb3f65b1567fcbfe652c490b65977f689d1f07642e122) from 'self' is invalid " +
               "because the signing key 'no-fingerprint' is not valid for 'self' in the current topology " +
               "(epoch 1, nodes Set(self)); the keys valid for 'self' in the current topology are Set()"
           ),

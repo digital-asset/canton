@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package transaction
 
-import com.digitalasset.daml.lf.value.{Value => Val}
+import com.digitalasset.daml.lf.value.Value as Val
 
 class Normalization {
 
@@ -13,25 +13,25 @@ class Normalization {
     * Informal spec: normalization is the result of serialization and deserialization.
     *
     * Here we take care of the following:
-    * - type information is dropped from Variant and Record values
-    * - field names are dropped from Records
-    * - values are normalized recursively
-    * - all values embedded in transaction nodes are normalized
-    * - version-specific normalization is applied to the 'byKey' fields of 'Node.Fetch' and 'Node.Exercises'
+    *   - type information is dropped from Variant and Record values
+    *   - field names are dropped from Records
+    *   - values are normalized recursively
+    *   - all values embedded in transaction nodes are normalized
+    *   - version-specific normalization is applied to the 'byKey' fields of 'Node.Fetch' and
+    *     'Node.Exercises'
     *
-    * We do not normalize the node-ids in the transaction here, but rather assume that
-    * aspect of normalization has already been performed (by the engine, or by
-    * deserialization).
+    * We do not normalize the node-ids in the transaction here, but rather assume that aspect of
+    * normalization has already been performed (by the engine, or by deserialization).
     *
-    * Eventually we would like that all aspects of normalization are achieved directly by
-    * the transaction which is constructed by the engine. When this is done, we will no
-    * longer need this separate normalization pass.
+    * Eventually we would like that all aspects of normalization are achieved directly by the
+    * transaction which is constructed by the engine. When this is done, we will no longer need this
+    * separate normalization pass.
     */
 
   private type KWM = GlobalKeyWithMaintainers
   private type VTX = VersionedTransaction
 
-  def normalizeTx(vtx: VTX): VTX = {
+  def normalizeTx(vtx: VTX): VTX =
     vtx match {
       case VersionedTransaction(_, nodes, _) =>
         VersionedTransaction(
@@ -42,7 +42,6 @@ class Normalization {
           vtx.roots,
         )
     }
-  }
 
   private def normNode(
       node: Node
@@ -77,7 +76,7 @@ class Normalization {
             keyOpt = old.keyOpt.map(normKWM(old.version)),
           )
 
-      case old: Node.LookupByKey =>
+      case old: Node.QueryByKey =>
         old.copy(
           key = normKWM(old.version)(old.key)
         )
@@ -87,25 +86,21 @@ class Normalization {
     }
   }
 
-  private def normValue(version: SerializationVersion)(x: Val): Val = {
+  private def normValue(version: SerializationVersion)(x: Val): Val =
     Util.assertNormalizeValue(x, version)
-  }
 
-  private def normKWM(version: SerializationVersion)(x: KWM): KWM = {
+  private def normKWM(version: SerializationVersion)(x: KWM): KWM =
     x match {
       case GlobalKeyWithMaintainers(key, maintainers) =>
         GlobalKeyWithMaintainers(
-          GlobalKey
-            .assertBuild(key.templateId, key.packageName, normValue(version)(key.key), key.hash),
+          GlobalKey(key.templateId, key.packageName, normValue(version)(key.key), key.hash),
           maintainers,
         )
     }
-  }
 
 }
 
 object Normalization {
-  def normalizeTx(tx: VersionedTransaction): VersionedTransaction = {
+  def normalizeTx(tx: VersionedTransaction): VersionedTransaction =
     new Normalization().normalizeTx(tx)
-  }
 }

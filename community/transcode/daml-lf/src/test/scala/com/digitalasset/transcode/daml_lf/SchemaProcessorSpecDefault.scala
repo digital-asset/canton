@@ -3,9 +3,8 @@
 
 package com.digitalasset.transcode.daml_lf
 
+import com.digitalasset.daml.lf.archive.DarSchemaDecoder
 import com.digitalasset.transcode.DamlExamples
-import com.digitalasset.transcode.daml_lf.Util
-import com.digitalasset.transcode.daml_lf.synonyms.DarDecoder
 import com.digitalasset.transcode.schema.*
 import zio.test.*
 import zio.test.diff.Diff.DiffOps
@@ -15,9 +14,10 @@ import scala.collection.mutable
 import scala.language.implicitConversions
 
 trait SchemaProcessorSpecDefault extends ZIOSpecDefault:
-  private val dar = DarDecoder.assertReadArchiveFromFile(DamlExamples.darPath.toFile)
+  // DarSchemaDecoder skips decoding non-serializable types (e.g. Void)
+  // This is useful to test unknown types
   private val packages =
-    dar.all.map((pkgId, pkg) => pkgId -> Util.toSignature(pkg)).toMap
+    DarSchemaDecoder.assertReadArchiveFromFile(DamlExamples.darPath.toFile).all.toMap
   private val dictionary =
     LfSchemaProcessor
       .process(packages, IdentifierFilter.AcceptAll)(DescriptorVisitor)

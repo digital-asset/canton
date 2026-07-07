@@ -26,9 +26,9 @@ object Question {
         callback: (FatContractInstance, Hash.HashingMethod, Hash => Boolean) => Unit,
     ) extends Update
 
-    /** Machine needs a definition that was not present when the machine was
-      * initialized. The caller must retrieve the definition and fill it in
-      * the packages cache it had provided to initialize the machine.
+    /** Machine needs a definition that was not present when the machine was initialized. The caller
+      * must retrieve the definition and fill it in the packages cache it had provided to initialize
+      * the machine.
       */
     final case class NeedPackage(
         pkg: PackageId,
@@ -46,13 +46,45 @@ object Question {
         limit: Int,
         progression: NeedKeyProgression.CanContinue,
         committers: Set[Party],
-        callback: (Vector[FatContractInstance], NeedKeyProgression.HasStarted) => Unit,
+        callback: (
+            Vector[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)],
+            NeedKeyProgression.HasStarted,
+        ) => Unit,
     ) extends Update
+
+    /** Update interpretation requires an external-call result from the host. The engine suspends
+      * until the host resumes the request. The request fields use canonical lowercase hexadecimal
+      * encoding. To resume a successful external call, the host must provide the output using the
+      * same canonical encoding.
+      *
+      * @param extensionId
+      *   Identifier of the configured extension
+      * @param functionId
+      *   Function identifier within the extension
+      * @param configHash
+      *   Configuration hash as canonical lowercase hex
+      * @param input
+      *   Input data as canonical lowercase hex
+      * @param callback
+      *   Callback to provide the result or error
+      */
+    final case class NeedExternalCall(
+        extensionId: String,
+        functionId: String,
+        configHash: String,
+        input: String,
+        callback: Either[NeedExternalCall.Error, String] => Unit,
+    ) extends Update
+
+    object NeedExternalCall {
+
+      /** Error information from external call failures */
+      final case class Error(message: String)
+    }
   }
 }
 
-/** The result from small-step evaluation.
-  * If the result is not Done or Continue, then the machine
+/** The result from small-step evaluation. If the result is not Done or Continue, then the machine
   * must be fed before it can be stepped further.
   */
 sealed abstract class SResult[+Q] extends Product with Serializable
@@ -61,8 +93,8 @@ object SResult {
 
   final case class SResultQuestion[Q](question: Q) extends SResult[Q]
 
-  /** The speedy machine has completed evaluation to reach a final value.
-    * And, if the evaluation was on-ledger, a completed transaction.
+  /** The speedy machine has completed evaluation to reach a final value. And, if the evaluation was
+    * on-ledger, a completed transaction.
     */
   final case class SResultFinal(v: SValue) extends SResult[Nothing]
 

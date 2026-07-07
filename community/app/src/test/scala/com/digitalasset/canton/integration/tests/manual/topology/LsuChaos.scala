@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   InstanceReference,
@@ -148,7 +149,7 @@ private[topology] class LsuChaos(
       enableMetrics,
     ) ++
       // pv=dev is used
-      ConfigTransforms.enableAlphaVersionSupport
+      ConfigTransforms.enableDevVersionSupport
 
   // Decide what to do next
   private def nextAction()(implicit env: TestConsoleEnvironment): Action = {
@@ -416,7 +417,8 @@ private[topology] object LsuChaos extends TopologyOperationsCompanion {
       index: PositiveInt,
   ) {
     val staticSynchronizerParameters: StaticSynchronizerParameters =
-      StaticSynchronizerParameters.defaultsWithoutKMS(
+      StaticSynchronizerParameters.defaults(
+        CryptoConfig(),
         psid.protocolVersion,
         psid.serial,
         topologyChangeDelay = config.NonNegativeFiniteDuration.Zero,

@@ -35,6 +35,7 @@ trait ExampleTransaction {
       versionedUnsuffixedTransaction,
       metadata,
       WithoutSuffixes,
+      PathRollbackContextFactory,
     )
 
   /** The key resolver to be used for iterating over the transaction nodes */
@@ -92,7 +93,12 @@ trait ExampleTransaction {
     *   if [[versionedSuffixedTransaction]] is malformed
     */
   def wellFormedSuffixedTransaction: WellFormedTransaction[WithSuffixes] =
-    WellFormedTransaction.checkOrThrow(versionedSuffixedTransaction, metadata, WithSuffixes)
+    WellFormedTransaction.checkOrThrow(
+      versionedSuffixedTransaction,
+      metadata,
+      WithSuffixes,
+      PathRollbackContextFactory,
+    )
 
   def usedAndCreated: UsedAndCreatedContracts
 

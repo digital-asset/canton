@@ -7,7 +7,7 @@ import com.daml.jwt.AuthServiceJWTPayload
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
-  AuthInterceptorAndJWTSuppressionRule,
+  AuthInterceptorSuppressionRule,
   AuthServiceJWTSuppressionRule,
 }
 
@@ -115,7 +115,7 @@ trait PublicServiceCallAuthTests extends SecuredServiceCallAuthTests {
         attackPermissionDenied(threat = "Present a non-expired 'unknown_user' user JWT")
       ) in { implicit env =>
       import env.*
-      loggerFactory.suppress(AuthInterceptorAndJWTSuppressionRule) {
+      loggerFactory.suppress(AuthInterceptorSuppressionRule) {
         expectPermissionDenied(serviceCall(canReadAsUnknownUserStandardJWT))
       }
     }

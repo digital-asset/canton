@@ -14,6 +14,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
+import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
+  byteCount,
+  byteSize,
+  hexPayloadSize,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -21,18 +26,17 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{LfCommand, LfGlobalKeyMapping, LfPackageId, LfPartyId}
-import com.digitalasset.daml.lf.VersionRange
+import com.digitalasset.canton.{LfCommand, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.data.{Bytes as LfBytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
-import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.{
+  ExternalCallResult,
   FatContractInstance,
   NeedKeyProgression,
-  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
@@ -42,11 +46,23 @@ import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
 object DAMLe {
+
+  /** @param allUsedPackageIds
+    *   All the packages used by the Daml Engine during reinterpretation: action node packages and
+    *   all their direct and transitive dependencies
+    * @param actionNodePackageIds
+    *   Only the packages directly referenced by action nodes. This is a subset of
+    *   `allUsedPackageIds`
+    */
+  final case class UsedPackages(
+      allUsedPackageIds: Set[PackageId],
+      actionNodePackageIds: Set[PackageId],
+  )
+
   final case class ReInterpretationResult(
       transaction: LfVersionedTransaction,
       metadata: TransactionMetadata,
-      legacyKeyResolver: LfGlobalKeyMapping,
-      usedPackages: Set[PackageId],
+      usedPackages: UsedPackages,
       timeBoundaries: LedgerTimeBoundaries,
   )
 
@@ -65,10 +81,7 @@ object DAMLe {
   ): Engine =
     new Engine(
       EngineConfig(
-        allowedLanguageVersions = VersionRange(
-          LanguageVersion.v2_1,
-          maxVersion(enableLfDev, enableLfBeta),
-        ),
+        allowedLanguageVersions = maxVersion(enableLfDev, enableLfBeta),
         // The package store contains only validated packages, so we can skip validation upon loading
         packageValidation = false,
         stackTraceMode = enableStackTraces,
@@ -84,9 +97,9 @@ object DAMLe {
     )
 
   private def maxVersion(enableLfDev: Boolean, enableLfBeta: Boolean) =
-    if (enableLfDev) v2_dev
-    else if (enableLfBeta) LanguageVersion.earlyAccessLfVersionsRange.max
-    else LanguageVersion.stableLfVersionsRange.max
+    if (enableLfDev) LanguageVersion.allLfVersions
+    else if (enableLfBeta) LanguageVersion.earlyAccessLfVersions
+    else LanguageVersion.stableLfVersions
 
   /** Resolves packages by [[com.digitalasset.daml.lf.data.Ref.PackageId]]. The returned packages
     * must have been validated so that [[com.digitalasset.daml.lf.engine.Engine]] can skip
@@ -116,6 +129,96 @@ object DAMLe {
     override protected def pretty: Pretty[EnrichmentError] = adHocPrettyInstance
   }
 
+  final case class ExternalCallRecordedResultDisagreement(
+      key: ExternalCallKey,
+      outputs: Set[LfBytes],
+  ) extends ReinterpretationError {
+    override protected def pretty: Pretty[ExternalCallRecordedResultDisagreement] = prettyOfClass(
+      param("key", _.key),
+      param("recorded output count", _.outputs.size),
+      param(
+        "recorded output bytes",
+        disagreement =>
+          disagreement.outputs.toSeq
+            .sortBy(byteCount)
+            .map(byteSize)
+            .mkString("[", ", ", "]")
+            .doubleQuoted,
+      ),
+    )
+  }
+
+  final case class ExternalCallReplayMissing(
+      key: ExternalCallKey
+  ) extends ReinterpretationError {
+    override protected def pretty: Pretty[ExternalCallReplayMissing] = prettyOfClass(
+      param("key", _.key)
+    )
+  }
+
+  /** Deterministic external-call identity. Config and input are engine-emitted canonical hex
+    * strings. The pretty-printed form deliberately shows only payload sizes, never the payloads.
+    */
+  final case class ExternalCallKey(
+      extensionId: String,
+      functionId: String,
+      config: String,
+      input: String,
+  ) extends PrettyPrinting {
+    override protected def pretty: Pretty[ExternalCallKey] = prettyOfClass(
+      param("extension id", _.extensionId.doubleQuoted),
+      param("function id", _.functionId.doubleQuoted),
+      param("config bytes", key => hexPayloadSize(key.config).doubleQuoted),
+      param("input bytes", key => hexPayloadSize(key.input).doubleQuoted),
+    )
+  }
+
+  object ExternalCallKey {
+
+    /** Orders by the semantic identity fields, lexicographically. */
+    implicit val externalCallKeyOrdering: Ordering[ExternalCallKey] =
+      Ordering.by(key => (key.extensionId, key.functionId, key.config, key.input))
+
+    def fromResult(result: ExternalCallResult): ExternalCallKey =
+      ExternalCallKey(
+        result.extensionId,
+        result.functionId,
+        result.config.toHexString,
+        result.input.toHexString,
+      )
+  }
+
+  /** External-call replay data: recorded outputs indexed by semantic key. Multiple outputs for one
+    * semantic key are preserved so replay can report a recorded-result disagreement.
+    */
+  final case class ExternalCallReplayData private (
+      outputsByKey: Map[ExternalCallKey, Set[LfBytes]]
+  ) {
+    def size: Int = outputsByKey.size
+
+    def outputFor(
+        key: ExternalCallKey
+    ): Either[ExternalCallRecordedResultDisagreement, Option[LfBytes]] =
+      outputsByKey.get(key) match {
+        case None => Right(None)
+        case Some(outputs) if outputs.sizeCompare(1) == 0 => Right(outputs.headOption)
+        case Some(outputs) => Left(ExternalCallRecordedResultDisagreement(key, outputs))
+      }
+  }
+
+  object ExternalCallReplayData {
+    val empty: ExternalCallReplayData = ExternalCallReplayData(Map.empty)
+
+    def fromResults(results: Iterable[ExternalCallResult]): ExternalCallReplayData =
+      ExternalCallReplayData(
+        results
+          .groupMap(ExternalCallKey.fromResult)(_.output)
+          .view
+          .mapValues(_.toSet)
+          .toMap
+      )
+  }
+
   trait HasReinterpret {
     def reinterpret(
         contracts: ReplayContractLookup,
@@ -129,6 +232,7 @@ object DAMLe {
         packageResolution: Map[Ref.PackageName, Ref.PackageId],
         expectFailure: Boolean,
         getEngineAbortStatus: GetEngineAbortStatus,
+        externalCallReplayData: () => ExternalCallReplayData,
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       ReinterpretationError,
@@ -154,7 +258,7 @@ class DAMLe(
     participantId: ParticipantId,
     resolvePackage: PackageResolver,
     engine: Engine,
-    contractStateMode: ContractStateMachine.Mode,
+    interpretationConfig: InterpretationConfig,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -217,12 +321,14 @@ class DAMLe(
       packageResolution: Map[PackageName, PackageId],
       expectFailure: Boolean,
       getEngineAbortStatus: GetEngineAbortStatus,
+      externalCallReplayData: () => ExternalCallReplayData,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     ReinterpretationError,
     ReInterpretationResult,
   ] = {
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     def peelAwayRootLevelRollbackNode(
         tx: LfVersionedTransaction
     ): Either[Error, LfVersionedTransaction] =
@@ -274,7 +380,7 @@ class DAMLe(
       ledgerEffectiveTime = ledgerTime.toLf,
       packageResolution = packageResolution,
       contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpretationConfig,
     )
 
     for {
@@ -286,6 +392,7 @@ class DAMLe(
           contractAuthenticator,
           result,
           getEngineAbortStatus,
+          externalCallReplayData,
         )
       )
       (tx, metadata) = txWithMetadata
@@ -296,11 +403,16 @@ class DAMLe(
       )
     } yield {
       ReInterpretationResult(
-        txNoRootRollback,
-        TransactionMetadata.fromLf(ledgerTime, metadata),
-        metadata.globalKeyMapping,
-        metadata.usedPackages,
-        LedgerTimeBoundaries(metadata.timeBoundaries),
+        transaction = txNoRootRollback,
+        metadata = TransactionMetadata.fromLf(ledgerTime, metadata),
+        usedPackages = UsedPackages(
+          actionNodePackageIds = tx.nodes.values.view
+            .collect { case node: LfActionNode => node.packageIds }
+            .flatten
+            .toSet,
+          allUsedPackageIds = metadata.usedPackages,
+        ),
+        timeBoundaries = LedgerTimeBoundaries(metadata.timeBoundaries),
       )
     }
   }
@@ -312,9 +424,27 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
+      externalCallReplayData: () => ExternalCallReplayData,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+    def handleExternalCall(
+        externalCallKey: ExternalCallKey,
+        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
+      externalCallReplayData().outputFor(externalCallKey) match {
+        case Left(disagreement) =>
+          FutureUnlessShutdown.pure(Left(disagreement))
+
+        case Right(None) =>
+          FutureUnlessShutdown.pure(Left(ExternalCallReplayMissing(externalCallKey)))
+
+        case Right(Some(storedOutput)) =>
+          logger.debug(
+            s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
+          )
+          handleResultInternal(resume(Right(storedOutput.toHexString)))
+      }
 
     def handleResultInternal(
         result: Result[A]
@@ -364,7 +494,21 @@ class DAMLe(
             else NeedKeyProgression.Finished
           FutureUnlessShutdown
             .pure(result)
-            .flatMap(r => handleResultInternal(resume(r, hasStarted)))
+            .flatMap { r =>
+              val entries = r.map { contract =>
+                CantonContractIdVersion.extractCantonContractIdVersion(contract.contractId) match {
+                  case Right(version) =>
+                    ResultNeedKey.Response.AuthenticableFatContractInstance(
+                      contract,
+                      version.contractHashingMethod,
+                      hash => contractAuthenticator(contract, hash).isRight,
+                    )
+                  case Left(_) =>
+                    ResultNeedKey.Response.UnsupportedContractIdVersion(contract.contractId)
+                }
+              }
+              handleResultInternal(resume(ResultNeedKey.Response(entries, hasStarted)))
+            }
 
         case ResultNeedContract(acoid, resume) =>
           val response: Response =
@@ -382,7 +526,9 @@ class DAMLe(
               case Left(_) =>
                 Response.UnsupportedContractIdVersion
             }
-          FutureUnlessShutdown.pure(response).flatMap(r => handleResultInternal(resume(r)))
+          FutureUnlessShutdown
+            .pure(response)
+            .flatMap(r => handleResultInternal(resume(r)))
 
         case ResultError(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
         case ResultInterruption(continue, _) =>
@@ -395,6 +541,14 @@ class DAMLe(
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
           handleResultInternal(resume())
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          val externalCallKey = ExternalCallKey(
+            extensionId,
+            functionId,
+            configHash,
+            input,
+          )
+          handleExternalCall(externalCallKey, resume)
       }
     }
 

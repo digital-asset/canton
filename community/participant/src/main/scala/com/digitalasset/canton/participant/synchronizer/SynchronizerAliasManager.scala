@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.synchronizer
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -12,6 +11,7 @@ import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager.Synchronizers
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.collect.{BiMap, HashBiMap}
 
 import java.util.concurrent.atomic.AtomicReference

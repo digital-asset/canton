@@ -9,7 +9,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapperCompanion,
   String255,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import slick.jdbc.{GetResult, SetParameter}
@@ -22,11 +26,14 @@ import slick.jdbc.{GetResult, SetParameter}
   */
 final case class SynchronizerAlias(protected val str: String255)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting {
-  override protected def pretty: Pretty[SynchronizerAlias] =
-    prettyOfString(inst => show"Synchronizer ${inst.unwrap.singleQuoted}")
+    with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerAlias] = SynchronizerAlias
 }
-object SynchronizerAlias extends LengthLimitedStringWrapperCompanion[String255, SynchronizerAlias] {
+object SynchronizerAlias
+    extends LengthLimitedStringWrapperCompanion[String255, SynchronizerAlias]
+    with PrettyPrintingCompanion[SynchronizerAlias] {
+  override val pretty: Pretty[SynchronizerAlias] =
+    prettyOfString(inst => show"Synchronizer ${inst.unwrap.singleQuoted}")
   override protected def companion: String255.type = String255
   override def instanceName: String = "SynchronizerAlias"
   override protected def factoryMethodWrapper(str: String255): SynchronizerAlias =
@@ -48,21 +55,25 @@ object SynchronizerAlias extends LengthLimitedStringWrapperCompanion[String255, 
   */
 final case class SequencerAlias private (protected val str: String255)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   require(str.nonEmpty, "Empty SequencerAlias is not supported")
 
-  override protected def pretty: Pretty[SequencerAlias] =
-    prettyOfString(inst => show"Sequencer ${inst.unwrap.singleQuoted}")
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerAlias] = SequencerAlias
 
   override def toProtoPrimitive: String =
     if (this == SequencerAlias.Default) "" else str.toProtoPrimitive
 }
 
-object SequencerAlias extends LengthLimitedStringWrapperCompanion[String255, SequencerAlias] {
+object SequencerAlias
+    extends LengthLimitedStringWrapperCompanion[String255, SequencerAlias]
+    with PrettyPrintingCompanion[SequencerAlias] {
   val Default: SequencerAlias = SequencerAlias.tryCreate("DefaultSequencer")
   override protected def companion: String255.type = String255
   override def instanceName: String = "SequencerAlias"
   override protected def factoryMethodWrapper(str: String255): SequencerAlias = SequencerAlias(str)
+
+  override val pretty: Pretty[SequencerAlias] =
+    prettyOfString(inst => show"Sequencer ${inst.unwrap.singleQuoted}")
 
   override def create(str: String): Either[String, SequencerAlias] =
     if (str.isEmpty) Left("Empty SequencerAlias is not supported") else super.create(str)
@@ -77,15 +88,16 @@ object SequencerAlias extends LengthLimitedStringWrapperCompanion[String255, Seq
   * @param id
   *   ledger string representing command
   */
-final case class CommandId(private val id: LfLedgerString) extends PrettyPrinting {
+final case class CommandId(private val id: LfLedgerString) extends PrettyPrintingFromCompanion {
   def unwrap: LfLedgerString = id
   def toProtoPrimitive: String = unwrap
   def toLengthLimitedString: String255 =
     checked(String255.tryCreate(id)) // LfLedgerString is limited to 255 chars
-  override protected def pretty: Pretty[CommandId] = prettyOfParam(_.unwrap)
+
+  override def prettyCompanion: PrettyPrintingCompanion[CommandId] = CommandId
 }
 
-object CommandId {
+object CommandId extends PrettyPrintingCompanion[CommandId] {
   def assertFromString(str: String): CommandId = CommandId(LfLedgerString.assertFromString(str))
   def fromProtoPrimitive(str: String): Either[String, CommandId] =
     LfLedgerString.fromString(str).map(CommandId(_))
@@ -98,21 +110,24 @@ object CommandId {
 
   implicit val setParameterCommandId: SetParameter[CommandId] = (v, pp) =>
     pp >> v.toLengthLimitedString
+
+  override val pretty: Pretty[CommandId] = prettyOfParam(_.unwrap)
 }
 
 /** User identifier for identifying customer users in the ledger api
   * @param id
   *   ledger string representing user
   */
-final case class UserId(private val id: LedgerUserId) extends PrettyPrinting {
+final case class UserId(private val id: LedgerUserId) extends PrettyPrintingFromCompanion {
   def unwrap: LedgerUserId = id
   def toProtoPrimitive: String = unwrap
   def toLengthLimitedString: String255 =
     checked(String255.tryCreate(id)) // LedgerUserId is limited to 255 chars
-  override protected def pretty: Pretty[UserId] = prettyOfParam(_.unwrap)
+
+  override def prettyCompanion: PrettyPrintingCompanion[UserId] = UserId
 }
 
-object UserId {
+object UserId extends PrettyPrintingCompanion[UserId] {
   def assertFromString(str: String) = UserId(LedgerUserId.assertFromString(str))
   def fromProtoPrimitive(str: String): Either[String, UserId] =
     LedgerUserId.fromString(str).map(UserId(_))
@@ -125,6 +140,8 @@ object UserId {
     }
 
   implicit val setParameterUserId: SetParameter[UserId] = (v, pp) => pp >> v.toLengthLimitedString
+
+  override val pretty: Pretty[UserId] = prettyOfParam(_.unwrap)
 }
 
 /** Workflow identifier for identifying customer workflows, i.e. individual requests, in the ledger
@@ -132,14 +149,16 @@ object UserId {
   * @param id
   *   ledger string representing workflow
   */
-final case class WorkflowId(private val id: LfWorkflowId) extends PrettyPrinting {
+final case class WorkflowId(private val id: LfWorkflowId) extends PrettyPrintingFromCompanion {
   def unwrap: LfWorkflowId = id
   def toProtoPrimitive: String = unwrap
-  override protected def pretty: Pretty[WorkflowId] = prettyOfParam(_.unwrap)
+
+  override def prettyCompanion: PrettyPrintingCompanion[WorkflowId] = WorkflowId
 }
 
-object WorkflowId {
+object WorkflowId extends PrettyPrintingCompanion[WorkflowId] {
   def assertFromString(str: String) = WorkflowId(LfWorkflowId.assertFromString(str))
   def fromProtoPrimitive(str: String): Either[String, WorkflowId] =
     LfWorkflowId.fromString(str).map(WorkflowId(_))
+  override val pretty: Pretty[WorkflowId] = prettyOfParam(_.unwrap)
 }

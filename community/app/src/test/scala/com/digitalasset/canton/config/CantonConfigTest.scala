@@ -4,7 +4,6 @@
 package com.digitalasset.canton.config
 
 import better.files.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.AuthServiceConfig.UnsafeJwtHmac256
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -20,8 +19,10 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -205,13 +206,40 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
   }
 
   "configuration file with unknown keys" should {
-    "should return an error" in {
+    "return an error" in {
       val result =
         loggerFactory.assertLogs(
           loadFile("invalid-configs/unknown-key-in-nested-config.conf"),
           _.errorMessage should include("canton.monitoring.this-is-not-a-key"),
         )
       result.left.value shouldBe a[GenericConfigError.Error]
+    }
+
+    "not return an error if unknown keys are allowed" in {
+      val filename = "invalid-configs/unknown-key-allowed-in-nested-config.conf"
+      val config = loadFile(filename).valueOrFail(s"failed to load $filename")
+
+      config.participants.keySet shouldBe Set(InstanceName.tryCreate("participant1"))
+    }
+  }
+
+  // Technically it's the same scenario as above,
+  // but it wasn't covered before https://github.com/DACH-NY/canton/issues/33636
+  "configuration file with no-longer-existing keys" should {
+    "return an error" in {
+      val result =
+        loggerFactory.assertLogs(
+          loadFile("invalid-configs/no-longer-existing-key.conf"),
+          _.errorMessage should include("ledger-api-jdbc-url"),
+        )
+      result.left.value shouldBe a[GenericConfigError.Error]
+    }
+
+    "not return an error if unknown keys are allowed" in {
+      val filename = "invalid-configs/no-longer-existing-allowed-key.conf"
+      val config = loadFile(filename).valueOrFail(s"failed to load $filename")
+
+      config.participants.keySet shouldBe Set(InstanceName.tryCreate("participant1"))
     }
   }
 
@@ -463,6 +491,46 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       }
     }
 
+    "load bearer token file auth for participant engine extensions" in {
+      File.usingTemporaryFile("extension-token", ".txt") { tokenFile =>
+        tokenFile.writeText("test-token")
+
+        File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+          overrideFile.writeText(
+            s"""
+               |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+               |  address = "127.0.0.1"
+               |  port = 12345
+               |  version = "v-test"
+               |  tls.enabled = false
+               |
+               |  auth {
+               |    type = bearer-token-file
+               |    token-file = "${tokenFile.pathAsString}"
+               |  }
+               |}
+               |""".stripMargin
+          )
+
+          val config = CantonConfig.parseAndLoadOrExit(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          )
+
+          val extension = config
+            .participantsByString("participant1")
+            .parameters
+            .engine
+            .extensions("external-call-test")
+          extension.version shouldBe "v-test"
+
+          inside(extension.auth) { case ExtensionServiceAuthConfig.BearerTokenFile(file) =>
+            file.unwrap.getAbsolutePath shouldBe tokenFile.toJava.getAbsolutePath
+          }
+        }
+      }
+    }
+
     "remote sequencer ha onboarding config" in {
       val configE =
         CantonConfig.parseAndLoad(
@@ -515,6 +583,91 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
   }
 
+  "config validation on engine extensions" should {
+    "reject API versions that are not single path segments" in {
+      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          """
+             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+             |  address = "127.0.0.1"
+             |  port = 12345
+             |  version = "v1/internal"
+             |  tls.enabled = false
+             |}
+             |""".stripMargin
+        )
+
+        val result = loggerFactory.assertLogs(
+          CantonConfig.parseAndLoad(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          ),
+          _.errorMessage should (include("external-call-test") and include(
+            "version"
+          ) and include("URI path segment")),
+        )
+
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+      }
+    }
+
+    "reject extension service port 0" in {
+      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          """
+             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+             |  address = "127.0.0.1"
+             |  port = 0
+             |  version = "v1"
+             |  tls.enabled = false
+             |}
+             |""".stripMargin
+        )
+
+        val result = loggerFactory.assertLogs(
+          CantonConfig.parseAndLoad(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          ),
+          _.errorMessage should (include("external-call-test") and include("port") and include(
+            "between 1"
+          )),
+        )
+
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+      }
+    }
+
+    "reject retry delays where the initial delay exceeds the maximum delay" in {
+      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          """
+             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
+             |  address = "127.0.0.1"
+             |  port = 12345
+             |  version = "v1"
+             |  tls.enabled = false
+             |  retry-initial-delay = 2s
+             |  retry-max-delay = 1s
+             |}
+             |""".stripMargin
+        )
+
+        val result = loggerFactory.assertLogs(
+          CantonConfig.parseAndLoad(
+            Seq(simpleConf.toJava, overrideFile.toJava),
+            defaultPorts = None,
+          ),
+          _.errorMessage should (include("external-call-test") and include(
+            "retry-initial-delay <= retry-max-delay"
+          )),
+        )
+
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+      }
+    }
+  }
+
   "config validation on duplicate storage" should {
     "return a ValidationError during loading" in {
       val result = loggerFactory.assertLogs(
@@ -551,6 +704,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         ) and include(
           ProtocolVersionCompatibility
             .supportedProtocols(
+              includeDevVersion = false,
               includeAlphaVersions = false,
               includeBetaVersions = false,
               release = ReleaseVersion.current,
@@ -696,5 +850,71 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       )
     }
   }
+  "AuthServiceConfig parsing" should {
+    "correctly parse max-token-life for all provider types" in {
+      import com.digitalasset.canton.config.AuthServiceConfig.*
+      import scala.concurrent.duration.*
 
+      val authConfigStr =
+        """
+          |canton.participants.participant1.ledger-api.auth-services = [
+          |  {
+          |    type = "unsafe-jwt-hmac-256"
+          |    secret = "super-secret-test-key-here"
+          |    max-token-life = "10m"
+          |  },
+          |  {
+          |    type = "jwt-rs-256-crt"
+          |    certificate = "path/to/rsa-cert.crt"
+          |    max-token-life = "20m"
+          |  },
+          |  {
+          |    type = "jwt-jwks"
+          |    url = "https://example.com/.well-known/jwks.json"
+          |    max-token-life = "30m"
+          |  },
+          |  {
+          |    type = "jwt-es-256-crt"
+          |    certificate = "path/to/cert256.crt"
+          |    max-token-life = "40m"
+          |  },
+          |  {
+          |    type = "jwt-es-512-crt"
+          |    certificate = "path/to/cert512.crt"
+          |    max-token-life = "50m"
+          |  }
+          |]
+          |""".stripMargin
+
+      File.usingTemporaryFile("auth-services-test", ".conf") { tempFile =>
+        tempFile.writeText(authConfigStr)
+
+        val parsedConfig = CantonConfig
+          .parseAndLoad(
+            Seq(simpleConf.toJava, tempFile.toJava),
+            Some(DefaultPorts.create()),
+          )
+          .valueOrFail("Failed to parse config with auth services")
+
+        val authServices = parsedConfig.participantsByString("participant1").ledgerApi.authServices
+
+        authServices should have size 5
+
+        inside(authServices) {
+          case Seq(
+                unsafe: UnsafeJwtHmac256,
+                rs256: JwtRs256Crt,
+                jwks: JwtJwks,
+                es256: JwtEs256Crt,
+                es512: JwtEs512Crt,
+              ) =>
+            unsafe.maxTokenLife.duration shouldBe 10.minutes
+            rs256.maxTokenLife.duration shouldBe 20.minutes
+            jwks.maxTokenLife.duration shouldBe 30.minutes
+            es256.maxTokenLife.duration shouldBe 40.minutes
+            es512.maxTokenLife.duration shouldBe 50.minutes
+        }
+      }
+    }
+  }
 }

@@ -49,13 +49,13 @@ final class StreamConsumer[A](attach: StreamObserver[A] => Unit) {
   def first()(implicit ec: ExecutionContext): Future[Option[A]] =
     take(1).map(_.headOption)
 
-  def within(duration: FiniteDuration)(implicit ec: ExecutionContext): Future[Vector[A]] = {
+  def within(duration: FiniteDuration): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
     attachWithCancelContext(new TimeBoundObserver(duration, observer, _))
     observer.result
   }
 
-  def firstWithin(duration: FiniteDuration)(implicit ec: ExecutionContext): Future[Vector[A]] = {
+  def firstWithin(duration: FiniteDuration): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
     attachWithCancelContext(context =>
       new TimeBoundObserver(
@@ -67,9 +67,7 @@ final class StreamConsumer[A](attach: StreamObserver[A] => Unit) {
     observer.result
   }
 
-  def firstNWithin(duration: FiniteDuration, n: Int)(implicit
-      ec: ExecutionContext
-  ): Future[Vector[A]] = {
+  def firstNWithin(duration: FiniteDuration, n: Int): Future[Vector[A]] = {
     val observer = new FiniteStreamObserver[A]
     attachWithCancelContext(context =>
       new TimeBoundObserver(

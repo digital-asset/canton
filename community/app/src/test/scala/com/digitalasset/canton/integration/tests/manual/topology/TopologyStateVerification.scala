@@ -7,7 +7,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.String185
@@ -46,6 +45,7 @@ import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{BaseTest, FutureHelpers}
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext}
@@ -101,19 +101,26 @@ class TopologyStateVerification(
       sequencers: Seq[SequencerReference]
   ): Unit =
     if (sequencers.sizeCompare(2) >= 0) { // do nothing
-      sequencers.map(n => n -> n.setup.snapshot(referenceTime)).sliding(2).foreach {
-        case Seq((node1, snapshot1), (node2, snapshot2)) =>
-          val snapshot1_ = withoutLastAcknowledgedAndLowerBound(snapshot1)
-          val snapshot2_ = withoutLastAcknowledgedAndLowerBound(snapshot2)
 
-          require(
-            snapshot1_.hasSameContentsAs(snapshot2_),
-            s"""sequencer snapshots were not the same
+      sequencers
+        .map(n =>
+          n ->
+            n.setup.snapshot(referenceTime, n.synchronizer_parameters.static.get().protocolVersion)
+        )
+        .sliding(2)
+        .foreach {
+          case Seq((node1, snapshot1), (node2, snapshot2)) =>
+            val snapshot1_ = withoutLastAcknowledgedAndLowerBound(snapshot1)
+            val snapshot2_ = withoutLastAcknowledgedAndLowerBound(snapshot2)
+
+            require(
+              snapshot1_.hasSameContentsAs(snapshot2_),
+              s"""sequencer snapshots were not the same
              |reference node ${node1.name}: $snapshot1_
              |node to verify ${node2.name}: $snapshot2_""".stripMargin,
-          )
-        case _otherwise => sys.error("should not happen")
-      }
+            )
+          case _otherwise => sys.error("should not happen")
+        }
     }
 
   private def withoutLastAcknowledgedAndLowerBound(
@@ -274,6 +281,7 @@ class TopologyStateVerification(
             ReleaseProtocolVersion(BaseTest.testedProtocolVersion),
             futureSupervisor,
             clock,
+            CommonMockMetrics.cryptoMetrics,
             executionContext,
             timeouts,
             BatchingConfig(),
@@ -303,6 +311,7 @@ class TopologyStateVerification(
           new TopologyMappingChecks.All(
             RequiredTopologyMappingChecks(
               Some(crypto.staticSynchronizerParameters),
+              crypto.staticSynchronizerParameters.protocolVersion,
               lookup,
               replayLoggerFactory,
             ),

@@ -19,7 +19,6 @@ import com.daml.ledger.api.v2.value.{
   Value,
 }
 import com.daml.ledger.javaapi.data.{DisclosedContract, Identifier}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.data
 import com.digitalasset.canton.admin.api.client.data.{
@@ -31,6 +30,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SequencerStatus,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   TemplateId,
 }
 import com.digitalasset.canton.concurrent.Threading
@@ -59,6 +59,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import io.circe.Encoder
@@ -566,7 +567,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           DecentralizedNamespaceDefinition,
         ]]((txA, txB) => txA.addSignatures(txB.signatures))
 
-      val ownerNSDs = owners.flatMap(_.topology.transactions.identity_transactions())
+      val ownerNSDs =
+        owners.flatMap(_.topology.transactions.identity_transactions())
       val foundingTransactions = ownerNSDs :+ decentralizedNamespaceDefinition
 
       owners.foreach(
@@ -607,7 +609,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
               true,
               s"${instance.id.member} has already been initialized for synchronizer ${status.synchronizerId} instead of $synchronizerId",
             )
-          case NodeStatus.NotInitialized(true, _) =>
+          case NodeStatus.NotInitialized(true, _, _) =>
             // the node is not yet initialized for this synchronizer
             Right(false)
           case NodeStatus.Failure(msg) =>
@@ -767,6 +769,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
                 sequencerLivenessMargin,
                 mediatorRequestAmplification,
                 SequencerConnectionPoolDelays.default,
+                SubscriptionLivenessLimits.default,
               ),
               // if we run bootstrap ourselves, we should have been able to reach the nodes
               // so we don't want the bootstrapping to fail spuriously here in the middle of
@@ -826,7 +829,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         synchronizerOwners = distinctSequencers,
         synchronizerThreshold = PositiveInt.tryCreate(distinctSequencers.length),
         staticSynchronizerParameters =
-          data.StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+          data.StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         mediatorThreshold = PositiveInt.tryCreate(distinctMediators.size),
       ).logical
     }
@@ -844,7 +847,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         mediators: Seq[MediatorReference],
         synchronizerOwners: Seq[InstanceReference],
         synchronizerThreshold: PositiveInt,
-        staticSynchronizerParameters: data.StaticSynchronizerParameters,
+        staticSynchronizerParameters: data.StaticSynchronizerParameters =
+          data.StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         mediatorRequestAmplification: SubmissionRequestAmplification =
           SubmissionRequestAmplification.NoAmplification,
         mediatorThreshold: PositiveInt = PositiveInt.one,

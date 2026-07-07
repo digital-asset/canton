@@ -8,6 +8,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSeque
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore.BatchIdAndEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   FakePipeToSelfCellUnitTestContext,
   FakePipeToSelfCellUnitTestEnv,
@@ -25,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
+  OrderingMode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.LocalDissemination.LocalBatchStoredSigned
@@ -66,7 +68,7 @@ class AvailabilityModuleOutputFetchTest
           availability.receive(
             LocalOutputFetch.FetchBatchDataFromNodes(
               ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
-              OrderedBlockForOutput.Mode.FromConsensus,
+              OrderingMode.Consensus,
             )
           )
 
@@ -96,14 +98,14 @@ class AvailabilityModuleOutputFetchTest
             availability.receive(
               LocalOutputFetch.FetchBatchDataFromNodes(
                 ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
-                OrderedBlockForOutput.Mode.FromConsensus,
+                OrderingMode.Consensus,
               )
             )
 
             outputFetchProtocolState.localOutputMissingBatches should contain only ABatchId -> AMissingBatchStatusNode1And2AcksWithNode2ToTry
             outputFetchProtocolState.incomingBatchRequests should be(empty)
             context.delayedMessages should contain(
-              LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId)
+              LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId, anEpochNumber)
             )
 
             p2pNetworkOutCell.get() shouldBe None
@@ -112,7 +114,9 @@ class AvailabilityModuleOutputFetchTest
             p2pNetworkOutCell.get() should contain(
               P2PNetworkOut.Multicast(
                 P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
-                  RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node0).fakeSign
+                  RemoteOutputFetch.FetchRemoteBatchData
+                    .create(ABatchId, anEpochNumber, Node0)
+                    .fakeSign
                 ),
                 Set(Node1),
               )
@@ -130,7 +134,9 @@ class AvailabilityModuleOutputFetchTest
           val availability = createAndStartAvailability[IgnoringUnitTestEnv](
             outputFetchProtocolState = outputFetchProtocolState
           )
-          availability.receive(RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node2))
+          availability.receive(
+            RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, anEpochNumber, Node2)
+          )
 
           outputFetchProtocolState.localOutputMissingBatches should be(empty)
           outputFetchProtocolState.incomingBatchRequests should contain only ABatchId -> Set(
@@ -152,13 +158,17 @@ class AvailabilityModuleOutputFetchTest
               outputFetchProtocolState = outputFetchProtocolState,
               availabilityStore = availabilityStore,
             )
-            availability.receive(RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node1))
+            availability.receive(
+              RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, anEpochNumber, Node1)
+            )
 
             outputFetchProtocolState.localOutputMissingBatches should be(empty)
             outputFetchProtocolState.incomingBatchRequests should contain only ABatchId -> Set(
               Node1
             )
-            verify(availabilityStore).fetchBatches(Seq(ABatchId))
+            verify(availabilityStore).fetchBatches(
+              Seq(BatchIdAndEpochNumber(ABatchId, anEpochNumber))
+            )
           }
       }
 
@@ -378,7 +388,7 @@ class AvailabilityModuleOutputFetchTest
           log => {
             log.level shouldBe Level.WARN
             log.message should include regex (
-              """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
+              """Batch BatchId\([^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
             )
           },
         )
@@ -417,7 +427,9 @@ class AvailabilityModuleOutputFetchTest
           val availability = createAndStartAvailability[IgnoringUnitTestEnv](
             outputFetchProtocolState = outputFetchProtocolState
           )
-          availability.receive(LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId))
+          availability.receive(
+            LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId, anEpochNumber)
+          )
 
           outputFetchProtocolState.localOutputMissingBatches should be(empty)
           outputFetchProtocolState.incomingBatchRequests should be(empty)
@@ -447,13 +459,15 @@ class AvailabilityModuleOutputFetchTest
               cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
               p2pNetworkOut = fakeCellModule(p2pNetworkOutCell),
             )
-            availability.receive(LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId))
+            availability.receive(
+              LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId, anEpochNumber)
+            )
 
             outputFetchProtocolState.localOutputMissingBatches should
               contain only ABatchId -> AMissingBatchStatusNode1And2AcksWithNoAttemptsLeft
             outputFetchProtocolState.incomingBatchRequests should be(empty)
             context.delayedMessages should contain(
-              LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId)
+              LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId, anEpochNumber)
             )
 
             p2pNetworkOutCell.get() shouldBe None
@@ -462,7 +476,9 @@ class AvailabilityModuleOutputFetchTest
             p2pNetworkOutCell.get() should contain(
               P2PNetworkOut.Multicast(
                 P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
-                  RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node0).fakeSign
+                  RemoteOutputFetch.FetchRemoteBatchData
+                    .create(ABatchId, anEpochNumber, Node0)
+                    .fakeSign
                 ),
                 Set(Node1),
               )
@@ -506,7 +522,7 @@ class AvailabilityModuleOutputFetchTest
               val p2pNetworkOutCell = new AtomicReference[Option[P2PNetworkOut.Message]](None)
               val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
               val fetchRemoteBatchData =
-                RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node0)
+                RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, anEpochNumber, Node0)
               when(
                 cryptoProvider.signMessage(
                   fetchRemoteBatchData,
@@ -527,7 +543,9 @@ class AvailabilityModuleOutputFetchTest
                 p2pNetworkOut = fakeCellModule(p2pNetworkOutCell),
               )
               loggerFactory.assertLoggedWarningsAndErrorsSeq(
-                availability.receive(LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId)),
+                availability.receive(
+                  LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId, anEpochNumber)
+                ),
                 forEvery(_) { entry =>
                   entry.message should include("got fetch timeout")
                   entry.message should include("no nodes")
@@ -539,7 +557,7 @@ class AvailabilityModuleOutputFetchTest
                 contain only ABatchId -> newMissingBatchStatus
               outputFetchProtocolState.incomingBatchRequests should be(empty)
               context.delayedMessages should contain(
-                LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId)
+                LocalOutputFetch.FetchRemoteBatchDataTimeout(ABatchId, anEpochNumber)
               )
 
               p2pNetworkOutCell.get() shouldBe None
@@ -553,7 +571,9 @@ class AvailabilityModuleOutputFetchTest
               p2pNetworkOutCell.get() should contain(
                 P2PNetworkOut.Multicast(
                   P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
-                    RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node0).fakeSign
+                    RemoteOutputFetch.FetchRemoteBatchData
+                      .create(ABatchId, anEpochNumber, Node0)
+                      .fakeSign
                   ),
                   Set(expectedSendTo),
                 )
@@ -604,7 +624,7 @@ class AvailabilityModuleOutputFetchTest
                 Seq(Node1),
                 numberOfAttempts = 1,
                 jitterStream = jitterStream,
-                mode = OrderedBlockForOutput.Mode.FromConsensus,
+                orderingMode = OrderingMode.Consensus,
               )
             )
             val storage = TrieMap[BatchId, OrderingRequestBatch]()
@@ -696,7 +716,7 @@ class AvailabilityModuleOutputFetchTest
                   Seq(Node1),
                   numberOfAttempts = 1,
                   jitterStream = jitterStream,
-                  mode = OrderedBlockForOutput.Mode.FromConsensus,
+                  orderingMode = OrderingMode.Consensus,
                 )
               )
               implicit val context
@@ -710,7 +730,9 @@ class AvailabilityModuleOutputFetchTest
                 cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
               )
               val result = mock[AvailabilityStore.FetchBatchesResult]
-              when(availabilityStore.fetchBatches(Seq(ABatchId))) thenReturn (() => result)
+              when(
+                availabilityStore.fetchBatches(Seq(BatchIdAndEpochNumber(ABatchId, anEpochNumber)))
+              ) thenReturn (() => result)
 
               availability.receive(message)
 
@@ -748,7 +770,7 @@ class AvailabilityModuleOutputFetchTest
                   Seq(Node1),
                   numberOfAttempts = 1,
                   jitterStream = jitterStream,
-                  mode = OrderedBlockForOutput.Mode.FromConsensus,
+                  orderingMode = OrderingMode.Consensus,
                 )
               )
               implicit val context
@@ -815,11 +837,11 @@ class AvailabilityModuleOutputFetchTest
 
       "record the missing batches and ask other node for missing data" in {
         forAll(
-          Table[OrderedBlockForOutput.Mode, BftNodeId](
+          Table[OrderingMode, BftNodeId](
             ("block mode", "expected send to"),
-            (OrderedBlockForOutput.Mode.FromConsensus, Node1),
+            (OrderingMode.Consensus, Node1),
             // Ignore nodes from the PoA, use the current topology
-            (OrderedBlockForOutput.Mode.FromStateTransfer, Node3),
+            (OrderingMode.StateTransfer, Node3),
           )
         ) { (blockMode, expectedSendTo) =>
           val outputFetchProtocolState = new MainOutputFetchProtocolState()
@@ -847,7 +869,7 @@ class AvailabilityModuleOutputFetchTest
               ViewNumber.First,
               isLastInEpoch = false, // Irrelevant for availability
               originalLeader = Node0,
-              mode = blockMode,
+              orderingMode = blockMode,
             ),
             mutable.SortedSet(ABatchId),
             traceContext,
@@ -858,7 +880,9 @@ class AvailabilityModuleOutputFetchTest
             Availability.LocalOutputFetch
               .FetchedBlockDataFromStorage(
                 request,
-                AvailabilityStore.MissingBatches(Set(ABatchId)),
+                AvailabilityStore.MissingBatches(
+                  Set(BatchIdAndEpochNumber(ABatchId, anEpochNumber))
+                ),
               )
           )
 
@@ -875,7 +899,7 @@ class AvailabilityModuleOutputFetchTest
             P2PNetworkOut.send(
               P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
                 Availability.RemoteOutputFetch.FetchRemoteBatchData
-                  .create(ABatchId, from = Node0)
+                  .create(ABatchId, anEpochNumber, from = Node0)
                   .fakeSign
               ),
               expectedSendTo,
@@ -907,7 +931,7 @@ class AvailabilityModuleOutputFetchTest
           availability.receive(
             Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
               singleBatchMissingRequest,
-              AvailabilityStore.MissingBatches(Set(ABatchId)),
+              AvailabilityStore.MissingBatches(Set(BatchIdAndEpochNumber(ABatchId, anEpochNumber))),
             )
           ),
           log => {
@@ -941,7 +965,7 @@ class AvailabilityModuleOutputFetchTest
         )
 
         availability.receive(
-          Availability.RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node0)
+          Availability.RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, anEpochNumber, Node0)
         )
 
         cellContextFake.get() shouldBe defined
@@ -970,7 +994,7 @@ class AvailabilityModuleOutputFetchTest
         )
 
         availability.receive(
-          Availability.RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, Node0)
+          Availability.RemoteOutputFetch.FetchRemoteBatchData.create(ABatchId, anEpochNumber, Node0)
         )
 
         cellContextFake.get() shouldBe defined

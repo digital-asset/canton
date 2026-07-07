@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcServiceUnavailable
 import com.digitalasset.canton.sequencer.api.v30
-import com.digitalasset.canton.sequencing.SequencedEventHandler
+import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.TokenExpiration
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionResponse
@@ -23,7 +23,7 @@ import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTrace
 import com.digitalasset.canton.tracing.TraceContext.withTraceContext
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{FutureUtil, MaxBytesToDecompress, SingleUseCell}
+import com.digitalasset.canton.util.{FutureUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Context.CancellableContext
@@ -244,6 +244,10 @@ abstract class ConsumesCancellableGrpcStreamObserver[
 
       override def onError(t: Throwable): Unit = {
         import TraceContext.Implicits.Empty.*
+
+        // Cancel the ongoing onNext
+        currentAwaitOnNext.get.trySuccess(Outcome(Right(()))).discard
+
         FutureUtil.doNotAwait(
           // re-sync on onNext processing but proceed even if the handler threw an exception
           currentProcessing
@@ -299,6 +303,9 @@ abstract class ConsumesCancellableGrpcStreamObserver[
 
       override def onCompleted(): Unit = {
         import TraceContext.Implicits.Empty.*
+        // Cancel the ongoing onNext
+        currentAwaitOnNext.get.trySuccess(Outcome(Right(()))).discard
+
         FutureUtil.doNotAwait(
           // re-sync on onNext processing but proceed even if the handler threw an exception
           currentProcessing.get().thereafter { _ =>
@@ -362,7 +369,7 @@ class GrpcSequencerSubscription[E, Request, Response: HasProtoTraceContext] priv
 object GrpcSequencerSubscription {
   def fromSubscriptionResponse[E](
       context: CancellableContext,
-      handler: SequencedEventHandler[E],
+      handler: MaybeCompressedSequencedEventHandler[E],
       hasRunOnClosing: HasRunOnClosing,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -376,9 +383,7 @@ object GrpcSequencerSubscription {
         handler,
         (value, traceContext) => {
           SubscriptionResponse
-            .fromVersionedProtoV30(MaxBytesToDecompress.HardcodedDefault, protocolVersion)(value)(
-              traceContext
-            )
+            .fromVersionedProtoV30(protocolVersion)(value)(traceContext)
         },
       ),
       timeouts,
@@ -386,7 +391,7 @@ object GrpcSequencerSubscription {
     )
 
   private def deserializingSubscriptionHandler[E, R](
-      handler: SequencedEventHandler[E],
+      handler: MaybeCompressedSequencedEventHandler[E],
       fromProto: (R, TraceContext) => ParsingResult[SubscriptionResponse],
   ): Traced[R] => EitherT[FutureUnlessShutdown, E, Unit] =
     withTraceContext { implicit traceContext => responseP =>
@@ -399,11 +404,10 @@ object GrpcSequencerSubscription {
                   s"Unable to parse response from sequencer. Discarding message. Reason: $err"
                 )
               ),
-            response => {
+            response =>
               handler(
                 SequencedEventWithTraceContext(response.signedSequencedEvent)(response.traceContext)
-              )
-            },
+              ),
           )
       )
     }

@@ -26,6 +26,8 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.{LoggerUtil, MonadUtil, ResourceUtil}
 import org.flywaydb.core.Flyway
+import org.flywaydb.core.api.configuration.FluentConfiguration
+import org.flywaydb.core.api.exception.FlywayValidateException
 import org.flywaydb.core.api.{FlywayException, MigrationInfo}
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.hikaricp.HikariCPJdbcDataSource
@@ -35,17 +37,18 @@ import java.sql.SQLException
 import javax.sql.DataSource
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, blocking}
+import scala.jdk.CollectionConverters.*
 
 /** Performs DB migrations using Flyway.
   *
-  * @param alphaVersionSupport
+  * @param devVersionSupport
   *   Whether we want to add the schema files found in the dev folder to the migration. A user that
   *   does that, won't be able to upgrade to new Canton versions, as we reserve our right to just
   *   modify the dev version files in any way we like.
   */
 class DbMigrations(
     dbConfig: DbConfig,
-    alphaVersionSupport: Boolean,
+    devVersionSupport: Boolean,
     timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, closeContext: CloseContext)
@@ -59,14 +62,20 @@ class DbMigrations(
     * https://flywaydb.org/documentation/getstarted/firststeps/api
     */
   protected def createFlyway(dataSource: DataSource): Flyway =
+    createFlywayConfig(dataSource: DataSource).load()
+
+  protected def createFlywayConfig(dataSource: DataSource): FluentConfiguration =
     Flyway.configure
-      .locations(dbConfig.buildMigrationsPaths(alphaVersionSupport)*)
+      .locations(dbConfig.buildMigrationsPaths(devVersionSupport)*)
       .dataSource(dataSource)
       .cleanDisabled(!dbConfig.parameters.unsafeCleanOnValidationError)
-      .cleanOnValidationError(dbConfig.parameters.unsafeCleanOnValidationError)
       .baselineOnMigrate(dbConfig.parameters.unsafeBaselineOnMigrate)
       .lockRetryCount(60)
-      .load()
+      .placeholders(
+        Map(
+          "initialBftOrdererTablesPartitionSize" -> dbConfig.parameters.partitions.initialBftOrdererTablesPartitionSize.toString
+        ).asJava
+      )
 
   protected def withCreatedDb[A](retryConfig: DbStorage.RetryConfig)(
       fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A]
@@ -114,11 +123,32 @@ class DbMigrations(
           val flyway = createFlyway(DbMigrations.createDataSource(db.source))
           for {
             _ <- validateRepeatableMigrations(dbConfig).toEitherT[UnlessShutdown]
-            migrationResult <- migrateDatabaseInternal(flyway)
+            migrationResult <- migrateWithOptionalClean(flyway)
           } yield migrationResult
         }
       }
     }
+
+  // Replicates the behaviour of the deprecated Flyway cleanOnValidationError flag:
+  // if unsafeCleanOnValidationError is set and migrate() throws a FlywayValidateException,
+  // clean the database and retry.
+  private def migrateWithOptionalClean(
+      flyway: Flyway
+  )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
+    EitherT(migrateDatabaseInternal(flyway).value.flatMap {
+      case Left(DbMigrations.FlywayError(cause: FlywayValidateException))
+          if dbConfig.parameters.unsafeCleanOnValidationError =>
+        logger.info("Validation error during migration; cleaning database and retrying", cause)
+        Either
+          .catchOnly[FlywayException](flyway.clean())
+          .leftMap[DbMigrations.Error](DbMigrations.FlywayError.apply)
+          .fold(
+            err => UnlessShutdown.Outcome(Left(err)),
+            _ => migrateDatabaseInternal(flyway).value,
+          )
+      case other =>
+        UnlessShutdown.Outcome(other)
+    })
 
   /** Repair the database in case the migrations files changed (e.g. due to comment changes). To
     * quote the Flyway documentation:
@@ -355,13 +385,13 @@ object DbMigrations {
 
   def create(
       dbConfig: DbConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, closeContext: CloseContext): DbMigrations =
     new DbMigrations(
       dbConfig,
-      alphaVersionSupport,
+      devVersionSupport,
       timeouts,
       loggerFactory,
     )

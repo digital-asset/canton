@@ -138,13 +138,13 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
      Shared test code for classes extending `HasProtocolVersionedWrapper` (protocol version embedded in the instance),
      with/without context for deserialization.
    */
-  private def testProtocolVersionedCommon[
+  protected def testProtocolVersionedCommon[
       T <: HasProtocolVersionedWrapper[T],
       DeserializedValueClass <: HasRepresentativeProtocolVersion,
   ](
       companion: BaseVersioningCompanion[T, ?, DeserializedValueClass, ?],
       deserializer: ByteString => ParsingResult[DeserializedValueClass],
-      warnWhenTestRunsLongerThan: Duration,
+      warnWhenTestRunsLongerThan: Duration = maxDurationWarning,
   )(implicit arb: Arbitrary[T]): Assertion = {
     val className = companion.getClass.getName
     testedClasses.add(className)
@@ -153,9 +153,8 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
     val result = forAll { (instance: T) =>
       val proto = clue(s"Serializing instance of ${companion.name}")(instance.toByteString)
 
-      val deserializedInstance = clue(s"Deserializing serialized ${companion.name}")(
-        deserializer(proto).value
-      )
+      val deserializedInstance =
+        clue(s"Deserializing serialized ${companion.name}")(deserializer(proto).value)
 
       withClue(
         s"Comparing ${companion.name} with representative ${instance.representativeProtocolVersion}"

@@ -397,8 +397,6 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
           T"ContractId Mod:I → (( Update Mod:I ))",
         E"λ (e: Party) → (( fetch_by_key @Mod:T e ))" ->
           T"Party → (( Update ($tuple2TyCon (ContractId Mod:T) Mod:T) ))",
-        E"λ (e: Party) →  (( lookup_by_key @Mod:T e ))" ->
-          T"Party → (( Update (Option (ContractId Mod:T)) ))",
         E"λ (n : Int64) (e: Party) → (( query_n_by_key @Mod:T n e ))" ->
           T"Int64 → Party → (( Update (Option (List ($tuple2TyCon (ContractId Mod:T) Mod:T))) ))",
         E"(( uget_time ))" ->
@@ -899,8 +897,6 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
                 ) =>
           },
         E"""⸨ fetch_by_key @Mod:T "Bob" ⸩""" -> //
-          { case _: ETypeMismatch => },
-        E"""⸨ lookup_by_key @Mod:T "Bob" ⸩""" -> //
           { case _: ETypeMismatch => },
         E"""⸨ query_n_by_key @Mod:T 1 "Bob" ⸩""" -> //
           { case _: ETypeMismatch => },

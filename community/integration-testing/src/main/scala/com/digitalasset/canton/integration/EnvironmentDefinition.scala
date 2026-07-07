@@ -59,7 +59,7 @@ import monocle.macros.syntax.lens.*
 final case class EnvironmentDefinition(
     baseConfig: CantonConfig,
     testingConfig: TestingConfigInternal =
-      TestingConfigInternal(warnOnAcsCommitmentDegradation = false),
+      TestingConfigInternal(warnOnAcsCommitmentDegradation = false, warnOnJwtScopeUsage = false),
     setups: List[TestConsoleEnvironment => Unit] = Nil,
     teardown: Unit => Unit = _ => (),
     configTransforms: Seq[ConfigTransform] = ConfigTransforms.defaults,
@@ -74,7 +74,10 @@ final case class EnvironmentDefinition(
     configTransforms.foldLeft(baseConfig)((config, transform) => transform(config))
 
   def withManualStart: EnvironmentDefinition =
-    copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(true))
+    setManualStart(true)
+
+  def setManualStart(manualStart: Boolean): EnvironmentDefinition =
+    copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(manualStart))
 
   /** Enable traffic control on all configured synchronizers
     * @param syncSynchronizerOwnersTime
@@ -462,6 +465,12 @@ object EnvironmentDefinition extends LazyLogging {
     numMediators = 1,
   )
 
+  lazy val P1S4M1_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
+    numParticipants = 1,
+    numSequencers = 4,
+    numMediators = 1,
+  )
+
   lazy val P1S4M4_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
     numParticipants = 1,
     numSequencers = 4,
@@ -610,6 +619,13 @@ object EnvironmentDefinition extends LazyLogging {
     buildBaseEnvironmentDefinition(
       numParticipants = 1,
       numSequencers = 2,
+      numMediators = 2,
+    )
+
+  lazy val P3S4M2_Config: EnvironmentDefinition =
+    buildBaseEnvironmentDefinition(
+      numParticipants = 3,
+      numSequencers = 4,
       numMediators = 2,
     )
 

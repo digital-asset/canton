@@ -41,6 +41,6 @@ class StoreBasedSynchronizerTopologyInitializationCallback
       topologyTransactions <- sequencerClient
         .downloadTopologyStateForInit(maxRetries = retry.Forever, retryLogLevel = None)
       _ <- topologyStoreInitialization.validateAndApplyInitialTopologySnapshot(topologyTransactions)
-      _ <- EitherT.right(topologyClient.initialize())
+      _ <- EitherT.right(topologyClient.updateKnownTimestampsDuringStartup())
     } yield ()
 }

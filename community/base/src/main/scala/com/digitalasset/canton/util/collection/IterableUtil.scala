@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.util.collection
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 import scala.annotation.tailrec
 import scala.collection.{IterableOps, immutable}

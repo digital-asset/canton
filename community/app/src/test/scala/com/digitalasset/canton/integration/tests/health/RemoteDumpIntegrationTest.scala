@@ -157,6 +157,7 @@ final class RemoteDumpIntegrationTest
         val jsons = json.getOrElse(fail()).findAllByKey("supportedProtocolVersions")
         val supportedPvs = ProtocolVersionCompatibility
           .supportedProtocols(
+            testedProtocolVersion.isDev,
             testedProtocolVersion.isAlpha,
             testedProtocolVersion.isBeta,
             ReleaseVersion.current,

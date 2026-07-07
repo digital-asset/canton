@@ -12,6 +12,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.UnknownContractSynchronizers
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -57,15 +58,15 @@ import scala.util.Random
   * initially a liveness margin of 0. The participant connections to the sequencers are controlled
   * by toxiproxy.
   *
-  * The test uses "disruptors" to create harsh conditions: each disruptor is a background thread
+  * The test uses "disrupters" to create harsh conditions: each disrupter is a background thread
   * that continuously picks a sequencer at random, applies a "timeout" toxiproxy on the connection
   * using random parameters, waits a random duration, and releases it.
   *
   * The main scenario is as follows:
   *   - Execute 5 initial cycles
-  *   - Start 2 disruptors
+  *   - Start 2 disrupters
   *   - Execute 100 cycles under disruptions
-  *   - Stop the disruptors
+  *   - Stop the disrupters
   *   - Execute 5 final cycles
   *
   * The only failure tolerated during these scenarios are cycles failing due to the synchronizer
@@ -78,9 +79,9 @@ import scala.util.Random
   * timings as well as the long durations due to the failures mentioned above don't allow to see
   * this consistently).
   *
-  * Finally, a similar scenario is executed with 3 disruptors, and executing only 5 cycles under
+  * Finally, a similar scenario is executed with 3 disrupters, and executing only 5 cycles under
   * disruptions. In this case, it is expected that the commands will fail with other errors such as
-  * timeouts. When it happens, we stop the disruptors, but verify that another 5 final cycles go
+  * timeouts. When it happens, we stop the disrupters, but verify that another 5 final cycles go
   * through normally when the participant has recovered.
   */
 sealed trait ToxiproxyBftSequencerConnectionsIntegrationTest
@@ -102,8 +103,11 @@ sealed trait ToxiproxyBftSequencerConnectionsIntegrationTest
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
-                mediator1 -> (sequencers.local,
-                /* trust threshold */ PositiveInt.two, /* liveness margin */ NonNegativeInt.zero)
+                mediator1 -> MediatorSequencersConfiguration(
+                  sequencers.local,
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               )
             ),
           )

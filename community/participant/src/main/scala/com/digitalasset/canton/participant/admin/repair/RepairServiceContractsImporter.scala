@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import cats.syntax.traverseFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
@@ -50,6 +49,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.CantonOnly
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source as PekkoSource}
@@ -80,23 +80,28 @@ final class RepairServiceContractsImporter(
 
   override protected def timeouts: ProcessingTimeout = nodeParameters.processingTimeouts
 
-  /** Decide whether contract `repairContract` needs to be added to the stores.
+  /** Decide whether contract `repairContract` requires persistence based on its current storage
+    * state.
     *
-    * DB calls: None
+    * Guarantees idempotency by skipping contracts that are already active. DB calls: None
     *
     * @param repairContract
-    *   Imported contracts
+    *   Candidate contract payload and metadata being imported.
     * @param acsState
-    *   Current state of the contract
+    *   Current status of the contract in the `ActiveContractStore`.
     * @param storedContract
-    *   Current stored instance for the contract
+    *   Current raw contract instance cached from the `ContractStore`.
+    * @param skippedAlreadyActiveCount
+    *   Thread-safe accumulator tracking bypassed pre-existing active contracts.
     * @return
-    *   Some if the contract needs to be added/imported, false otherwise
+    *   `Right(Some(...))` if the contract must be added, `Right(None)` if safely bypassed, or
+    *   `Left` on validation failure.
     */
   private def contractToAdd(
       repairContract: RepairContract,
       acsState: Option[ActiveContractStore.Status],
       storedContract: Option[ContractInstance],
+      skippedAlreadyActiveCount: AtomicLong,
   )(implicit
       traceContext: TraceContext
   ): Either[String, Option[ContractToAdd]] = {
@@ -123,6 +128,8 @@ final class RepairServiceContractsImporter(
 
       case Some(ActiveContractStore.Active(_)) =>
         logger.debug(s"Skipping contract $contractId because it is already active")
+        skippedAlreadyActiveCount.incrementAndGet().discard
+
         for {
           contractAlreadyThere <-
             storedContract.toRight {
@@ -231,64 +238,110 @@ final class RepairServiceContractsImporter(
 
     val batchSize = nodeParameters.batchingConfig.maxAcsImportBatchSize.unwrap
     val parallelism = nodeParameters.batchingConfig.parallelism.unwrap
+
+    // Shared visibility metrics accumulators to be INFO logged
     val droppedContractsCount = new AtomicLong(0L)
+    val skippedAlreadyActiveCount = new AtomicLong(0L)
+    val persistedContractsCount = new AtomicLong(0L)
 
     helpers.withRepairIndexer { repairIndexer =>
       val indexedContractBatches: PekkoSource[(Seq[RepairContract], Long), NotUsed] =
         contracts.grouped(batchSize).zipWithIndex
 
-      val doneF = toFuture(helpers.readSynchronizerData(synchronizerId, repairIndexer)).flatMap {
-        synchronizer =>
-          indexedContractBatches
-            .mapAsync(parallelism) { data =>
-              toFuture(
-                validateAndPersistContracts(
-                  synchronizer = synchronizer,
-                  contractImportMode = contractImportMode,
-                  selectRepresentativePackageIds = selectRepresentativePackageIds,
-                  batchSize = batchSize,
-                  droppedContractsCount = droppedContractsCount,
-                )(data)
+      val doneF = for {
+        synchronizer <- toFuture(helpers.readSynchronizerData(synchronizerId, repairIndexer))
+        // 1. Explicitly trigger crash recovery cleanup and verify ACS commitment watermarks
+        _ <- toFuture(helpers.verifyRepairPreconditions(synchronizer))
+        // 2. Execute the stream only after the Active Contract Store is clean
+        _ <- indexedContractBatches
+          .mapAsync(parallelism) { data =>
+            toFuture(
+              validateAndPersistContracts(
+                synchronizer = synchronizer,
+                contractImportMode = contractImportMode,
+                selectRepresentativePackageIds = selectRepresentativePackageIds,
+                batchSize = batchSize,
+                droppedContractsCount = droppedContractsCount,
+                skippedAlreadyActiveCount = skippedAlreadyActiveCount,
+                persistedContractsCount = persistedContractsCount,
+              )(data)
+            )
+          }
+          // Publish events to the indexer
+          .mapAsync(1) { contractsToAddWithInternalContractIds =>
+            if (nodeParameters.enableAllLedgerApiReassignments) {
+              publishAssignedEvents(
+                synchronizerId,
+                synchronizer.currentRecordTime,
+                contractsToAddWithInternalContractIds,
+                workflowProvider,
+                repairIndexer,
               )
+            } else {
+              writeContractsAddedEvents(
+                synchronizerId,
+                contractsToAddWithInternalContractIds,
+                workflowProvider,
+                repairIndexer,
+              ).failOnShutdownToAbortException("addContracts")
             }
-            // Publish events to the indexer
-            .mapAsync(1) { contractsToAddWithInternalContractIds =>
-              if (nodeParameters.alphaMultiSynchronizerSupport) {
-                publishAssignedEvents(
-                  synchronizerId,
-                  synchronizer.currentRecordTime,
-                  contractsToAddWithInternalContractIds,
-                  workflowProvider,
-                  repairIndexer,
-                )
-              } else {
-                writeContractsAddedEvents(
-                  synchronizerId,
-                  contractsToAddWithInternalContractIds,
-                  workflowProvider,
-                  repairIndexer,
-                ).failOnShutdownToAbortException("addContracts")
-              }
-            }
-            .toMat(Sink.ignore)(Keep.right)
-            .run()
-      }
+          }
+          .toMat(Sink.ignore)(Keep.right)
+          .run()
+      } yield ()
 
       EitherT.liftF(doneF.map { _ =>
+        val totalPersisted = persistedContractsCount.get()
+        val totalSkipped = skippedAlreadyActiveCount.get()
         val totalDropped = droppedContractsCount.get()
-        if (totalDropped > 0) {
-          logger.info(
-            s"Dropped $totalDropped contracts belonging to other synchronizers than $synchronizerId"
-          )
-        }
+
+        logger.info(
+          s"Contract import pipeline for synchronizer $synchronizerId finished. " +
+            s"Persisted: $totalPersisted new active contracts written. " +
+            s"Skipped: $totalSkipped pre-existing contracts safely bypassed (idempotent). " +
+            s"Dropped: $totalDropped foreign payloads ignored (synchronizer mismatch)."
+        )
       })
     }
   }
 
-  /** Validate the contracts in the batch and insert data in Canton stores.
+  /** Validates a batch of repair contracts and synchronously persists new ones to Canton internal
+    * storage.
+    *
+    *   1. Filters contracts to the expected synchronizer and verifies reassignment counter
+    *      constraints.
+    *   1. Authenticates payloads and signatures.
+    *   1. Drops internally active contracts to guarantee idempotency.
+    *   1. Writes missing contracts to the internal `ContractStore` and `ActiveContractStore` with
+    *      sequential repair counters.
+    *
+    * @param synchronizer
+    *   Target synchronizer context containing essential persistence handles (`persistentState`),
+    *   the current logical record time, and the baseline repair counter.
+    * @param contractImportMode
+    *   Processing strictness level. In
+    *   [[com.digitalasset.canton.participant.admin.data.ContractImportMode.Accept]] mode,
+    *   validation is bypassed; in
+    *   [[com.digitalasset.canton.participant.admin.data.ContractImportMode.Validation]] mode,
+    *   contracts undergo full signature/version authentication and allow representative package ID
+    *   overrides.
+    * @param selectRepresentativePackageIds
+    *   Resolves optimal representative package IDs using an explicit chain of precedence rules
+    *   (scanning from granular contract ID overrides down to the highest versioned package in the
+    *   local store).
     * @param batchSize
-    *   Should correspond to the batch size used in the source
+    *   Expected source stream chunk size, used to space sequential repair counters cleanly.
+    * @param droppedContractsCount
+    *   Thread-safe accumulator tracking contracts ignored due to logical synchronizer mismatch.
+    * @param skippedAlreadyActiveCount
+    *   Thread-safe accumulator tracking pre-existing contracts bypassed to guarantee idempotency.
+    * @param persistedContractsCount
+    *   Thread-safe accumulator tracking the total number of newly persisted active contracts
+    *   written.
+    * @param data
+    *   A tuple containing the unfiltered incoming repair contracts and their absolute chunk index.
     * @return
+    *   Successfully persisted contracts grouped by creation time and assigned `TimeOfRepair`.
     */
   private def validateAndPersistContracts(
       synchronizer: RepairRequest.SynchronizerData,
@@ -296,6 +349,8 @@ final class RepairServiceContractsImporter(
       selectRepresentativePackageIds: SelectRepresentativePackageIds,
       batchSize: Int,
       droppedContractsCount: AtomicLong,
+      skippedAlreadyActiveCount: AtomicLong,
+      persistedContractsCount: AtomicLong,
   )(
       data: (Seq[RepairContract], Long)
   )(implicit traceContext: TraceContext): EitherT[
@@ -306,14 +361,14 @@ final class RepairServiceContractsImporter(
     val (contractsUnchecked, idx) = data
 
     for {
-      contracts <- selectRepresentativePackageIds(contractsUnchecked)
+      contractsUnfiltered <- selectRepresentativePackageIds(contractsUnchecked)
         .toEitherT[FutureUnlessShutdown]
 
       contractsWithUnexpectedReassignmentCounter =
-        if (nodeParameters.alphaMultiSynchronizerSupport) {
+        if (nodeParameters.enableAllLedgerApiReassignments) {
           Nil
         } else {
-          contracts.filter(_.reassignmentCounter != ReassignmentCounter.Genesis)
+          contractsUnfiltered.filter(_.reassignmentCounter != ReassignmentCounter.Genesis)
         }
 
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
@@ -322,11 +377,11 @@ final class RepairServiceContractsImporter(
             .map(c => (c.contractId, c.reassignmentCounter))}",
       )
 
-      contractsWithExpectedSynchronizer = contracts.filter(
+      contracts = contractsUnfiltered.filter(
         _.synchronizerId == synchronizer.psid.logical
       )
 
-      localDroppedContractsCount = contracts.size - contractsWithExpectedSynchronizer.size
+      localDroppedContractsCount = contractsUnfiltered.size - contracts.size
 
       _ = if (localDroppedContractsCount > 0) {
         droppedContractsCount.addAndGet(localDroppedContractsCount.toLong).discard
@@ -337,9 +392,9 @@ final class RepairServiceContractsImporter(
         syncPersistentStateLookup,
         contractValidator,
         contractImportMode,
-      )(contractsWithExpectedSynchronizer)
+      )(contracts)
 
-      contractIds = contractsWithExpectedSynchronizer.map(_.contract.contractId)
+      contractIds = contracts.map(_.contract.contractId)
 
       contractStates <- EitherT.right[String](
         helpers.readContractAcsStates(
@@ -356,14 +411,21 @@ final class RepairServiceContractsImporter(
         .map(_.flatten)
 
       storedContracts = contractInstances.map(c => c.contractId -> c).toMap
+
+      // Fail-fast before zipping unequal collections (future refactorings)
+      _ = ErrorUtil.requireState(
+        contracts.sizeCompare(contractStates) == 0,
+        s"Contract states list size (${contractStates.size}) must align exactly with the targeted contracts list size (${contracts.size})",
+      )
+
       filteredContracts <- EitherT.fromEither[FutureUnlessShutdown](
-        contractsWithExpectedSynchronizer.zip(contractStates).traverseFilter {
-          case (contract, acsState) =>
-            contractToAdd(
-              repairContract = contract,
-              acsState = acsState,
-              storedContract = storedContracts.get(contract.contract.contractId),
-            )
+        contracts.zip(contractStates).traverseFilter { case (contract, acsState) =>
+          contractToAdd(
+            repairContract = contract,
+            acsState = acsState,
+            storedContract = storedContracts.get(contract.contract.contractId),
+            skippedAlreadyActiveCount = skippedAlreadyActiveCount,
+          )
         }
       )
 
@@ -385,7 +447,14 @@ final class RepairServiceContractsImporter(
 
       contractsToAdd = timesOfRepair.zip(contractsByCreationTime).toSeq
 
-      _ = logger.debug(s"Persisting ${filteredContracts.size} added contracts")
+      // Logging exactly once per non-empty chunk provides a non-spammy, reliable progress heartbeat
+      // while atomically accumulating the exact volume for a final summary.
+      _ = if (filteredContracts.nonEmpty) {
+        persistedContractsCount.addAndGet(filteredContracts.size.toLong).discard
+        logger.info(
+          s"Importing chunk index $idx: synchronously persisting ${filteredContracts.size} active contracts"
+        )
+      }
 
       contractsWithTimeOfChange = contractsToAdd.flatMap { case (tor, (_, cs)) =>
         cs.map(_ -> tor.toToc)

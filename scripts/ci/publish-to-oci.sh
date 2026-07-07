@@ -24,8 +24,8 @@ if [[ -z "$RELEASE_SUFFIX" ]]; then
 fi
 
 # We don't publish "SNAPSHOT" releases, only properly dated snapshots or full releases.
-if [[ "$current_version" == *"-SNAPSHOT" || ( "$nightly_release" == "true" && $(date +"%u") -ne 2 ) ]]; then
-  echo "Skip publishing of unnamed snapshot release or a nightly release not on Tuesdays"
+if [[ "$current_version" == *"-SNAPSHOT" ]]; then
+  echo "Skip publishing of unnamed snapshot release"
   exit 0
 fi
 
@@ -103,7 +103,7 @@ for i in ${component_line[@]}; do
       echo "$linked_daml_version" > "${workspace_oci}/${artifact_location[${i}]}/linked-daml-version"
       cat ${ABSDIR}/../../LICENSE.txt > "${workspace_oci}/${artifact_location[${i}]}/LICENSE"
       info "Uploading..."
-      dpm repo publish-component "canton-${i}" "${current_version}" ${extra_tags} --platform generic=. --registry "${oci_path}"
+      dpm publish component ${extra_tags} --platform generic=. oci://${oci_path}/components/canton-${i}:${current_version}
       info_done "Component ${c_white}canton ${c_lgreen}${i}${c_reset} published.\n"
       unset DPM_EDITION
     else

@@ -73,22 +73,26 @@ private final class ChangeAssignation(
       }
       unassignedContracts <- readContracts(contractIdCounters)
       internalContractIdsForUnassignedContracts <- persistContracts(unassignedContracts)
+      batchesWithTargetTors <- EitherT.fromEither[FutureUnlessShutdown](
+        zipBatchesWithTimes(
+          unassignedContracts.batches,
+          unassignmentData.targetTimesOfRepair.unwrap,
+          "target",
+        )
+      )
       _ <- targetPersistentState.unwrap.reassignmentStore
         .completeReassignment(
           unassignmentData.payload.reassignmentId,
-          unassignmentData.targetTimeOfRepair.unwrap.timestamp,
+          repairTarget.unwrap.timestamp,
         )
         .toEitherT
 
-      _ <- persistAssignments(
-        unassignmentData.payload.contractsBatch.contractIdCounters,
-        unassignmentData.targetTimeOfRepair,
-      ).toEitherT
+      _ <- persistAssignments(batchesWithTargetTors).toEitherT
 
       _ <- EitherT.right(
         publishAssignmentEvent(
           unassignmentData.payload.unassignmentTs,
-          unassignmentData.map(_ => unassignedContracts),
+          batchesWithTargetTors,
           internalContractIdsForUnassignedContracts,
         )
       )
@@ -130,9 +134,28 @@ private final class ChangeAssignation(
       )
       internalContractIds <- persistContracts(changeBatch)
       newChanges = changes.map(_ => changeBatch)
-      _ <- persistUnassignAndAssign(newChanges).toEitherT
+      batchesWithSourceTors <- EitherT.fromEither[FutureUnlessShutdown](
+        zipBatchesWithTimes(
+          changeBatch.batches,
+          newChanges.sourceTimesOfRepair.unwrap,
+          "source",
+        )
+      )
+      batchesWithTargetTors <- EitherT.fromEither[FutureUnlessShutdown](
+        zipBatchesWithTimes(
+          changeBatch.batches,
+          newChanges.targetTimesOfRepair.unwrap,
+          "target",
+        )
+      )
+      _ <- persistUnassignAndAssign(batchesWithSourceTors, batchesWithTargetTors).toEitherT
       _ <- EitherT.right(
-        publishReassignmentEvents(repairSource.unwrap.timestamp, newChanges, internalContractIds)
+        publishReassignmentEvents(
+          repairSource.unwrap.timestamp,
+          batchesWithSourceTors,
+          batchesWithTargetTors,
+          internalContractIds,
+        )
       )
     } yield ()
   }
@@ -303,85 +326,73 @@ private final class ChangeAssignation(
   }
 
   private def persistAssignments(
-      contracts: Iterable[(LfContractId, ReassignmentCounter)],
-      timeOfRepair: Target[TimeOfRepair],
+      batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)]
   )(implicit
       traceContext: TraceContext
   ): CheckedT[FutureUnlessShutdown, String, ActiveContractStore.AcsWarning, Unit] =
     targetPersistentState.unwrap.activeContractStore
       .assignContracts(
-        contracts.map { case (cid, reassignmentCounter) =>
-          (
-            cid,
-            sourceLsid,
-            reassignmentCounter,
-            timeOfRepair.unwrap.toToc,
-          )
-        }.toSeq
+        batchesWithTargetTors.flatMap { case (batch, targetTor) =>
+          batch.contractIdCounters.map { case (cid, reassignmentCounter) =>
+            (cid, sourceLsid, reassignmentCounter, targetTor.toToc)
+          }
+        }
       )
       .mapAbort(e => s"Failed to mark contracts as assigned: $e")
 
   private def persistUnassignAndAssign(
-      changes: ChangeAssignation.Data[Changes]
+      batchesWithSourceTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
+      batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
   )(implicit
       traceContext: TraceContext
   ): CheckedT[FutureUnlessShutdown, String, ActiveContractStore.AcsWarning, Unit] = {
-    val contractIdCounters = changes.payload.batches.flatMap(_.contractIdCounters)
-
     val unassignF = sourcePersistentState.unwrap.activeContractStore
       .unassignContracts(
-        contractIdCounters.map { case (cid, reassignmentCounter) =>
-          (
-            cid,
-            targetLsid,
-            reassignmentCounter,
-            changes.sourceTimeOfRepair.unwrap.toToc,
-          )
+        batchesWithSourceTors.flatMap { case (batch, sourceTor) =>
+          batch.contractIdCounters.map { case (cid, reassignmentCounter) =>
+            (cid, targetLsid, reassignmentCounter, sourceTor.toToc)
+          }
         }
       )
       .mapAbort(e => s"Failed to mark contracts as unassigned: $e")
 
-    unassignF.flatMap(_ => persistAssignments(contractIdCounters, changes.targetTimeOfRepair))
+    unassignF.flatMap(_ => persistAssignments(batchesWithTargetTors))
   }
 
   private def publishAssignmentEvent(
       unassignmentTs: CantonTimestamp,
-      changes: ChangeAssignation.Data[Changes],
+      batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
       internalContractIds: Map[LfContractId, Long],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    val updates = assignment(unassignmentTs, changes, internalContractIds)
-
-    for {
-      _ <- FutureUnlessShutdown.outcomeF(
-        MonadUtil.sequentialTraverse(updates)(repairIndexer.offer(_))
-      )
-    } yield ()
+    val updates = assignment(unassignmentTs, batchesWithTargetTors, internalContractIds)
+    FutureUnlessShutdown.outcomeF(
+      MonadUtil.sequentialTraverse(updates)(repairIndexer.offer(_)).map(_ => ())
+    )
   }
 
   private def publishReassignmentEvents(
       unassignmentTs: CantonTimestamp,
-      changes: ChangeAssignation.Data[Changes],
+      batchesWithSourceTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
+      batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
       internalContractIds: Map[LfContractId, Long],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val updates =
-      unassignment(unassignmentTs, changes) ++
-        assignment(unassignmentTs, changes, internalContractIds)
-    for {
-      _ <- FutureUnlessShutdown.outcomeF(
-        MonadUtil.sequentialTraverse(updates)(repairIndexer.offer)
-      )
-    } yield ()
+      unassignment(unassignmentTs, batchesWithSourceTors) ++
+        assignment(unassignmentTs, batchesWithTargetTors, internalContractIds)
+    FutureUnlessShutdown.outcomeF(
+      MonadUtil.sequentialTraverse(updates)(repairIndexer.offer).map(_ => ())
+    )
   }
 
   private def unassignment(
       unassignmentTs: CantonTimestamp,
-      changes: ChangeAssignation.Data[Changes],
+      batchesWithSourceTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
   )(implicit
       traceContext: TraceContext
   ): Seq[RepairUpdate] =
-    changes.payload.batches.map { batch =>
+    batchesWithSourceTors.map { case (batch, sourceTor) =>
       val reassignmentId = ReassignmentId(
         sourceLsid,
         targetLsid,
@@ -407,22 +418,23 @@ private final class ChangeAssignation(
             assignmentExclusivity = None,
             reassignmentCounter = reassign.counter.v,
             nodeId = idx,
+            keyOpt = reassign.contract.contractKeyWithMaintainers,
           )
         }),
-        repairCounter = changes.sourceTimeOfRepair.unwrap.repairCounter,
-        recordTime = changes.sourceTimeOfRepair.unwrap.timestamp,
+        repairCounter = sourceTor.repairCounter,
+        recordTime = sourceTor.timestamp,
         synchronizerId = sourceLsid.unwrap,
       )
     }
 
   private def assignment(
       unassignmentTs: CantonTimestamp,
-      changes: ChangeAssignation.Data[Changes],
+      batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
       internalContractIds: Map[LfContractId, Long],
   )(implicit
       traceContext: TraceContext
   ): Seq[RepairUpdate] =
-    changes.payload.batches.map { case batch =>
+    batchesWithTargetTors.map { case (batch, targetTor) =>
       val reassignmentId = ReassignmentId(
         sourceLsid,
         targetLsid,
@@ -458,30 +470,40 @@ private final class ChangeAssignation(
             ),
           )
         }),
-        repairCounter = changes.targetTimeOfRepair.unwrap.repairCounter,
-        recordTime = changes.targetTimeOfRepair.unwrap.timestamp,
+        repairCounter = targetTor.repairCounter,
+        recordTime = targetTor.timestamp,
         synchronizerId = targetLsid.unwrap,
       )
     }
+
+  /** Pairs each batch with the time-of-repair it should use for its emitted [[Update]] (and ACS
+    * entries). Each batch consumes one [[TimeOfRepair]] — and therefore one
+    * [[com.digitalasset.canton.RepairCounter]] — so every emitted Update has its own counter.
+    */
+  private def zipBatchesWithTimes(
+      batches: Seq[ContractsReassignmentBatch],
+      timesOfRepair: Seq[TimeOfRepair],
+      side: String,
+  ): Either[String, Seq[(ContractsReassignmentBatch, TimeOfRepair)]] =
+    Either.cond(
+      timesOfRepair.sizeIs >= batches.size,
+      batches.zip(timesOfRepair),
+      s"Not enough $side repair counters: have ${timesOfRepair.size}, need at least ${batches.size}",
+    )
 }
 
 // TODO(i14540): this needs to be called by RepairService to commit the changes
 private[repair] object ChangeAssignation {
 
+  /** Carries the times-of-repair to use for each [[Update]] emitted by the change assignation flow.
+    * Each batch produced downstream consumes one [[TimeOfRepair]] from the corresponding sequence,
+    * so that every emitted Update gets its own [[com.digitalasset.canton.RepairCounter]].
+    */
   final case class Data[Payload](
       payload: Payload,
-      sourceTimeOfRepair: Source[TimeOfRepair],
-      targetTimeOfRepair: Target[TimeOfRepair],
+      sourceTimesOfRepair: Source[Seq[TimeOfRepair]],
+      targetTimesOfRepair: Target[Seq[TimeOfRepair]],
   ) {
-    def incrementRepairCounter: Either[String, Data[Payload]] =
-      for {
-        incrementedSourceToc <- sourceTimeOfRepair.unwrap.incrementRepairCounter
-        incrementedTargetToc <- targetTimeOfRepair.unwrap.incrementRepairCounter
-      } yield copy(
-        sourceTimeOfRepair = Source(incrementedSourceToc),
-        targetTimeOfRepair = Target(incrementedTargetToc),
-      )
-
     def map[T](f: Payload => T): Data[T] = this.copy(payload = f(payload))
   }
 
@@ -490,15 +512,15 @@ private[repair] object ChangeAssignation {
     implicit val dataFunctorInstance: Functor[Data] = new Functor[Data] {
       // Define the map function for Data
       override def map[A, B](fa: Data[A])(f: A => B): Data[B] =
-        Data(f(fa.payload), fa.sourceTimeOfRepair, fa.targetTimeOfRepair)
+        Data(f(fa.payload), fa.sourceTimesOfRepair, fa.targetTimesOfRepair)
     }
 
     def from[Payload](payload: Payload, changeAssignation: ChangeAssignation): Data[Payload] =
       ChangeAssignation
         .Data(
           payload,
-          changeAssignation.repairSource.map(_.firstTimeOfRepair),
-          changeAssignation.repairTarget.map(_.firstTimeOfRepair),
+          changeAssignation.repairSource.map(_.timesOfRepair),
+          changeAssignation.repairTarget.map(_.timesOfRepair),
         )
   }
 

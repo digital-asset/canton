@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.showInterpolator
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
@@ -41,6 +40,7 @@ import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{ErrorUtil, MaxBytesToDecompress, Thereafter}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicReference
@@ -375,7 +375,7 @@ object SequencedEventStore {
 
   /** Base type for wrapping all not yet stored (no counter) and stored events (have counter)
     */
-  sealed trait ProcessingSequencedEvent[+Env <: Envelope[?]]
+  sealed trait ProcessingSequencedEvent[+B <: GenBatch[?]]
       extends HasTraceContext
       with PrettyPrinting
       with Product
@@ -384,33 +384,35 @@ object SequencedEventStore {
 
     def timestamp: CantonTimestamp
 
-    def underlying: Option[SignedContent[SequencedEvent[Env]]]
+    def underlying: Option[SignedContent[SequencedEvent[B]]]
   }
 
   /** A wrapper for not yet stored events (no counter) with an additional trace context.
     */
-  final case class SequencedEventWithTraceContext[+Env <: Envelope[?]](
-      signedEvent: SignedContent[SequencedEvent[Env]]
+  final case class SequencedEventWithTraceContext[+B <: GenBatch[?]](
+      signedEvent: SignedContent[SequencedEvent[B]]
   )(
       override val traceContext: TraceContext
-  ) extends ProcessingSequencedEvent[Env] {
+  ) extends ProcessingSequencedEvent[B] {
     override def previousTimestamp: Option[CantonTimestamp] = signedEvent.content.previousTimestamp
     override def timestamp: CantonTimestamp = signedEvent.content.timestamp
-    override def underlying: Option[SignedContent[SequencedEvent[Env]]] = Some(signedEvent)
+    override def underlying: Option[SignedContent[SequencedEvent[B]]] = Some(
+      signedEvent
+    )
     override protected def pretty: Pretty[SequencedEventWithTraceContext.this.type] = prettyOfClass(
       param("sequencedEvent", _.signedEvent),
       param("traceContext", _.traceContext),
     )
 
-    def asOrdinaryEvent(counter: SequencerCounter): OrdinarySequencedEvent[Env] =
+    def asOrdinaryEvent(counter: SequencerCounter): OrdinarySequencedEvent[B] =
       OrdinarySequencedEvent(counter, signedEvent)(traceContext)
   }
 
   /** Encapsulates an event stored in the SequencedEventStore (has a counter assigned), and the
     * event could have been marked as "ignored".
     */
-  sealed trait PossiblyIgnoredSequencedEvent[+Env <: Envelope[?]]
-      extends ProcessingSequencedEvent[Env] {
+  sealed trait PossiblyIgnoredSequencedEvent[+B <: GenBatch[?]]
+      extends ProcessingSequencedEvent[B] {
 
     def previousTimestamp: Option[CantonTimestamp]
 
@@ -424,14 +426,14 @@ object SequencedEventStore {
 
     def isIgnored: Boolean
 
-    def underlying: Option[SignedContent[SequencedEvent[Env]]]
+    def underlying: Option[SignedContent[SequencedEvent[B]]]
 
-    def asIgnoredEvent: IgnoredSequencedEvent[Env]
+    def asIgnoredEvent: IgnoredSequencedEvent[B]
 
-    def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env]
+    def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[B]
 
-    def asSequencedSerializedEvent: SequencedEventWithTraceContext[Env] =
-      SequencedEventWithTraceContext[Env](
+    def asSequencedSerializedEvent: SequencedEventWithTraceContext[B] =
+      SequencedEventWithTraceContext[B](
         underlying.getOrElse(
           // TODO(#25162): "Future" ignored events have no underlying event and are no longer supported,
           //  need to refactor this to only allow ignoring past events, that always have the underlying event
@@ -464,13 +466,13 @@ object SequencedEventStore {
     * `ie` is inserted as a placeholder for an event that has not been received, the underlying
     * event `ie.underlying` is left empty.
     */
-  final case class IgnoredSequencedEvent[+Env <: Envelope[?]](
+  final case class IgnoredSequencedEvent[+B <: GenBatch[?]](
       override val timestamp: CantonTimestamp,
       override val counter: SequencerCounter,
-      override val underlying: Option[SignedContent[SequencedEvent[Env]]],
+      override val underlying: Option[SignedContent[SequencedEvent[B]]],
       override val previousTimestamp: Option[CantonTimestamp] = None,
   )(override val traceContext: TraceContext)
-      extends PossiblyIgnoredSequencedEvent[Env] {
+      extends PossiblyIgnoredSequencedEvent[B] {
 
     override def underlyingEventBytes: Array[Byte] = Array.empty
 
@@ -481,14 +483,14 @@ object SequencedEventStore {
 
     override def isIgnored: Boolean = true
 
-    override def asIgnoredEvent: IgnoredSequencedEvent[Env] = this
+    override def asIgnoredEvent: IgnoredSequencedEvent[B] = this
 
-    override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env] = underlying match {
+    override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[B] = underlying match {
       case Some(event) => OrdinarySequencedEvent(counter, event)(traceContext)
       case None => this
     }
 
-    override protected def pretty: Pretty[IgnoredSequencedEvent[Envelope[?]]] =
+    override protected def pretty: Pretty[IgnoredSequencedEvent[GenBatch[?]]] =
       prettyOfClass(
         param("timestamp", _.timestamp),
         param("counter", _.counter),
@@ -499,30 +501,37 @@ object SequencedEventStore {
   object IgnoredSequencedEvent {
     @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
     def openEnvelopes(
-        event: IgnoredSequencedEvent[ClosedEnvelope]
+        event: IgnoredSequencedEvent[Batch[ClosedEnvelope]]
     )(
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
-    ): WithOpeningErrors[IgnoredSequencedEvent[DefaultOpenEnvelope]] =
+    ): WithOpeningErrors[IgnoredSequencedEvent[Batch[DefaultOpenEnvelope]]] =
       event.underlying match {
         case Some(signedEvent) =>
           SignedContent
             .openEnvelopes(signedEvent)(protocolVersion, hashOps)
-            .map(evt => event.copy(underlying = Some(evt))(event.traceContext))
+            .map(evt =>
+              IgnoredSequencedEvent(
+                event.timestamp,
+                event.counter,
+                Some(evt),
+                event.previousTimestamp,
+              )(event.traceContext)
+            )
         case None =>
-          NoOpeningErrors(event.asInstanceOf[IgnoredSequencedEvent[DefaultOpenEnvelope]])
+          NoOpeningErrors(event.asInstanceOf[IgnoredSequencedEvent[Batch[DefaultOpenEnvelope]]])
       }
   }
 
   /** Encapsulates an event received by the sequencer client that has been validated and stored. Has
     * a counter assigned by this store and contains a trace context.
     */
-  final case class OrdinarySequencedEvent[+Env <: Envelope[?]](
+  final case class OrdinarySequencedEvent[+B <: GenBatch[?]](
       override val counter: SequencerCounter,
-      signedEvent: SignedContent[SequencedEvent[Env]],
+      signedEvent: SignedContent[SequencedEvent[B]],
   )(
       override val traceContext: TraceContext
-  ) extends PossiblyIgnoredSequencedEvent[Env] {
+  ) extends PossiblyIgnoredSequencedEvent[B] {
 
     override def previousTimestamp: Option[CantonTimestamp] = signedEvent.content.previousTimestamp
 
@@ -534,26 +543,28 @@ object SequencedEventStore {
 
     override def isIgnored: Boolean = false
 
-    override def underlying: Some[SignedContent[SequencedEvent[Env]]] = Some(signedEvent)
+    override def underlying: Some[SignedContent[SequencedEvent[B]]] = Some(
+      signedEvent
+    )
 
-    override def asIgnoredEvent: IgnoredSequencedEvent[Env] =
+    override def asIgnoredEvent: IgnoredSequencedEvent[B] =
       IgnoredSequencedEvent(timestamp, counter, Some(signedEvent))(traceContext)
 
-    override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env] = this
+    override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[B] = this
 
-    override protected def pretty: Pretty[OrdinarySequencedEvent[Envelope[?]]] = prettyOfClass(
+    override protected def pretty: Pretty[OrdinarySequencedEvent[GenBatch[?]]] = prettyOfClass(
       param("signedEvent", _.signedEvent)
     )
   }
 
   object OrdinarySequencedEvent {
-    def openEnvelopes(event: OrdinarySequencedEvent[ClosedEnvelope])(
+    def openEnvelopes(event: OrdinarySequencedEvent[Batch[ClosedEnvelope]])(
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
-    ): WithOpeningErrors[OrdinarySequencedEvent[DefaultOpenEnvelope]] =
+    ): WithOpeningErrors[OrdinarySequencedEvent[Batch[DefaultOpenEnvelope]]] =
       SignedContent
         .openEnvelopes(event.signedEvent)(protocolVersion, hashOps)
-        .map(evt => event.copy(signedEvent = evt)(event.traceContext))
+        .map(evt => OrdinarySequencedEvent(event.counter, evt)(event.traceContext))
   }
 
   object PossiblyIgnoredSequencedEvent {
@@ -613,14 +624,14 @@ object SequencedEventStore {
       } yield possiblyIgnoredSequencedEvent
     }
 
-    def openEnvelopes(event: PossiblyIgnoredSequencedEvent[ClosedEnvelope])(
+    def openEnvelopes(event: PossiblyIgnoredSequencedEvent[Batch[ClosedEnvelope]])(
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
-    ): WithOpeningErrors[PossiblyIgnoredSequencedEvent[OpenEnvelope[ProtocolMessage]]] =
+    ): WithOpeningErrors[PossiblyIgnoredSequencedEvent[Batch[OpenEnvelope[ProtocolMessage]]]] =
       event match {
-        case evt: OrdinarySequencedEvent[ClosedEnvelope] =>
+        case evt: OrdinarySequencedEvent[Batch[ClosedEnvelope]] =>
           OrdinarySequencedEvent.openEnvelopes(evt)(protocolVersion, hashOps)
-        case evt: IgnoredSequencedEvent[ClosedEnvelope] =>
+        case evt: IgnoredSequencedEvent[Batch[ClosedEnvelope]] =>
           IgnoredSequencedEvent.openEnvelopes(evt)(protocolVersion, hashOps)
       }
   }

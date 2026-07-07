@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.manual.topology
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
@@ -28,6 +27,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.{BaseTest, ScalaFuturesWithPatience, config}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalactic.source.Position
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}

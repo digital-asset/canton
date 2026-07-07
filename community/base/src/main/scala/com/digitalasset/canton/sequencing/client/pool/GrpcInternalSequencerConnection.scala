@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -38,6 +37,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, Mutex, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 
 import java.util.concurrent.atomic.AtomicReference
@@ -66,7 +66,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
   private val connection: GrpcConnection =
     GrpcConnection(config, params, metrics, timeouts, loggerFactory)
 
-  private val connectionMetricsContext: MetricsContext = metricsContext.withExtraLabels(
+  private implicit val connectionMetricsContext: MetricsContext = metricsContext.withExtraLabels(
     "connection" -> connection.config.name
   )
   private val stub: SequencerConnectionStub =

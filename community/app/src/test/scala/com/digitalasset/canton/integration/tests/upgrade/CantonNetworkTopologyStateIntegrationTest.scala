@@ -21,6 +21,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.NodeLoggingUtil
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage}
 import com.digitalasset.canton.store.IndexedTopologyStoreId
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.{InitialTopologySnapshotValidator, SequencedTime}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
@@ -39,6 +40,7 @@ import eu.rekawek.toxiproxy.model.ToxicDirection
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.*
 
 trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest {
@@ -48,24 +50,28 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
       txs: GenericStoredTopologyTransactions,
       cleanupTopologyState: Boolean,
       timeout: FiniteDuration,
+      physicalSynchronizerIdOverride: Option[PhysicalSynchronizerId] = None,
   )(implicit
       env: TestConsoleEnvironment
   ): (TopologyStore[TopologyStoreId], InitialTopologySnapshotValidator) = {
     import env.*
 
-    val synchronizerId = txs
-      .collectOfMapping[SynchronizerParametersState]
-      .result
-      .headOption
-      .value
-      .mapping
-      .synchronizerId
-    val static = StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion).toInternal
-    val storeId = SynchronizerStore(synchronizerId.toPhysical)
+    val physicalSynchronizerId = physicalSynchronizerIdOverride.getOrElse {
+      txs
+        .collectOfMapping[SynchronizerParametersState]
+        .result
+        .lastOption
+        .value
+        .mapping
+        .synchronizerId
+        .toPhysical
+    }
+    val static = StaticSynchronizerParameters.defaults(testedProtocolVersion).toInternal
+    val storeId = SynchronizerStore(physicalSynchronizerId)
     val store = participant1.underlying.valueOrFail("is there").storage match {
       case _: MemoryStorage =>
         new InMemoryTopologyStore[TopologyStoreId](
-          SynchronizerStore(synchronizerId.toPhysical),
+          SynchronizerStore(physicalSynchronizerId),
           predecessor = None,
           testedProtocolVersion,
           loggerFactory,
@@ -90,6 +96,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
       TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
       Some(static),
       timeouts,
+      futureSupervisor = env.environment.futureSupervisor,
       loggerFactory,
       cleanupTopologySnapshot = cleanupTopologyState,
     )
@@ -115,7 +122,7 @@ final class CantonNetworkTopologyStateIntegrationTest
 
   private val enablePostgres = true
   private val toxiProxyLatency = 0 // in ms, 0 to disable
-  private val timeout = 30.seconds
+  private val timeout = if (sys.env.contains("CI")) 5.minutes else 30.seconds
 
   private val participant1Proxy = "participant1-to-postgres"
   // using toxi-proxy to simulate database latency
@@ -166,8 +173,9 @@ final class CantonNetworkTopologyStateIntegrationTest
           participant1.topology.stores
             .create_temporary_topology_store("test", testedProtocolVersion)
 
-        participant1.topology.transactions
-          .import_topology_snapshot(genesisBytes, testTempStoreId)
+        // The genesis fixture is in the V1 bytestring format, so we use the deprecated import_topology_snapshot here.
+        (participant1.topology.transactions
+          .import_topology_snapshot(genesisBytes, testTempStoreId): @nowarn("cat=deprecation"))
 
         val importedState = participant1.topology.transactions
           .list(testTempStoreId, timeQuery = TimeQuery.Range(None, None), operation = None)

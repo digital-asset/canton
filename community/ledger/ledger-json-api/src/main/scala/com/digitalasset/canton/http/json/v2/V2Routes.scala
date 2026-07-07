@@ -25,6 +25,7 @@ import org.apache.pekko.util.ByteString
 import sttp.model.{Header, StatusCode, StatusText}
 import sttp.tapir.model.{ConnectionInfo, ServerRequest}
 import sttp.tapir.server.interceptor.RequestInterceptor.RequestResultTransform
+import sttp.tapir.server.interceptor.decodefailure.DefaultDecodeFailureHandler.FailureMessages
 import sttp.tapir.server.interceptor.{RequestInterceptor, RequestResult}
 import sttp.tapir.server.pekkohttp.{PekkoHttpServerInterpreter, PekkoHttpServerOptions}
 
@@ -311,7 +312,7 @@ class RequestInterceptors(
           )
           Future.successful(result)
         case RequestResult.Failure(fails) =>
-          val error = fails.map(_.failure.toString).mkString("; ")
+          val error = fails.map(FailureMessages.failureMessage).mkString("; ")
           auditLogger.logResponseStatus(
             callMetadata,
             ResponseKind.MinorError,

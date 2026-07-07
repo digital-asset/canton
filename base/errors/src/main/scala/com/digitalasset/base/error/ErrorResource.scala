@@ -20,6 +20,7 @@ object ErrorResource {
   lazy val ContractArg: ErrorResource = ErrorResource("CONTRACT_ARG")
   lazy val CryptoValue: ErrorResource = ErrorResource("CRYPTO_VALUE")
   lazy val TransactionId: ErrorResource = ErrorResource("TRANSACTION_ID")
+  lazy val TransactionHash: ErrorResource = ErrorResource("TRANSACTION_HASH")
   lazy val UpdateId: ErrorResource = ErrorResource("UPDATE_ID")
   lazy val DalfPackage: ErrorResource = ErrorResource("PACKAGE")
   lazy val TemplateId: ErrorResource = ErrorResource("TEMPLATE_ID")
@@ -34,6 +35,8 @@ object ErrorResource {
   lazy val ExceptionValue: ErrorResource = ErrorResource("EXCEPTION_VALUE")
   lazy val ExceptionType: ErrorResource = ErrorResource("EXCEPTION_TYPE")
   lazy val ExceptionText: ErrorResource = ErrorResource("EXCEPTION_TEXT")
+  lazy val ExternalCallExtensionId: ErrorResource = ErrorResource("EXTERNAL_CALL_EXTENSION_ID")
+  lazy val ExternalCallFunctionId: ErrorResource = ErrorResource("EXTERNAL_CALL_FUNCTION_ID")
   lazy val DevErrorType: ErrorResource = ErrorResource("DEV_ERROR_TYPE")
   lazy val SynchronizerId: ErrorResource = ErrorResource("SYNCHRONIZER_ID")
   lazy val SynchronizerAlias: ErrorResource = ErrorResource("SYNCHRONIZER_ALIAS")
@@ -55,6 +58,8 @@ object ErrorResource {
     ExceptionType,
     ExceptionValue,
     ExpectedType,
+    ExternalCallExtensionId,
+    ExternalCallFunctionId,
     FieldIndex,
     IdentityProviderConfig,
     InterfaceId,
@@ -66,6 +71,7 @@ object ErrorResource {
     SynchronizerId,
     TemplateId,
     TransactionId,
+    TransactionHash,
     UpdateId,
     User,
   )

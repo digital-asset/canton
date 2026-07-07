@@ -168,6 +168,7 @@ object HouseRules extends AutoPlugin {
       Wart.IterableOps,
       Wart.ListUnapplySeq,
       Wart.ObjectThrowable,
+      Wart.PartialFunctionApply,
       Wart.Null,
       Wart.Var,
     )

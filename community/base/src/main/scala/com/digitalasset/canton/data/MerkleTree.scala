@@ -116,6 +116,7 @@ trait MerkleTree[+A] extends Product with Serializable with PrettyPrinting {
   }
 
   /** Internal function that effectively performs the blinding. */
+  @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
   private[data] final def doBlind(
       optimizedBlindingPolicy: PartialFunction[RootHash, BlindingCommand]
   ): MerkleTree[A] =

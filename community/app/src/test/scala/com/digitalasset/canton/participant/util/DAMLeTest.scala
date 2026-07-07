@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
@@ -33,7 +34,6 @@ import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine
 import org.scalatest.wordspec.AsyncWordSpec
 
 class DAMLeTest
@@ -74,7 +74,7 @@ class DAMLeTest
         validationPhaseLogging = EngineLoggingConfig(),
         loggerFactory = loggerFactory,
       ),
-      contractStateMode = NextGenContractStateMachine.Mode.default,
+      interpretationConfig = LfInterpretationConfig.Default,
       loggerFactory = loggerFactory,
     )
 
@@ -101,6 +101,7 @@ class DAMLeTest
           packageResolution = Map.empty,
           expectFailure = false,
           getEngineAbortStatus = getEngineAbortStatus,
+          externalCallReplayData = () => DAMLe.ExternalCallReplayData.empty,
         )
 
     def createCycleContract(): (LfNodeCreate, LfHash, GenContractInstance) = {

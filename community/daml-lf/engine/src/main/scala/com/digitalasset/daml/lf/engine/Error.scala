@@ -60,11 +60,11 @@ object Error {
     final case class AllowedLanguageVersion(
         packageId: Ref.PackageId,
         languageVersion: language.LanguageVersion,
-        allowedLanguageVersions: VersionRange[language.LanguageVersion],
+        allowedLanguageVersions: Seq[language.LanguageVersion],
     ) extends Error {
       def message: String =
         s"Disallowed language version in package $packageId: " +
-          s"Expected version range is ${allowedLanguageVersions.pretty} but got ${languageVersion.pretty}"
+          s"Expected version range is ${allowedLanguageVersions.map(_.pretty)} but got ${languageVersion.pretty}"
     }
 
     final case class DarSelfConsistency(
@@ -109,7 +109,9 @@ object Error {
         location: String,
         override val message: String,
         cause: Option[Throwable],
-    )(implicit loggingContext: ErrorLoggingContext) extends Error with InternalError {
+    )(implicit loggingContext: ErrorLoggingContext)
+        extends Error
+        with InternalError {
       protected override def logError(): Unit = {
         loggingContext.error(s"LF internal error in $location: $message")
         cause.foreach(err => loggingContext.error(s"root cause: ${err.getMessage}", err))
@@ -188,7 +190,7 @@ object Error {
         key: Value,
     ) extends Error {
       override def message: String =
-        s"Template of prefetched contract key does not define a key: ${templateId} ($key)"
+        s"Template of prefetched contract key does not define a key: $templateId ($key)"
     }
 
     final case class ContractIdInContractKey(key: Value) extends Error {

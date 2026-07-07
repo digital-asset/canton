@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.pruning
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.protocol.messages.CommitmentPeriod
+import com.digitalasset.canton.protocol.messages.LegacyCommitmentPeriod
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
@@ -141,10 +141,10 @@ class SortedReconciliationIntervalsProviderTest
         provider.computeReconciliationIntervalsCovering(fromEpoch(8), fromEpoch(40)).futureValueUS
       periods.toSeq shouldBe
         Seq(
-          CommitmentPeriod.create(fromEpochSecond(20), fromEpochSecond(40)),
-          CommitmentPeriod.create(fromEpochSecond(12), fromEpochSecond(20)),
-          CommitmentPeriod.create(fromEpochSecond(10), fromEpochSecond(12)),
-          CommitmentPeriod.create(fromEpochSecond(8), fromEpochSecond(10)),
+          LegacyCommitmentPeriod.create(fromEpochSecond(20), fromEpochSecond(40)),
+          LegacyCommitmentPeriod.create(fromEpochSecond(12), fromEpochSecond(20)),
+          LegacyCommitmentPeriod.create(fromEpochSecond(10), fromEpochSecond(12)),
+          LegacyCommitmentPeriod.create(fromEpochSecond(8), fromEpochSecond(10)),
         ).map(_.value)
     }
 

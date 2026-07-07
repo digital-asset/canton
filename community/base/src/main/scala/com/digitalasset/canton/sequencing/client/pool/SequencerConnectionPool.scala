@@ -6,7 +6,8 @@ package com.digitalasset.canton.sequencing.client.pool
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
+import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
@@ -26,13 +27,15 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionConfig
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.Materializer
 
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
 
 /** Pool of sequencer connections.
   *
@@ -119,24 +122,32 @@ trait SequencerConnectionPool extends FlagCloseable with NamedLogging {
     *   - the sequencer IDs represented are picked at random at every call
     *   - it may contain less than the requested number of connections if the current pool contents
     *     cannot satisfy the requirements
-    *   - it excludes connections for sequencer IDs provided in `exclusions`
+    *   - it excludes connections for sequencer IDs provided in `excluded`
+    *   - it excludes connections for sequencer IDs NOT provided in `acceptableO`, if defined
     *   - when the pool contains multiple connections for the same sequencer ID, the connection
     *     returned for that sequencer ID is chosen via round-robin
     */
   def getConnections(
       requester: String,
       nb: PositiveInt,
-      exclusions: Set[SequencerId],
+      excluded: Set[SequencerId],
+      acceptableO: Option[Set[SequencerId]],
   )(implicit traceContext: TraceContext): Set[SequencerConnection]
 
   /** Obtain a single connection for each different sequencer ID present in the pool.
     */
-  def getOneConnectionPerSequencer(requester: String)(implicit
-      traceContext: TraceContext
+  def getOneConnectionPerSequencer(requester: String, acceptableO: Option[Set[SequencerId]])(
+      implicit traceContext: TraceContext
   ): Map[SequencerId, SequencerConnection]
 
   /** Obtain all the connections present in the pool. */
-  def getAllConnections()(implicit traceContext: TraceContext): Seq[SequencerConnection]
+  def getAllConnections: Seq[SequencerConnection]
+
+  /** Obtain all the sequencer IDs present in the pool, associated to their sequencer alias */
+  def getAllSequencerIds(implicit traceContext: TraceContext): Map[SequencerAlias, SequencerId]
+
+  /** The context for the pool metrics */
+  def metricsContext: MetricsContext
 
   /** Determine whether the connection pool can still reach the given threshold, ignoring the
     * `ignored` connections and considering an additional `extraUndecided` number of undecided
@@ -360,4 +371,30 @@ trait SequencerConnectionPoolFactory {
       materializer: Materializer,
       traceContext: TraceContext,
   ): Either[SequencerConnectionPoolError, SequencerConnectionPool]
+}
+
+trait HasAcceptableSequencers { this: NamedLogging =>
+
+  /** Determine the set of acceptable sequencers based on the provided topology snapshot. This can
+    * be used when requesting connections from the connection pool.
+    *
+    * If the provided topology snapshot does not have a `SequencerGroup`, we return None, which will
+    * impose no restriction on the allowed sequencers. This can happen e.g. for downloading the
+    * initial topology snapshot when a node bootstraps, or during LSU.
+    */
+  def getAcceptableSequencers(snapshot: TopologySnapshot)(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[Option[Set[SequencerId]]] =
+    for {
+      sequencerGroupO <- snapshot.sequencerGroup()
+    } yield {
+      if (sequencerGroupO.isEmpty)
+        logger.debug(
+          s"Topology snapshot at ${snapshot.timestamp} does not have a SequencerGroup -- allowing connections to all sequencers"
+        )
+
+      sequencerGroupO.map(_.active.toSet)
+    }
+
 }

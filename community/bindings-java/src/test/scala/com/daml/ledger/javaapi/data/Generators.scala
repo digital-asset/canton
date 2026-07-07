@@ -688,10 +688,27 @@ object Generators {
   def getLedgerEndResponseGen: Gen[v2.StateServiceOuterClass.GetLedgerEndResponse] =
     for {
       offset <- Gen.option(Arbitrary.arbLong.arbitrary)
+      times <- Gen.nonEmptyMap(
+        Gen.identifier.flatMap(synch => Gen.calendar.map(cal => synch -> cal))
+      )
     } yield {
       val builder = v2.StateServiceOuterClass.GetLedgerEndResponse
         .newBuilder()
       offset.foreach(builder.setOffset)
+      times.foreach(x =>
+        builder.addSynchronizerTimes(
+          com.daml.ledger.api.v2.OffsetCheckpointOuterClass.SynchronizerTime
+            .newBuilder()
+            .setSynchronizerId(x._1)
+            .setRecordTime(
+              com.google.protobuf.Timestamp
+                .newBuilder()
+                .setSeconds(x._2.getTimeInMillis / 1000)
+                .build()
+            )
+            .build()
+        )
+      )
       builder.build()
     }
 
@@ -800,6 +817,20 @@ object Generators {
       val builder = Request
         .newBuilder()
         .setUserId(userId)
+        .addAllParties(parties.asJava)
+      beginExclusive.foreach(builder.setBeginExclusive)
+      builder.build()
+    }
+  }
+
+  def getCompletionsRequestGen: Gen[v2.CommandCompletionServiceOuterClass.GetCompletionsRequest] = {
+    import v2.CommandCompletionServiceOuterClass.GetCompletionsRequest as Request
+    for {
+      parties <- Gen.listOf(Arbitrary.arbString.arbitrary)
+      beginExclusive <- Gen.option(Arbitrary.arbLong.arbitrary)
+    } yield {
+      val builder = Request
+        .newBuilder()
         .addAllParties(parties.asJava)
       beginExclusive.foreach(builder.setBeginExclusive)
       builder.build()
@@ -941,7 +972,7 @@ object Generators {
       synchronizerId <- Arbitrary.arbString.arbitrary
       traceContext <- Gen.const(Utils.newProtoTraceContext("parent", "state"))
       recordTime <- instantGen
-      extendedTransactionHash <- byteStringGen
+      transactionHash <- byteStringGen
     } yield Transaction
       .newBuilder()
       .setUpdateId(updateId)
@@ -953,13 +984,14 @@ object Generators {
       .setSynchronizerId(synchronizerId)
       .setTraceContext(traceContext)
       .setRecordTime(Utils.instantToProto(recordTime))
-      .setExternalTransactionHash(extendedTransactionHash)
+      .setExternalTransactionHash(transactionHash)
+      .setTransactionHash(transactionHash)
       .build()
   }
 
   def transactionGenLegacy: Gen[v2.TransactionOuterClass.Transaction] =
     transactionGen.map { transaction =>
-      transaction.toBuilder.clearExternalTransactionHash().build()
+      transaction.toBuilder.clearExternalTransactionHash().clearTransactionHash().build()
     }
 
   def transactionGenFilteredEvents: Gen[v2.TransactionOuterClass.Transaction] =
@@ -1036,6 +1068,18 @@ object Generators {
     } yield Request
       .newBuilder()
       .setOffset(offset)
+      .setUpdateFormat(updateFormat)
+      .build()
+  }
+
+  def getUpdateByHashRequestGen: Gen[v2.UpdateServiceOuterClass.GetUpdateByHashRequest] = {
+    import v2.UpdateServiceOuterClass.GetUpdateByHashRequest as Request
+    for {
+      hashBytes <- Gen.listOf(Arbitrary.arbByte.arbitrary).map(_.toArray)
+      updateFormat <- updateFormatGen
+    } yield Request
+      .newBuilder()
+      .setTransactionHash(ByteString.copyFrom(hashBytes))
       .setUpdateFormat(updateFormat)
       .build()
   }
@@ -1329,10 +1373,12 @@ object Generators {
     for {
       templateId <- identifierGen
       contractKey <- valueGen
+      limit <- Gen.posNum[Int]
     } yield CommandsOuterClass.PrefetchContractKey
       .newBuilder()
       .setTemplateId(templateId)
       .setContractKey(contractKey)
+      .setLimit(limit)
       .build()
 
   val eventFormatGen: Gen[TransactionFilterOuterClass.EventFormat] =

@@ -28,7 +28,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     identity shouldBe None
-    end shouldBe ParameterStorageBackend.LedgerEnd.beforeBegin
+    end shouldBe LedgerEnd.beforeBegin
     parties shouldBe empty
     stringInterningEntries shouldBe empty
   }
@@ -76,6 +76,8 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       dtosWitnessedExercised(event_offset = 8L, event_sequential_id = 7L),
       // 9: witnessed non-consuming exercise
       dtosWitnessedExercised(event_offset = 9L, event_sequential_id = 8L, consuming = false),
+      // 10: acs commitment
+      Seq(dtoAcsCommitment(offset = offset(10), eventSequentialId = 9L)),
       // String interning
       Seq(DbDto.StringInterningDto(internalId = 10, externalString = "d|x:abc")),
     ).flatten
@@ -120,6 +122,11 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
         )
 
     def parties = executeSql(backend.party.knownParties(None, None, 10))
+
+    def acsCommitments = executeSql(
+      backend.event
+        .fetchAcsCommitments(IdRange(1L, 10L), someSynchronizerId, descendingOrder = false)
+    )
 
     def stringInterningEntries = executeSql(
       backend.stringInterning.loadStringInterningEntries(0, 1000)
@@ -185,10 +192,11 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     // verify queries indeed return something
     identity should not be None
-    end should not be ParameterStorageBackend.LedgerEnd.beforeBegin
+    end should not be LedgerEnd.beforeBegin
     events.size shouldBe 7
     parties should not be empty
     stringInterningEntries should not be empty
+    acsCommitments should not be empty
     activateStakeholderIds should not be empty
     activateWitnessesIds should not be empty
     deactivateStakeholderIds should not be empty
@@ -200,7 +208,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     // Check the contents (queries that do not depend on ledger end)
     identity shouldBe None
-    end shouldBe ParameterStorageBackend.LedgerEnd.beforeBegin
+    end shouldBe LedgerEnd.beforeBegin
     events shouldBe empty
 
     // Check the contents (queries that don't read beyond ledger end)
@@ -208,6 +216,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     parties shouldBe empty
     stringInterningEntries shouldBe empty
+    acsCommitments shouldBe empty
     activateStakeholderIds shouldBe empty
     activateWitnessesIds shouldBe empty
     deactivateStakeholderIds shouldBe empty

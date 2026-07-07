@@ -25,9 +25,19 @@ trait SessionSigningKeysLifecycleIntegrationTest
     with SharedEnvironment
     with KmsCryptoIntegrationTestBase {
 
-  private val sessionSigningKeysConfig = SessionSigningKeysConfig.short
+  /** Short test-only configuration: durations are small enough to trigger key rotation and validity
+    * edge cases.
+    */
+  private val sessionSigningKeysConfig: SessionSigningKeysConfig = SessionSigningKeysConfig(
+    enabled = true,
+    keyValidityDuration = config.PositiveFiniteDuration.ofSeconds(10),
+    toleranceShiftDuration = config.NonNegativeFiniteDuration.ofSeconds(2),
+    cutOffDuration = config.NonNegativeFiniteDuration.ofSeconds(2),
+    keyEvictionPeriod = config.PositiveFiniteDuration.ofMinutes(1),
+    disableBoundChecks = true,
+  )
   private val shortDuration = config.NonNegativeFiniteDuration.tryFromDuration(
-    SessionSigningKeysConfig.short.keyValidityDuration.duration.div(2.0)
+    sessionSigningKeysConfig.keyValidityDuration.duration.div(2.0)
   )
 
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
@@ -78,7 +88,10 @@ trait SessionSigningKeysLifecycleIntegrationTest
       // record initial metrics to establish a baseline, as a fallback to the long-term key
       // may have occurred during bootstrap.
       val participantKmsMetrics = Seq(participant1, participant2).map(
-        _.underlying.value.metrics.kmsMetrics.sessionSigningKeysFallback.valuesWithContext
+        _.underlying.value.metrics.cryptoMetrics.kmsMetricsO
+          .valueOrFail("no KMS metrics")
+          .sessionSigningKeysFallback
+          .valuesWithContext
       )
 
       env.nodes.local.foreach { node =>
@@ -100,7 +113,10 @@ trait SessionSigningKeysLifecycleIntegrationTest
       // we expect that no fallback has been triggered for the ping requests and that
       // session signing keys have been used and rotated successfully.
       Seq(participant1, participant2).map(
-        _.underlying.value.metrics.kmsMetrics.sessionSigningKeysFallback.valuesWithContext
+        _.underlying.value.metrics.cryptoMetrics.kmsMetricsO
+          .valueOrFail("no KMS metrics")
+          .sessionSigningKeysFallback
+          .valuesWithContext
       ) shouldBe participantKmsMetrics
     }
 }

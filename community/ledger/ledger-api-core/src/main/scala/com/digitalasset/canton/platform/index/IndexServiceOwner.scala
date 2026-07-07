@@ -5,12 +5,11 @@ package com.digitalasset.canton.platform.index
 
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.resources.ProgramResource.StartupException
-import com.daml.timer.RetryStrategy
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.error.IndexErrors.IndexDbException
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasSynchronizeWithClosing}
 import com.digitalasset.canton.logging
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
@@ -18,6 +17,7 @@ import com.digitalasset.canton.logging.{
   LoggingContextWithTrace,
   NamedLoggerFactory,
   NamedLogging,
+  TracedLogger,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InMemoryState
@@ -37,13 +37,10 @@ import com.digitalasset.canton.platform.store.dao.{
   LedgerReadDao,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.platform.store.{
-  DbSupport,
-  LedgerApiContractStore,
-  PruningOffsetService,
-}
+import com.digitalasset.canton.platform.store.{DbSupport, LedgerApiContractStore}
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.retry
 import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.Scheduler
@@ -73,14 +70,13 @@ final class IndexServiceOwner(
     queryExecutionContext: ExecutionContextExecutorService,
     commandExecutionContext: ExecutionContextExecutorService,
     participantContractStore: LedgerApiContractStore,
-    pruningOffsetService: PruningOffsetService,
     materializer: Materializer,
     updateServiceConfig: UpdateServiceConfig,
     scheduler: Scheduler,
 ) extends ResourceOwner[IndexService]
     with NamedLogging {
   private val initializationRetryDelay = 100.millis
-  private val initializationMaxAttempts = 3000 // give up after 5min
+  private val initializationMaxRetries = 3000 // give up after 5min
 
   def acquire()(implicit context: ResourceContext): Resource[IndexService] = {
     val ledgerDao = createLedgerReadDao(
@@ -89,7 +85,6 @@ final class IndexServiceOwner(
       stringInterning = inMemoryState.stringInterningView,
       contractLoader = contractLoader,
       lfValueTranslation = lfValueTranslation,
-      pruningOffsetService = pruningOffsetService,
       queryExecutionContext = queryExecutionContext,
       commandExecutionContext = commandExecutionContext,
     )
@@ -103,6 +98,7 @@ final class IndexServiceOwner(
         loggerFactory = loggerFactory,
         contractStore = participantContractStore,
         ledgerEndCache = inMemoryState.ledgerEndCache,
+        maxLookupLimit = config.maxLookupLimit,
       )(commandExecutionContext)
 
       bufferedTransactionsReader = BufferedUpdateReader(
@@ -113,6 +109,19 @@ final class IndexServiceOwner(
         eventProcessingParallelism = config.bufferedEventsProcessingParallelism,
         loggerFactory = loggerFactory,
       )(queryExecutionContext)
+
+      acsChangesReader = new AcsChangesReader(
+        updatesReader = bufferedTransactionsReader,
+        dbDispatcher = dbSupport.dbDispatcher,
+        eventStorageBackend = dbSupport.storageBackendFactory
+          .readStorageBackend(
+            inMemoryState.ledgerEndCache,
+            inMemoryState.stringInterningView,
+            loggerFactory,
+          )
+          .eventStorageBackend,
+        metrics = metrics,
+      )(commandExecutionContext)
 
       bufferedCommandCompletionsReader = BufferedCommandCompletionsReader(
         inMemoryFanoutBuffer = inMemoryState.inMemoryFanoutBuffer,
@@ -125,6 +134,7 @@ final class IndexServiceOwner(
         participantId = participantId,
         ledgerDao = ledgerDao,
         updatesReader = bufferedTransactionsReader,
+        acsChangesReader = acsChangesReader,
         commandCompletionsReader = bufferedCommandCompletionsReader,
         contractStore = contractStore,
         pruneBuffers = inMemoryState.inMemoryFanoutBuffer.prune,
@@ -137,7 +147,7 @@ final class IndexServiceOwner(
         getPreferredPackages = getPackagePreference,
         materializer = materializer,
         executionContext = commandExecutionContext,
-        pruningOffsetService = pruningOffsetService,
+        ledgerEndCache = inMemoryState.ledgerEndCache,
         updateServiceConfig = updateServiceConfig,
       )
     } yield new TimedIndexService(indexService, metrics)
@@ -145,23 +155,34 @@ final class IndexServiceOwner(
 
   private def waitForInMemoryStateInitialization()(implicit
       executionContext: ExecutionContext
-  ): Future[Unit] =
-    RetryStrategy.constant(
-      attempts = Some(initializationMaxAttempts),
-      waitTime = initializationRetryDelay,
-    ) { case InMemoryStateNotInitialized => true } { (attempt, _) =>
-      if (!inMemoryState.initialized) {
-        logger.info(
-          s"Participant in-memory state not initialized on attempt $attempt/$initializationMaxAttempts. Retrying again in $initializationRetryDelay."
-        )(TraceContext.empty)
-        Future.failed(InMemoryStateNotInitialized)
-      } else {
-        logger.info(
-          s"Participant in-memory state initialized."
-        )(TraceContext.empty)
-        Future.unit
-      }
-    }
+  ): Future[Unit] = {
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
+    implicit val success = retry.Success.always
+    retry
+      .Pause(
+        logger = logger,
+        operationName = "Participant in-memory state initialization",
+        maxRetries = initializationMaxRetries,
+        delay = initializationRetryDelay,
+        hasSynchronizeWithClosing = HasSynchronizeWithClosing.NeverClosing,
+      )
+      .applyFut(
+        if (inMemoryState.initialized) Future.unit else Future.failed(InMemoryStateNotInitialized),
+        new retry.ExceptionRetryPolicy {
+          override protected def determineExceptionErrorKind(
+              exception: Throwable,
+              logger: TracedLogger,
+          )(implicit
+              tc: TraceContext
+          ): retry.ErrorKind = exception match {
+            case InMemoryStateNotInitialized => retry.ErrorKind.NoSuccessErrorKind
+            case _ => retry.ErrorKind.FatalErrorKind
+          }
+        },
+      )
+      .map(_ => ())
+  }
 
   private def verifyParticipantId(
       ledgerDao: LedgerReadDao
@@ -171,39 +192,54 @@ final class IndexServiceOwner(
     // If the index database is not yet fully initialized,
     // querying for the participant ID will throw different errors,
     // depending on the database, and how far the initialization is.
-    val isRetryable: PartialFunction[Throwable, Boolean] = {
-      case _: IndexDbException => true
-      case _: ParticipantIdNotFoundException => true
-      case _: MismatchException.ParticipantId => false
-      case _ => false
+    case object VerifyParticipantIdRetryPolicy extends retry.ExceptionRetryPolicy {
+      override protected def determineExceptionErrorKind(
+          exception: Throwable,
+          logger: TracedLogger,
+      )(implicit
+          tc: TraceContext
+      ): retry.ErrorKind = exception match {
+        case _: IndexDbException => retry.ErrorKind.NoSuccessErrorKind
+        case _: ParticipantIdNotFoundException => retry.ErrorKind.NoSuccessErrorKind
+        case _: MismatchException.ParticipantId => retry.ErrorKind.FatalErrorKind
+        case _ => retry.ErrorKind.FatalErrorKind
+      }
     }
 
-    RetryStrategy.constant(
-      attempts = Some(initializationMaxAttempts),
-      waitTime = initializationRetryDelay,
-    )(isRetryable) { (attempt, _) =>
-      implicit val loggingContext: LoggingContextWithTrace =
-        LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
-      ledgerDao
-        .lookupParticipantId()
-        .flatMap {
-          case Some(`participantId`) =>
-            logger.info(s"Found existing participant with ID: $participantId`")
-            Future.unit
-          case Some(foundParticipantId) =>
-            Future.failed(
-              new MismatchException.ParticipantId(
-                foundParticipantId,
-                ParticipantId(participantId),
-              ) with StartupException
-            )
-          case None =>
-            logger.info(
-              s"Participant ID not found in the index database on attempt $attempt/$initializationMaxAttempts. Retrying again in $initializationRetryDelay."
-            )
-            Future.failed(new ParticipantIdNotFoundException(attempt))
-        }
-    }
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContext.empty)
+    implicit val success = retry.Success.always
+    retry
+      .Pause(
+        logger = logger,
+        operationName = "Verify participant ID",
+        maxRetries = initializationMaxRetries,
+        delay = initializationRetryDelay,
+        hasSynchronizeWithClosing = HasSynchronizeWithClosing.NeverClosing,
+      )
+      .applyFut(
+        ledgerDao
+          .lookupParticipantId()
+          .flatMap {
+            case Some(`participantId`) =>
+              logger.info(s"Found existing participant with ID: $participantId`")
+              Future.unit
+            case Some(foundParticipantId) =>
+              Future.failed(
+                new MismatchException.ParticipantId(
+                  foundParticipantId,
+                  ParticipantId(participantId),
+                ) with StartupException
+              )
+            case None =>
+              logger.info(
+                s"Participant ID not found in the index database. Retrying again in $initializationRetryDelay."
+              )
+              Future.failed(new ParticipantIdNotFoundException())
+          },
+        VerifyParticipantIdRetryPolicy,
+      )
+      .map(_ => ())
   }
 
   private def createLedgerReadDao(
@@ -211,7 +247,6 @@ final class IndexServiceOwner(
       achsStateCache: AchsStateCache,
       stringInterning: StringInterning,
       contractLoader: ContractLoader,
-      pruningOffsetService: PruningOffsetService,
       lfValueTranslation: LfValueTranslation,
       queryExecutionContext: ExecutionContextExecutorService,
       commandExecutionContext: ExecutionContextExecutorService,
@@ -236,7 +271,6 @@ final class IndexServiceOwner(
       incompleteOffsets = incompleteOffsets,
       contractLoader = contractLoader,
       lfValueTranslation = lfValueTranslation,
-      pruningOffsetService = pruningOffsetService,
       contractStore = participantContractStore,
       achsStateCache = achsStateCache,
       contractPruningMaxRetries = config.contractPruningMaxRetries,

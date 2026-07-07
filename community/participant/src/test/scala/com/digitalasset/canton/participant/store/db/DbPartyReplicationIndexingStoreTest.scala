@@ -22,7 +22,11 @@ sealed trait DbPartyReplicationIndexingStoreTest
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     import storage.api.*
     storage.update(
-      DBIO.seq(sqlu"truncate table par_party_replication_indexing"),
+      DBIO.seq(sqlu"""
+              truncate table par_party_replication_indexing;
+              truncate table par_party_replication_indexing_watermarks;
+              truncate table par_party_replication_indexed_watermarks;
+              """),
       "clean-up par_party_replication_indexing for test",
     )
   }
@@ -40,6 +44,7 @@ sealed trait DbPartyReplicationIndexingStoreTest
       new DbPartyReplicationIndexingStore(
         storage,
         synchronizerId,
+        pauseIndexingDuringOnPR = false,
         timeouts,
         loggerFactory,
       )

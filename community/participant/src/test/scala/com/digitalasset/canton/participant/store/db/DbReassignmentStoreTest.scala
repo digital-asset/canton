@@ -8,7 +8,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.store.ReassignmentStoreTest
-import com.digitalasset.canton.protocol.ExampleContractFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -44,20 +43,6 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
     )
   }
 
-}
-
-class DbContractsTest extends AsyncWordSpec with BaseTest {
-  import DbReassignmentStore.DbContracts
-
-  "DbContracts" should {
-    "roundTrip" in {
-      val contract = ExampleContractFactory.build()
-
-      DbContracts.tryDeserializeOne(
-        DbContracts.serializeOne(contract)
-      ) shouldBe contract
-    }
-  }
 }
 
 class ReassignmentStoreTestH2 extends DbReassignmentStoreTest with H2Test

@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.{
   SequencerBasedRegisterTopologyTransactionHandle,
@@ -35,6 +34,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.version.ParticipantProtocolFeatureFlags
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
@@ -202,6 +202,7 @@ class ParticipantTopologyDispatcher(
               ),
               serial = None,
               signingKeys = Seq.empty,
+              namespacesToSignFor = Seq.empty,
               protocolVersion = state.staticSynchronizerParameters.protocolVersion,
               expectFullAuthorization = true,
               waitToBecomeEffective = None,
@@ -228,6 +229,7 @@ class ParticipantTopologyDispatcher(
       psid: PhysicalSynchronizerId,
       alias: SynchronizerAlias,
       sequencerConnectClient: SequencerConnectClient,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       executionContext: ExecutionContextExecutor,
       traceContext: TraceContext,
@@ -246,6 +248,7 @@ class ParticipantTopologyDispatcher(
             .append("psid", psid.toString)
             .appendUnnamedKey("onboarding", "onboarding"),
           SynchronizerCrypto(crypto, state.staticSynchronizerParameters),
+          onboardingTransactions,
         )
     }
 
@@ -356,6 +359,7 @@ private class SynchronizerOnboardingOutbox(
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     override protected val crypto: SynchronizerCrypto,
+    providedTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
 ) extends StoreBasedSynchronizerOutboxDispatchHelper
     with FlagCloseable {
 
@@ -365,7 +369,10 @@ private class SynchronizerOnboardingOutbox(
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Boolean] = (for {
-    initialTransactions <- loadInitialTransactionsFromStore()
+    initialTransactions <- providedTransactions match {
+      case Some(transactions) => validateProvidedTransactions(transactions)
+      case None => loadInitialTransactionsFromStore()
+    }
     _ = logger.debug(
       s"Sending ${initialTransactions.size} onboarding transactions to $synchronizerAlias"
     )
@@ -395,14 +402,57 @@ private class SynchronizerOnboardingOutbox(
       applicable <- EitherT.right(
         synchronizeWithClosing(functionFullName)(onlyApplicable(candidates))
       )
-      _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicable))
-      // Try to convert if necessary the topology transactions for the required protocol version of the synchronizer
-      convertedTxs <- synchronizeWithClosing(functionFullName) {
+      converted <- synchronizeWithClosing(functionFullName)(
         convertTransactions(applicable).leftMap[SynchronizerRegistryError](
           SynchronizerRegistryError.TopologyConversionError.Error(_)
         )
-      }
-    } yield convertedTxs
+      )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(converted))
+    } yield converted
+
+  /** Validates onboarding transactions provided by the operator at connect time. They must only
+    * contain onboarding mappings (NamespaceDelegation, OwnerToKeyMapping,
+    * SynchronizerTrustCertificate).
+    */
+  private def validateProvidedTransactions(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Seq[
+    GenericSignedTopologyTransaction
+  ]] =
+    for {
+      applicable <- EitherT.right(
+        synchronizeWithClosing(functionFullName)(onlyApplicable(transactions))
+      )
+      unexpected = applicable.filterNot(tx =>
+        TopologyStore.initialParticipantDispatchingSet.contains(tx.mapping.code)
+      )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        Either.cond(
+          unexpected.isEmpty,
+          (),
+          SynchronizerRegistryError.InitialOnboardingError.Error(
+            s"Provided onboarding transactions contain unexpected mappings (only " +
+              s"${TopologyStore.initialParticipantDispatchingSet.mkString(", ")} are allowed): " +
+              s"${unexpected.map(_.mapping).mkString(", ")}"
+          ): SynchronizerRegistryError,
+        )
+      )
+      wrongVersion = applicable.filterNot(_.transaction.isEquivalentTo(protocolVersion))
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        Either.cond(
+          wrongVersion.isEmpty,
+          (),
+          SynchronizerRegistryError.InitialOnboardingError.Error(
+            s"Provided onboarding transactions are not serialized for the synchronizer's protocol " +
+              s"version $protocolVersion: ${wrongVersion.map(_.mapping).mkString(", ")}"
+          ): SynchronizerRegistryError,
+        )
+      )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicable))
+    } yield applicable
 
   private def dispatch(transactions: Seq[GenericSignedTopologyTransaction])(implicit
       traceContext: TraceContext
@@ -452,6 +502,7 @@ object SynchronizerOnboardingOutbox {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       crypto: SynchronizerCrypto,
+      providedTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -466,6 +517,7 @@ object SynchronizerOnboardingOutbox {
       timeouts,
       loggerFactory,
       crypto,
+      providedTransactions,
     )
     outbox.run().transform { res =>
       outbox.close()

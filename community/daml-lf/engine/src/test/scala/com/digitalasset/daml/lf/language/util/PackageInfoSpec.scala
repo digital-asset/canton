@@ -8,12 +8,13 @@ package util
 
 import com.digitalasset.daml.lf.data.Ref.{PackageId, TypeConId}
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import data.{Ref, Relation}
-import testing.parser
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
 import scala.language.implicitConversions
+
+import data.{Ref, Relation}
+import testing.parser
 
 class PackageInfoSpec extends AnyWordSpec with Matchers {
 

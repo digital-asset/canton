@@ -9,7 +9,9 @@ info:
     MINIMUM_CANTON_VERSION=3.6.0
 channels:
   /v2/commands/completions:
-    description: Subscribe to command completion events.
+    description: |-
+      Deprecated: please use ``GetCompletions`` instead.
+      Subscribe to command completion events.
     subscribe:
       operationId: onV2CommandsCompletions
       message:
@@ -18,6 +20,21 @@ channels:
       operationId: sendV2CommandsCompletions
       message:
         $ref: '#/components/messages/CompletionStreamRequest'
+    bindings:
+      ws:
+        method: GET
+  /v2/commands/command-completions:
+    description: |-
+      Subscribe to command completion events.
+      This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
+    subscribe:
+      operationId: onV2CommandsCommand-completions
+      message:
+        $ref: '#/components/messages/Either_JsCantonError_CompletionStreamResponse'
+    publish:
+      operationId: sendV2CommandsCommand-completions
+      message:
+        $ref: '#/components/messages/GetCompletionsRequest'
     bindings:
       ws:
         method: GET
@@ -53,34 +70,6 @@ channels:
         $ref: '#/components/messages/Either_JsCantonError_JsGetUpdatesResponse'
     publish:
       operationId: sendV2Updates
-      message:
-        $ref: '#/components/messages/GetUpdatesRequest'
-    bindings:
-      ws:
-        method: GET
-  /v2/updates/flats:
-    description: Get flat transactions update stream. Provided for backwards compatibility,
-      it will be removed in the Canton version 3.5.0, use v2/updates instead.
-    subscribe:
-      operationId: onV2UpdatesFlats
-      message:
-        $ref: '#/components/messages/Either_JsCantonError_JsGetUpdatesResponse'
-    publish:
-      operationId: sendV2UpdatesFlats
-      message:
-        $ref: '#/components/messages/GetUpdatesRequest'
-    bindings:
-      ws:
-        method: GET
-  /v2/updates/trees:
-    description: Get update transactions tree stream. Provided for backwards compatibility,
-      it will be removed in the Canton version 3.5.0, use v2/updates instead.
-    subscribe:
-      operationId: onV2UpdatesTrees
-      message:
-        $ref: '#/components/messages/Either_JsCantonError_JsGetUpdateTreesResponse'
-    publish:
-      operationId: sendV2UpdatesTrees
       message:
         $ref: '#/components/messages/GetUpdatesRequest'
     bindings:
@@ -339,6 +328,22 @@ components:
             Optional
           type: integer
           format: int64
+        transactionHash:
+          description: |-
+            The transaction hash signed by the external party for prepared transactions
+            that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+            or one of its variants.
+
+            Use this to correlate prepared transactions with their execution result
+            on the *same participant* that executed the transaction.
+
+            Not available for:
+
+            - transactions executed on Canton versions prior to 3.5
+            - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+            Optional: can be empty
+          type: string
     JsStatus:
       title: JsStatus
       type: object
@@ -540,6 +545,32 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SynchronizerTime'
+    GetCompletionsRequest:
+      title: GetCompletionsRequest
+      type: object
+      properties:
+        parties:
+          description: |-
+            If specified, only completions of commands are included, which have at least one of the ``act_as`` parties
+            in the given set of parties.
+            Only Ledger API users with CanReadAsAnyParty permission allowed to provide no ``parties``.
+            Must be a valid PartyIdString (as described in ``value.proto``).
+
+            Optional: can be empty
+          type: array
+          items:
+            type: string
+        beginExclusive:
+          description: |-
+            This optional field indicates the minimum offset for completions. This can be used to resume an earlier completion stream.
+            If not set the ledger uses the ledger begin offset instead.
+            If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset).
+            If the ledger has been pruned, this parameter must be specified and greater than the pruning offset. (the pruning
+            offset is accessible on the StateService.GetLatestPrunedOffsets endpoint)
+
+            Optional
+          type: integer
+          format: int64
     GetActiveContractsRequest:
       title: GetActiveContractsRequest
       description: |-
@@ -1987,6 +2018,7 @@ components:
           type: string
         externalTransactionHash:
           description: |-
+            Deprecated: please use ``transaction_hash`` which has the same value.
             For transaction externally signed, contains the external transaction hash
             signed by the external party. Can be used to correlate an external submission with a committed transaction.
 
@@ -2006,6 +2038,22 @@ components:
             Optional
           type: integer
           format: int64
+        transactionHash:
+          description: |-
+            The transaction hash signed by the external party for prepared transactions
+            that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+            or one of its variants.
+
+            Use this to correlate prepared transactions with their execution result
+            on the *same participant* that executed the transaction.
+
+            Not available for:
+
+            - transactions executed on Canton versions prior to 3.6
+            - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+            Optional: can be empty
+          type: string
     Event:
       title: Event
       description: |-
@@ -2272,191 +2320,6 @@ components:
 
             Required
           type: boolean
-    Either_JsCantonError_JsGetUpdateTreesResponse:
-      title: Either_JsCantonError_JsGetUpdateTreesResponse
-      oneOf:
-      - $ref: '#/components/schemas/JsCantonError'
-      - $ref: '#/components/schemas/JsGetUpdateTreesResponse'
-    JsGetUpdateTreesResponse:
-      title: JsGetUpdateTreesResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
-      type: object
-      properties:
-        update:
-          $ref: '#/components/schemas/Update1'
-    Update1:
-      title: Update
-      oneOf:
-      - type: object
-        required:
-        - OffsetCheckpoint
-        properties:
-          OffsetCheckpoint:
-            $ref: '#/components/schemas/OffsetCheckpoint3'
-      - type: object
-        required:
-        - Reassignment
-        properties:
-          Reassignment:
-            $ref: '#/components/schemas/Reassignment1'
-      - type: object
-        required:
-        - TransactionTree
-        properties:
-          TransactionTree:
-            $ref: '#/components/schemas/TransactionTree'
-    OffsetCheckpoint3:
-      title: OffsetCheckpoint
-      description: |-
-        OffsetCheckpoints may be used to:
-
-        - detect time out of commands.
-        - provide an offset which can be used to restart consumption.
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/OffsetCheckpoint1'
-    Reassignment1:
-      title: Reassignment
-      description: Complete view of an on-ledger reassignment.
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/JsReassignment'
-    TransactionTree:
-      title: TransactionTree
-      description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
-        Complete view of an on-ledger transaction.
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/JsTransactionTree'
-    JsTransactionTree:
-      title: JsTransactionTree
-      description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
-        Complete view of an on-ledger transaction.
-      type: object
-      required:
-      - updateId
-      - effectiveAt
-      - offset
-      - eventsById
-      - synchronizerId
-      - recordTime
-      properties:
-        updateId:
-          description: |-
-            Assigned by the server. Useful for correlating logs.
-            Must be a valid LedgerString (as described in ``value.proto``).
-            Required
-          type: string
-        commandId:
-          description: |-
-            The ID of the command which resulted in this transaction. Missing for everyone except the submitting party.
-            Must be a valid LedgerString (as described in ``value.proto``).
-            Optional
-          type: string
-        workflowId:
-          description: |-
-            The workflow ID used in command submission. Only set if the ``workflow_id`` for the command was set.
-            Must be a valid LedgerString (as described in ``value.proto``).
-            Optional
-          type: string
-        effectiveAt:
-          description: |-
-            Ledger effective time.
-            Required
-          type: string
-        offset:
-          description: |-
-            The absolute offset. The details of this field are described in ``community/ledger-api/README.md``.
-            Required, it is a valid absolute offset (positive integer).
-          type: integer
-          format: int64
-        eventsById:
-          $ref: '#/components/schemas/Map_Int_TreeEvent'
-          description: |-
-            Changes to the ledger that were caused by this transaction. Nodes of the transaction tree.
-            Each key must be a valid node ID (non-negative integer).
-            Required
-        synchronizerId:
-          description: |-
-            A valid synchronizer id.
-            Identifies the synchronizer that synchronized the transaction.
-            Required
-          type: string
-        traceContext:
-          $ref: '#/components/schemas/TraceContext'
-          description: |-
-            Optional; ledger API trace context
-
-            The trace context transported in this message corresponds to the trace context supplied
-            by the client application in a HTTP2 header of the original command submission.
-            We typically use a header to transfer this type of information. Here we use message
-            body, because it is used in gRPC streams which do not support per message headers.
-            This field will be populated with the trace context contained in the original submission.
-            If that was not provided, a unique ledger-api-server generated trace context will be used
-            instead.
-        recordTime:
-          description: |-
-            The time at which the transaction was recorded. The record time refers to the synchronizer
-            which synchronized the transaction.
-            Required
-          type: string
-    Map_Int_TreeEvent:
-      title: Map_Int_TreeEvent
-      type: object
-      additionalProperties:
-        $ref: '#/components/schemas/TreeEvent'
-    TreeEvent:
-      title: TreeEvent
-      description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
-        Each tree event message type below contains a ``witness_parties`` field which
-        indicates the subset of the requested parties that can see the event
-        in question.
-
-        Note that transaction trees might contain events with
-        _no_ witness parties, which were included simply because they were
-        children of events which have witnesses.
-      oneOf:
-      - type: object
-        required:
-        - CreatedTreeEvent
-        properties:
-          CreatedTreeEvent:
-            $ref: '#/components/schemas/CreatedTreeEvent'
-      - type: object
-        required:
-        - ExercisedTreeEvent
-        properties:
-          ExercisedTreeEvent:
-            $ref: '#/components/schemas/ExercisedTreeEvent'
-    CreatedTreeEvent:
-      title: CreatedTreeEvent
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/CreatedEvent'
-    ExercisedTreeEvent:
-      title: ExercisedTreeEvent
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/ExercisedEvent'
   messages:
     CompletionStreamRequest:
       payload:
@@ -2465,6 +2328,10 @@ components:
     Either_JsCantonError_CompletionStreamResponse:
       payload:
         $ref: '#/components/schemas/Either_JsCantonError_CompletionStreamResponse'
+      contentType: application/json
+    GetCompletionsRequest:
+      payload:
+        $ref: '#/components/schemas/GetCompletionsRequest'
       contentType: application/json
     GetActiveContractsRequest:
       payload:
@@ -2481,10 +2348,6 @@ components:
     Either_JsCantonError_JsGetUpdatesResponse:
       payload:
         $ref: '#/components/schemas/Either_JsCantonError_JsGetUpdatesResponse'
-      contentType: application/json
-    Either_JsCantonError_JsGetUpdateTreesResponse:
-      payload:
-        $ref: '#/components/schemas/Either_JsCantonError_JsGetUpdateTreesResponse'
       contentType: application/json
   securitySchemes:
     httpAuth:

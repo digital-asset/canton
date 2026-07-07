@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.pruning
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
   NonNegativeProportion,
@@ -81,15 +81,18 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration as JDuration, Instant}
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import scala.annotation.nowarn
 import scala.collection.immutable.{Seq, Set, SortedSet}
 import scala.concurrent.duration.*
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.Try
 
 @nowarn("msg=match may not be exhaustive")
 sealed trait AcsCommitmentProcessorBaseTest
@@ -823,18 +826,80 @@ sealed trait AcsCommitmentProcessorBaseTest
 
   protected val coid: (Int, Int) => LfContractId = (txId, discriminator) =>
     ExampleTransactionFactory.suffixedId(txId, discriminator)
+
+  /** Asynchronously polls a condition until it evaluates to true or retries are exhausted.
+    *
+    * Unlike standard blocking `eventually` loops (which use `Thread.sleep`), this method safely
+    * yields the thread between attempts using a background timer. This prevents thread starvation
+    * and deadlocks on single-threaded `ExecutionContext`s (e.g., in CI environments) by allowing
+    * pending background tasks to execute between checks.
+    *
+    * Decision note: If a test suite already mixes in `HasActorSystem`, this polling behavior could
+    * alternatively be achieved using Pekko Streams (e.g., `Source.tick`). However, bootstrapping a
+    * full `ActorSystem` solely for non-blocking delays introduces unnecessary setup/teardown
+    * latency and memory overhead for fast-running (unit) tests. This helper uses a lightweight
+    * `ScheduledExecutorService` to achieve the exact same non-blocking yield with a minimal
+    * footprint.
+    *
+    * @param condition
+    *   The boolean condition to evaluate.
+    * @param retries
+    *   The maximum number of times to check the condition before giving up.
+    * @param delay
+    *   The delay between each evaluation attempt.
+    * @return
+    *   A [[FutureUnlessShutdown]] that completes when the condition is met or retries are depleted.
+    */
+  protected def waitForConditionAsync(
+      condition: => Boolean,
+      retries: Int = 100,
+      delay: FiniteDuration = 200.millis,
+  )(implicit ec: ExecutionContext): FutureUnlessShutdown[Unit] = {
+    val scheduler = Threading.singleThreadScheduledExecutor(
+      s"${this.getClass.getSimpleName}-wait-for-async",
+      noTracingLogger,
+    )
+
+    def loop(remaining: Int): FutureUnlessShutdown[Unit] =
+      FutureUnlessShutdown
+        .fromTry(Try(condition))
+        .flatMap { ok =>
+          if (ok) FutureUnlessShutdown.unit
+          else if (remaining <= 0)
+            FutureUnlessShutdown.failed(
+              new AssertionError(
+                s"Condition was not met within $retries retries (delay: $delay)."
+              )
+            )
+          else {
+            val p = Promise[Unit]()
+            scheduler.schedule(
+              (() => { p.trySuccess(()); () }): Runnable,
+              delay.toMillis.max(0L),
+              TimeUnit.MILLISECONDS,
+            )
+            FutureUnlessShutdown.outcomeF(p.future).flatMap(_ => loop(remaining - 1))
+          }
+        }
+
+    FutureUnlessShutdown(loop(retries).unwrap.transform { result =>
+      scheduler.shutdown()
+      result
+    })
+  }
 }
 
 class AcsCommitmentProcessorTest
     extends AsyncWordSpec
     with AcsCommitmentProcessorBaseTest
-    with ProtocolVersionChecksAsyncWordSpec {
+    with ProtocolVersionChecksAsyncWordSpec
+    with HasTestCloseContext {
   // This is duplicating the internal logic of the commitment computation, but I don't have a better solution at the moment
   // if we want to test whether commitment buffering works
   // Also assumes that all the contracts in the map have the same stakeholders
   private def stakeholderCommitment(
       contracts: Map[LfContractId, ReassignmentCounter]
-  ): AcsCommitment.CommitmentType = {
+  ): Digest.DigestType = {
     val h = LtHash16()
     contracts.foreach { case (cid, reassignmentCounter) =>
       AcsCommitmentProcessor.addContractToCommitmentDigest(h, cid, reassignmentCounter)
@@ -843,10 +908,10 @@ class AcsCommitmentProcessorTest
   }
 
   private def commitmentsForCounterParticipants(
-      stkhdCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
+      stkhdCommitments: Map[SortedSet[LfPartyId], Digest.DigestType],
       localId: ParticipantId,
       topology: Map[ParticipantId, Set[LfPartyId]],
-  ): Map[ParticipantId, AcsCommitment.CommitmentType] = {
+  ): Map[ParticipantId, Digest.DigestType] = {
 
     def isCommonStakeholder(
         stkhd: Set[LfPartyId],
@@ -880,7 +945,7 @@ class AcsCommitmentProcessorTest
           CantonTimestampSecond,
           Option[PositiveSeconds],
       )
-  ): FutureUnlessShutdown[SignedProtocolMessage[AcsCommitment]] = {
+  ): FutureUnlessShutdown[SignedProtocolMessage[LegacyAcsCommitment]] = {
     val (remote, contracts, fromExclusive, toInclusive, reconciliationInterval) = params
 
     val syncCrypto =
@@ -892,7 +957,7 @@ class AcsCommitmentProcessorTest
     val cmt = commitmentsFromStkhdCmts(Seq(stakeholderCommitment(contracts)))
     val snapshotF = syncCrypto.snapshot(CantonTimestamp.Epoch)
     val period =
-      CommitmentPeriod
+      LegacyCommitmentPeriod
         .create(
           fromExclusive.forgetRefinement,
           toInclusive.forgetRefinement,
@@ -900,7 +965,14 @@ class AcsCommitmentProcessorTest
         )
         .value
     val payload =
-      AcsCommitment.create(synchronizerId, remote, localId, period, cmt, testedProtocolVersion)
+      LegacyAcsCommitment.create(
+        synchronizerId,
+        remote,
+        localId,
+        period,
+        cmt,
+        testedProtocolVersion,
+      )
 
     snapshotF.flatMap { snapshot =>
       SignedProtocolMessage
@@ -917,7 +989,7 @@ class AcsCommitmentProcessorTest
       at: CantonTimestampSecond,
       contractSetup: Map[LfContractId, (Set[Ref.IdString.Party], NonEmpty[Seq[Lifespan]])],
       crypto: SyncCryptoClient[SynchronizerSnapshotSyncCryptoApi],
-  ): FutureUnlessShutdown[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
+  ): FutureUnlessShutdown[Map[ParticipantId, Digest.DigestType]] = {
     val stakeholderLookup = { (cid: LfContractId) =>
       contractSetup
         .map { case (cid, tuple) => (cid, tuple) }
@@ -965,7 +1037,7 @@ class AcsCommitmentProcessorTest
   private def addCommonContractId(
       rc: InternalizedRunningCommitments,
       reassignmentCounter: ReassignmentCounter,
-  ): (AcsCommitment.CommitmentType, AcsCommitment.CommitmentType) = {
+  ): (Digest.DigestType, Digest.DigestType) = {
     val commonContractId = coid(0, 0)
     rc.watermark shouldBe RecordTime.MinValue
     rc.snapshot() shouldBe CommitmentSnapshot[InternedPartyId](
@@ -1432,7 +1504,7 @@ class AcsCommitmentProcessorTest
       } yield {
         computed.size shouldBe 1
         inside(computed.headOption.value) { case (commitmentPeriod, participantId, _) =>
-          commitmentPeriod shouldBe CommitmentPeriod
+          commitmentPeriod shouldBe LegacyCommitmentPeriod
             .create(ts(10) - reconInterval, ts(10))
             .value
           participantId shouldBe remoteId1
@@ -1443,13 +1515,13 @@ class AcsCommitmentProcessorTest
         inside(received.headOption.value) {
           case SignedProtocolMessage(
                 TypedSignedProtocolMessageContent(
-                  AcsCommitment(_, sender, counterParticipant, period, _)
+                  LegacyAcsCommitment(_, sender, counterParticipant, period, _)
                 ),
                 _,
               ) =>
             sender shouldBe remoteId1
             counterParticipant shouldBe localId
-            period shouldBe CommitmentPeriod.create(ts(5), ts(10)).value
+            period shouldBe LegacyCommitmentPeriod.create(ts(5), ts(10)).value
         }
 
         outstanding shouldBe empty
@@ -2156,6 +2228,33 @@ class AcsCommitmentProcessorTest
       snap3.delta.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedCarol))
       snap3.deleted shouldBe Set.empty
       snap3.groupCountDelta shouldBe 0L
+    }
+
+    "releaseMemory clears the commitments aggressively (removes data faster upon close)" in {
+      val rc =
+        new InternalizedRunningCommitments(RecordTime.MinValue, Seq.empty, mockStringInterning)
+
+      val ch = AcsChange(
+        activations = Map(
+          coid(0, 0) ->
+            ContractStakeholdersAndReassignmentCounter(
+              Set(alice, bob),
+              initialReassignmentCounter,
+            ),
+          coid(0, 1) ->
+            ContractStakeholdersAndReassignmentCounter(
+              Set(bob, carol),
+              initialReassignmentCounter,
+            ),
+        ),
+        deactivations = Map.empty,
+      )
+      rc.update(rt(1, 0), ch)
+      rc.size shouldBe 2
+
+      rc.releaseMemory()
+
+      rc.size shouldBe 0
     }
 
     "contracts differing by reassignment counter result in different commitments if the PV support reassignment counters" in {
@@ -3672,6 +3771,22 @@ class AcsCommitmentProcessorTest
         })
       }
 
+      // TEST: Verify Catch-Up mode handles delayed counter-commitments gracefully.
+      //
+      // SCENARIO:
+      // 1. A "Fast Node" (remoteId1) sends a rapid sequence of commitments (ticks 5 to 30),
+      //    forcing the Local Node into Catch-Up mode.
+      // 2. To catch up, the Local Node skips fine-grained computations for intermediate ticks
+      //    (5, 15, 25) and records empty placeholders instead.
+      // 3. A "Slow Node" (remoteId2) eventually sends commitments specifically for
+      //    the skipped periods (10-15 and 20-25).
+      //
+      // EXPECTED BEHAVIOR:
+      // The Local Node must process the Slow Node's late commitments without failing or throwing
+      // false `NO_SHARED_CONTRACTS` errors (even though it skipped those exact computations).
+      // It must correctly persist the 3 skipped placeholders, store all received commitments,
+      // and successfully dispatch its 4 boundary/reply network sends.
+      //
       "not report errors about skipped commitments due to catch-up mode" in {
         val reconciliationInterval = 5L
         val timeProofs =
@@ -3815,6 +3930,11 @@ class AcsCommitmentProcessorTest
             processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
           _ <- processor.flush()
+
+          // Yield the thread to allow the single-threaded EC to process the background `send` tasks.
+          // processor.flush() only clears internal queues, so we must wait asynchronously for the
+          // 4th commitment (triggered by the catch-up mismatch) to reach the mock sequencer client.
+          _ <- waitForConditionAsync(sequencerClient.requests.sizeIs >= 4)
 
           outstanding <- store.noOutstandingCommitments(toc(30).timestamp)
           computed <- store
@@ -4527,7 +4647,7 @@ class AcsCommitmentProcessorTest
         processor <- proc
         _ <- processor
           .indicateLocallyProcessed(
-            new CommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
+            new LegacyCommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
           )
         remote <- remoteCommitments.parTraverse(commitmentMsg)
         delivered = remote.map(cmt =>
@@ -4624,7 +4744,7 @@ class AcsCommitmentProcessorTest
         processor <- proc
         _ <- processor
           .indicateLocallyProcessed(
-            new CommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
+            new LegacyCommitmentPeriod(ts(0), PositiveSeconds.tryOfSeconds(20))
           )
         remote <- remoteCommitments.parTraverse(commitmentMsg)
         delivered = remote.map(cmt =>

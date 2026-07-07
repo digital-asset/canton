@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ActionDescription.{
   ExerciseActionDescription,
@@ -13,6 +14,7 @@ import com.digitalasset.canton.data.ActionDescription.{
 import com.digitalasset.canton.data.TransactionView.{
   AllSubviewState,
   InvalidView,
+  NoKeyValidation,
   TransactionViewTreeOps,
   TransactionViewTreeOpsWithPosition,
   WithPath,
@@ -25,9 +27,9 @@ import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.digitalasset.canton.util.{ErrorUtil, NamedLoggingLazyVal, RoseTree}
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, RoseTree}
 import com.digitalasset.canton.version.*
-import com.digitalasset.canton.{LfPartyId, LfVersioned, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPartyId, LfVersioned, ProtoDeserializationError, checked}
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -56,18 +58,19 @@ final case class TransactionView private (
   def subviewHashesConsistentWith(subviewHashes: Seq[ViewHash]): Boolean =
     subviews.hashesConsistentWith(hashOps)(subviewHashes)
 
+  private def getOrError[T](
+      either: Either[String, T]
+  )(implicit loggingContext: NamedLoggingContext): T =
+    either.valueOr(s => ErrorUtil.invalidState(s))
+
   override def subtrees: Seq[MerkleTree[?]] =
     Seq[MerkleTree[?]](viewCommonData, viewParticipantData) ++ subviews.trees
 
-  def tryUnblindViewParticipantData(
+  private def unblindViewParticipantData(
       fieldName: String
-  )(implicit loggingContext: NamedLoggingContext): ViewParticipantData =
-    viewParticipantData.unwrap.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException(
-          s"$fieldName of view $viewHash can be computed only if the view participant data is unblinded"
-        )
-      )
+  ): Either[String, ViewParticipantData] =
+    viewParticipantData.unwrap.leftMap(_ =>
+      s"$fieldName of view $viewHash can be computed only if the view participant data is unblinded"
     )
 
   override private[data] def withBlindedSubtrees(
@@ -78,6 +81,7 @@ final case class TransactionView private (
       viewParticipantData.doBlind(blindingCommandPerNode), // O(1)
       subviews.doBlind(blindingCommandPerNode), // O(#subviews)
       representativeProtocolVersion,
+      validateKeys = NoKeyValidation,
     )(hashOps)
 
   private[data] def tryBlindForTransactionViewTree(
@@ -92,6 +96,7 @@ final case class TransactionView private (
         viewParticipantData.blindFully,
         subviews.tryBlindForTransactionViewTree(viewPos),
         representativeProtocolVersion,
+        validateKeys = NoKeyValidation,
       )(hashOps)
     }
   }
@@ -102,15 +107,6 @@ final case class TransactionView private (
     RoseTree.foldLeft(TransactionViewTreeOps, this)(init = AllSubviewState.init)(finish = _.finish)(
       update = _.update(_)
     )
-
-  /** Traverses all unblinded subviews `v1, v2, v3, ...` in pre-order and yields `f(...f(f(z, v1),
-    * v2)..., vn)`
-    */
-  // TODO(#23971) remove this function as it's used only in tests
-  def foldLeft[A](z: A)(f: (A, TransactionView) => A): A =
-    subviews.unblindedElements
-      .to(LazyList)
-      .foldLeft(f(z, this))((acc, subView) => subView.foldLeft(acc)(f))
 
   /** Yields all (direct and indirect) subviews of this view in pre-order. The first element is this
     * view.
@@ -140,9 +136,9 @@ final case class TransactionView private (
     param("subviews", _.subviews),
   )
 
-  // This constructor is intended for monocle GenLens/test use where the intention is to bypass the validation
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
-  private[data] def copy(
+  def copy(
       viewCommonData: MerkleTree[ViewCommonData] = this.viewCommonData,
       viewParticipantData: MerkleTree[ViewParticipantData] = this.viewParticipantData,
       subviews: TransactionSubviews = this.subviews,
@@ -153,20 +149,25 @@ final case class TransactionView private (
     )
 
   private[data] def tryCopy(
+      validateKeys: Boolean,
       viewCommonData: MerkleTree[ViewCommonData] = this.viewCommonData,
       viewParticipantData: MerkleTree[ViewParticipantData] = this.viewParticipantData,
       subviews: TransactionSubviews = this.subviews,
   ): TransactionView =
-    copy(viewCommonData, viewParticipantData, subviews).tryValidated()
+    copy(viewCommonData, viewParticipantData, subviews).tryValidated(validateKeys)
 
   /** If the view with the given hash appears either as this view or one of its unblinded
     * descendants, replace it by the given view.
     *
     * TODO(i26565): not stack safe unless we have limits on the depths of views.
     */
-  def replace(h: ViewHash, v: TransactionView): TransactionView =
+  def replace(h: ViewHash, v: TransactionView, validateKeys: Boolean): TransactionView =
     if (viewHash == h) v
-    else this.tryCopy(subviews = subviews.mapUnblinded(_.replace(h, v)))
+    else
+      this.tryCopy(
+        validateKeys = validateKeys,
+        subviews = subviews.mapUnblinded(_.replace(h, v, validateKeys)),
+      )
 
   protected def toProtoV30: v30.ViewNode = v30.ViewNode(
     viewCommonData = Some(MerkleTree.toBlindableNodeV30(viewCommonData)),
@@ -174,9 +175,11 @@ final case class TransactionView private (
     subviews = Some(subviews.toProtoV30),
   )
 
-  /** The key maintainers associated with each global key, the resolved contracts are always empty.
+  /** The key maintainers associated with each queried global key.
     *
     * Use to support protocol behaviour from [[com.digitalasset.canton.version.ProtocolVersion.v35]]
+    *
+    * For more information on the population see [[ViewParticipantData.keyResolution]].
     *
     * @throws java.lang.IllegalStateException
     *   if the [[ViewParticipantData]] of this view is blinded
@@ -184,21 +187,23 @@ final case class TransactionView private (
   def keyMaintainers(): Map[LfGlobalKey, Set[LfPartyId]] =
     viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.maintainers)
 
-  private[data] val _legacyGlobalKeyInputs
-      : NamedLoggingLazyVal[Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =
-    NamedLoggingLazyVal[Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] {
-      implicit loggingContext =>
-        val viewParticipantData = tryUnblindViewParticipantData("Global key inputs")
+  private lazy val legacyGlobalKeyInputsE
+      : Either[String, Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =
+    for {
+      viewParticipantData <- unblindViewParticipantData("Global key inputs")
 
-        subviews.assertAllUnblinded(hash =>
-          s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
-        )
-
-        subviews.unblindedElements.foldLeft(viewParticipantData.keyResolution) { (acc, subview) =>
-          val subviewGki = subview._legacyGlobalKeyInputs.get
-          MapsUtil.mergeWith(acc, subviewGki)((accRes, _) => accRes)
+      _ <- subviews.allUnblinded(hash =>
+        s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
+      )
+      inputs <-
+        MonadUtil.foldLeftM(viewParticipantData.keyResolution, subviews.unblindedElements) {
+          case (acc, subview) =>
+            subview.legacyGlobalKeyInputsE.map { subviewGki =>
+              MapsUtil.mergeWith(acc, subviewGki)((accRes, _) => accRes)
+            }
         }
-    }
+
+    } yield inputs
 
   /** Legacy view global keys mapping
     *
@@ -211,7 +216,9 @@ final case class TransactionView private (
   def legacyGlobalKeyInputs(implicit
       loggingContext: NamedLoggingContext
   ): Map[LfGlobalKey, LfVersioned[LegacyKeyResolutionWithMaintainers]] =
-    _legacyGlobalKeyInputs.get.fmap(_.map(LegacyKeyResolutionWithMaintainers.tryFromNextGen))
+    getOrError(legacyGlobalKeyInputsE).fmap(
+      _.map(LegacyKeyResolutionWithMaintainers.tryFromNextGen)
+    )
 
   /** The input contracts of the view (including subviews).
     *
@@ -220,7 +227,7 @@ final case class TransactionView private (
     */
   def inputContracts(implicit
       loggingContext: NamedLoggingContext
-  ): Map[LfContractId, InputContract] = _inputsAndCreated.get._1
+  ): Map[LfContractId, InputContract] = getOrError(inputContractsE)
 
   /** The contracts appearing in create nodes in the view (including subviews).
     *
@@ -229,75 +236,85 @@ final case class TransactionView private (
     */
   def createdContracts(implicit
       loggingContext: NamedLoggingContext
-  ): Map[LfContractId, CreatedContractInView] = _inputsAndCreated.get._2
+  ): Map[LfContractId, CreatedContractInView] = getOrError(createdContractsE)
 
-  private[this] val _inputsAndCreated: NamedLoggingLazyVal[
-    (Map[LfContractId, InputContract], Map[LfContractId, CreatedContractInView])
-  ] = NamedLoggingLazyVal[
-    (Map[LfContractId, InputContract], Map[LfContractId, CreatedContractInView])
-  ] { implicit loggingContext =>
-    val vpd = viewParticipantData.unwrap.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException(
-          s"Inputs and created contracts of view $viewHash can be computed only if the view participant data is unblinded"
-        )
+  private def inputContractsE: Either[String, Map[LfContractId, InputContract]] =
+    inputsAndCreatedE.map(_._1)
+
+  private def createdContractsE: Either[String, Map[LfContractId, CreatedContractInView]] =
+    inputsAndCreatedE.map(_._2)
+
+  private lazy val inputsAndCreatedE: Either[
+    String,
+    (Map[LfContractId, InputContract], Map[LfContractId, CreatedContractInView]),
+  ] =
+    for {
+      vpd <- viewParticipantData.unwrap.leftMap(_ =>
+        s"Inputs and created contracts of view $viewHash can be computed only if the view participant data is unblinded"
       )
-    )
-    val currentRollbackScope = vpd.rollbackContext.rollbackScope
-    subviews.assertAllUnblinded(hash =>
-      s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
-    )
-    val subviewInputsAndCreated = subviews.unblindedElements.map { subview =>
-      val subviewVpd =
-        subview.tryUnblindViewParticipantData("Inputs and created contracts")
-      val created = subview.createdContracts
-      val inputs = subview.inputContracts
-      val subviewRollbackScope = subviewVpd.rollbackContext.rollbackScope
-      // If the subview sits under a Rollback node in the view's core,
-      // then the created contracts of the subview are all rolled back,
-      // and all consuming inputs become non-consuming inputs.
-      if (subviewRollbackScope != currentRollbackScope) {
-        (
-          inputs.fmap(_.copy(consumed = false)),
-          created.fmap(_.copy(rolledBack = true)),
-        )
-      } else (inputs, created)
-    }
+      _ <- subviews.allUnblinded(hash =>
+        s"Inputs and created contracts of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
+      )
 
-    val createdCore = vpd.createdCore.map { contract =>
-      contract.contract.contractId -> CreatedContractInView.fromCreatedContract(contract)
-    }.toMap
-    subviewInputsAndCreated.foldLeft((vpd.coreInputs, createdCore)) {
-      case ((accInputs, accCreated), (subviewInputs, subviewCreated)) =>
-        val subviewCreatedUpdated = subviewCreated.fmap { contract =>
-          if (vpd.createdInSubviewArchivedInCore.contains(contract.contract.contractId))
-            contract.copy(consumedInView = true)
-          else contract
-        }
-        val accCreatedUpdated = accCreated.fmap { contract =>
-          if (subviewInputs.get(contract.contract.contractId).exists(_.consumed))
-            contract.copy(consumedInView = true)
-          else contract
-        }
-        val nextCreated = MapsUtil.mergeWith(accCreatedUpdated, subviewCreatedUpdated) {
-          (fromAcc, _) =>
-            // By the contract ID allocation scheme, the contract IDs in the subviews are pairwise distinct
-            // and distinct from `createdCore`
-            throw InvalidView(
-              s"Contract ${fromAcc.contract.contractId} is created multiple times in view $viewHash"
+      currentRollbackScope = vpd.rollbackContext.rollbackScope
+      subviewInputsAndCreated <- subviews.unblindedElements.traverse { subview =>
+        for {
+          subviewVpd <- subview.unblindViewParticipantData("Inputs and created contracts")
+          created <- subview.createdContractsE
+          inputs <- subview.inputContractsE
+
+        } yield {
+          val subviewRollbackScope = subviewVpd.rollbackContext.rollbackScope
+          // If the subview sits under a Rollback node in the view's core,
+          // then the created contracts of the subview are all rolled back,
+          // and all consuming inputs become non-consuming inputs.
+          if (
+            checked(RollbackScope.tryRollbackEffects(subviewRollbackScope, currentRollbackScope))
+          ) {
+            (
+              inputs.fmap(_.copy(consumed = false)),
+              created.fmap(_.copy(rolledBack = true)),
             )
+          } else (inputs, created)
         }
+      }
 
-        val subviewNontransientInputs = subviewInputs.filter { case (cid, _) =>
-          !accCreated.contains(cid)
-        }
-        val nextInputs = MapsUtil.mergeWith(accInputs, subviewNontransientInputs) {
-          (fromAcc, fromSubview) =>
-            fromAcc.copy(consumed = fromAcc.consumed || fromSubview.consumed)
-        }
-        (nextInputs, nextCreated)
+    } yield {
+
+      val createdCore = vpd.createdCore.map { contract =>
+        contract.contract.contractId -> CreatedContractInView.fromCreatedContract(contract)
+      }.toMap
+      subviewInputsAndCreated.foldLeft((vpd.coreInputs, createdCore)) {
+        case ((accInputs, accCreated), (subviewInputs, subviewCreated)) =>
+          val subviewCreatedUpdated = subviewCreated.fmap { contract =>
+            if (vpd.createdInSubviewArchivedInCore.contains(contract.contract.contractId))
+              contract.copy(consumedInView = true)
+            else contract
+          }
+          val accCreatedUpdated = accCreated.fmap { contract =>
+            if (subviewInputs.get(contract.contract.contractId).exists(_.consumed))
+              contract.copy(consumedInView = true)
+            else contract
+          }
+          val nextCreated = MapsUtil.mergeWith(accCreatedUpdated, subviewCreatedUpdated) {
+            (fromAcc, _) =>
+              // By the contract ID allocation scheme, the contract IDs in the subviews are pairwise distinct
+              // and distinct from `createdCore`
+              throw InvalidView(
+                s"Contract ${fromAcc.contract.contractId} is created multiple times in view $viewHash"
+              )
+          }
+
+          val subviewNontransientInputs = subviewInputs.filter { case (cid, _) =>
+            !accCreated.contains(cid)
+          }
+          val nextInputs = MapsUtil.mergeWith(accInputs, subviewNontransientInputs) {
+            (fromAcc, fromSubview) =>
+              fromAcc.copy(consumed = fromAcc.consumed || fromSubview.consumed)
+          }
+          (nextInputs, nextCreated)
+      }
     }
-  }
 
   def consumed(implicit loggingContext: NamedLoggingContext): Map[LfContractId, Unit] = {
     // In strict mode, every node involving a key updates the active ledger state
@@ -312,15 +329,16 @@ final case class TransactionView private (
     val consumedCreates = createdContracts.collect {
       // If the creation is rolled back, then so are all archivals
       // because a rolled-back create can only be used in the same or deeper rollback scopes,
-      // as ensured by `WellformedTransaction.checkCreatedContracts`.
+      // as ensured by `WellFormedTransaction.checkCreatedContracts`.
       case (cid, contract) if !contract.rolledBack && contract.consumedInView => cid -> ()
     }
     consumedInputs ++ consumedCreates
   }
 
-  def tryValidated(): TransactionView = validated.valueOr(e => throw InvalidView(e))
+  private def tryValidated(validateKeys: Boolean): TransactionView =
+    validated(validateKeys).valueOr(e => throw InvalidView(e))
 
-  def validated: Either[String, TransactionView] = {
+  def validated(validateKeys: Boolean): Either[String, TransactionView] = {
 
     lazy val childParticipantData = subviews.unblindedElementsWithIndex.flatMap(t =>
       t._1.viewParticipantData.unwrap.toOption.toList.map(WithPath(t._2, _))
@@ -330,9 +348,15 @@ final case class TransactionView private (
     )
 
     for {
+
+      // Key resolution validation can only be performed if the view is fully unblinded
+      inputContractsO <-
+        if (isFullyUnblinded && validateKeys) inputContractsE.map(Some(_)) else Right(None)
+
       _ <- viewParticipantData.unwrap match {
         case Left(_) => Either.unit
-        case Right(d) => validateViewParticipantData(d, childParticipantData)
+        case Right(d) =>
+          validateViewParticipantData(d, childParticipantData, inputContractsO)
       }
       _ <- viewCommonData.unwrap match {
         case Left(_) => Either.unit
@@ -360,11 +384,12 @@ object TransactionView
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: TransactionSubviews,
       representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView.type],
+      validateKeys: Boolean,
   )(hashOps: HashOps): TransactionView =
     new TransactionView(viewCommonData, viewParticipantData, subviews)(
       hashOps,
       representativeProtocolVersion,
-    ).tryValidated()
+    ).tryValidated(validateKeys)
 
   /** Creates a view.
     *
@@ -382,6 +407,7 @@ object TransactionView
       viewParticipantData,
       subviews,
       protocolVersionRepresentativeFor(protocolVersion),
+      ValidateKeys(protocolVersion),
     )(hashOps)
 
   private def createFromRepresentativePV(hashOps: HashOps)(
@@ -389,6 +415,7 @@ object TransactionView
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: TransactionSubviews,
       representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView.type],
+      validateKeys: Boolean,
   ): Either[String, TransactionView] =
     Either
       .catchOnly[InvalidView](
@@ -397,6 +424,7 @@ object TransactionView
           viewParticipantData,
           subviews,
           representativeProtocolVersion,
+          validateKeys,
         )(hashOps)
       )
       .leftMap(_.message)
@@ -427,11 +455,11 @@ object TransactionView
   @VisibleForTesting
   object Optics {
     val subviewsUnsafe: Lens[TransactionView, TransactionSubviews] =
-      GenLens[TransactionView](_.subviews)
+      GenLens.apply[TransactionView](_.subviews)
     val viewCommonDataUnsafe: Lens[TransactionView, MerkleTree[ViewCommonData]] =
-      GenLens[TransactionView](_.viewCommonData)
+      GenLens.apply[TransactionView](_.viewCommonData)
     val viewParticipantDataUnsafe: Lens[TransactionView, MerkleTree[ViewParticipantData]] =
-      GenLens[TransactionView](_.viewParticipantData)
+      GenLens.apply[TransactionView](_.viewParticipantData)
   }
 
   private def fromProtoV30(
@@ -446,7 +474,7 @@ object TransactionView
       )
       participantData <- MerkleTree.fromProtoOptionV30(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(expectedProtocolVersion, hashOps),
+        ViewParticipantData.fromByteString(expectedProtocolVersion, context),
       )
       subViews <- TransactionSubviews.fromProtoV30(context, protoView.subviews)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
@@ -455,6 +483,7 @@ object TransactionView
         participantData,
         subViews,
         rpv,
+        ValidateKeys(context._2),
       ).leftMap(e =>
         ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
       )
@@ -468,6 +497,7 @@ object TransactionView
   def validateViewParticipantData(
       parentData: ViewParticipantData,
       childData: Seq[WithPath[ViewParticipantData]],
+      inputContractsO: Option[Map[LfContractId, InputContract]],
   ): Either[String, Unit] = {
     def validateExercise(
         parentExercise: ExerciseActionDescription,
@@ -491,7 +521,7 @@ object TransactionView
       } yield ()
     }
 
-    parentData.actionDescription match {
+    val validatedActionDescription = parentData.actionDescription match {
       case ead: ExerciseActionDescription =>
         validateExercise(
           ead,
@@ -504,6 +534,33 @@ object TransactionView
         )
       case _ => Either.unit
     }
+
+    val validatedKeyResolution = inputContractsO match {
+      case None => Either.unit
+      case Some(inputContracts) =>
+        val contractIdKeys = parentData.keyResolution.view.flatMap { case (key, resolution) =>
+          resolution.unversioned.contracts.map(_ -> key)
+        }.toSeq
+        contractIdKeys
+          .traverse { case (cid, key) =>
+            inputContracts.get(cid) match {
+              case Some(contract)
+                  if contract.contract.inst.contractKeyWithMaintainers.exists(_.globalKey == key) =>
+                Right(())
+              case Some(contract) =>
+                Left(
+                  s"Contract ${contract.contractId.coid} resolved for key $key does not have a matching key in the contract instance"
+                )
+              case None => Left(s"Failed to find key resolution contract: ${cid.coid}")
+            }
+          }
+          .map(_ => ())
+    }
+
+    for {
+      _ <- validatedActionDescription
+      _ <- validatedKeyResolution
+    } yield ()
 
   }
 
@@ -548,5 +605,11 @@ object TransactionView
   }
   private object AllSubviewState {
     def init[A](current: A): AllSubviewState[A] = AllSubviewState(List.empty, current)
+  }
+
+  private[data] val NoKeyValidation: Boolean = false
+  private[data] object ValidateKeys {
+    def apply(protocolVersion: ProtocolVersion): Boolean =
+      protocolVersion >= ProtocolVersion.v36
   }
 }

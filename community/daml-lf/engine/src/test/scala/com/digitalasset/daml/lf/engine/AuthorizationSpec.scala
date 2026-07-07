@@ -5,26 +5,30 @@ package com.digitalasset.daml.lf
 package engine
 
 import com.digitalasset.daml.lf.crypto.SValueHash
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.data.Ref.Party
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.ledger.Authorize
-import com.digitalasset.daml.lf.ledger.FailedAuthorization._
+import com.digitalasset.daml.lf.ledger.FailedAuthorization.*
 import com.digitalasset.daml.lf.speedy.{DefaultAuthorizationChecker, SValue}
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.digitalasset.daml.lf.transaction.test.{
+  TestIdFactory,
+  TestNodeBuilder,
+  TransactionBuilder,
+}
 import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, Node}
-import com.digitalasset.daml.lf.transaction.test.{TestIdFactory, TestNodeBuilder, TransactionBuilder}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueRecord
+import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.Inside
 
 class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestIdFactory {
 
   // Test the various forms of FailedAuthorization which can be returned from CheckAuthorization
   // for the 4 kinds of GenActionNode: Create/Fetch/Lookup/Exercise.
 
-  import TransactionBuilder.Implicits._
+  import TransactionBuilder.Implicits.*
 
   private val builder = TestNodeBuilder
 
@@ -48,7 +52,7 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     init.copy(
       // By default maintainers are added to signatories so do this to allow error case testing
       keyOpt = Some(
-        GlobalKeyWithMaintainers.assertBuild(
+        GlobalKeyWithMaintainers(
           templateId,
           Value.ValueUnit,
           SValueHash.assertHashContractKey(pkgName, templateId.qualifiedName, SValue.SUnit),
@@ -64,14 +68,24 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     "ok" in {
       val createNode = makeCreateNode()
       val auth = Authorize(Set("Alice", "Bob", "Mary"))
-      val fails = DefaultAuthorizationChecker.authorizeCreate(optLocation = None, createNode.templateId, createNode.signatories, createNode.keyOpt.map(_.maintainers))(auth)
+      val fails = DefaultAuthorizationChecker.authorizeCreate(
+        optLocation = None,
+        createNode.templateId,
+        createNode.signatories,
+        createNode.keyOpt.map(_.maintainers),
+      )(auth)
       fails shouldBe Nil
     }
     // TEST_EVIDENCE: Authorization: create with no signatories is rejected
     "NoSignatories" in {
       val createNode = makeCreateNode(signatories = Nil, maintainers = Nil)
       val auth = Authorize(Set("Alice", "Bob", "Mary"))
-      val fails = DefaultAuthorizationChecker.authorizeCreate(optLocation = None, createNode.templateId, createNode.signatories, createNode.keyOpt.map(_.maintainers))(auth)
+      val fails = DefaultAuthorizationChecker.authorizeCreate(
+        optLocation = None,
+        createNode.templateId,
+        createNode.signatories,
+        createNode.keyOpt.map(_.maintainers),
+      )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case _: NoSignatories =>
         }
@@ -81,7 +95,12 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     "CreateMissingAuthorization" in {
       val createNode = makeCreateNode()
       val auth = Authorize(Set("Alice"))
-      val fails = DefaultAuthorizationChecker.authorizeCreate(optLocation = None, createNode.templateId, createNode.signatories, createNode.keyOpt.map(_.maintainers))(auth)
+      val fails = DefaultAuthorizationChecker.authorizeCreate(
+        optLocation = None,
+        createNode.templateId,
+        createNode.signatories,
+        createNode.keyOpt.map(_.maintainers),
+      )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case x: CreateMissingAuthorization =>
           x.authorizingParties shouldBe Set("Alice")
@@ -93,7 +112,12 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     "MaintainersNotSubsetOfSignatories" in {
       val createNode = makeCreateNode(maintainers = Seq("Alice", "Mary"))
       val auth = Authorize(Set("Alice", "Bob", "Mary"))
-      val fails = DefaultAuthorizationChecker.authorizeCreate(optLocation = None, createNode.templateId, createNode.signatories, createNode.keyOpt.map(_.maintainers))(auth)
+      val fails = DefaultAuthorizationChecker.authorizeCreate(
+        optLocation = None,
+        createNode.templateId,
+        createNode.signatories,
+        createNode.keyOpt.map(_.maintainers),
+      )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case x: MaintainersNotSubsetOfSignatories =>
           x.signatories shouldBe Set("Alice", "Bob")
@@ -109,13 +133,21 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     // TEST_EVIDENCE: Authorization: well-authorized fetch is accepted
     "ok" in {
       val auth = Authorize(Set("Alice", "Mary", "Nigel"))
-      val fails = DefaultAuthorizationChecker.authorizeFetch(optLocation = None, fetchNode.templateId, fetchNode.stakeholders)(auth)
+      val fails = DefaultAuthorizationChecker.authorizeFetch(
+        optLocation = None,
+        fetchNode.templateId,
+        fetchNode.stakeholders,
+      )(auth)
       fails shouldBe Nil
     }
     // TEST_EVIDENCE: Authorization: badly-authorized fetch is rejected
     "FetchMissingAuthorization" in {
       val auth = Authorize(Set("Mary", "Nigel"))
-      val fails = DefaultAuthorizationChecker.authorizeFetch(optLocation = None, fetchNode.templateId, fetchNode.stakeholders)(auth)
+      val fails = DefaultAuthorizationChecker.authorizeFetch(
+        optLocation = None,
+        fetchNode.templateId,
+        fetchNode.stakeholders,
+      )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case x: FetchMissingAuthorization =>
           x.stakeholders shouldBe Set("Alice", "Bob", "Carl")
@@ -132,14 +164,22 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     "ok" in {
       val auth = Authorize(Set("Alice", "Bob", "Mary"))
       val fails =
-        DefaultAuthorizationChecker.authorizeLookupByKey(optLocation = None, lookupNode.templateId, lookupNode.key.maintainers)(auth)
+        DefaultAuthorizationChecker.authorizeLookupByKey(
+          optLocation = None,
+          lookupNode.templateId,
+          lookupNode.key.maintainers,
+        )(auth)
       fails shouldBe Nil
     }
     // TEST_EVIDENCE: Authorization: badly-authorized lookup is rejected
     "LookupByKeyMissingAuthorization" in {
       val auth = Authorize(Set("Alice", "Mary"))
       val fails =
-        DefaultAuthorizationChecker.authorizeLookupByKey(optLocation = None, lookupNode.templateId, lookupNode.key.maintainers)(auth)
+        DefaultAuthorizationChecker.authorizeLookupByKey(
+          optLocation = None,
+          lookupNode.templateId,
+          lookupNode.key.maintainers,
+        )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case x: LookupByKeyMissingAuthorization =>
           x.maintainers shouldBe Set("Alice", "Bob")
@@ -151,7 +191,7 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
 
   "exercise" - {
     val contract = makeCreateNode(maintainers = Seq("Alice", "Bob"))
-    def makeExeNode(actingParties: Set[Party] = Seq("Alice", "Mary")) = {
+    def makeExeNode(actingParties: Set[Party] = Seq("Alice", "Mary")) =
       builder.exercise(
         contract = contract,
         choice = "C",
@@ -160,19 +200,30 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
         argument = ValueRecord(None, ImmArray.empty),
         byKey = false,
       )
-    }
     // TEST_EVIDENCE: Authorization: well-authorized exercise is accepted
     "ok" in {
       val auth = Authorize(Set("Alice", "John", "Mary"))
       val exeNode = makeExeNode()
-      val fails = DefaultAuthorizationChecker.authorizeExercise(optLocation = None, exeNode.templateId, exeNode.choiceId, exeNode.actingParties, exeNode.choiceAuthorizers)(auth)
+      val fails = DefaultAuthorizationChecker.authorizeExercise(
+        optLocation = None,
+        exeNode.templateId,
+        exeNode.choiceId,
+        exeNode.actingParties,
+        exeNode.choiceAuthorizers,
+      )(auth)
       fails shouldBe Nil
     }
     // TEST_EVIDENCE: Authorization: exercise with no controllers is rejected
     "NoControllers" in {
       val exeNode = makeExeNode(actingParties = Nil)
       val auth = Authorize(Set("Alice", "John", "Mary"))
-      val fails = DefaultAuthorizationChecker.authorizeExercise(optLocation = None, exeNode.templateId, exeNode.choiceId, exeNode.actingParties, exeNode.choiceAuthorizers)(auth)
+      val fails = DefaultAuthorizationChecker.authorizeExercise(
+        optLocation = None,
+        exeNode.templateId,
+        exeNode.choiceId,
+        exeNode.actingParties,
+        exeNode.choiceAuthorizers,
+      )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case _: NoControllers =>
         }
@@ -182,7 +233,13 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     "ExerciseMissingAuthorization" in {
       val exeNode = makeExeNode()
       val auth = Authorize(Set("Alice", "John"))
-      val fails = DefaultAuthorizationChecker.authorizeExercise(optLocation = None, exeNode.templateId, exeNode.choiceId, exeNode.actingParties, exeNode.choiceAuthorizers)(auth)
+      val fails = DefaultAuthorizationChecker.authorizeExercise(
+        optLocation = None,
+        exeNode.templateId,
+        exeNode.choiceId,
+        exeNode.actingParties,
+        exeNode.choiceAuthorizers,
+      )(auth)
       inside(fails) { case List(oneFail) =>
         inside(oneFail) { case x: ExerciseMissingAuthorization =>
           x.requiredParties shouldBe Set("Alice", "Mary")

@@ -9,7 +9,7 @@ import scala.annotation.nowarn
 object Util {
 
   import value.Value
-  import value.Value._
+  import value.Value.*
 
   // Equivalent to serialization + unserialization.
   // Fails if :
@@ -65,19 +65,13 @@ object Util {
   ): Either[String, VersionedValue] =
     normalizeValue(value.unversioned, value.version).map(normalized => value.map(_ => normalized))
 
-  def normalizeContract(
-      contract: VersionedThinContractInstance
-  ): Either[String, VersionedThinContractInstance] =
-    normalizeValue(contract.unversioned.arg, contract.version)
-      .map(normalized => contract.map(_.copy(arg = normalized)))
-
   def normalizeKey(
       key: GlobalKeyWithMaintainers,
       version: SerializationVersion,
   ): Either[String, GlobalKeyWithMaintainers] =
     normalizeValue(key.globalKey.key, version).map(normalized =>
       key.copy(globalKey =
-        GlobalKey.assertBuild(
+        GlobalKey(
           key.globalKey.templateId,
           key.globalKey.packageName,
           normalized,

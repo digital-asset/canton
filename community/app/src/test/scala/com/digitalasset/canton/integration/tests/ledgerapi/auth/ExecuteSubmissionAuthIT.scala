@@ -14,7 +14,8 @@ import scala.concurrent.{ExecutionContext, Future}
 final class ExecuteSubmissionAuthIT
     extends SyncServiceCallAuthTests
     with SubmitDummyPreparedSubmission
-    with ExecuteAsAuthTests {
+    with ExecuteAsAuthTests
+    with ActAsAnyPartyAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 

@@ -116,7 +116,7 @@ class SchemaProcessorsImpl(
 
   override def keyArgFromJsonToProto(
       template: value.Identifier,
-      jsonArgs: ujson.Value,
+      jsonArgsValue: ujson.Value,
   )(implicit
       traceContext: TraceContext
   ): Future[value.Value] = {
@@ -125,7 +125,7 @@ class SchemaProcessorsImpl(
       templateId <- resolveIdentifier(template, signatures).toFuture
       protoDict <- prepareProtoDict(signatures)
       templateKeyConverter <- extractTemplateKey(protoDict)(templateId)
-    } yield templateKeyConverter.convert(jsonArgs)
+    } yield templateKeyConverter.convert(jsonArgsValue)
   }
 
   override def exerciseResultFromProtoToJson(

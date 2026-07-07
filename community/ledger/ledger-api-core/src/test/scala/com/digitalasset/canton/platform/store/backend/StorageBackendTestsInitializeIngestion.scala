@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import anorm.SqlParser.long
+import anorm.SqlStringInterpolation
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
@@ -138,36 +141,38 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         participant = participant,
       ),
     ),
+    // 6: acs commitment (persisted, within the first ledger end)
+    Seq(dtoAcsCommitment(offset(5), eventSequentialId = 8L)),
   ).flatten
 
   it should "delete overspill entries - events, transaction meta, completions" in {
     val dtos2 = Vector(
-      // 6: transaction with create node
+      // 7: transaction with create node
       dtosCreate(
         6L,
-        event_sequential_id = 8L,
+        event_sequential_id = 9L,
         internal_contract_id = 201,
         additional_witnesses = Set(someParty),
       )(stakeholders = Set(signatory, someParty)),
       Seq(
         dtoTransactionMeta(
           offset(6),
-          event_sequential_id_first = 8L,
-          event_sequential_id_last = 8L,
+          event_sequential_id_first = 9L,
+          event_sequential_id_last = 9L,
         ),
         dtoCompletion(offset(6)),
       ),
-      // 7: transaction with exercise node
+      // 8: transaction with exercise node
       dtosWitnessedExercised(
         7L,
-        event_sequential_id = 9L,
+        event_sequential_id = 10L,
         consuming = false,
         internal_contract_id = Some(201),
         additional_witnesses = Set(someParty),
       ),
       dtosConsumingExercise(
         7L,
-        event_sequential_id = 10L,
+        event_sequential_id = 11L,
         internal_contract_id = Some(202),
         stakeholders = Set(someParty),
         additional_witnesses = Set(someParty),
@@ -175,46 +180,48 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       Seq(
         dtoTransactionMeta(
           offset(7),
-          event_sequential_id_first = 9L,
-          event_sequential_id_last = 10L,
+          event_sequential_id_first = 10L,
+          event_sequential_id_last = 11L,
         ),
         dtoCompletion(offset(7)),
       ),
-      // 8: assign
-      dtosAssign(8L, event_sequential_id = 11, internal_contract_id = 203)(stakeholders =
+      // 9: assign
+      dtosAssign(8L, event_sequential_id = 12, internal_contract_id = 203)(stakeholders =
         Set(someParty)
       ),
-      // 9: unassign
+      // 10: unassign
       dtosUnassign(
         9L,
-        event_sequential_id = 12,
+        event_sequential_id = 13,
         internal_contract_id = Some(203),
         stakeholders = Set(someParty),
       ),
-      // 10: topology transactions
+      // 11: topology transactions
       Seq(
         dtoPartyToParticipant(
           offset(10),
-          eventSequentialId = 13,
+          eventSequentialId = 14,
           party = someParty,
           participant = participant,
         ),
         dtoPartyToParticipant(
           offset(10),
-          eventSequentialId = 14,
+          eventSequentialId = 15,
           party = someParty3,
           participant = participant,
         ),
       ),
+      // 12: acs commitment
+      Seq(dtoAcsCommitment(offset(12), eventSequentialId = 16L)),
     ).flatten
     val allDtos = dtos1 ++ dtos2
     fixture(
       dtos1 = dtos1,
       lastOffset1 = 5L,
-      lastEventSeqId1 = 7L,
+      lastEventSeqId1 = 8L,
       dtos2 = dtos2,
       lastOffset2 = 12L,
-      lastEventSeqId2 = 15L,
+      lastEventSeqId2 = 16L,
       checkContentsBefore = () => {
         val activateEventSeqIds =
           executeSql(
@@ -236,15 +243,16 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           executeSql(
             backend.event.topologyPartyEventBatch(IdRange(1L, 100L))
           ).map(_.partyId)
-        activateEventSeqIds shouldBe List(1, 4, 8, 11)
-        deactivateEventSeqIds shouldBe List(3, 5, 10, 12)
-        witnessEventSeqIds shouldBe List(2, 9)
+        activateEventSeqIds shouldBe List(1, 4, 9, 12)
+        deactivateEventSeqIds shouldBe List(3, 5, 11, 13)
+        witnessEventSeqIds shouldBe List(2, 10)
         topologyPartyEvents shouldBe List(
           someParty,
           someParty2,
           someParty,
           someParty3,
         ) // not constrained by ledger end
+        acsCommitmentSeqIds() shouldBe List(8L, 16L)
         fetchIdsFromTransactionMetaUpdateIds(allDtos.collect { case meta: DbDto.TransactionMeta =>
           meta.update_id
         }) shouldBe Set((1, 1), (2, 4))
@@ -256,14 +264,14 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         })
         fetchIdsCreateStakeholder() shouldBe List(
           1L,
-          8L,
+          9L,
         ) // since ledger-end does not limit the range query
-        fetchIdsCreateNonStakeholder() shouldBe List(1L, 8L)
-        fetchIdsConsumingStakeholder() shouldBe List(3L, 10L)
-        fetchIdsConsumingNonStakeholder() shouldBe List(3L, 10L)
-        fetchIdsNonConsuming() shouldBe List(2L, 9L)
-        fetchIdsAssignStakeholder() shouldBe List(4L, 11L)
-        fetchTopologyParty() shouldBe List(6, 13)
+        fetchIdsCreateNonStakeholder() shouldBe List(1L, 9L)
+        fetchIdsConsumingStakeholder() shouldBe List(3L, 11L)
+        fetchIdsConsumingNonStakeholder() shouldBe List(3L, 11L)
+        fetchIdsNonConsuming() shouldBe List(2L, 10L)
+        fetchIdsAssignStakeholder() shouldBe List(4L, 12L)
+        fetchTopologyParty() shouldBe List(6, 14)
       },
       checkContentsAfter = () => {
         val activateEventSeqIds =
@@ -293,6 +301,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           someParty,
           someParty2,
         ) // not constrained by ledger end
+        acsCommitmentSeqIds() shouldBe List(8L)
         fetchIdsFromTransactionMetaUpdateIds(allDtos.collect { case meta: DbDto.TransactionMeta =>
           meta.update_id
         }) shouldBe Set((1, 1), (2, 4))
@@ -468,6 +477,15 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         .ids
     )
 
+  private def acsCommitmentSeqIds(): Vector[Long] =
+    executeSql(
+      backend.event.fetchAcsCommitments(
+        IdRange(1L, 100L),
+        someSynchronizerId,
+        descendingOrder = false,
+      )
+    ).map(_.eventSequentialId)
+
   private def fetchIdsFromTransactionMetaUpdateIds(
       updateIds: Seq[Array[Byte]]
   ): Set[(Long, Long)] = {
@@ -553,4 +571,158 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql(updateLedgerEnd(ledgerEnd(lastOffset + 1, lastEventSeqId + 1)))
     checkContentsAfter()
   }
+
+  behavior of "addContractPruningCandidatesAfter"
+
+  it should "populate candidates correctly during initialization" in {
+    // baseline: there should be no candidates
+    contractCandidates() shouldBe Vector.empty
+
+    val ledgerEnd = 1000L
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(
+      ingest(
+        Vector(
+          // before ledgerEnd1
+          dtosCreate(
+            event_offset = 100L,
+            event_sequential_id = 100L,
+            internal_contract_id = 50,
+          )(),
+          dtosWitnessedCreate(
+            event_offset = 1000L,
+            event_sequential_id = 1000L,
+            internal_contract_id = 51,
+          )(),
+          // between  ledgerEnd1 and ledgerEnd2
+
+          // check activated
+          // will be added + lower bound check
+          dtosCreate(
+            event_offset = 1001L,
+            event_sequential_id = 1001L,
+            internal_contract_id = 100,
+          )(),
+          // will be added second
+          dtosCreate(
+            event_offset = 1002L,
+            event_sequential_id = 1002L,
+            internal_contract_id = 101,
+          )(),
+          // won't be added: has before activate
+          dtosCreate(
+            event_offset = 1003L,
+            event_sequential_id = 1003L,
+            internal_contract_id = 50,
+          )(),
+          // won't be added: has before witnessed
+          dtosCreate(
+            event_offset = 1004L,
+            event_sequential_id = 1004L,
+            internal_contract_id = 51,
+          )(),
+          // won't be added: already there
+          dtosCreate(
+            event_offset = 1005L,
+            event_sequential_id = 1005L,
+            internal_contract_id = 1,
+          )(),
+          // won't be added: duplicate activate
+          dtosCreate(
+            event_offset = 1006L,
+            event_sequential_id = 1006L,
+            internal_contract_id = 101,
+          )(),
+          // won't be added: duplicate witnessed
+          dtosCreate(
+            event_offset = 1007L,
+            event_sequential_id = 1007L,
+            internal_contract_id = 104,
+          )(),
+
+          // check witnessed
+          // will be added
+          dtosWitnessedCreate(
+            event_offset = 1008L,
+            event_sequential_id = 1008L,
+            internal_contract_id = 103,
+          )(),
+          // will be added second
+          dtosWitnessedCreate(
+            event_offset = 1009L,
+            event_sequential_id = 1009L,
+            internal_contract_id = 104,
+          )(),
+          // won't be added: has before activate
+          dtosWitnessedCreate(
+            event_offset = 1010L,
+            event_sequential_id = 1010L,
+            internal_contract_id = 50,
+          )(),
+          // won't be added: has before witnessed
+          dtosWitnessedCreate(
+            event_offset = 1011L,
+            event_sequential_id = 1011L,
+            internal_contract_id = 51,
+          )(),
+          // won't be added: already there
+          dtosWitnessedCreate(
+            event_offset = 1012L,
+            event_sequential_id = 1012L,
+            internal_contract_id = 2,
+          )(),
+          // won't be added: duplicate activate
+          dtosWitnessedCreate(
+            event_offset = 1013L,
+            event_sequential_id = 1013L,
+            internal_contract_id = 101,
+          )(),
+          // won't be added: duplicate witnessed
+          dtosWitnessedCreate(
+            event_offset = 1014L,
+            event_sequential_id = 1014L,
+            internal_contract_id = 104,
+          )(),
+
+          // won't be there, no deactivation is selected
+          dtosConsumingExercise(
+            event_offset = 1015L,
+            event_sequential_id = 1015L,
+            internal_contract_id = Some(3),
+          ),
+        ).flatten,
+        _,
+      )
+    )
+
+    manuallyAddContractCandidates(Vector(1, 2))
+    contractCandidates() shouldBe Vector(1, 2)
+
+    executeSql { connection =>
+      // non-auto commit is enforced by the PG locking mechanism used inside
+      connection.setAutoCommit(false)
+      backend.event.addContractPruningCandidatesAfter(ledgerEnd)(connection, implicitly)
+      connection.commit()
+    }
+    contractCandidates() shouldBe Vector(1, 2, 100, 101, 103, 104)
+  }
+
+  private def contractCandidates(): Vector[Long] =
+    executeSql(
+      SQL"""
+            select internal_contract_id
+            from lapi_pruning_contract_candidate
+            order by internal_contract_id
+      """.asVectorOf(long("internal_contract_id"))(_)
+    )
+
+  private def manuallyAddContractCandidates(internalContractIds: Vector[Long]): Unit =
+    executeSql(
+      SQL"""
+            insert into lapi_pruning_contract_candidate(internal_contract_id)
+            values #${internalContractIds.map(id => s"($id)").mkString(", ")}
+      """.executeUpdate()(_)
+    ) shouldBe internalContractIds.size
+
 }

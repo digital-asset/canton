@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver
 
+import cats.Eval
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.config
@@ -13,11 +14,7 @@ import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
 import com.digitalasset.canton.ledger.api.validation.*
-import com.digitalasset.canton.ledger.localstore.api.{
-  IdentityProviderConfigStore,
-  PartyRecordStore,
-  UserManagementStore,
-}
+import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -32,12 +29,16 @@ import com.digitalasset.canton.platform.apiserver.services.command.{
   CommandInspectionServiceImpl,
   CommandServiceImpl,
   CommandSubmissionServiceImpl,
+  TrafficEnforcementBackend,
 }
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
+import com.digitalasset.canton.platform.apiserver.services.traffic.ApiTrafficService
 import com.digitalasset.canton.platform.config.*
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.daml.lf.data.Ref
@@ -101,11 +102,11 @@ object ApiServices {
       commandProgressTracker: CommandProgressTracker,
       commandConfig: CommandServiceConfig,
       optTimeServiceBackend: Option[TimeServiceBackend],
+      partyReplicationEndpointsO: Option[PartyReplicationEndpoints],
       queryExecutionContext: ExecutionContext,
       commandExecutionContext: ExecutionContext,
       metrics: LedgerApiServerMetrics,
       healthChecks: HealthChecks,
-      seedService: SeedService,
       managementServiceTimeout: FiniteDuration,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       ledgerFeatures: LedgerFeatures,
@@ -124,6 +125,8 @@ object ApiServices {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
+      externalCallHandler: ExternalCallHandler,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -285,6 +288,7 @@ object ApiServices {
           loggerFactory = loggerFactory,
           dynParamGetter = dynParamGetter,
           timeProvider = timeProvider,
+          externalCallHandler = externalCallHandler,
         )
 
       val commandExecutor =
@@ -320,7 +324,6 @@ object ApiServices {
           syncService,
           timeProvider,
           timeProviderType,
-          seedService,
           commandExecutor,
           checkOverloaded,
           metrics,
@@ -340,6 +343,10 @@ object ApiServices {
           ApiPartyManagementService.CreateSubmissionId.forParticipant(participantId),
         loggerFactory = loggerFactory,
       )
+      val apiPartyManagementAlphaServiceO =
+        partyReplicationEndpointsO.map(partyReplicationEndpoints =>
+          ApiPartyManagementAlphaService.createApiService(partyReplicationEndpoints)
+        )
 
       val apiPackageManagementService =
         ApiPackageManagementService.createApiService(
@@ -384,12 +391,19 @@ object ApiServices {
         loggerFactory = loggerFactory,
       )
 
+      val trafficServiceO = trafficEnforcementBackendO
+        .map(trafficClient =>
+          new TrafficServiceAuthorization(
+            new ApiTrafficService(trafficClient.map(_.trafficServiceClient), loggerFactory),
+            authorizer,
+          )
+        )
+
       val apiInteractiveSubmissionService = {
         val interactiveSubmissionService =
           InteractiveSubmissionServiceImpl.createApiService(
             updateServices,
             syncService,
-            seedService,
             commandExecutor,
             metrics,
             checkOverloaded,
@@ -399,6 +413,7 @@ object ApiServices {
             packagePreferenceBackend,
             transactionSubmissionTracker,
             commandConfig.defaultTrackingTimeout,
+            trafficEnforcementBackendO,
             loggerFactory,
           )
 
@@ -422,7 +437,9 @@ object ApiServices {
         new PackageManagementServiceAuthorization(apiPackageManagementService, authorizer),
         new ParticipantPruningServiceAuthorization(participantPruningService, authorizer),
         new InteractiveSubmissionServiceAuthorization(apiInteractiveSubmissionService, authorizer),
-      )
+      ) ++ apiPartyManagementAlphaServiceO
+        .map(new PartyManagementAlphaServiceAuthorization(_, authorizer))
+        .toList ++ trafficServiceO.toList
     }
 
     logger.info(engine.info.toString)

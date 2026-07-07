@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.data.GenTransactionTree
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -19,12 +18,14 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.store.PackageDependencyResolver
+import com.digitalasset.canton.topology.store.{
+  PackageDependencyResolver,
+  ResolvedPackagesAndDependencies,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TestContractHasher
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
-import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -33,7 +34,8 @@ import scala.concurrent.Future
 final class LegacyTransactionTreeFactoryTest
     extends AsyncWordSpec
     with BaseTest
-    with HasExecutionContext {
+    with HasExecutionContext
+    with ProtocolVersionChecksAsyncWordSpec {
 
   private def successfulLookup(example: ExampleTransaction): ContractInstanceOfId = id => {
     EitherT.fromEither[FutureUnlessShutdown](
@@ -46,7 +48,10 @@ final class LegacyTransactionTreeFactoryTest
   private def failedLookup(testErrorMessage: String): ContractInstanceOfId =
     id => EitherT.leftT(ContractLookupError(id, testErrorMessage))
 
-  forAll(Table("contract id version", CantonContractIdVersion.all*)) { contractIdVersion =>
+  private val testedContractIdVersions: Seq[CantonContractIdVersion] =
+    if (testedProtocolVersion < ProtocolVersion.v35) CantonContractIdVersion.all else Seq.empty
+
+  forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
     )(cantonContractIdVersion = contractIdVersion)
@@ -67,7 +72,6 @@ final class LegacyTransactionTreeFactoryTest
           treeFactory: TransactionTreeFactory,
           transaction: WellFormedTransaction[WithoutSuffixes],
           contractInstanceOfId: ContractInstanceOfId,
-          keyResolver: LegacyContractStateMachine.KeyResolver,
           actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
           snapshot: TopologySnapshot = factory.topologySnapshot,
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -82,7 +86,6 @@ final class LegacyTransactionTreeFactoryTest
             transactionUuid = factory.transactionUuid,
             topologySnapshot = snapshot,
             contractOfId = contractInstanceOfId,
-            legacyKeyResolver = keyResolver.fmap(_.toList.toVector),
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
           )
@@ -100,7 +103,6 @@ final class LegacyTransactionTreeFactoryTest
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
               ).value.flatMap(_ should equal(Right(example.transactionTree)))
             }
           }
@@ -119,7 +121,6 @@ final class LegacyTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               failedLookup(errorMessage),
-              example.keyResolver.asCidOptionMap,
             ).value.flatMap(
               _ shouldEqual Left(
                 ContractLookupError(example.absolutizedContractId, errorMessage)
@@ -137,7 +138,6 @@ final class LegacyTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               actAs = List.empty,
             ).value
               .flatMap(
@@ -154,19 +154,18 @@ final class LegacyTransactionTreeFactoryTest
               treeFactory,
               example.wellFormedUnsuffixedTransaction,
               successfulLookup(example),
-              example.keyResolver.asCidOptionMap,
               snapshot = defaultTestingTopology.withPackages(Map.empty).build().topologySnapshot(),
             ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
           }
-          "fail if some dependency is not vetted" in {
 
+          // Starting with Canton protocol version 35, package dependency vetting is not required
+          "fail if some dependency is not vetted" onlyRunWithOrLessThan ProtocolVersion.v34 in {
             val example = factory.standardHappyCases(2)
             for {
               err <- createTransactionTree(
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
                 snapshot = defaultTestingIdentityFactory.topologySnapshot(
                   packageDependencyResolver = TestPackageDependencyResolver
                 ),
@@ -186,7 +185,6 @@ final class LegacyTransactionTreeFactoryTest
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
-                example.keyResolver.asCidOptionMap,
                 snapshot = defaultTestingIdentityFactory.topologySnapshot(
                   packageDependencyResolver = MisconfiguredPackageDependencyResolver
                 ),
@@ -207,19 +205,22 @@ final class LegacyTransactionTreeFactoryTest
 
   object TestPackageDependencyResolver extends PackageDependencyResolver {
     val exampleDependency: IdString.PackageId = PackageId.assertFromString("example-dependency")
-    override def packageDependencies(packageIds: Set[PackageId])(implicit
+    override def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
         traceContext: TraceContext
-    ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] =
-      if (packageIds.contains(ExampleTransactionFactory.packageId)) Right(Set(exampleDependency))
-      else Right(Set.empty[PackageId])
+    ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies] =
+      if (packages.contains(ExampleTransactionFactory.packageId))
+        Right(ResolvedPackagesAndDependencies(packages, Set(exampleDependency)))
+      else Right(ResolvedPackagesAndDependencies(packages, Set.empty))
   }
 
   object MisconfiguredPackageDependencyResolver extends PackageDependencyResolver {
     private val participantId = ParticipantId("MisconfiguredPackageDependencyResolver")
 
-    override def packageDependencies(packageIds: Set[PackageId])(implicit
+    override def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
         traceContext: TraceContext
-    ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] = Left(participantId -> packageIds)
+    ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies] = Left(
+      participantId -> packages
+    )
   }
 
 }

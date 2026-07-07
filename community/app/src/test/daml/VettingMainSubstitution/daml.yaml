@@ -6,6 +6,8 @@ override-components:
     version: $DAML_VERSION
   daml-script:
     version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION
 name: VettingMain
 data-dependencies:
 - ../../scala-2.13/resource_managed/test/VettingDepSubstitution-1.0.0.dar

@@ -18,12 +18,12 @@ import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.{
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
   AchsState,
-  LedgerEnd,
 }
 import com.digitalasset.canton.platform.store.backend.{
   CompletionStorageBackend,
   EventStorageBackend,
   IngestionStorageBackend,
+  LedgerEnd,
   ParameterStorageBackend,
   StringInterningStorageBackend,
 }
@@ -31,12 +31,14 @@ import com.digitalasset.canton.platform.store.cache.AchsStateCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.interning.UpdatingStringInterningView
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PekkoUtil.ShutdownInProgress
 import com.digitalasset.daml.lf.data.Ref
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.Cancellable
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
+import java.sql.Connection
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
@@ -60,7 +62,8 @@ private[platform] final case class InitializeParallelIngestion(
   def apply(
       dbDispatcher: DbDispatcher,
       initializeInMemoryState: (Option[LedgerEnd], AchsState) => Future[Unit],
-  ): Future[(Option[LedgerEnd], AchsWorkDistance)] = {
+      shutdownRequested: ShutdownInProgress,
+  ): Future[Future[(Option[LedgerEnd], AchsWorkDistance)]] = {
     implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.empty
@@ -77,14 +80,21 @@ private[platform] final case class InitializeParallelIngestion(
       ledgerEnd <- dbDispatcher.executeSql(metrics.index.db.getLedgerEnd)(
         parameterStorageBackend.ledgerEnd
       )
-      _ <- dbDispatcher.executeSql(metrics.indexer.initialization)(
-        ingestionStorageBackend.deletePartiallyIngestedData(ledgerEnd)
-      )
-      (postAchsState, postAchsWork) <- initializeAchs(
-        achsConfig = achsConfig,
-        lastEventSeqId = ledgerEnd.map(_.lastEventSeqId).getOrElse(0L),
-        dbDispatcher = dbDispatcher,
-      )
+      _ <- dbDispatcher.executeSql(metrics.indexer.initialization) { connection =>
+        // addContractPruningCandidatesAfter must execute before deletePartiallyIngestedData
+        // addContractPruningCandidatesAfter and deletePartiallyIngestedData must be in one transaction
+        // so that it cannot be intersected with pruning contract candidate cleansing: that might remove candidates
+        // as they are referenced after the ledger-end in corner cases.
+        eventStorageBackend.addContractPruningCandidatesAfter(
+          eventSeqIdExclusive = ledgerEnd
+            .map(_.lastEventSeqId)
+            .getOrElse(-1L) // if no watermark we gather candidates from all events
+        )(
+          connection = connection,
+          traceContext = loggingContext.traceContext,
+        )
+        ingestionStorageBackend.deletePartiallyIngestedData(ledgerEnd)(connection)
+      }
       _ <- updatingStringInterningView.update(ledgerEnd.map(_.lastStringInterningId)) {
         (fromExclusive, toInclusive) =>
           implicit val loggingContext: LoggingContextWithTrace =
@@ -116,82 +126,76 @@ private[platform] final case class InitializeParallelIngestion(
       _ <- dbDispatcher.executeSql(metrics.indexer.postProcessingEndIngestion)(
         parameterStorageBackend.updatePostProcessingEnd(ledgerEnd.map(_.lastOffset))
       )
-      _ = logger.info(s"Indexer initialized at $ledgerEnd")
-      _ <- initializeInMemoryState(ledgerEnd, postAchsState)
-    } yield (ledgerEnd, postAchsWork)
+      achsState <- dbDispatcher.executeSql(metrics.indexer.achsStateInitialization)(
+        initializeAchsState(achsConfig)
+      )
+      _ <- initializeInMemoryState(ledgerEnd, achsState)
+    } yield {
+      logger.info(s"Indexer initialized at $ledgerEnd with ACHS state $achsState")
+      initializeAchs(
+        achsConfig = achsConfig,
+        ledgerEnd = ledgerEnd,
+        dbDispatcher = dbDispatcher,
+        shutdownRequested = shutdownRequested,
+      )
+    }
   }
 
-  /** Initializes ACHS state and eagerly creates the ACHS snapshot using AchsMaintenancePipe.
-    *
-    * If ACHS is enabled, it checks for an existing snapshot of ACHS state in the database:
-    *   - If no snapshot exists, it creates a new snapshot.
-    *   - If a snapshot exists and lags behind, it uses the existing state to build the ACHS.
-    *   - If a snapshot exists and is ahead, it does not alter the existing state and expects the
-    *     ACHS to catch up when new events will be indexed (work distance will be negative,
-    *     representing debt).
-    *
-    * If ACHS is disabled, it clears any existing ACHS data from the database.
-    */
-  private def initializeAchs(
-      achsConfig: Option[AchsConfig],
-      lastEventSeqId: Long,
-      dbDispatcher: DbDispatcher,
-  )(implicit
-      ec: ExecutionContext,
-      loggingContext: LoggingContextWithTrace,
-  ): Future[(AchsState, AchsWorkDistance)] =
-    achsConfig match {
-      case Some(config) =>
-        dbDispatcher
-          .executeSql(metrics.indexer.initialization) { connection =>
-            val achsState = parameterStorageBackend.fetchACHSState(connection) match {
-              case None =>
-                logger.info(s"ACHS not found, creating new one.")
-                val freshState =
-                  ParameterStorageBackend.AchsState(
-                    validAt = 0,
-                    lastPointers = AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
-                  )
-                parameterStorageBackend.insertACHSState(freshState)(connection)
-                freshState
-              case Some(existingState) =>
-                // snapshot exists (behind or ahead), use existing state.
-                // initialWork will compute the correct work distance:
-                //   - positive values for catch-up (behind)
-                //   - negative values as debt (ahead, will be absorbed by incoming batches)
-                logger.info(
-                  s"ACHS resuming from existing state: $existingState"
-                )
-                existingState
-            }
-            achsState -> AchsMaintenancePipe.initialWork(achsState, lastEventSeqId, config)
-          }
-          .flatMap { case (initialState, initialWork) =>
-            createAchsSnapshot(
-              initialState = initialState,
-              initialWork = initialWork,
-              lastEventSeqId = lastEventSeqId,
-              config = config,
-              dbDispatcher = dbDispatcher,
-            )
-          }
-      case None =>
+  private def initializeAchsState(
+      achsConfigO: Option[AchsConfig]
+  )(connection: Connection)(implicit
+      loggingContext: LoggingContextWithTrace
+  ): AchsState =
+    (parameterStorageBackend.fetchAchsState(connection), achsConfigO) match {
+      case (None, None) =>
+        logger.info(s"ACHS State not found, also not configured")
+        AchsState.empty
+
+      case (None, Some(_)) =>
+        logger.info(s"ACHS State not found, creating new empty state as ACHS is enabled")
+        parameterStorageBackend.insertAchsState(AchsState.empty)(connection)
+        AchsState.empty
+
+      case (Some(_), None) =>
+        logger.info("ACHS is disabled, clearing existing ACHS data")
         // Clearing ACHS data here is safe because configuration is not changing dynamically.
         // Otherwise, clearing could race with ACS retrieval that relies on ACHS data,
         // as pointers would be updated after the data is already evicted.
-        logger.info("ACHS is disabled, clearing existing ACHS data")
-        dbDispatcher
-          .executeSql(metrics.indexer.initialization) { connection =>
-            parameterStorageBackend.clearAchsData(connection)
-          }
-          .map { _ =>
-            // not used when ACHS is disabled
-            AchsState(
-              validAt = 0L,
-              lastPointers = AchsLastPointers(lastRemoved = 0L, lastPopulated = 0L),
-            ) ->
-              AchsWorkDistance(populate = 0L, remove = 0L)
-          }
+        parameterStorageBackend.clearAchsStateAndData(connection)
+        AchsState.empty
+
+      case (Some(existingState), Some(_)) =>
+        // snapshot exists (behind or ahead), use existing state.
+        // initialWork will compute the correct work distance:
+        //   - positive values for catch-up (behind)
+        //   - negative values as debt (ahead, will be absorbed by incoming batches)
+        logger.info(s"ACHS resuming from existing state: $existingState")
+        eventStorageBackend.deletePartiallyIngestedAchsData(
+          fromExclusiveEventSeqId = existingState.lastPointers.lastPopulated
+        )(connection)
+        existingState
+    }
+
+  private def initializeAchs(
+      achsConfig: Option[AchsConfig],
+      ledgerEnd: Option[LedgerEnd],
+      dbDispatcher: DbDispatcher,
+      shutdownRequested: ShutdownInProgress,
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: LoggingContextWithTrace,
+  ): Future[(Option[LedgerEnd], AchsWorkDistance)] =
+    achsConfig match {
+      case Some(config) =>
+        createAchsSnapshot(
+          lastEventSeqId = ledgerEnd.map(_.lastEventSeqId).getOrElse(0L),
+          config = config,
+          dbDispatcher = dbDispatcher,
+          shutdownRequested = shutdownRequested,
+        ).map(ledgerEnd -> _)
+      case None =>
+        // not used when ACHS is disabled
+        Future.successful(ledgerEnd -> AchsWorkDistance(populate = 0L, remove = 0L))
     }
 
   /** Eagerly creates the ACHS snapshot by running AchsMaintenancePipe in two phases:
@@ -208,17 +212,16 @@ private[platform] final case class InitializeParallelIngestion(
     * correctly accounts for debt (negative work when ACHS is ahead).
     */
   private def createAchsSnapshot(
-      initialState: AchsState,
-      initialWork: AchsWorkDistance,
       lastEventSeqId: Long,
       config: AchsConfig,
       dbDispatcher: DbDispatcher,
+      shutdownRequested: ShutdownInProgress,
   )(implicit
       ec: ExecutionContext,
       loggingContext: LoggingContextWithTrace,
-  ): Future[(AchsState, AchsWorkDistance)] = {
-    // initialize the in-memory ACHS state here as well to ensure it is available for the snapshot creation step
-    achsStateCache.set(initialState)
+  ): Future[AchsWorkDistance] = {
+    val initialState = achsStateCache.get()
+    val initialWork = AchsMaintenancePipe.initialWork(initialState, lastEventSeqId, config)
     logger.info(s"Initializing ACHS snapshot with initial work distance: $initialWork")
 
     val lastPointers = new AtomicReference[AchsLastPointers](initialState.lastPointers)
@@ -250,6 +253,7 @@ private[platform] final case class InitializeParallelIngestion(
         )
         elem
       }
+      .takeWhile(_ => !shutdownRequested())
       .runWith(Sink.ignore)
       .map { _ =>
         cancellable.cancel().discard
@@ -260,10 +264,15 @@ private[platform] final case class InitializeParallelIngestion(
         val updatedAchsState = achsStateCache.get()
         val remainingWork =
           AchsMaintenancePipe.initialWork(updatedAchsState, lastEventSeqId, config)
-        logger.info(
-          s"ACHS snapshot initialization finished. Initial work: $initialWork, remaining work: $remainingWork (updated ACHS state: $updatedAchsState)"
-        )
-        updatedAchsState -> remainingWork
+        if (!shutdownRequested())
+          logger.info(
+            s"ACHS snapshot initialization finished. Initial work: $initialWork, remaining work: $remainingWork (updated ACHS state: $updatedAchsState)"
+          )
+        else
+          logger.info(
+            s"ACHS snapshot initialization interrupted by shutdown request. Initial work: $initialWork, work at interruption: $remainingWork (updated ACHS state: $updatedAchsState)"
+          )
+        remainingWork
       }
   }
 

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import com.daml.metrics.api.MetricHandle.Meter
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
@@ -37,6 +36,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   UserId,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
@@ -140,12 +140,14 @@ class MediatorStateTest
         )(traceContext, executorService)
         .futureValueUS // without explicit ec it deadlocks on AnyTestSuite.serialExecutionContext
 
+    val metrics = MediatorTestMetrics(this.getClass.getSimpleName)
+
     def mediatorState: MediatorState = {
       val sut = new MediatorState(
         new InMemoryFinalizedResponseStore(loggerFactory),
         new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
         mock[Clock],
-        MediatorTestMetrics,
+        metrics,
         testedProtocolVersion,
         timeouts,
         loggerFactory,
@@ -201,7 +203,7 @@ class MediatorStateTest
           new InMemoryFinalizedResponseStore(loggerFactory),
           new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
           mock[Clock],
-          MediatorTestMetrics,
+          metrics,
           testedProtocolVersion,
           timeouts,
           loggerFactory,

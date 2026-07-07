@@ -31,7 +31,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
       else toNat(i - 1, SValue.SVariant(Nat, S, 1, acc))
 
     "rejects excessive nesting" in {
-      import interpretation.{Error => IError}
+      import interpretation.Error as IError
 
       // Because Z has a nesting of 1, toNat(Value.MAXIMUM_NESTING) has a nesting of
       // Value.MAXIMUM_NESTING + 1
@@ -42,7 +42,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
     }
 
     "rejects null char in Text" in {
-      import interpretation.{Error => IError}
+      import interpretation.Error as IError
 
       val testCases = Table(
         "value",
@@ -76,7 +76,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
     "accepts just right nesting" in {
       // Because Z has a nesting of 1, toNat(Value.MAXIMUM_NESTING - 1) has a nesting of
       // Value.MAXIMUM_NESTING
-      Try(toNat(Value.MAXIMUM_NESTING - 1)) shouldBe a[Success[_]]
+      Try(toNat(Value.MAXIMUM_NESTING - 1)) shouldBe a[Success[?]]
     }
   }
 
@@ -176,7 +176,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
       forEvery(testCases) { entries =>
         Try(SMap.fromStrictlyOrderedEntries(true, entries)) shouldBe nonComparableFailure
         Try(SMap(false, entries)) shouldBe nonComparableFailure
-        Try(SMap(true, entries: _*)) shouldBe nonComparableFailure
+        Try(SMap(true, entries*)) shouldBe nonComparableFailure
       }
     }
 

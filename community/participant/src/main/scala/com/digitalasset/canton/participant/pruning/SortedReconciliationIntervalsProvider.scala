@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.pruning
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.*
@@ -11,11 +10,12 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProvider.ComputeReconciliationIntervalsCoveringIterable
 import com.digitalasset.canton.protocol.SynchronizerParameters
-import com.digitalasset.canton.protocol.messages.CommitmentPeriod
+import com.digitalasset.canton.protocol.messages.LegacyCommitmentPeriod
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil.*
+import com.digitalasset.nonempty.NonEmpty
 
 import java.security.InvalidParameterException
 import java.util.concurrent.atomic.AtomicReference
@@ -139,9 +139,9 @@ class SortedReconciliationIntervalsProvider(
     * -> 40, 40 -> 50, 50 -> 60 etc.)
     */
 
-  def splitCommitmentPeriod(commitmentPeriod: CommitmentPeriod)(implicit
+  def splitCommitmentPeriod(commitmentPeriod: LegacyCommitmentPeriod)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[NonEmpty[immutable.Iterable[CommitmentPeriod]]]] =
+  ): FutureUnlessShutdown[Option[NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]]]] =
     for {
       isFromTick <- isTick(commitmentPeriod.fromExclusive.forgetRefinement)
       isToTick <- isTick(commitmentPeriod.toInclusive.forgetRefinement)
@@ -164,7 +164,7 @@ class SortedReconciliationIntervalsProvider(
       toInclusive: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[immutable.Iterable[CommitmentPeriod]] = {
+  ): FutureUnlessShutdown[immutable.Iterable[LegacyCommitmentPeriod]] = {
     logger.debug(s"Computing covering reconciliation intervals from $fromExclusive to $toInclusive")
     for {
       _ <- tryCheckIsTick(fromExclusive)
@@ -184,23 +184,23 @@ object SortedReconciliationIntervalsProvider {
       sortedReconciliationIntervals: SortedReconciliationIntervals,
       fromExclusive: CantonTimestampSecond,
       toInclusive: CantonTimestampSecond,
-  ) extends immutable.Iterable[CommitmentPeriod] {
+  ) extends immutable.Iterable[LegacyCommitmentPeriod] {
     import ComputeReconciliationIntervalsCoveringIterable.*
 
     private type State = CantonTimestampSecond
 
-    override def iterator: Iterator[CommitmentPeriod] =
+    override def iterator: Iterator[LegacyCommitmentPeriod] =
       Iterator.unfold(toInclusive)(next)
 
-    private def next(tick: CantonTimestampSecond): Option[(CommitmentPeriod, State)] =
+    private def next(tick: CantonTimestampSecond): Option[(LegacyCommitmentPeriod, State)] =
       if (tick <= fromExclusive) None
       else {
         val tickBefore = sortedReconciliationIntervals.tickBefore(tick.forgetRefinement)
         val lastPeriod = tickBefore match {
           case Some(tickBef) if tickBef > fromExclusive =>
-            CommitmentPeriod(tickBef, periodLength(tickBef, tick))
+            LegacyCommitmentPeriod(tickBef, periodLength(tickBef, tick))
           case _ =>
-            CommitmentPeriod(fromExclusive, periodLength(fromExclusive, tick))
+            LegacyCommitmentPeriod(fromExclusive, periodLength(fromExclusive, tick))
         }
         val nextTick = lastPeriod.fromExclusive
         Some(lastPeriod -> nextTick)

@@ -205,11 +205,13 @@ final class TimeBasedInteractiveIntegrationTest
         val completion = findCompletion(submissionId, ledgerEnd, johnE, epn)
         if (expectSuccess) {
           completion.status.value.code shouldBe io.grpc.Status.Code.OK.value()
+          completion.transactionHash shouldBe Some(prepared.preparedTransactionHash)
         } else {
           completion.status.value.code shouldBe io.grpc.Status.Code.ABORTED.value()
           completion.status.value.message should include regex (
             s"LOCAL_VERDICT_MAX_RECORD_TIME_EXCEEDED.*Rejected transaction as record time exceeds the maximum record time:.*maxRecordTime=${maxRecordTime.toString}"
           )
+          completion.transactionHash shouldBe Some(prepared.preparedTransactionHash)
         }
       }
 
@@ -332,12 +334,14 @@ final class TimeBasedInteractiveIntegrationTest
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
           val (submissionId, ledgerEnd) = exec(prepared, signatures, epn)
-          findCompletion(
+          val completion = findCompletion(
             submissionId,
             ledgerEnd,
             aliceE,
             epn,
-          ).status.value.code shouldBe Status.Code.ABORTED.value()
+          )
+          completion.status.value.code shouldBe Status.Code.ABORTED.value()
+          completion.transactionHash shouldBe Some(prepared.preparedTransactionHash)
         },
         entries => {
           forAtLeast(1, entries) { l =>

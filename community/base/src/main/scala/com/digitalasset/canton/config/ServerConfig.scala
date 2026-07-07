@@ -4,7 +4,6 @@
 package com.digitalasset.canton.config
 
 import com.daml.jwt.JwtTimestampLeeway
-import com.daml.nonempty.NonEmpty
 import com.daml.tls.{TlsClientConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
@@ -14,6 +13,7 @@ import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChann
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import scala.concurrent.duration.DurationInt
@@ -296,6 +296,7 @@ final case class JwksCacheConfig(
     cacheExpiration: NonNegativeFiniteDuration = JwksCacheConfig.DefaultCacheExpiration,
     connectionTimeout: NonNegativeFiniteDuration = JwksCacheConfig.DefaultConnectionTimeout,
     readTimeout: NonNegativeFiniteDuration = JwksCacheConfig.DefaultReadTimeout,
+    autoRefreshAfter: NonNegativeFiniteDuration = JwksCacheConfig.DefaultAutoRefreshAfter,
 )
 
 object JwksCacheConfig {
@@ -306,6 +307,15 @@ object JwksCacheConfig {
     NonNegativeFiniteDuration.ofSeconds(10)
   private val DefaultReadTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(10)
+
+  /** Default auto-refresh time of 0 preserves legacy behavior (no background refresh). When set to
+    * a positive duration, the cache begins asynchronous background refresh after this interval
+    * since the entry was written. If the refresh fails, the old verifier continues to be served
+    * until hard eviction at `cacheExpiration`. This value should be less than `cacheExpiration` to
+    * be effective.
+    */
+  private val DefaultAutoRefreshAfter: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(0)
 }
 
 /** Configuration for admin-token based authorization.

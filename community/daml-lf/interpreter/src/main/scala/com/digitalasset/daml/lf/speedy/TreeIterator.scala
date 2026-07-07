@@ -6,20 +6,20 @@ package speedy
 
 import com.daml.scalautil.Statement.discard
 
-/** A factory for iterators over the reachable nodes of a tree.
-  * The tree is defined by the function `children` that maps each node to its children.
+/** A factory for iterators over the reachable nodes of a tree. The tree is defined by the function
+  * `children` that maps each node to its children.
   *
-  * Note: There are no checks that `children` actually defines a tree.
-  * If `children` defines a graph, then the iterator will return each node `x` in the DAG
-  * as many times as there are paths from the start node to `x`.
-  * In particular, if the cycle is reachable from the start node, then the iterator will not terminate.
-  * Yet, it will still ensure that all reachable nodes eventually show up.
+  * Note: There are no checks that `children` actually defines a tree. If `children` defines a
+  * graph, then the iterator will return each node `x` in the DAG as many times as there are paths
+  * from the start node to `x`. In particular, if the cycle is reachable from the start node, then
+  * the iterator will not terminate. Yet, it will still ensure that all reachable nodes eventually
+  * show up.
   */
 class TreeIterator[A](children: A => Iterator[A]) {
 
   /** Returns an iterator over all nodes reachable from `x` via a possibly empty path in `children`.
-    * Uses dove-tailing to support both infinitely branching and infinitely deep trees.
-    * Callers must not rely on any particular order in which the nodes are returned.
+    * Uses dove-tailing to support both infinitely branching and infinitely deep trees. Callers must
+    * not rely on any particular order in which the nodes are returned.
     */
   def apply(x: A): Iterator[A] = new Iterator[A] {
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin
 
 import cats.Eval
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -44,6 +43,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPackageId}
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentMatchersSugar
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -263,6 +263,7 @@ class PackageOpsTest extends PackageOpsTestBase {
               any[TopologyMapping],
               any[Option[PositiveInt]],
               any[Seq[Fingerprint]],
+              any[Seq[Namespace]],
               any[ProtocolVersion],
               anyBoolean,
               any[ForceFlags],
@@ -320,6 +321,7 @@ class PackageOpsTest extends PackageOpsTestBase {
               any[TopologyMapping],
               any[Option[PositiveInt]],
               any[Seq[Fingerprint]],
+              any[Seq[Namespace]],
               any[ProtocolVersion],
               anyBoolean,
               any[ForceFlags],
@@ -402,7 +404,6 @@ class PackageOpsTest extends PackageOpsTestBase {
         syncPersistentStateO = topologyTestSetup.get(_).map(_._2),
         loggerFactory = loggerFactory,
       ),
-      initialProtocolVersion = testedProtocolVersion,
       loggerFactory = loggerFactory,
       timeouts = ProcessingTimeout(),
       futureSupervisor = futureSupervisor,
@@ -417,6 +418,7 @@ class PackageOpsTest extends PackageOpsTestBase {
       } yield {
         when(persistentState.topologyStore).thenReturn(mock[TopologyStore[SynchronizerStore]])
         when(persistentState.psid).thenReturn(psId)
+        when(topologyManager.psid).thenReturn(psId)
         when(topologyClient.approximateTimestamp).thenReturn(approxTime)
         val asOfExpectedTime = if (queryAtApproximateTime) approxTime else CantonTimestamp.MaxValue
         when(
@@ -465,6 +467,7 @@ class PackageOpsTest extends PackageOpsTestBase {
             )
           ),
           eqTo(Some(txSerial.tryAdd(1))),
+          eqTo(Seq.empty),
           eqTo(Seq.empty),
           eqTo(testedProtocolVersion),
           eqTo(true),

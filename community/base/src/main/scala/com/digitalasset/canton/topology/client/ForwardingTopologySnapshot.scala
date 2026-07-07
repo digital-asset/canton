@@ -13,14 +13,15 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
@@ -91,8 +92,15 @@ class ForwardingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
-    parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+    parent.findUnvettedPackagesOrDependencies(
+      participant,
+      packages,
+      ledgerTime,
+      vettedPackages,
+      checkDependencyVetting,
+    )
 
   /** returns the list of currently known mediators */
   override def mediatorGroups()(implicit
@@ -131,7 +139,7 @@ class ForwardingTopologySnapshot(
 
   override def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
     parent.findDynamicSequencingParameters()
 
   /** List all the dynamic synchronizer parameters (past and current) */
@@ -165,7 +173,9 @@ class ForwardingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     parent.sequencerConnectionSuccessors(successorPsid)
 }
 
@@ -284,7 +294,7 @@ class CachingTopologySnapshot(
 
   private val sequencingDynamicParametersCache =
     new AtomicReference[
-      Option[FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]]]
+      Option[FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]]]
     ](
       None
     )
@@ -362,8 +372,15 @@ class CachingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
-    parent.findUnvettedPackagesOrDependencies(participant, packages, ledgerTime, vettedPackages)
+    parent.findUnvettedPackagesOrDependencies(
+      participant,
+      packages,
+      ledgerTime,
+      vettedPackages,
+      checkDependencyVetting,
+    )
 
   override def inspectKeys(
       filterOwner: String,
@@ -439,7 +456,7 @@ class CachingTopologySnapshot(
 
   override def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
     getAndCache(sequencingDynamicParametersCache, parent.findDynamicSequencingParameters())
 
   /** List all the dynamic synchronizer parameters (past and current) */
@@ -468,6 +485,8 @@ class CachingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     parent.sequencerConnectionSuccessors(successorPsid)
 }

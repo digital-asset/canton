@@ -87,6 +87,13 @@ object Descriptor:
         cases <- condOpt(body) { case Enumeration(cases) => cases }
       yield (id, cases)
 
+  /* Unknown type body. */
+  case object Unknown extends Adt:
+    object Ctor:
+      def unapply(d: Descriptor): Option[(Identifier, SList[TypeVarName])] =
+        condOpt(d) { case Constructor(id, tp, Unknown) => (id, tp) }
+  val unknown: Unknown.type = Unknown
+
   /** List of values of the same type */
   final case class List private[Descriptor] (value: Descriptor) extends Traversable
   def list(value: Descriptor): List = List(value)
@@ -187,7 +194,7 @@ object Descriptor:
   private object Lazy:
     private[Descriptor] def apply(compute: => Adt) = new Lazy(compute)
   private final class Lazy private[Descriptor] (compute: => Adt) extends Serializable {
-    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
     private var _value: Adt = uninitialized
     def value: Adt =
       if _value == null then synchronized(if _value == null then _value = compute)

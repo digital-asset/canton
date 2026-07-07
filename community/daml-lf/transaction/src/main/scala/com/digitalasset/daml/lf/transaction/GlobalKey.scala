@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf
 package transaction
 
-import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageName, Party, TypeConId}
 import com.digitalasset.daml.lf.value.Value
@@ -12,12 +11,13 @@ import com.digitalasset.daml.lf.value.Value
 /** Useful in various circumstances -- basically this is what a ledger implementation must use as a
   * key. The 'hash' is guaranteed to be stable over time.
   */
-final class GlobalKey private (
-    val templateId: Ref.TypeConId,
-    val packageName: Ref.PackageName,
-    val key: Value,
-    val hash: crypto.Hash,
-) extends data.NoCopy {
+final case class GlobalKey(
+    templateId: Ref.TypeConId,
+    packageName: Ref.PackageName,
+    key: Value,
+    hash: crypto.Hash,
+) extends {
+
   override def equals(obj: Any): Boolean = obj match {
     case that: GlobalKey => this.hash == that.hash
     case _ => false
@@ -27,34 +27,10 @@ final class GlobalKey private (
 
   override def hashCode(): Int = hash.hashCode()
 
-  override def toString: String = s"GlobalKey($templateId, $packageName, $key, $hash)"
+  def nonVerbose: GlobalKey = copy(key = key.nonVerboseWithoutTrailingNones)
 }
 
 object GlobalKey {
-
-  def assertWithRenormalizedValue(key: GlobalKey, value: Value): GlobalKey =
-    new GlobalKey(key.templateId, key.packageName, value, key.hash)
-
-  // Will fail if key contains contract ids
-  // TODO(#31844): remove this redundant smart constructor now that the hash is computed by the caller
-  def build(
-      templateId: TypeConId,
-      packageName: PackageName,
-      key: Value,
-      keyHash: crypto.Hash,
-  ): Either[crypto.Hash.HashingError, GlobalKey] =
-    Right(new GlobalKey(templateId, packageName, key, keyHash))
-
-  def assertBuild(
-      templateId: TypeConId,
-      packageName: PackageName,
-      key: Value,
-      keyHash: crypto.Hash,
-  ): GlobalKey =
-    data.assertRight(build(templateId, packageName, key, keyHash).left.map(_.msg))
-
-  private[lf] def unapply(globalKey: GlobalKey): Some[(TypeConId, Value)] =
-    Some((globalKey.templateId, globalKey.key))
 
   implicit val globalKeyOrdering: Ordering[GlobalKey] = Ordering.by(_.hash)
 
@@ -66,51 +42,44 @@ final case class GlobalKeyWithMaintainers(
 ) {
   def value: Value = globalKey.key
 
-  def nonVerbose: GlobalKeyWithMaintainers =
-    GlobalKeyWithMaintainers(
-      GlobalKey
-        .assertWithRenormalizedValue(globalKey, globalKey.key.nonVerboseWithoutTrailingNones),
-      maintainers,
-    )
+  def nonVerbose: GlobalKeyWithMaintainers = copy(globalKey = globalKey.nonVerbose)
 }
 
 object GlobalKeyWithMaintainers {
 
-  def assertBuild(
+  def assertWithRenormalizedValue(
+      keyWithMaintainers: GlobalKeyWithMaintainers,
+      value: Value,
+  ): GlobalKeyWithMaintainers =
+    keyWithMaintainers.copy(
+      globalKey = keyWithMaintainers.globalKey.copy(key = value)
+    )
+
+  def apply(
       templateId: TypeConId,
       value: Value,
       valueHash: crypto.Hash,
       maintainers: Set[Party],
       packageName: PackageName,
   ): GlobalKeyWithMaintainers =
-    data.assertRight(build(templateId, value, valueHash, maintainers, packageName).left.map(_.msg))
-
-  def build(
-      templateId: TypeConId,
-      value: Value,
-      valueHash: crypto.Hash,
-      maintainers: Set[Party],
-      packageName: PackageName,
-  ): Either[Hash.HashingError, GlobalKeyWithMaintainers] =
-    GlobalKey
-      .build(templateId, packageName, value, valueHash)
-      .map(GlobalKeyWithMaintainers(_, maintainers))
+    GlobalKeyWithMaintainers(GlobalKey(templateId, packageName, value, valueHash), maintainers)
 }
 
-
-/** Controls whether the engine should error out when it encounters duplicate keys.
- * This is always turned on with the exception of Canton which allows turning this on or off
- * and forces it to be turned off in multi-domain mode.
- */
+/** Controls whether the engine should error out when it encounters duplicate keys. This is always
+  * turned on with the exception of Canton which allows turning this on or off and forces it to be
+  * turned off in multi-domain mode.
+  */
 sealed abstract class LegacyContractKeyUniquenessMode extends Product with Serializable
 
 object LegacyContractKeyUniquenessMode {
 
-  /** Disable key uniqueness checks and only consider byKey operations.
-   * Note that no stable semantics are provided for off mode.
-   */
+  /** Disable key uniqueness checks and only consider byKey operations. Note that no stable
+    * semantics are provided for off mode.
+    */
   case object Off extends LegacyContractKeyUniquenessMode
 
-  /** Considers all nodes mentioning keys as byKey operations and checks for contract key uniqueness. */
+  /** Considers all nodes mentioning keys as byKey operations and checks for contract key
+    * uniqueness.
+    */
   case object Strict extends LegacyContractKeyUniquenessMode
 }

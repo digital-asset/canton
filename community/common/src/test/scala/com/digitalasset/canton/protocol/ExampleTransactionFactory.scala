@@ -8,9 +8,9 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton
 import com.digitalasset.canton.*
+import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -56,6 +56,7 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Versioned}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.*
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.EitherValues
 
 import java.time.Duration as JDuration
@@ -64,8 +65,6 @@ import scala.collection.immutable.HashMap
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext}
 import scala.util.Random
-
-import BaseTest.*
 
 /** Provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
   */
@@ -87,29 +86,26 @@ object ExampleTransactionFactory {
 
   private val random = new Random(0)
 
-  private def valueCapturing(coid: List[LfContractId]): Value = {
+  private def valueCapturing(coid: Seq[LfContractId]): Value = {
     val captives = coid.map(c => (None, ValueContractId(c)))
     ValueRecord(None, captives.to(ImmArray))
   }
 
-  private def versionedValueCapturing(coid: List[LfContractId]): Value.VersionedValue =
+  private[protocol] def versionedValueCapturing(coid: Seq[LfContractId]): Value.VersionedValue =
     LfVersioned(serializationVersion, valueCapturing(coid))
 
-  def contractInstance(
-      capturedIds: Seq[LfContractId] = Seq.empty,
-      templateId: LfTemplateId = templateId,
-      packageName: LfPackageName = packageName,
-  ): LfThinContractInst =
-    LfThinContractInst(
-      packageName = packageName,
-      template = templateId,
-      arg = versionedValueCapturing(capturedIds.toList),
-    )
+  object ExampleInstance {
+    def apply(arg: VersionedValue): VersionedValue = arg
+  }
+
+  val defaultVersionedValue: VersionedValue = LfVersioned(serializationVersion, ValueUnit)
 
   def authenticatedContractInstance(
       metadata: ContractMetadata,
-      instance: LfThinContractInst = ExampleTransactionFactory.contractInstance(),
+      arg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue,
       ledgerTime: CantonTimestamp = CantonTimestamp.Epoch,
+      templateId: LfTemplateId = ExampleTransactionFactory.templateId,
+      packageName: LfPackageName = ExampleTransactionFactory.packageName,
   ): ContractInstance = {
     val contractIdVersion =
       CantonContractIdVersion.maximumSupportedVersion(BaseTest.testedProtocolVersion).value match {
@@ -131,13 +127,13 @@ object ExampleTransactionFactory {
     val unsuffixedContractId = LfContractId.V1(ExampleTransactionFactory.lfHash(1337))
     val unsuffixedCreateNode = LfNodeCreate(
       coid = unsuffixedContractId,
-      packageName = instance.unversioned.packageName,
-      templateId = instance.unversioned.template,
-      arg = instance.unversioned.arg,
+      packageName = packageName,
+      templateId = templateId,
+      arg = arg.unversioned,
       signatories = metadata.signatories,
       stakeholders = metadata.stakeholders,
       keyOpt = metadata.maybeKeyWithMaintainers,
-      version = instance.version,
+      version = arg.version,
     )
 
     val contractHash =
@@ -166,13 +162,6 @@ object ExampleTransactionFactory {
   val veryDeepVersionedValue: VersionedValue =
     LfVersioned(serializationVersion, veryDeepValue)
 
-  val veryDeepContractInstance: LfThinContractInst =
-    LfThinContractInst(
-      packageName = packageName,
-      template = templateId,
-      arg = veryDeepVersionedValue,
-    )
-
   def globalKey(
       templateId: LfTemplateId,
       value: LfValue,
@@ -180,21 +169,21 @@ object ExampleTransactionFactory {
   ): Versioned[LfGlobalKey] =
     LfVersioned(
       serializationVersion,
-      LfGlobalKey.assertBuild(
+      LfGlobalKey(
         templateId,
         packageName,
         value,
-        // This hash is wrong for PV35, but it doesn't matter if it's only used in serialization/deserialization tests.
-        // We need it to be that way however for `fromProtoV30` and `toProtoV30` to be consistent.
-        com.digitalasset.daml.lf.crypto.Hash.assertHashContractKey(templateId, packageName, value),
+        // This hash is wrong, but it doesn't matter if it's only used in serialization/deserialization tests.
+        com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey("bubu"),
       ),
     )
 
   def globalKeyWithMaintainers(
       key: LfGlobalKey = defaultGlobalKey,
       maintainers: Set[LfPartyId] = Set(signatory),
+      version: LfSerializationVersion = serializationVersion,
   ): Versioned[LfGlobalKeyWithMaintainers] =
-    LfVersioned(serializationVersion, LfGlobalKeyWithMaintainers(key, maintainers))
+    LfVersioned(version, LfGlobalKeyWithMaintainers(key, maintainers))
 
   def fetchNode(
       cid: LfContractId,
@@ -222,23 +211,23 @@ object ExampleTransactionFactory {
 
   def createNode(
       cid: LfContractId,
-      contractInstance: LfThinContractInst = this.contractInstance(),
+      arg: VersionedValue = defaultVersionedValue,
       signatories: Set[LfPartyId] = Set.empty,
       observers: Set[LfPartyId] = Set.empty,
       key: Option[LfGlobalKeyWithMaintainers] = None,
-  ): LfNodeCreate = {
-    val unversionedContractInst = contractInstance.unversioned
+      templateId: LfTemplateId = ExampleTransactionFactory.templateId,
+      packageName: LfPackageName = ExampleTransactionFactory.packageName,
+  ): LfNodeCreate =
     LfNodeCreate(
       coid = cid,
-      packageName = unversionedContractInst.packageName,
-      templateId = unversionedContractInst.template,
-      arg = unversionedContractInst.arg,
+      packageName = packageName,
+      templateId = templateId,
+      arg = arg.unversioned,
       signatories = signatories,
       stakeholders = signatories ++ observers,
       keyOpt = key,
       version = serializationVersion,
     )
-  }
 
   def exerciseNode(
       targetCoid: LfContractId,
@@ -383,11 +372,6 @@ object ExampleTransactionFactory {
   def rootViewPosition(index: Int, total: Int): ViewPosition =
     ViewPosition(List(MerkleSeq.indicesFromSeq(total)(index)))
 
-  def asSerializableRaw(contractInstance: LfThinContractInst): SerializableRawContractInstance =
-    SerializableRawContractInstance
-      .create(contractInstance)
-      .fold(err => throw new IllegalArgumentException(err.toString), Predef.identity)
-
   private def asAuthenticationData(
       salt: Salt,
       version: CantonContractIdVersion,
@@ -403,27 +387,56 @@ object ExampleTransactionFactory {
         )(v2)
     }
 
-  def asContractInstance[Time <: CreationTime](
+  def asContractInstanceFromCreate[Time <: CreationTime](
+      createNode: LfNodeCreate,
+      ledgerTime: Time = CreationTime.CreatedAt(LfTimestamp.Epoch),
+  )(
+      authenticationData: ContractAuthenticationData = asAuthenticationData(
+        TestSalt.generateSalt(random.nextInt()),
+        CantonContractIdVersion.extractCantonContractIdVersion(createNode.coid).value,
+      )
+  ): GenContractInstance { type InstCreatedAtTime <: Time } = {
+    val fci = FatContractInstance.fromCreateNode(
+      createNode,
+      ledgerTime,
+      authenticationData.toLfBytes,
+    )
+    ContractInstance.create(fci).value
+  }
+
+  def asContractInstance(
       contractId: LfContractId,
-      contractInstance: LfThinContractInst = this.contractInstance(),
+      arg: VersionedValue = defaultVersionedValue,
+      metadata: ContractMetadata =
+        ContractMetadata.tryCreate(Set(this.signatory), Set(this.signatory), None),
+      ledgerTime: CreationTime.CreatedAt = CreationTime.CreatedAt(LfTimestamp.Epoch),
+  ): ContractInstance =
+    asGenContractInstance(contractId, arg, metadata, ledgerTime)()
+      .asInstanceOf[ContractInstance]
+
+  def asGenContractInstance[Time <: CreationTime](
+      contractId: LfContractId,
+      arg: VersionedValue = defaultVersionedValue,
       metadata: ContractMetadata =
         ContractMetadata.tryCreate(Set(this.signatory), Set(this.signatory), None),
       ledgerTime: Time = CreationTime.CreatedAt(LfTimestamp.Epoch),
+      templateId: LfTemplateId = ExampleTransactionFactory.templateId,
+      packageName: LfPackageName = ExampleTransactionFactory.packageName,
   )(
       authenticationData: ContractAuthenticationData = asAuthenticationData(
         TestSalt.generateSalt(random.nextInt()),
         CantonContractIdVersion.extractCantonContractIdVersion(contractId).value,
       )
-  ): GenContractInstance { type InstCreatedAtTime <: Time } = {
+  ): GenContractInstance = {
     val createNode = LfNodeCreate(
       coid = contractId,
-      packageName = contractInstance.unversioned.packageName,
-      templateId = contractInstance.unversioned.template,
-      arg = contractInstance.unversioned.arg,
+      packageName = packageName,
+      templateId = templateId,
+      arg = arg.unversioned,
       signatories = metadata.signatories,
       stakeholders = metadata.stakeholders,
       keyOpt = metadata.maybeKeyWithMaintainers,
-      version = contractInstance.version,
+      version = arg.version,
     )
     val fci = FatContractInstance.fromCreateNode(
       createNode,
@@ -499,7 +512,7 @@ object ExampleTransactionFactory {
   * Also provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
   */
 class ExampleTransactionFactory(
-    val cryptoOps: HashOps with HmacOps with RandomOps = new SymbolicPureCrypto,
+    val cryptoOps: HashOps & HmacOps & RandomOps = new SymbolicPureCrypto,
     versionOverride: Option[ProtocolVersion] = None,
 )(
     val transactionSalt: Salt = TestSalt.generateSalt(0),
@@ -517,6 +530,7 @@ class ExampleTransactionFactory(
     extends EitherValues {
 
   private val protocolVersion = versionOverride.getOrElse(BaseTest.testedProtocolVersion)
+  private val rollbackContextFactory = RollbackContextFactory(protocolVersion)
   private val random = new Random(0)
 
   private def createNewView(
@@ -527,7 +541,7 @@ class ExampleTransactionFactory(
       isRoot: Boolean,
   ): FutureUnlessShutdown[NewView] = {
 
-    val rootRbContext = RollbackContext.empty
+    val rootRbContext = rollbackContextFactory.empty
 
     val submittingAdminPartyO =
       Option.when(isRoot)(submitterMetadata.submittingParticipant.adminParty.toLf)
@@ -650,13 +664,13 @@ class ExampleTransactionFactory(
 
   def fromLocalContractId(
       viewPosition: ViewPosition,
-      viewIndex: Int,
-      createIndex: Int,
-      suffixedContractInstance: LfThinContractInst,
+      viewIndex: NodeIdx,
+      createIndex: NodeIdx,
       localContractId: LfContractId,
+      suffixedArg: VersionedValue = defaultVersionedValue,
       signatories: Set[LfPartyId] = Set.empty,
       observers: Set[LfPartyId] = Set.empty,
-      maybeKeyWithMaintainers: Option[protocol.LfGlobalKeyWithMaintainers] = None,
+      maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers] = None,
   ): CreateInfo = {
     val metadata = ContractMetadata.tryCreate(
       signatories,
@@ -679,7 +693,7 @@ class ExampleTransactionFactory(
     }
     val unsuffixedCreateNode = createNode(
       localContractId,
-      suffixedContractInstance,
+      suffixedArg,
       metadata.signatories,
       metadata.stakeholders,
       metadata.maybeKeyWithMaintainers,
@@ -742,10 +756,8 @@ class ExampleTransactionFactory(
       node: LfNodeCreate,
       authenticationData: ContractAuthenticationData,
   ): NewContractInstance =
-    asContractInstance(
-      node.coid,
-      node.versionedCoinst,
-      metadataFromCreate(node),
+    asContractInstanceFromCreate(
+      node,
       relativeCreateTime,
     )(authenticationData)
 
@@ -756,7 +768,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[GenContractInstance],
       created: Seq[NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       seed: Option[LfHash],
       packagePreference: Set[LfPackageId],
       subviews: Seq[TransactionView],
@@ -768,7 +780,7 @@ class ExampleTransactionFactory(
         protocolVersion,
       )
 
-    val createWithSerialization = created.map { contract =>
+    val createdContracts = created.map { contract =>
       val coid = contract.contractId
       CreatedContract.tryCreate(
         contract,
@@ -798,14 +810,15 @@ class ExampleTransactionFactory(
       )
 
     val viewParticipantData = ViewParticipantData.tryCreate(cryptoOps)(
-      coreInputContracts,
-      createWithSerialization,
-      createdInSubviewArchivedInCore,
-      resolvedKeys,
-      actionDescription,
-      RollbackContext.empty,
-      participantDataSalt(viewIndex),
-      protocolVersion,
+      coreInputs = coreInputContracts,
+      createdCore = createdContracts,
+      createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
+      keyResolution = keyResolution,
+      actionDescription = actionDescription,
+      rollbackContext = rollbackContextFactory.empty,
+      salt = participantDataSalt(viewIndex),
+      externalCallResults = Seq.empty,
+      protocolVersion = protocolVersion,
     )
 
     val subViews = TransactionSubviews(subviews)(protocolVersion, cryptoOps)
@@ -823,7 +836,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[GenContractInstance],
       created: Seq[NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       seed: Option[LfHash],
       isRoot: Boolean,
       packagePreference: Set[LfPackageId],
@@ -849,7 +862,7 @@ class ExampleTransactionFactory(
       consumed,
       coreInputs,
       created,
-      resolvedKeys,
+      keyResolution,
       seed,
       packagePreference,
       subviews,
@@ -863,7 +876,7 @@ class ExampleTransactionFactory(
       consumed: Set[LfContractId],
       coreInputs: Seq[ContractInstance],
       created: Seq[NewContractInstance],
-      resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+      keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       seed: Option[LfHash],
       isRoot: Boolean,
       packagePreference: Set[LfPackageId],
@@ -907,7 +920,7 @@ class ExampleTransactionFactory(
       consumed,
       coreInputs,
       created,
-      resolvedKeys,
+      keyResolution,
       seed,
       packagePreference,
       subviews,
@@ -1039,7 +1052,7 @@ class ExampleTransactionFactory(
 
     override def keyResolver: LfGlobalKeyMapping = Map.empty
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "empty transaction"
 
@@ -1106,9 +1119,9 @@ class ExampleTransactionFactory(
 
     def nodeId: LfNodeId
 
-    protected def relativeContractInstance: LfThinContractInst
+    protected def relativeContractArg: VersionedValue
 
-    protected def absoluteContractInstance: LfThinContractInst
+    protected def absoluteContractArg: VersionedValue
 
     def lfNode: LfActionNode
 
@@ -1123,7 +1136,7 @@ class ExampleTransactionFactory(
     def created: Seq[NewContractInstance] = relativeNode match {
       case n: LfNodeCreate =>
         Seq(
-          asContractInstance(n.coid, n.versionedCoinst, metadataFromCreate(n), relativeCreateTime)(
+          asContractInstanceFromCreate(n, relativeCreateTime)(
             relativeAuthenticationData
           )
         )
@@ -1133,7 +1146,7 @@ class ExampleTransactionFactory(
     def createdAbsolute: Map[LfContractId, NewContractInstance] = node match {
       case n: LfNodeCreate =>
         Map(
-          n.coid -> asContractInstance(n.coid, n.versionedCoinst, metadataFromCreate(n))(
+          n.coid -> asContractInstanceFromCreate(n)(
             absoluteAuthenticationData
           )
         )
@@ -1150,18 +1163,18 @@ class ExampleTransactionFactory(
       relativeNode match {
         case n: LfNodeExercises =>
           Seq(
-            asContractInstance(
+            asGenContractInstance(
               n.targetCoid,
-              relativeContractInstance,
+              relativeContractArg,
               metadataFromExercise(n),
               creationTime,
             )(relativeAuthenticationData)
           )
         case n: LfNodeFetch =>
           Seq(
-            asContractInstance(
+            asGenContractInstance(
               n.coid,
-              relativeContractInstance,
+              relativeContractArg,
               metadataFromFetch(n),
               creationTime,
             )(relativeAuthenticationData)
@@ -1174,17 +1187,17 @@ class ExampleTransactionFactory(
       node match {
         case n: LfNodeExercises =>
           Map(
-            n.targetCoid -> asContractInstance(
+            n.targetCoid -> asGenContractInstance(
               n.targetCoid,
-              absoluteContractInstance,
+              absoluteContractArg,
               metadataFromExercise(n),
             )(absoluteAuthenticationData)
           )
         case n: LfNodeFetch =>
           Map(
-            n.coid -> asContractInstance(
+            n.coid -> asGenContractInstance(
               n.coid,
-              absoluteContractInstance,
+              absoluteContractArg,
               metadataFromFetch(n),
             )(absoluteAuthenticationData)
           )
@@ -1300,11 +1313,13 @@ class ExampleTransactionFactory(
           )
       )
 
-    lazy val relativeContractInstance: LfThinContractInst =
-      ExampleTransactionFactory.contractInstance(relativeCapturedContractIds)
+    lazy val relativeContractArg: VersionedValue = versionedValueCapturing(
+      relativeCapturedContractIds
+    )
 
-    override lazy val absoluteContractInstance: LfThinContractInst =
-      ExampleTransactionFactory.contractInstance(absoluteCapturedContractIds)
+    override lazy val absoluteContractArg: VersionedValue = versionedValueCapturing(
+      absoluteCapturedContractIds
+    )
 
     lazy val interpretedContractId: LfContractId = localContractId(discriminator)
 
@@ -1312,8 +1327,8 @@ class ExampleTransactionFactory(
       viewPosition,
       viewIndex,
       0,
-      relativeContractInstance,
       interpretedContractId,
+      relativeContractArg,
       signatories,
       observers,
       key,
@@ -1347,20 +1362,20 @@ class ExampleTransactionFactory(
     override def lfNode: LfNodeCreate =
       createNode(
         interpretedContractId,
-        ExampleTransactionFactory.contractInstance(interpretedCapturedContractIds),
+        versionedValueCapturing(interpretedCapturedContractIds),
         signatories,
         observers,
         key,
       )
 
     override def node: LfNodeCreate =
-      createNode(absolutizedContractId, absoluteContractInstance, signatories, observers, key)
+      createNode(absolutizedContractId, absoluteContractArg, signatories, observers, key)
 
     override def reinterpretedNode: LfNodeCreate =
-      createNode(interpretedContractId, relativeContractInstance, signatories, observers, key)
+      createNode(interpretedContractId, relativeContractArg, signatories, observers, key)
 
     override def relativeNode: LfNodeCreate =
-      createNode(relativizedContractId, relativeContractInstance, signatories, observers, key)
+      createNode(relativizedContractId, relativeContractArg, signatories, observers, key)
 
     override def consuming: Boolean = false
   }
@@ -1406,7 +1421,7 @@ class ExampleTransactionFactory(
       override val nodeId: LfNodeId = LfNodeId(0),
       interpretedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
       relativizedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
-      fetchedContractInstance: LfThinContractInst = contractInstance(),
+      fetchedContractInstance: VersionedValue = defaultVersionedValue,
       version: LfSerializationVersion = serializationVersion,
       authenticationData: Either[
         Salt,
@@ -1415,8 +1430,8 @@ class ExampleTransactionFactory(
       updateIdOverride: Option[Eval[UpdateId]] = None,
   ) extends SingleUseNode(None, authenticationData, updateIdOverride) {
 
-    override def relativeContractInstance: LfThinContractInst = fetchedContractInstance
-    override def absoluteContractInstance: LfThinContractInst = fetchedContractInstance
+    override def relativeContractArg: VersionedValue = fetchedContractInstance
+    override def absoluteContractArg: VersionedValue = fetchedContractInstance
 
     override def toString: String = "single fetch"
 
@@ -1452,8 +1467,8 @@ class ExampleTransactionFactory(
       override val nodeId: LfNodeId = LfNodeId(0),
       interpretedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
       relativizedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
-      relativeInputContractInstance: LfThinContractInst = contractInstance(),
-      absoluteInputContractInstance: Eval[LfThinContractInst] = Eval.later(contractInstance()),
+      relativeInputContractInstance: VersionedValue = defaultVersionedValue,
+      absoluteInputContractInstance: Eval[VersionedValue] = Eval.later(defaultVersionedValue),
       authenticationData: Either[
         Salt,
         (ContractAuthenticationData, Eval[ContractAuthenticationData]),
@@ -1462,8 +1477,8 @@ class ExampleTransactionFactory(
   ) extends SingleUseNode(Some(seed), authenticationData, updateIdOverride) {
     override def toString: String = "single exercise"
 
-    override def relativeContractInstance: LfThinContractInst = relativeInputContractInstance
-    override def absoluteContractInstance: LfThinContractInst = absoluteInputContractInstance.value
+    override def relativeContractArg: VersionedValue = relativeInputContractInstance
+    override def absoluteContractArg: VersionedValue = absoluteInputContractInstance.value
 
     private def genNode(id: LfContractId): LfNodeExercises =
       exerciseNodeWithoutChildren(
@@ -1487,7 +1502,7 @@ class ExampleTransactionFactory(
     *   id of the exercised contract during interpretation
     * @param relativizedContractId
     *   id of the exercised contract after suffixing
-    * @param inputContractInstance
+    * @param inputContractArg
     *   instance of the used contract.
     */
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
@@ -1496,7 +1511,7 @@ class ExampleTransactionFactory(
       override val nodeId: LfNodeId = LfNodeId(0),
       interpretedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
       relativizedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
-      inputContractInstance: LfThinContractInst = contractInstance(),
+      inputContractArg: VersionedValue = defaultVersionedValue,
       authenticationData: Either[
         Salt,
         (ContractAuthenticationData, Eval[ContractAuthenticationData]),
@@ -1504,8 +1519,8 @@ class ExampleTransactionFactory(
   ) extends SingleUseNode(Some(seed), authenticationData, None) {
     override def toString: String = "single exercise"
 
-    override def relativeContractInstance: LfThinContractInst = inputContractInstance
-    override def absoluteContractInstance: LfThinContractInst = inputContractInstance
+    override def relativeContractArg: VersionedValue = inputContractArg
+    override def absoluteContractArg: VersionedValue = inputContractArg
 
     private def genNode(id: LfContractId): LfNodeExercises =
       exerciseNodeWithoutChildren(
@@ -1528,8 +1543,8 @@ class ExampleTransactionFactory(
       nodeId: LfNodeId = LfNodeId(0),
       interpretedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
       relativizedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
-      override val relativeContractInstance: LfThinContractInst =
-        ExampleTransactionFactory.contractInstance(),
+      override val relativeContractArg: VersionedValue =
+        ExampleTransactionFactory.defaultVersionedValue,
       authenticationData: Either[
         Salt,
         (ContractAuthenticationData, Eval[ContractAuthenticationData]),
@@ -1544,7 +1559,7 @@ class ExampleTransactionFactory(
     override def lfNode: LfNodeExercises = genNode(interpretedContractId)
     override def reinterpretedNode: LfNodeExercises = genNode(relativizedContractId)
 
-    override def absoluteContractInstance: LfThinContractInst = relativeContractInstance
+    override def absoluteContractArg: VersionedValue = relativeContractArg
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
@@ -1553,15 +1568,15 @@ class ExampleTransactionFactory(
       override val nodeId: LfNodeId = LfNodeId(0),
       interpretedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
       relativizedContractId: LfContractId = suffixedId(-1, 0, cantonContractIdVersion),
-      inputContractInstance: LfThinContractInst = contractInstance(),
+      inputContractInstance: VersionedValue = defaultVersionedValue,
       authenticationData: Either[
         Salt,
         (ContractAuthenticationData, Eval[ContractAuthenticationData]),
       ] = Left(TestSalt.generateSalt(random.nextInt())),
   ) extends SingleUseNode(Some(seed), authenticationData, None) {
 
-    override def relativeContractInstance: LfThinContractInst = inputContractInstance
-    override def absoluteContractInstance: LfThinContractInst = inputContractInstance
+    override def relativeContractArg: VersionedValue = inputContractInstance
+    override def absoluteContractArg: VersionedValue = inputContractInstance
 
     private def genNode(id: LfContractId): LfActionNode =
       exerciseNodeWithoutChildren(
@@ -1598,7 +1613,7 @@ class ExampleTransactionFactory(
     */
   case object MultipleRoots extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "multiple roots"
 
@@ -1633,7 +1648,7 @@ class ExampleTransactionFactory(
         nodeId = LfNodeId(3),
         interpretedContractId = create0.interpretedContractId,
         relativizedContractId = create0.relativizedContractId,
-        fetchedContractInstance = create0.relativeContractInstance,
+        fetchedContractInstance = create0.relativeContractArg,
         // ensure we test merging transactions with different versions
         version = LfSerializationVersion.VDev,
         authenticationData = Right(
@@ -1649,8 +1664,8 @@ class ExampleTransactionFactory(
       nodeId = LfNodeId(5),
       interpretedContractId = create1.interpretedContractId,
       relativizedContractId = create1.relativizedContractId,
-      relativeInputContractInstance = create1.relativeContractInstance,
-      absoluteInputContractInstance = Eval.later(create1.absoluteContractInstance),
+      relativeInputContractInstance = create1.relativeContractArg,
+      absoluteInputContractInstance = Eval.later(create1.absoluteContractArg),
       authenticationData = Right(
         create1.relativeAuthenticationData ->
           Eval.later(absolutizeAuthenticationData(updateId, create1.createInfo))
@@ -1736,39 +1751,39 @@ class ExampleTransactionFactory(
       consumedInputsOfHostedStakeholders =
         Map(exercise4.absolutizedContractId -> exercise4.allInformees),
       used = Map(
-        fetch2.absolutizedContractId -> asContractInstance(
+        fetch2.absolutizedContractId -> asGenContractInstance(
           fetch2.absolutizedContractId,
-          fetch2.absoluteContractInstance,
+          fetch2.absoluteContractArg,
           metadataFromFetch(fetch2.node),
         )(fetch2.absoluteAuthenticationData),
-        fetch3.absolutizedContractId -> asContractInstance(
+        fetch3.absolutizedContractId -> asGenContractInstance(
           fetch3.absolutizedContractId,
-          fetch3.absoluteContractInstance,
+          fetch3.absoluteContractArg,
           metadataFromFetch(fetch3.node),
         )(fetch3.absoluteAuthenticationData),
-        exercise4.absolutizedContractId -> asContractInstance(
+        exercise4.absolutizedContractId -> asGenContractInstance(
           exercise4.absolutizedContractId,
-          exercise4.absoluteContractInstance,
+          exercise4.absoluteContractArg,
           metadataFromExercise(exercise4.node),
         )(exercise4.absoluteAuthenticationData),
-        exercise5.absolutizedContractId -> asContractInstance(
+        exercise5.absolutizedContractId -> asGenContractInstance(
           exercise5.absolutizedContractId,
-          exercise5.absoluteContractInstance,
+          exercise5.absoluteContractArg,
           metadataFromExercise(exercise5.node),
         )(exercise5.absoluteAuthenticationData),
       ),
       maybeCreated = Map(
         create0.absolutizedContractId -> Some(
-          asContractInstance(
+          asGenContractInstance(
             create0.absolutizedContractId,
-            create0.absoluteContractInstance,
+            create0.absoluteContractArg,
             metadataFromCreate(create0.node),
           )(create0.absoluteAuthenticationData)
         ),
         create1.absolutizedContractId -> Some(
-          asContractInstance(
+          asGenContractInstance(
             create1.absolutizedContractId,
-            create1.absoluteContractInstance,
+            create1.absoluteContractArg,
             metadataFromCreate(create1.node),
           )(create1.absoluteAuthenticationData)
         ),
@@ -1797,15 +1812,13 @@ class ExampleTransactionFactory(
     override def toString: String = "transaction with multiple roots and a simple view nesting"
 
     val create0Agreement = "create0"
-    def create0Inst: LfThinContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0local: LfContractId = localContractId(
       discriminator(create0seed, Set(submitter, observer))
     )
     def genCreate0(cid: LfContractId): LfNodeCreate =
       createNode(
-        cid,
-        contractInstance = create0Inst,
+        cid = cid,
         signatories = Set(submitter),
         observers = Set(observer),
       )
@@ -1823,19 +1836,15 @@ class ExampleTransactionFactory(
     val lfExercise1Id: LfContractId = suffixedId(-1, 0)
     val lfExercise1: LfNodeExercises = genExercise1(lfExercise1Id)
 
-    def create10Inst: LfThinContractInst = contractInstance()
-    def create12Inst: LfThinContractInst = contractInstance()
     def genCreate10(cid: LfContractId): LfNodeCreate =
       createNode(
-        cid,
-        contractInstance = create10Inst,
+        cid = cid,
         signatories = Set(submitter, signatory, signatoryReplica),
       )
 
     def genCreate12(cid: LfContractId): LfNodeCreate =
       createNode(
-        cid,
-        contractInstance = create12Inst,
+        cid = cid,
         signatories = Set(submitter, signatory, extra),
       )
 
@@ -1921,10 +1930,14 @@ class ExampleTransactionFactory(
        * informee participants (i.e. party <<extra>> is hosted in the <<extraParticipant>>)
        */
       val v1TailNodes = Seq(
-        SameView(lfCreate10, LfNodeId(2), RollbackContext.empty),
-        SameView(lfFetch11, LfNodeId(3), RollbackContext.empty),
+        SameView(lfCreate10, LfNodeId(2), rollbackContextFactory.empty),
+        SameView(lfFetch11, LfNodeId(3), rollbackContextFactory.empty),
         v10,
-        SameView(LfTransactionUtil.lightWeight(lfExercise13), LfNodeId(5), RollbackContext.empty),
+        SameView(
+          LfTransactionUtil.lightWeight(lfExercise13),
+          LfNodeId(5),
+          rollbackContextFactory.empty,
+        ),
       )
 
       val v1Pre =
@@ -1978,11 +1991,10 @@ class ExampleTransactionFactory(
 
     // Nodes with translated contract ids
     val create0Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(0, 2),
-      0,
-      0,
-      create0Inst,
-      create0local,
+      viewPosition = rootViewPosition(0, 2),
+      viewIndex = 0,
+      createIndex = 0,
+      localContractId = create0local,
       signatories = Set(submitter),
       observers = Set(observer),
     )
@@ -1991,15 +2003,12 @@ class ExampleTransactionFactory(
     val exercise1Agreement = "exercise1"
     val exercise1Id: LfContractId = suffixedId(-1, 0)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
-    val exercise1Instance: LfThinContractInst = contractInstance()
-
     val create10Info: CreateInfo =
       fromLocalContractId(
-        rootViewPosition(1, 2),
-        1,
-        0,
-        create10Inst,
-        create10local,
+        viewPosition = rootViewPosition(1, 2),
+        viewIndex = 1,
+        createIndex = 0,
+        localContractId = create10local,
         signatories = Set(submitter, signatory, signatoryReplica),
       )
     val create10Relative: LfNodeCreate = genCreate10(create10Info.relativeContractId)
@@ -2008,11 +2017,10 @@ class ExampleTransactionFactory(
 
     val create12Info: CreateInfo =
       fromLocalContractId(
-        subViewIndex(0, 1) +: rootViewPosition(1, 2),
-        2,
-        0,
-        create12Inst,
-        create12local,
+        viewPosition = subViewIndex(0, 1) +: rootViewPosition(1, 2),
+        viewIndex = 2,
+        createIndex = 0,
+        localContractId = create12local,
         signatories = Set(submitter, signatory, extra),
       )
     val create12Relative: LfNodeCreate = genCreate12(create12Info.relativeContractId)
@@ -2048,21 +2056,21 @@ class ExampleTransactionFactory(
         Set.empty,
       )
 
-    val exercise1Input = asContractInstance(
-      exercise1Id,
-      exercise1Instance,
-      metadataFromExercise(exercise1),
-      CreationTime.CreatedAt(ledgerTime.toLf),
-    )()
+    val exercise1Input: ContractInstance = asGenContractInstance(
+      contractId = exercise1Id,
+      metadata = metadataFromExercise(exercise1),
+      ledgerTime = CreationTime.CreatedAt(ledgerTime.toLf),
+    )().asInstanceOf[ContractInstance]
 
     val view1: TransactionView =
       viewWithInformeesMerge(
-        exercise1,
+        node = exercise1,
         Seq[LfActionNode](create10Relative, fetch11, exercise13),
         1,
         Set(exercise1Id, exercise13Id),
-        Seq(exercise1Input),
-        Seq(instanceFromCreate(create10Relative, create10Info.relativeAuthenticationData)),
+        coreInputs = Seq(exercise1Input),
+        created =
+          Seq(instanceFromCreate(create10Relative, create10Info.relativeAuthenticationData)),
         Map.empty,
         Some(deriveNodeSeed(1)),
         isRoot = true,
@@ -2169,20 +2177,9 @@ class ExampleTransactionFactory(
       )
 
     override def usedAndCreated: UsedAndCreatedContracts = {
-      val create0Instance =
-        asContractInstance(create0Absolute, create0.versionedCoinst, metadataFromCreate(create0))(
-          create0auth
-        )
-      val create10Instance = asContractInstance(
-        create10Absolute,
-        create10.versionedCoinst,
-        metadataFromCreate(create10),
-      )(create10auth)
-      val create12Instance = asContractInstance(
-        create12Absolute,
-        create12.versionedCoinst,
-        metadataFromCreate(create12),
-      )(create12auth)
+      val create0Instance = asContractInstanceFromCreate(create0)(create0auth)
+      val create10Instance = asContractInstanceFromCreate(create10)(create10auth)
+      val create12Instance = asContractInstanceFromCreate(create12)(create12auth)
 
       UsedAndCreatedContracts.empty.copy(
         checkActivenessTxInputs = Set(exercise1Id, exercise13Id),
@@ -2220,19 +2217,17 @@ class ExampleTransactionFactory(
     */
   case object MultipleRootsAndViewNestings extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with multiple roots and view nestings"
 
-    def create0Inst: LfThinContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0local: LfContractId = localContractId(
       discriminator(deriveNodeSeed(0), Set(submitter, observer))
     )
     def genCreate0(cid: LfContractId): LfNodeCreate =
       createNode(
-        cid,
-        contractInstance = create0Inst,
+        cid = cid,
         signatories = Set(submitter),
         observers = Set(observer),
       )
@@ -2250,12 +2245,13 @@ class ExampleTransactionFactory(
     val lfExercise1Id: LfContractId = suffixedId(-1, 0)
     val lfExercise1: LfNodeExercises = genExercise1(lfExercise1Id)
 
-    def create10Inst: LfThinContractInst = contractInstance()
-    def create12Inst: LfThinContractInst = contractInstance()
-    def genCreate1x(cid: LfContractId, contractInstance: LfThinContractInst): LfNodeCreate =
+    def genCreate1x(
+        cid: LfContractId,
+        contractInstance: VersionedValue = defaultVersionedValue,
+    ): LfNodeCreate =
       createNode(
         cid,
-        contractInstance = contractInstance,
+        arg = contractInstance,
         signatories = Set(submitter, signatory),
       )
 
@@ -2263,12 +2259,12 @@ class ExampleTransactionFactory(
     val create10local: LfContractId = localContractId(
       discriminator(create10seed, Set(submitter, signatory))
     )
-    val lfCreate10: LfNodeCreate = genCreate1x(create10local, create10Inst)
+    val lfCreate10: LfNodeCreate = genCreate1x(create10local)
     val create12seed: LfHash = deriveNodeSeed(1, 2)
     val create12local: LfContractId = localContractId(
       discriminator(create12seed, Set(submitter, signatory))
     )
-    val lfCreate12: LfNodeCreate = genCreate1x(create12local, create12Inst)
+    val lfCreate12: LfNodeCreate = genCreate1x(create12local)
 
     def genFetch11(cid: LfContractId): LfNodeFetch =
       fetchNode(
@@ -2289,12 +2285,10 @@ class ExampleTransactionFactory(
       )
     val lfExercise13: LfNodeExercises = genExercise13(lfCreate12.coid)
 
-    def create130Inst: LfThinContractInst = contractInstance()
     val create130seed: LfHash = deriveNodeSeed(1, 3, 0)
     def genCreate130(cid: LfContractId): LfNodeCreate =
       createNode(
-        cid,
-        contractInstance = create130Inst,
+        cid = cid,
         signatories = Set(signatory),
         observers = Set(extra),
       )
@@ -2315,12 +2309,10 @@ class ExampleTransactionFactory(
     val lfExercise131Id: LfContractId = suffixedId(-1, 1)
     val lfExercise131: LfNodeExercises = genExercise131(lfExercise131Id)
 
-    def create1310Inst: LfThinContractInst = contractInstance()
     val create1310seed: LfHash = deriveNodeSeed(1, 3, 1, 0)
     def genCreate1310(cid: LfContractId): LfNodeCreate =
       createNode(
-        cid,
-        contractInstance = create1310Inst,
+        cid = cid,
         signatories = Set(submitter),
         observers = Set(extra),
       )
@@ -2396,10 +2388,14 @@ class ExampleTransactionFactory(
       )
 
       val v1TailNodes = Seq(
-        SameView(lfCreate10, LfNodeId(2), RollbackContext.empty),
-        SameView(lfFetch11, LfNodeId(3), RollbackContext.empty),
-        SameView(lfCreate12, LfNodeId(4), RollbackContext.empty),
-        SameView(LfTransactionUtil.lightWeight(lfExercise13), LfNodeId(5), RollbackContext.empty),
+        SameView(lfCreate10, LfNodeId(2), rollbackContextFactory.empty),
+        SameView(lfFetch11, LfNodeId(3), rollbackContextFactory.empty),
+        SameView(lfCreate12, LfNodeId(4), rollbackContextFactory.empty),
+        SameView(
+          LfTransactionUtil.lightWeight(lfExercise13),
+          LfNodeId(5),
+          rollbackContextFactory.empty,
+        ),
         v10,
         v11,
       )
@@ -2417,11 +2413,10 @@ class ExampleTransactionFactory(
 
     // Nodes with translated contract ids
     val create0Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(0, 2),
-      0,
-      0,
-      create0Inst,
-      create0local,
+      viewPosition = rootViewPosition(0, 2),
+      viewIndex = 0,
+      createIndex = 0,
+      localContractId = create0local,
       signatories = Set(submitter),
       observers = Set(observer),
     )
@@ -2429,36 +2424,33 @@ class ExampleTransactionFactory(
 
     val exercise1Id: LfContractId = suffixedId(-1, 0)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
-    val exercise1Instance: LfThinContractInst = contractInstance()
-
     val create10Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(1, 2),
-      1,
-      0,
-      create10Inst,
-      create10local,
+      viewPosition = rootViewPosition(1, 2),
+      viewIndex = 1,
+      createIndex = 0,
+      localContractId = create10local,
       signatories = Set(submitter, signatory),
     )
-    val create10Relative: LfNodeCreate = genCreate1x(create10Info.relativeContractId, create10Inst)
+    val create10Relative: LfNodeCreate =
+      genCreate1x(create10Info.relativeContractId, defaultVersionedValue)
 
     val fetch11: LfNodeFetch = lfFetch11
 
     val create12Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(1, 2),
-      1,
-      1,
-      create12Inst,
-      create12local,
+      viewPosition = rootViewPosition(1, 2),
+      viewIndex = 1,
+      createIndex = 1,
+      localContractId = create12local,
       signatories = Set(submitter, signatory),
     )
-    val create12Relative: LfNodeCreate = genCreate1x(create12Info.relativeContractId, create12Inst)
+    val create12Relative: LfNodeCreate =
+      genCreate1x(create12Info.relativeContractId, defaultVersionedValue)
 
     val create130Info: CreateInfo = fromLocalContractId(
-      subViewIndex(0, 2) +: rootViewPosition(1, 2),
-      2,
-      0,
-      create130Inst,
-      create130local,
+      viewPosition = subViewIndex(0, 2) +: rootViewPosition(1, 2),
+      viewIndex = 2,
+      createIndex = 0,
+      localContractId = create130local,
       signatories = Set(signatory),
       observers = Set(extra),
     )
@@ -2466,14 +2458,11 @@ class ExampleTransactionFactory(
 
     val exercise131Id: LfContractId = suffixedId(-1, 1)
     val exercise131: LfNodeExercises = genExercise131(exercise131Id)
-    val exercise131Instance: LfThinContractInst = contractInstance()
-
     val create1310Info: CreateInfo = fromLocalContractId(
-      subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 2),
-      4,
-      0,
-      create1310Inst,
-      create1310local,
+      viewPosition = subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 2),
+      viewIndex = 4,
+      createIndex = 0,
+      localContractId = create1310local,
       signatories = Set(submitter),
       observers = Set(extra),
     )
@@ -2517,9 +2506,8 @@ class ExampleTransactionFactory(
         Set.empty,
       )
 
-    val exercise131Input = asContractInstance(
+    val exercise131Input: GenContractInstance = asGenContractInstance(
       contractId = exercise131Id,
-      contractInstance = exercise131Instance,
       metadata = metadataFromExercise(exercise131),
       ledgerTime = CreationTime.CreatedAt(ledgerTime.toLf),
     )()
@@ -2538,11 +2526,10 @@ class ExampleTransactionFactory(
         view110,
       )
 
-    val exercise1Input = asContractInstance(
-      exercise1Id,
-      exercise1Instance,
-      metadataFromExercise(exercise1),
-      CreationTime.CreatedAt(ledgerTime.toLf),
+    val exercise1Input: GenContractInstance = asGenContractInstance(
+      contractId = exercise1Id,
+      metadata = metadataFromExercise(exercise1),
+      ledgerTime = CreationTime.CreatedAt(ledgerTime.toLf),
     )()
 
     val view1: TransactionView =
@@ -2687,9 +2674,9 @@ class ExampleTransactionFactory(
     val (create0auth, create0Absolute) = toAbsolute(updateId, create0Info.relativeFci)
     val create0: LfNodeCreate = genCreate0(create0Absolute)
     val (create10auth, create10Absolute) = toAbsolute(updateId, create10Info.relativeFci)
-    val create10: LfNodeCreate = genCreate1x(create10Absolute, create10Inst)
+    val create10: LfNodeCreate = genCreate1x(create10Absolute)
     val (create12auth, create12Absolute) = toAbsolute(updateId, create12Info.relativeFci)
-    val create12: LfNodeCreate = genCreate1x(create12Absolute, create12Inst)
+    val create12: LfNodeCreate = genCreate1x(create12Absolute)
     val fetch11Abs: LfNodeFetch = genFetch11(create10Absolute)
     val exercise13Abs: LfNodeExercises = genExercise13(create12Absolute)
     val (create130auth, create130Absolute) = toAbsolute(updateId, create130Info.relativeFci)
@@ -2712,30 +2699,11 @@ class ExampleTransactionFactory(
       )
 
     override def usedAndCreated: UsedAndCreatedContracts = {
-      val create0Instance =
-        asContractInstance(create0Absolute, create0.versionedCoinst, metadataFromCreate(create0))(
-          create0auth
-        )
-      val create10Instance = asContractInstance(
-        create10Absolute,
-        create10.versionedCoinst,
-        metadataFromCreate(create10),
-      )(create10auth)
-      val create12Instance = asContractInstance(
-        create12Absolute,
-        create12.versionedCoinst,
-        metadataFromCreate(create12),
-      )(create12auth)
-      val create130Instance = asContractInstance(
-        create130Absolute,
-        create130.versionedCoinst,
-        metadataFromCreate(create130),
-      )(create130auth)
-      val create1310Instance = asContractInstance(
-        create1310Absolute,
-        create1310.versionedCoinst,
-        metadataFromCreate(create1310),
-      )(create1310auth)
+      val create0Instance = asContractInstanceFromCreate(create0)(create0auth)
+      val create10Instance = asContractInstanceFromCreate(create10)(create10auth)
+      val create12Instance = asContractInstanceFromCreate(create12)(create12auth)
+      val create130Instance = asContractInstanceFromCreate(create130)(create130auth)
+      val create1310Instance = asContractInstanceFromCreate(create1310)(create1310auth)
 
       UsedAndCreatedContracts.empty.copy(
         checkActivenessTxInputs = Set(exercise1Id, exercise131Id),
@@ -2781,26 +2749,25 @@ class ExampleTransactionFactory(
     */
   case object ViewInterleavings extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with subviews and core nodes interleaved"
 
     def stakeholdersX: Set[LfPartyId] = Set(submitter, observer)
     def genCreateX(
         cid: LfContractId,
-        contractInst: LfThinContractInst,
+        contractInst: VersionedValue = defaultVersionedValue,
     ): LfNodeCreate =
       createNode(
         cid,
-        contractInstance = contractInst,
+        arg = contractInst,
         signatories = Set(submitter),
         observers = Set(observer),
       )
 
-    val create0Inst: LfThinContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0local: LfContractId = localContractId(discriminator(create0seed, stakeholdersX))
-    val lfCreate0: LfNodeCreate = genCreateX(create0local, create0Inst)
+    val lfCreate0: LfNodeCreate = genCreateX(create0local)
 
     def genExercise1(cid: LfContractId): LfNodeExercises =
       exerciseNode(
@@ -2830,33 +2797,32 @@ class ExampleTransactionFactory(
     def stakeholders3X: Set[LfPartyId] = Set(signatory, observer)
     def genCreate3X(
         cid: LfContractId,
-        contractInst: LfThinContractInst,
+        contractInst: VersionedValue = defaultVersionedValue,
     ): LfNodeCreate =
       createNode(
         cid,
-        contractInstance = contractInst,
+        arg = contractInst,
         signatories = Set(signatory),
         observers = Set(observer),
       )
 
-    val create100Inst: LfThinContractInst = contractInstance()
     val create100seed: LfHash = deriveNodeSeed(1, 0, 0)
     val create100local: LfContractId = localContractId(discriminator(create100seed, stakeholders3X))
-    val lfCreate100: LfNodeCreate = genCreate3X(create100local, create100Inst)
+    val lfCreate100: LfNodeCreate = genCreate3X(create100local)
 
     def stakeholdersXX: Set[LfPartyId] = Set(signatory, submitter)
     def genCreateXX(
         cid: LfContractId,
-        contractInst: LfThinContractInst,
+        contractInst: VersionedValue,
     ): LfNodeCreate =
       createNode(
         cid,
-        contractInstance = contractInst,
+        arg = contractInst,
         signatories = stakeholdersXX,
         observers = Set.empty,
       )
 
-    def genCreate11Inst(capturedId: LfContractId): LfThinContractInst = contractInstance(
+    def genCreate11Inst(capturedId: LfContractId): VersionedValue = versionedValueCapturing(
       Seq(capturedId)
     )
     val create11seed: LfHash = deriveNodeSeed(1, 1)
@@ -2866,25 +2832,25 @@ class ExampleTransactionFactory(
 
     val lfExercise12: LfNodeExercises = genExercise1X(suffixedId(-1, 12), 6)
 
-    def genCreate120Inst(capturedId: LfContractId): LfThinContractInst = contractInstance(
+    def genCreate120Inst(capturedId: LfContractId): VersionedValue = versionedValueCapturing(
       Seq(capturedId)
     )
-    val lfCreate120Inst: LfThinContractInst = genCreate120Inst(create100local)
+    val lfCreate120Inst: VersionedValue = genCreate120Inst(create100local)
     val create120seed: LfHash = deriveNodeSeed(1, 2, 0)
     val create120local: LfContractId = localContractId(discriminator(create120seed, stakeholders3X))
     val lfCreate120: LfNodeCreate = genCreate3X(create120local, lfCreate120Inst)
 
-    def genCreate13Inst(capturedId: LfContractId): LfThinContractInst = contractInstance(
+    def genCreate13Inst(capturedId: LfContractId): VersionedValue = versionedValueCapturing(
       Seq(capturedId)
     )
+
     val create13seed: LfHash = deriveNodeSeed(1, 3)
     val create13local: LfContractId = localContractId(discriminator(create13seed, stakeholdersXX))
     val lfCreate13: LfNodeCreate = genCreateXX(create13local, genCreate13Inst(create120local))
 
-    val create2Inst: LfThinContractInst = contractInstance()
     val create2seed: LfHash = deriveNodeSeed(2)
     val create2local: LfContractId = localContractId(discriminator(create2seed, stakeholdersX))
-    val lfCreate2: LfNodeCreate = genCreateX(create2local, create2Inst)
+    val lfCreate2: LfNodeCreate = genCreateX(create2local)
 
     override lazy val versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(
@@ -2900,9 +2866,9 @@ class ExampleTransactionFactory(
         lfCreate2,
       )
 
-    val exercise1seed = deriveNodeSeed(1)
-    val exercise10seed = deriveNodeSeed(1, 0)
-    val exercise12seed = deriveNodeSeed(1, 2)
+    val exercise1seed: LfHash = deriveNodeSeed(1)
+    val exercise10seed: LfHash = deriveNodeSeed(1, 0)
+    val exercise12seed: LfHash = deriveNodeSeed(1, 2)
 
     override lazy val metadata: TransactionMetadata = mkMetadata(
       Map(
@@ -2967,9 +2933,9 @@ class ExampleTransactionFactory(
         LfNodeId(1),
         Seq(
           v10,
-          SameView(lfCreate11, LfNodeId(4), RollbackContext.empty),
+          SameView(lfCreate11, LfNodeId(4), rollbackContextFactory.empty),
           v11,
-          SameView(lfCreate13, LfNodeId(7), RollbackContext.empty),
+          SameView(lfCreate13, LfNodeId(7), rollbackContextFactory.empty),
         ),
         isRoot = true,
       )
@@ -2986,85 +2952,76 @@ class ExampleTransactionFactory(
     }
 
     val create0Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(0, 3),
-      0,
-      0,
-      create0Inst,
-      create0local,
+      viewPosition = rootViewPosition(0, 3),
+      viewIndex = 0,
+      createIndex = 0,
+      localContractId = create0local,
       signatories = Set(submitter),
       observers = Set(observer),
     )
-    val create0Relative: LfNodeCreate = genCreateX(create0Info.relativeContractId, create0Inst)
+    val create0Relative: LfNodeCreate = genCreateX(create0Info.relativeContractId)
 
     val exercise1Id: LfContractId = suffixedId(-1, 1)
     val exercise1: LfNodeExercises = genExercise1(exercise1Id)
-    val exercise1Instance: LfThinContractInst = contractInstance()
-
     val exercise10Id: LfContractId = suffixedId(-1, 10)
     val exercise10: LfNodeExercises = genExercise1X(exercise10Id, 3)
-    val exercise10Instance: LfThinContractInst = contractInstance()
-
     val create100Info: CreateInfo = fromLocalContractId(
-      subViewIndex(0, 1) +: subViewIndex(0, 2) +: rootViewPosition(1, 3),
-      3,
-      0,
-      create100Inst,
-      create100local,
+      viewPosition = subViewIndex(0, 1) +: subViewIndex(0, 2) +: rootViewPosition(1, 3),
+      viewIndex = 3,
+      createIndex = 0,
+      localContractId = create100local,
       signatories = Set(signatory),
       observers = Set(observer),
     )
     val create100Relative: LfNodeCreate =
-      genCreate3X(create100Info.relativeContractId, create100Inst)
+      genCreate3X(create100Info.relativeContractId)
 
-    val create11InstR: LfThinContractInst = genCreate11Inst(create100Info.relativeContractId)
+    val create11InstR: VersionedValue = genCreate11Inst(create100Info.relativeContractId)
     val create11Info: CreateInfo = fromLocalContractId(
       rootViewPosition(1, 3),
       1,
       0,
-      create11InstR,
       create11local,
+      create11InstR,
       signatories = stakeholdersXX,
     )
     val create11Relative: LfNodeCreate = genCreateXX(create11Info.relativeContractId, create11InstR)
 
     val exercise12Id: LfContractId = suffixedId(-1, 12)
     val exercise12: LfNodeExercises = genExercise1X(exercise12Id, 6)
-    val exercise12Instance: LfThinContractInst = contractInstance()
-
-    val create120Inst: LfThinContractInst = genCreate120Inst(create100Info.relativeContractId)
+    val create120Inst: VersionedValue = genCreate120Inst(create100Info.relativeContractId)
     val create120Info: CreateInfo = fromLocalContractId(
       subViewIndex(0, 1) +: subViewIndex(1, 2) +: rootViewPosition(1, 3),
       5,
       0,
-      create120Inst,
       create120local,
+      create120Inst,
       signatories = Set(signatory),
       observers = Set(observer),
     )
     val create120Relative: LfNodeCreate =
       genCreate3X(create120Info.relativeContractId, create120Inst)
 
-    val create13Inst: LfThinContractInst = genCreate13Inst(create120Info.relativeContractId)
+    val create13Inst: VersionedValue = genCreate13Inst(create120Info.relativeContractId)
     val create13Info: CreateInfo = fromLocalContractId(
       rootViewPosition(1, 3),
       1,
       1,
-      create13Inst,
       create13local,
+      create13Inst,
       signatories = stakeholdersXX,
     )
     val create13Relative: LfNodeCreate = genCreateXX(create13Info.relativeContractId, create13Inst)
 
     val create2Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(2, 3),
-      6,
-      0,
-      create2Inst,
-      create2local,
+      viewPosition = rootViewPosition(2, 3),
+      viewIndex = 6,
+      createIndex = 0,
+      localContractId = create2local,
       signatories = Set(submitter),
       observers = Set(observer),
     )
-    val create2Relative: LfNodeCreate = genCreateX(create2Info.relativeContractId, create2Inst)
+    val create2Relative: LfNodeCreate = genCreateX(create2Info.relativeContractId)
 
     val view0: TransactionView =
       view(
@@ -3092,11 +3049,10 @@ class ExampleTransactionFactory(
         Set.empty,
       )
 
-    val exercise10Input = asContractInstance(
-      exercise10Id,
-      exercise10Instance,
-      metadataFromExercise(exercise10),
-      CreationTime.CreatedAt(ledgerTime.toLf),
+    val exercise10Input: GenContractInstance = asGenContractInstance(
+      contractId = exercise10Id,
+      metadata = metadataFromExercise(exercise10),
+      ledgerTime = CreationTime.CreatedAt(ledgerTime.toLf),
     )()
 
     val view10: TransactionView = view(
@@ -3125,11 +3081,10 @@ class ExampleTransactionFactory(
         Set.empty,
       )
 
-    val exercise12Input = asContractInstance(
-      exercise12Id,
-      exercise12Instance,
-      metadataFromExercise(exercise12),
-      CreationTime.CreatedAt(ledgerTime.toLf),
+    val exercise12Input: GenContractInstance = asGenContractInstance(
+      contractId = exercise12Id,
+      metadata = metadataFromExercise(exercise12),
+      ledgerTime = CreationTime.CreatedAt(ledgerTime.toLf),
     )()
 
     val view11: TransactionView =
@@ -3146,11 +3101,10 @@ class ExampleTransactionFactory(
         view110,
       )
 
-    private val exercise1Input = asContractInstance(
-      exercise1Id,
-      exercise1Instance,
-      metadataFromExercise(exercise1),
-      CreationTime.CreatedAt(ledgerTime.toLf),
+    private val exercise1Input = asGenContractInstance(
+      contractId = exercise1Id,
+      metadata = metadataFromExercise(exercise1),
+      ledgerTime = CreationTime.CreatedAt(ledgerTime.toLf),
     )()
 
     val view1: TransactionView =
@@ -3347,9 +3301,9 @@ class ExampleTransactionFactory(
       Seq(transactionViewTree0, transactionViewTree1, transactionViewTree2)
 
     val (create0auth, create0Absolute) = toAbsolute(updateId, create0Info.relativeFci)
-    val create0: LfNodeCreate = genCreateX(create0Absolute, create0Inst)
+    val create0: LfNodeCreate = genCreateX(create0Absolute)
     val (create100auth, create100Absolute) = toAbsolute(updateId, create100Info.relativeFci)
-    val create100: LfNodeCreate = genCreate3X(create100Absolute, create100Inst)
+    val create100: LfNodeCreate = genCreate3X(create100Absolute)
     val (create11auth, create11Absolute) = toAbsolute(updateId, create11Info.relativeFci)
     val create11: LfNodeCreate = genCreateXX(create11Absolute, genCreate11Inst(create100Absolute))
     val (create120auth, create120Absolute) = toAbsolute(updateId, create120Info.relativeFci)
@@ -3358,7 +3312,7 @@ class ExampleTransactionFactory(
     val (create13auth, create13Absolute) = toAbsolute(updateId, create13Info.relativeFci)
     val create13: LfNodeCreate = genCreateXX(create13Absolute, genCreate13Inst(create120Absolute))
     val (create2auth, create2Absolute) = toAbsolute(updateId, create2Info.relativeFci)
-    val create2: LfNodeCreate = genCreateX(create2Absolute, create2Inst)
+    val create2: LfNodeCreate = genCreateX(create2Absolute)
 
     override lazy val versionedSuffixedTransaction: LfVersionedTransaction =
       transaction(
@@ -3375,35 +3329,12 @@ class ExampleTransactionFactory(
       )
 
     override def usedAndCreated: UsedAndCreatedContracts = {
-      val create0Instance =
-        asContractInstance(create0Absolute, create0.versionedCoinst, metadataFromCreate(create0))(
-          create0auth
-        )
-      val create100Instance = asContractInstance(
-        create100Absolute,
-        create100.versionedCoinst,
-        metadataFromCreate(create100),
-      )(create100auth)
-      val create11Instance = asContractInstance(
-        create11Absolute,
-        create11.versionedCoinst,
-        metadataFromCreate(create11),
-      )(create11auth)
-      val create120Instance = asContractInstance(
-        create120Absolute,
-        create120.versionedCoinst,
-        metadataFromCreate(create120),
-      )(create120auth)
-      val create13Instance = asContractInstance(
-        create13Absolute,
-        create13.versionedCoinst,
-        metadataFromCreate(create13),
-      )(create13auth)
-      val create2Instance = asContractInstance(
-        create2Absolute,
-        create2.versionedCoinst,
-        metadataFromCreate(create2),
-      )(create2auth)
+      val create0Instance = asContractInstanceFromCreate(create0)(create0auth)
+      val create100Instance = asContractInstanceFromCreate(create100)(create100auth)
+      val create11Instance = asContractInstanceFromCreate(create11)(create11auth)
+      val create120Instance = asContractInstanceFromCreate(create120)(create120auth)
+      val create13Instance = asContractInstanceFromCreate(create13)(create13auth)
+      val create2Instance = asContractInstanceFromCreate(create2)(create2auth)
 
       UsedAndCreatedContracts.empty.copy(
         checkActivenessTxInputs = Set(exercise1Id, exercise10Id, exercise12Id),
@@ -3444,26 +3375,25 @@ class ExampleTransactionFactory(
     */
   case object TransientContracts extends ExampleTransaction {
 
-    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps & RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with transient contracts"
 
     def stakeholders: Set[LfPartyId] = Set(submitter, observer)
     def genCreate(
         cid: LfContractId,
-        contractInst: LfThinContractInst,
+        contractInst: VersionedValue = defaultVersionedValue,
     ): LfNodeCreate =
       createNode(
         cid,
-        contractInstance = contractInst,
+        arg = contractInst,
         signatories = Set(submitter),
         observers = Set(observer),
       )
 
-    val create0Inst: LfThinContractInst = contractInstance()
     val create0seed: LfHash = deriveNodeSeed(0)
     val create0local: LfContractId = localContractId(discriminator(create0seed, stakeholders))
-    val lfCreate0: LfNodeCreate = genCreate(create0local, create0Inst)
+    val lfCreate0: LfNodeCreate = genCreate(create0local)
 
     def genExercise(cid: LfContractId, childIndices: List[Int]): LfNodeExercises =
       exerciseNode(
@@ -3475,10 +3405,9 @@ class ExampleTransactionFactory(
       )
     val lfExercise1: LfNodeExercises = genExercise(create0local, List(2, 3, 5, 6))
 
-    val create10Inst: LfThinContractInst = contractInstance()
     val create10seed: LfHash = deriveNodeSeed(1, 0)
     val create10local: LfContractId = localContractId(discriminator(create10seed, stakeholders))
-    val lfCreate10: LfNodeCreate = genCreate(create10local, create10Inst)
+    val lfCreate10: LfNodeCreate = genCreate(create10local)
 
     def genExerciseN(cid: LfContractId, childIndex: Int): LfNodeExercises =
       exerciseNode(
@@ -3495,11 +3424,9 @@ class ExampleTransactionFactory(
     val create110local: LfContractId = localContractId(
       discriminator(create110seed, Set(submitter, signatory))
     )
-    val create110Inst: LfThinContractInst = contractInstance()
     def genCreate110(cid: LfContractId): LfNodeCreate =
       createNode(
         cid,
-        contractInstance = create110Inst,
         signatories = Set(submitter, signatory),
         observers = Set.empty,
       )
@@ -3553,7 +3480,7 @@ class ExampleTransactionFactory(
         LfTransactionUtil.lightWeight(lfExercise11),
         Some(exercise11seed),
         LfNodeId(3),
-        Seq(SameView(lfCreate110, LfNodeId(4), RollbackContext.empty)),
+        Seq(SameView(lfCreate110, LfNodeId(4), rollbackContextFactory.empty)),
         isRoot = false,
       )
 
@@ -3562,10 +3489,18 @@ class ExampleTransactionFactory(
         Some(exercise1seed),
         LfNodeId(1),
         Seq(
-          SameView(lfCreate10, LfNodeId(2), RollbackContext.empty),
+          SameView(lfCreate10, LfNodeId(2), rollbackContextFactory.empty),
           v10,
-          SameView(LfTransactionUtil.lightWeight(lfExercise12), LfNodeId(5), RollbackContext.empty),
-          SameView(LfTransactionUtil.lightWeight(lfExercise13), LfNodeId(6), RollbackContext.empty),
+          SameView(
+            LfTransactionUtil.lightWeight(lfExercise12),
+            LfNodeId(5),
+            rollbackContextFactory.empty,
+          ),
+          SameView(
+            LfTransactionUtil.lightWeight(lfExercise13),
+            LfNodeId(6),
+            rollbackContextFactory.empty,
+          ),
         ),
         isRoot = true,
       )
@@ -3575,37 +3510,36 @@ class ExampleTransactionFactory(
 
     val create0Info: CreateInfo =
       fromLocalContractId(
-        rootViewPosition(0, 2),
-        0,
-        0,
-        create0Inst,
-        create0local,
+        viewPosition = rootViewPosition(0, 2),
+        viewIndex = 0,
+        createIndex = 0,
+        localContractId = create0local,
         signatories = Set(submitter),
         observers = Set(observer),
       )
-    val create0Relative: LfNodeCreate = genCreate(create0Info.relativeContractId, create0Inst)
+    val create0Relative: LfNodeCreate =
+      genCreate(create0Info.relativeContractId)
 
     val exercise1: LfNodeExercises = genExercise(create0Info.relativeContractId, List(2, 3, 5, 6))
 
     val create10Info: CreateInfo = fromLocalContractId(
-      rootViewPosition(1, 2),
-      1,
-      0,
-      create10Inst,
-      create10local,
+      viewPosition = rootViewPosition(1, 2),
+      viewIndex = 1,
+      createIndex = 0,
+      localContractId = create10local,
       signatories = Set(submitter),
       observers = Set(observer),
     )
-    val create10Relative: LfNodeCreate = genCreate(create10Info.relativeContractId, create10Inst)
+    val create10Relative: LfNodeCreate =
+      genCreate(create10Info.relativeContractId)
 
     val exercise11: LfNodeExercises = genExerciseN(create10Info.relativeContractId, 4)
 
     val create110Info: CreateInfo = fromLocalContractId(
-      subViewIndex(0, 1) +: rootViewPosition(1, 2),
-      2,
-      0,
-      create110Inst,
-      create110local,
+      viewPosition = subViewIndex(0, 1) +: rootViewPosition(1, 2),
+      viewIndex = 2,
+      createIndex = 0,
+      localContractId = create110local,
       signatories = Set(submitter, signatory),
     )
     val create110Relative: LfNodeCreate = genCreate110(create110Info.relativeContractId)
@@ -3729,10 +3663,10 @@ class ExampleTransactionFactory(
       Seq(transactionViewTree0, transactionViewTree1)
 
     val (create0auth, create0Absolute) = toAbsolute(updateId, create0Info.relativeFci)
-    val create0: LfNodeCreate = genCreate(create0Absolute, create0Inst)
+    val create0: LfNodeCreate = genCreate(create0Absolute)
     val exercise1Abs: LfNodeExercises = genExercise(create0Absolute, List(2, 3, 5, 6))
     val (create10auth, create10Absolute) = toAbsolute(updateId, create10Info.relativeFci)
-    val create10: LfNodeCreate = genCreate(create10Absolute, create10Inst)
+    val create10: LfNodeCreate = genCreate(create10Absolute)
     val exercise11Abs: LfNodeExercises = genExerciseN(create10Absolute, 4)
     val (create110auth, create110Absolute) = toAbsolute(updateId, create110Info.relativeFci)
     val create110: LfNodeCreate = genCreate110(create110Absolute)
@@ -3752,20 +3686,9 @@ class ExampleTransactionFactory(
       )
 
     override def usedAndCreated: UsedAndCreatedContracts = {
-      val create0Instance =
-        asContractInstance(create0Absolute, create0.versionedCoinst, metadataFromCreate(create0))(
-          create0auth
-        )
-      val create10Instance = asContractInstance(
-        create10Absolute,
-        create10.versionedCoinst,
-        metadataFromCreate(create10),
-      )(create10auth)
-      val create110Instance = asContractInstance(
-        create110Absolute,
-        create110.versionedCoinst,
-        metadataFromCreate(create110),
-      )(create110auth)
+      val create0Instance = asContractInstanceFromCreate(create0)(create0auth)
+      val create10Instance = asContractInstanceFromCreate(create10)(create10auth)
+      val create110Instance = asContractInstanceFromCreate(create110)(create110auth)
 
       UsedAndCreatedContracts.empty.copy(
         checkActivenessTxInputs = Set.empty,

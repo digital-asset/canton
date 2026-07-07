@@ -51,7 +51,10 @@ service SequencerAdministrationService {
 
   // Fetch the onboarding state for a given sequencer.
   // the returned bytestring can be used directly to initialize the given sequencer later on
-  rpc OnboardingState(OnboardingStateRequest) returns (stream OnboardingStateResponse);
+  // Deprecated in favor of OnboardingStateV2
+  rpc OnboardingState(OnboardingStateRequest) returns (stream OnboardingStateResponse) {
+    option deprecated = true;
+  }
 
   // Fetch the onboarding state for a given sequencer.
   // the returned bytestring can be used directly to initialize the given sequencer later on

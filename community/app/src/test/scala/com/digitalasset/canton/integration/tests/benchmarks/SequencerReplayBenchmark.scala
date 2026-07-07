@@ -204,7 +204,13 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
 
     val mediatorSendConfigs: Map[String, SequencerSends] =
       (1 to numberOfMediators)
-        .map(index => s"mediator$index" -> SequencerSends(loggerFactory, usePekko = true))
+        .map(index =>
+          s"mediator$index" -> SequencerSends(
+            loggerFactory,
+            usePekko = true,
+            maxSequencingTimeExtSecs = Some(240L),
+          )
+        )
         .toMap
 
     // the replay configs need to be set upfront

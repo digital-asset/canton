@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{MediatorReference, SequencerReference}
@@ -21,6 +22,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.OnboardsNewSequencerNode
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.topology.{ForceFlag, PhysicalSynchronizerId}
 
 import java.time.Duration
@@ -134,6 +136,7 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
         sequencerLivenessMargin = NonNegativeInt.zero,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       )
       participant1.synchronizers.modify(
         daName,
@@ -178,7 +181,17 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
       participant2.synchronizers.list_registered() shouldBe empty
       participant2.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer5))
 
-      participant1.health.ping(participant2)
+      /*
+      It can happen that admin package vetting races with the connect. In that can, ping fails
+      (see https://github.com/DACH-NY/canton/issues/20851#issuecomment-4224764947)
+       */
+      loggerFactory.assertLogsUnorderedOptional(
+        eventually(retryOnTestFailuresOnly = false) {
+          participant1.health.maybe_ping(participant2).value
+        },
+        (LogEntryOptionality.OptionalMany, _.warningMessage should include("Failed ping")),
+        (LogEntryOptionality.OptionalMany, _.errorMessage should include("Failed to submit ping")),
+      )
     }
   }
 }

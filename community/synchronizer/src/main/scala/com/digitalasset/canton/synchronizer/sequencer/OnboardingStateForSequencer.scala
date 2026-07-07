@@ -61,7 +61,7 @@ object OnboardingStateForSequencer extends VersioningCompanion[OnboardingStateFo
         value.staticSynchronizerParameters,
       )
       sequencerSnapshot <- ProtoConverter.parseRequired(
-        SequencerSnapshot.fromProtoV30,
+        SequencerSnapshot.fromProtoV30(staticSynchronizerParams.protocolVersion, _),
         "sequencer_snapshot",
         value.sequencerSnapshot,
       )

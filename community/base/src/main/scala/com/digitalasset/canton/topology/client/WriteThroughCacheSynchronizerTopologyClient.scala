@@ -15,8 +15,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
@@ -29,9 +29,11 @@ import com.digitalasset.canton.topology.store.{
   UnknownOrUnvettedPackages,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   LsuSequencerConnectionSuccessor,
   ParticipantAttributes,
+  TopologyTransaction,
   VettedPackage,
 }
 import com.digitalasset.canton.topology.{
@@ -225,15 +227,19 @@ class WriteThroughCacheSynchronizerTopologyClient(
   override def latestTopologyChangeTimestamp: CantonTimestamp =
     delegate.latestTopologyChangeTimestamp
 
-  override def initialize(
-      sequencerSnapshotTimestamp: Option[EffectiveTime],
+  override def updateKnownTimestampsDuringStartup(
+      sequencerSnapshotTimestamp: Option[SequencedTime],
       synchronizerUpgradeTime: Option[SequencedTime],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    delegate.initialize(sequencerSnapshotTimestamp, synchronizerUpgradeTime).map { _ =>
-      cacheDuringCrashRecovery
-        .set(Some((EffectiveTime(delegate.latestTopologyChangeTimestamp), stateLookup.makeCopy())))
-      ()
-    }
+    delegate
+      .updateKnownTimestampsDuringStartup(sequencerSnapshotTimestamp, synchronizerUpgradeTime)
+      .map { _ =>
+        cacheDuringCrashRecovery
+          .set(
+            Some((EffectiveTime(delegate.latestTopologyChangeTimestamp), stateLookup.makeCopy()))
+          )
+        ()
+      }
 
   override def staticSynchronizerParameters: StaticSynchronizerParameters =
     delegate.staticSynchronizerParameters
@@ -329,6 +335,7 @@ object WriteThroughCacheSynchronizerTopologyClient {
       store: TopologyStore[TopologyStoreId.SynchronizerStore],
       stateLookup: TopologyStateLookup,
       synchronizerUpgradeTime: Option[CantonTimestamp],
+      sequencerSnapshotTimestamp: Option[SequencedTime],
       packageDependencyResolver: PackageDependencyResolver,
       cachingConfigs: CachingConfigs,
       enableConsistencyChecks: Boolean,
@@ -336,8 +343,6 @@ object WriteThroughCacheSynchronizerTopologyClient {
       timeouts: ProcessingTimeout,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
-  )(
-      sequencerSnapshotTimestamp: Option[EffectiveTime] = None
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -366,7 +371,10 @@ object WriteThroughCacheSynchronizerTopologyClient {
         loggerFactory,
       )
     caching
-      .initialize(sequencerSnapshotTimestamp, synchronizerUpgradeTime.map(SequencedTime(_)))
+      .updateKnownTimestampsDuringStartup(
+        sequencerSnapshotTimestamp = sequencerSnapshotTimestamp,
+        synchronizerUpgradeTime = synchronizerUpgradeTime.map(SequencedTime(_)),
+      )
       .map(_ => caching)
   }
 
@@ -509,7 +517,7 @@ class ValidatingTopologySnapshot(
 
   override def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
     verify("findDynamicSequencingParameters")(_.findDynamicSequencingParameters())
 
   @nowarn("cat=deprecation")
@@ -525,7 +533,9 @@ class ValidatingTopologySnapshot(
 
   override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ] =
     verify("sequencerConnectionSuccessors")(_.sequencerConnectionSuccessors(successorPsid))
 
   override private[client] def findUnvettedPackagesOrDependencies(
@@ -533,6 +543,7 @@ class ValidatingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
     verify[Id, UnknownOrUnvettedPackages](
       s"findUnvettedPackagesOrDependencies $participant $packages $ledgerTime $vettedPackages"
@@ -542,6 +553,7 @@ class ValidatingTopologySnapshot(
         packages,
         ledgerTime,
         vettedPackages,
+        checkDependencyVetting,
       )
     )
 

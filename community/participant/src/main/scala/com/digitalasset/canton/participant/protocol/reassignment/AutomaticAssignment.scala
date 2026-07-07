@@ -67,10 +67,7 @@ private[participant] object AutomaticAssignment {
     def performAutoAssignmentOnce: EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
       for {
         targetTopology <- reassignmentCoordination
-          .getRecentTopologySnapshot(
-            targetSynchronizer,
-            targetStaticSynchronizerParameters,
-          )
+          .getTargetApproximateSnapshot(targetSynchronizer)
         possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetTopology))
         assignmentSubmitter <- EitherT.fromOption[FutureUnlessShutdown](
           possibleSubmittingParties.headOption,
@@ -183,6 +180,16 @@ private[participant] object AutomaticAssignment {
     }
 
     for {
+      // targetTimestamp is provided by the unassignment submitter and may be ahead of the target
+      // topology observed locally, so wait for it before taking the snapshot
+      // TODO(i33545): verify that awaiting this submitter-provided timestamp is not a new security
+      //  vulnerability
+      _ <- reassignmentCoordination.awaitTimestamp(
+        targetSynchronizer,
+        targetStaticSynchronizerParameters,
+        targetTimestamp,
+        FutureUnlessShutdown.unit,
+      )
       targetIps <- reassignmentCoordination
         .cryptoSnapshot(
           targetSynchronizer,

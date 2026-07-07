@@ -16,6 +16,7 @@ import com.digitalasset.canton.synchronizer.block.{AsyncWriterParameters, Sequen
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerLsuConfig,
   SequencerNodeParameters,
   TimeAdvancingTopologyConfig,
 }
@@ -51,7 +52,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         testedProtocolVersion,
         sequencerId,
         params,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         loggerFactory,
       )
 
@@ -82,6 +83,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         ProcessingTimeout()
       ),
       protocol = CantonNodeParameters.Protocol.Impl(
+        devVersionSupport = false,
         alphaVersionSupport = false,
         betaVersionSupport = true,
         dontWarnOnDeprecatedPV = false,
@@ -90,6 +92,10 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      enableRejectDeliveredAggregationsOnPv35 = Seq("MED", "PAR"),
+      disableAggregationRuleSizeCheckForTesting = true,
+      lsuConfig = SequencerLsuConfig(),
+      enablePrevalidation = true,
     )
 
   "Reference sequencer" when runSequencerApiTests()

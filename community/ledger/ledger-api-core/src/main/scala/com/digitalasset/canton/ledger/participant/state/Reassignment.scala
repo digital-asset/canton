@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
-import com.digitalasset.daml.lf.transaction.Node
+import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, Node}
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait Reassignment {
   def templateId: Ref.Identifier
@@ -53,6 +53,8 @@ object Reassignment {
     *   The reassignment counter of the underlying contract.
     * @param nodeId
     *   The node ID of the unassign node.
+    * @param keyOpt
+    *   The contract key with maintainers of the underlying contract, if defined.
     */
   final case class Unassign(
       contractId: Value.ContractId,
@@ -62,7 +64,8 @@ object Reassignment {
       assignmentExclusivity: Option[Timestamp],
       reassignmentCounter: Long,
       nodeId: Int,
-  ) extends Reassignment {}
+      keyOpt: Option[GlobalKeyWithMaintainers],
+  ) extends Reassignment
 
   /** Represents the update of assigning a contract to a synchronizer.
     *

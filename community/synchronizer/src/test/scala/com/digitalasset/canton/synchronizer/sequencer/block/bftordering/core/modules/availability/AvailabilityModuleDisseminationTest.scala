@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.TimestampedSend
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   OrderingRequest,
   OrderingRequestBatch,
@@ -45,6 +46,7 @@ import com.digitalasset.canton.tracing.Traced
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 
@@ -185,9 +187,12 @@ class AvailabilityModuleDisseminationTest
           operationId = "availability-sign-local-batchId",
         )
 
-        disseminationProtocolState.disseminationProgress should
-          contain only ABatchDisseminationProgressNode0To3WithNode0Vote._1 -> ABatchDisseminationProgressNode0To3WithNode0Vote._2
-            .copy(batchSentTo = Node1To3)
+        val t = Instant.now
+        withFixedTimestamp(
+          t,
+          disseminationProtocolState.disseminationProgress,
+        ) should contain only ABatchDisseminationProgressNode0To3WithNode0Vote._1 -> ABatchDisseminationProgressNode0To3WithNode0Vote._2
+          .copy(sentToLast = Node1To3.map(TimestampedSend(_, t)))
         disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe None
       }
     }
@@ -354,9 +359,10 @@ class AvailabilityModuleDisseminationTest
           )
 
           val updated = ABatchDisseminationProgressNode0To3WithNode0Vote._2
-          disseminationProtocolState.disseminationInProgressView should
+          val t = Instant.now
+          withFixedTimestamp(t, disseminationProtocolState.disseminationProgress) should
             contain only ABatchDisseminationProgressNode0To3WithNode0Vote._1 -> updated
-              .copy(batchSentTo = Node1To3)
+              .copy(sentToLast = Node1To3.map(TimestampedSend(_, t)))
           disseminationProtocolState.disseminationCompleteView should be(empty)
           disseminationProtocolState.nextToBeProvidedToConsensus shouldBe ANextToBeProvidedToConsensus
           p2pNetworkOutCell.get() shouldBe None
@@ -442,7 +448,7 @@ class AvailabilityModuleDisseminationTest
         log => {
           log.level shouldBe Level.WARN
           log.message should include regex
-            """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
+            """Batch BatchId\([^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
         },
       )
 
@@ -470,7 +476,7 @@ class AvailabilityModuleDisseminationTest
           log.level shouldBe Level.WARN
           val validTags = OrderingRequest.ValidTags.mkString(", ")
           log.message should include regex
-            """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains requests with invalid tags, """ +
+            """Batch BatchId\([^)]+\) from 'node1' contains requests with invalid tags, """ +
             s"valid tags are: \\($validTags\\); skipping"
         },
       )
@@ -498,7 +504,7 @@ class AvailabilityModuleDisseminationTest
         log => {
           log.level shouldBe Level.WARN
           log.message should include regex (
-            """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains one or more batches that exceed the maximum allowed request size bytes \(0\), skipping"""
+            """Batch BatchId\([^)]+\) from 'node1' contains one or more batches that exceed the maximum allowed request size bytes \(0\), skipping"""
           )
         },
       )
@@ -527,7 +533,7 @@ class AvailabilityModuleDisseminationTest
         log => {
           log.level shouldBe Level.WARN
           log.message should include regex
-            """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains an expired batch at epoch number 0 which is 500 epochs or more older than last known epoch 501, skipping"""
+            """Batch BatchId\([^)]+\) from 'node1' contains an expired batch at epoch number 0 which is 500 epochs or more older than last known epoch 501, skipping"""
         },
       )
 
@@ -544,7 +550,7 @@ class AvailabilityModuleDisseminationTest
         log => {
           log.level shouldBe Level.WARN
           log.message should include regex
-            """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains a batch whose epoch number 1501 is too far in the future compared to last known epoch 501, skipping"""
+            """Batch BatchId\([^)]+\) from 'node1' contains a batch whose epoch number 1501 is too far in the future compared to last known epoch 501, skipping"""
         },
       )
 
@@ -764,7 +770,7 @@ class AvailabilityModuleDisseminationTest
       )
 
       // the batch got evicted
-      verify(availabilityStore).gc(Seq(ABatchId))
+      verify(availabilityStore).gc(Map(anEpochNumber -> Set(ABatchId)))
     }
   }
 
@@ -1016,14 +1022,17 @@ class AvailabilityModuleDisseminationTest
           )
         )
 
+        val newAcks =
+          ABatchDisseminationProgressNode0To6WithNode0Vote._2.acks + AvailabilityAck(
+            node1Ack.from,
+            node1Ack.signature,
+          )
         disseminationProtocolState.disseminationProgress should
-          contain only ABatchDisseminationProgressNode0To6WithNonQuorumVotes._1 -> ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2
+          contain only ABatchDisseminationProgressNode0To6WithNode0Vote._1 -> ABatchDisseminationProgressNode0To6WithNode0Vote._2
             .copy(
-              acks =
-                ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2.acks + AvailabilityAck(
-                  node1Ack.from,
-                  node1Ack.signature,
-                )
+              acks = newAcks,
+              previousAcks =
+                Some(newAcks), // Receiving acks cause a review in the most recent topology
             )
         disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe None
       }
@@ -1160,14 +1169,16 @@ class AvailabilityModuleDisseminationTest
           )
         )
 
+        val newAcks = ABatchDisseminationProgressNode0To6WithNode0Vote._2.acks + AvailabilityAck(
+          node1Ack.from,
+          node1Ack.signature,
+        )
         disseminationProtocolState.disseminationProgress should
-          contain only ABatchDisseminationProgressNode0To6WithNonQuorumVotes._1 -> ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2
+          contain only ABatchDisseminationProgressNode0To6WithNode0Vote._1 -> ABatchDisseminationProgressNode0To6WithNode0Vote._2
             .copy(
-              acks =
-                ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2.acks + AvailabilityAck(
-                  node1Ack.from,
-                  node1Ack.signature,
-                )
+              acks = newAcks,
+              previousAcks =
+                Some(newAcks), // Receiving acks cause a review in the most recent topology
             )
         disseminationProtocolState.nextToBeProvidedToConsensus shouldBe ANextToBeProvidedToConsensus
       }
@@ -1217,16 +1228,18 @@ class AvailabilityModuleDisseminationTest
           )
         )
 
+        val acks =
+          disseminationProgress._2.acks + AvailabilityAck(
+            node1Ack.from,
+            node1Ack.signature,
+          )
         val expectedDisseminationProgress =
           disseminationProgress._1 ->
             disseminationProgress._2
               // Verifying an inbound ack advances progress, which re-syncs `sentTo` with the acks received
               .copy(
-                acks =
-                  ABatchDisseminationProgressNode0To6WithNonQuorumVotes._2.acks + AvailabilityAck(
-                    node1Ack.from,
-                    node1Ack.signature,
-                  )
+                acks = acks,
+                previousAcks = Some(acks),
               )
         disseminationProtocolState.disseminationProgress should contain only expectedDisseminationProgress
         disseminationProtocolState.nextToBeProvidedToConsensus shouldBe ANextToBeProvidedToConsensus

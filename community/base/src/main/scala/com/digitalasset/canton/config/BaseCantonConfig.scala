@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.config
 
+import pureconfig.generic.ProductHint
 import pureconfig.{ConfigReader, ConfigWriter}
 
 /** Base config readers and writers used in different places
@@ -17,6 +18,10 @@ object BaseCantonConfig {
 
   object Readers {
 
+    // the great ux of pureconfig expects you to provide this ProductHint such that the created derivedReader fails on
+    // unknown keys
+    implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
+
     lazy implicit val batchAggregatorConfigReader: ConfigReader[BatchAggregatorConfig] = {
       implicit val batching: ConfigReader[BatchAggregatorConfig.Batching] =
         deriveReader[BatchAggregatorConfig.Batching]
@@ -30,6 +35,9 @@ object BaseCantonConfig {
 
     lazy implicit final val connectionAllocationReader: ConfigReader[ConnectionAllocation] =
       deriveReader[ConnectionAllocation]
+
+    lazy implicit final val partitionConfigReader: ConfigReader[PartitionConfig] =
+      deriveReader[PartitionConfig]
 
     lazy implicit final val dbParamsReader: ConfigReader[DbParametersConfig] =
       deriveReader[DbParametersConfig]
@@ -56,6 +64,9 @@ object BaseCantonConfig {
 
     lazy implicit final val connectionAllocationWriter: ConfigWriter[ConnectionAllocation] =
       deriveWriter[ConnectionAllocation]
+
+    lazy implicit final val partitionConfigWriter: ConfigWriter[PartitionConfig] =
+      deriveWriter[PartitionConfig]
 
     lazy implicit final val dbParamsWriter: ConfigWriter[DbParametersConfig] =
       deriveWriter[DbParametersConfig]

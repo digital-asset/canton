@@ -8,12 +8,10 @@ import cats.implicits.toFunctorFilterOps
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{SyncCryptoError, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
@@ -26,7 +24,10 @@ import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUnlessShutdownUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LfPartyId, config}
+import com.digitalasset.nonempty.NonEmpty
 
+import java.time.Duration
 import scala.concurrent.ExecutionContext
 
 /** Sends confirmation result messages to the informee participants of a request. The result message
@@ -47,7 +48,7 @@ private[mediator] trait VerdictSender {
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
       aggregationRule: Option[AggregationRule],
-      sendVerdict: Boolean,
+      sendVerdictWithDelay: Option[Duration],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   /** Mediator rejects are important for situations where malformed mediator confirmation request or
@@ -70,19 +71,28 @@ private[mediator] object VerdictSender {
       sequencerSend: SequencerClientSend,
       crypto: SynchronizerCryptoClient,
       mediatorId: MediatorId,
-      batchingConfig: BatchingConfig,
+      parameters: VerdictSenderParameters,
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): VerdictSender =
-    new DefaultVerdictSender(sequencerSend, crypto, mediatorId, batchingConfig, loggerFactory)
+  )(implicit executionContext: ExecutionContext, closeContext: CloseContext): VerdictSender =
+    new DefaultVerdictSender(sequencerSend, crypto, mediatorId, parameters, loggerFactory)
 }
+
+final case class VerdictSenderParameters(
+    enableDelay: Boolean,
+    livenessMargin: NonNegativeInt,
+    immediateBeforeDeadline: config.NonNegativeFiniteDuration,
+    initialDelay: config.NonNegativeFiniteDuration,
+    delay: config.NonNegativeFiniteDuration,
+    parallelism: PositiveInt,
+)
 
 private[mediator] class DefaultVerdictSender(
     sequencerSend: SequencerClientSend,
     crypto: SynchronizerCryptoClient,
     mediatorId: MediatorId,
-    batchingConfig: BatchingConfig,
+    parameters: VerdictSenderParameters,
     override protected val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends VerdictSender
     with NamedLogging {
   private val protocolVersion = sequencerSend.protocolVersion
@@ -109,7 +119,7 @@ private[mediator] class DefaultVerdictSender(
             )
         )
       sendVerdict <- EitherT
-        .right(shouldSendVerdict(request.mediator, snapshot))
+        .right(shouldSendVerdict(requestId, request.mediator, snapshot))
       batch <- createResults(requestId, request, verdict)
       _ <- EitherT.right[SyncCryptoError](
         sendResultBatch(requestId, batch, decisionTime, aggregationRule, sendVerdict)
@@ -128,7 +138,7 @@ private[mediator] class DefaultVerdictSender(
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
       aggregationRule: Option[AggregationRule],
-      sendVerdict: Boolean,
+      sendVerdictWithDelay: Option[Duration],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val callback: SendCallback = {
       case UnlessShutdown.Outcome(SendResult.Success(_)) =>
@@ -136,7 +146,9 @@ private[mediator] class DefaultVerdictSender(
       case UnlessShutdown.Outcome(SendResult.Error(error)) =>
         val reason = error.reason
         reason match {
-          case SequencerErrors.AggregateSubmissionAlreadySent(_) =>
+          // The V2 error may appear with PV36
+          case SequencerErrors.AggregateSubmissionAlreadySent(_) |
+              SequencerErrors.AggregateSubmissionAlreadySentV2(_) =>
             logger.info(
               s"Result message was already sent for $requestId: $reason"
             )
@@ -155,33 +167,57 @@ private[mediator] class DefaultVerdictSender(
         logger.debug("Sequencing result processing was aborted due to shutdown")
     }
 
-    val sendET = if (sendVerdict) {
+    val sendET = if (sendVerdictWithDelay.nonEmpty) {
       implicit val metricsContext: MetricsContext = MetricsContext("type" -> "send-verdict")
-      // the result of send request will be logged within the returned future however any error is effectively
-      // discarded. Any error logged by the eventual callback will most likely occur after the returned future has
-      // completed.
-      // we use decision-time for max-sequencing-time as recipients will simply ignore the message if received after
-      // that point.
-      EitherTUtil.leftSubflatMap(
-        sequencerSend
-          .send(
-            batch,
-            timestamps = SendRequestTimestamps(
-              topologyTimestamp = Some(requestId.unwrap),
-              // We use `clock.now` to stay consistent with how other submission requests are signed.
-              approximateTimestampForSigning = sequencerSend.clock.now,
-              maxSequencingTime = decisionTime,
-            ),
-            callback = callback,
-            aggregationRule = aggregationRule,
-            amplify = true,
-          )
+
+      def doSend() =
+        // the result of send request will be logged within the returned future however any error is effectively
+        // discarded. Any error logged by the eventual callback will most likely occur after the returned future has
+        // completed.
+        // we use decision-time for max-sequencing-time as recipients will simply ignore the message if received after
+        // that point.
+        EitherTUtil.leftSubflatMap(
+          sequencerSend
+            .send(
+              batch,
+              timestamps = SendRequestTimestamps(
+                topologyTimestamp =
+                  if (protocolVersion <= ProtocolVersion.v34) Some(requestId.unwrap) else None,
+                // We use `clock.now` to stay consistent with how other submission requests are signed.
+                approximateTimestampForSigning = sequencerSend.clock.now,
+                maxSequencingTime = decisionTime,
+              ),
+              callback = callback,
+              aggregationRule = aggregationRule,
+              amplify = true,
+            )
+        ) {
+          case RequestRefused(refused) if refused.hasMaxSequencingTimeElapsed =>
+            logger.info("Sequencing result message timed out synchronously.")
+            Right(())
+          case other =>
+            Left(other)
+        }
+
+      // Delay the submission of the verdict to increase the chance that we don't have to process all mediator verdicts
+      val delay = sendVerdictWithDelay.getOrElse(Duration.ZERO)
+      if (
+        delay.isZero || !parameters.enableDelay ||
+        // if the request is about to expire, respond immediately to avoid the transaction failing
+        // all this depends on the local clock being reasonably in sync with the sequencer's clock.
+        sequencerSend.clock.now
+          .plus(delay)
+          .isAfter(decisionTime.minus(parameters.immediateBeforeDeadline.asJava))
       ) {
-        case RequestRefused(refused) if refused.hasMaxSequencingTimeElapsed =>
-          logger.info("Sequencing result message timed out synchronously.")
-          Right(())
-        case other =>
-          Left(other)
+        doSend()
+      } else {
+        logger.debug(s"Delaying sending of verdict by ${delay.toMillis} ms")
+        EitherT
+          .right(
+            sequencerSend.clock
+              .scheduleAfterCancelledOnShutdown(_ => (), "delayed-send-verdict", delay)
+          )
+          .flatMap(_ => doSend())
       }
     } else {
       logger.info(
@@ -189,7 +225,6 @@ private[mediator] class DefaultVerdictSender(
       )
       EitherTUtil.unitUS
     }
-
     EitherTUtil
       .logOnErrorU(sendET, s"Failed to send result to sequencer for request ${requestId.unwrap}")
       .value
@@ -263,20 +298,33 @@ private[mediator] class DefaultVerdictSender(
     }
 
   private def shouldSendVerdict(
+      requestId: RequestId,
       mediatorGroup: MediatorGroupRecipient,
       topologySnapshot: TopologySnapshot,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Duration]] = {
     val mediatorGroupIndex = mediatorGroup.group
     topologySnapshot.mediatorGroup(mediatorGroupIndex).map { groupO =>
-      groupO
+      val group = groupO
         .getOrElse(
           // This has been checked in the `validateRequest`
           ErrorUtil.invalidState(
             s"Unexpected absent mediator group $mediatorGroupIndex."
           )
         )
-        .active
-        .contains(mediatorId)
+      val index = group.active.indexOf(mediatorId)
+      if (index > -1) {
+        val position =
+          ((index + requestId.unwrap.toMicros) % (group.active.size)) - group.threshold.value - parameters.livenessMargin.value
+        // if position is negative, then we want to send immediately as we are part of the first threshold + extra nodes
+        // otherwise, send with a delay proportional to our position in the group
+        if (position > -1) {
+          Some(
+            parameters.initialDelay.asJava.plusMillis(position * parameters.delay.asJava.toMillis)
+          )
+        } else Some(Duration.ZERO)
+      } else None
     }
   }
 
@@ -306,9 +354,17 @@ private[mediator] class DefaultVerdictSender(
             "MediatorGroup is expected to have at least 1 active member at this point"
           )
         )
+
       // We need aggregation only if the mediator group is truly decentralized
-      Option.when(mediatorGroup.threshold.unwrap > 1)(
-        AggregationRule(activeNE, mediatorGroup.threshold, protocolVersion)
+      // With PV35 we do always need to set it as we will be checking the group at
+      // time of delivery and not at time of construction.
+      Option.when(mediatorGroup.threshold.unwrap > 1 || protocolVersion > ProtocolVersion.v34)(
+        AggregationRule.activeMediators(
+          activeNE,
+          mediatorGroup.index,
+          mediatorGroup.threshold,
+          protocolVersion,
+        )
       )
     }
   }
@@ -339,7 +395,7 @@ private[mediator] class DefaultVerdictSender(
     if (recipientsByViewTypeAndRootHash.nonEmpty) {
       for {
         snapshot <- crypto.awaitSnapshot(requestId.unwrap)
-        envs <- MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(
+        envs <- MonadUtil.parTraverseWithLimit(parameters.parallelism)(
           recipientsByViewTypeAndRootHash.toSeq
         ) { case ((viewType, rootHash), flatRecipients) =>
           val rejection = ConfirmationResultMessage.create(
@@ -376,7 +432,7 @@ private[mediator] class DefaultVerdictSender(
                   )
                 }
             }
-        _ <- MonadUtil.parTraverseWithLimit_(batchingConfig.parallelism)(batches) { batch =>
+        _ <- MonadUtil.parTraverseWithLimit_(parameters.parallelism)(batches) { batch =>
           mediatorGroupO.traverse_ {
             // if no mediator could be detected from RHMs, participants will also detect this and there's not need to send a reject
             mediatorGroup =>
@@ -392,7 +448,7 @@ private[mediator] class DefaultVerdictSender(
                     )
                   )
                 sendVerdict <-
-                  shouldSendVerdict(mediatorGroup, snapshot.ipsSnapshot)
+                  shouldSendVerdict(requestId, mediatorGroup, snapshot.ipsSnapshot)
               } yield {
                 FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
                   sendResultBatch(

@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.index
 import cats.implicits.catsSyntaxSemigroup
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.AcsDelta
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
@@ -55,6 +54,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   Party,
   QualifiedName,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.StatusRuntimeException
@@ -1671,6 +1671,7 @@ class IndexServiceImplSpec
           recordTime = Some(Timestamp.defaultInstance),
           externalTransactionHash = None,
           paidTrafficCost = None,
+          transactionHash = None,
         )
       )
     )
@@ -1681,6 +1682,8 @@ class IndexServiceImplSpec
         Some(TransactionFormat(eventFormat = eventFormat, transactionShape = AcsDelta)),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeAcsCommitments = None,
+      includeAcsChanges = None,
     )
 
   def updateFormatForReassignments(eventFormat: EventFormat): UpdateFormat =
@@ -1688,6 +1691,8 @@ class IndexServiceImplSpec
       includeTransactions = None,
       includeReassignments = Some(eventFormat),
       includeTopologyEvents = None,
+      includeAcsCommitments = None,
+      includeAcsChanges = None,
     )
 
   def internalUpdateFormatForTransactions(
@@ -1702,6 +1707,7 @@ class IndexServiceImplSpec
       ),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeAcsCommitments = None,
     )
 
   def internalUpdateFormatForReassignments(
@@ -1711,6 +1717,7 @@ class IndexServiceImplSpec
       includeTransactions = None,
       includeReassignments = Some(internalEventFormat),
       includeTopologyEvents = None,
+      includeAcsCommitments = None,
     )
 
 }

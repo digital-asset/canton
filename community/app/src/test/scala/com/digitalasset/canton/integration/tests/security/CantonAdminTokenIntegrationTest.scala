@@ -13,15 +13,16 @@ import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmpty
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.participant.config.RemoteParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
+import com.digitalasset.canton.user.store.UserManagementStore
 import monocle.macros.syntax.lens.*
 
 /** Test CantonAdminToken
@@ -47,6 +48,13 @@ class CantonAdminTokenIntegrationTest(elevatedRights: Boolean)
 
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
+
+  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   private val mySecret = NonEmptyString.tryCreate("pyjama")
 

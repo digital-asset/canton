@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.admin.inspection
 
 import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   LtHash16,
@@ -50,6 +50,7 @@ import com.digitalasset.canton.{
   HasExecutionContext,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -148,6 +149,7 @@ sealed trait SyncStateInspectionTest
       timeouts,
       loggerFactory,
       Eval.now(mockStringInterning),
+      BatchingConfig(),
     )
 
     when(syncStateInspection.syncPersistentStateManager.acsCommitmentStore(synchronizerId))
@@ -158,7 +160,7 @@ sealed trait SyncStateInspectionTest
     acsCommitmentStore
   }
 
-  private def createDummyHash(default: Boolean): AcsCommitment.CommitmentType = {
+  private def createDummyHash(default: Boolean): Digest.DigestType = {
     val h = LtHash16()
     h.add("blah".getBytes())
     if (!default)
@@ -196,17 +198,17 @@ sealed trait SyncStateInspectionTest
   private def createDummyReceivedCommitment(
       synchronizerId: PhysicalSynchronizerId,
       remoteParticipant: ParticipantId,
-      commitmentPeriod: CommitmentPeriod,
+      commitmentPeriod: LegacyCommitmentPeriod,
       hashingState: HashingState = new HashingState(),
       state: CommitmentPeriodState = CommitmentPeriodState.Outstanding,
-  ): (ReceivedAcsCommitment, SignedProtocolMessage[AcsCommitment]) = {
+  ): (ReceivedAcsCommitment, SignedProtocolMessage[LegacyAcsCommitment]) = {
 
     val dummyCommitment = createDummyHash(hashingState.isOwnDefault)
-    val hashedDummyCommitment: AcsCommitment.HashedCommitmentType =
-      AcsCommitment.hashCommitment(dummyCommitment)
+    val hashedDummyCommitment: Digest.HashedDigestType =
+      Digest.hashDigest(dummyCommitment)
     val dummyCounterCommitment = createDummyHash(hashingState.isCounterDefault)
-    val hashedDummyCounterCommitment: AcsCommitment.HashedCommitmentType =
-      AcsCommitment.hashCommitment(dummyCounterCommitment)
+    val hashedDummyCounterCommitment: Digest.HashedDigestType =
+      Digest.hashDigest(dummyCounterCommitment)
 
     val dummySignature: Signature =
       symbolicCrypto.sign(
@@ -214,8 +216,8 @@ sealed trait SyncStateInspectionTest
         testKey.id,
         SigningKeyUsage.ProtocolOnly,
       )
-    val dummyCommitmentMsg: AcsCommitment =
-      AcsCommitment.create(
+    val dummyCommitmentMsg: LegacyAcsCommitment =
+      LegacyAcsCommitment.create(
         synchronizerId,
         remoteParticipant,
         localId,
@@ -243,15 +245,15 @@ sealed trait SyncStateInspectionTest
   private def createDummyComputedCommitment(
       synchronizerId: SynchronizerId,
       counterParticipant: ParticipantId,
-      period: CommitmentPeriod,
+      period: LegacyCommitmentPeriod,
       hashingState: HashingState = new HashingState(),
       state: ValidSentPeriodState = CommitmentPeriodState.NotCompared,
   ): (SentAcsCommitment, AcsCommitmentStore.ParticipantCommitmentData) = {
 
     val dummyCommitment = createDummyHash(hashingState.isOwnDefault)
-    val hashedDummyCommitment = AcsCommitment.hashCommitment(dummyCommitment)
+    val hashedDummyCommitment = Digest.hashDigest(dummyCommitment)
     val dummyCounterCommitment = createDummyHash(hashingState.isCounterDefault)
-    val hashedDummyCounterCommitment = AcsCommitment.hashCommitment(dummyCounterCommitment)
+    val hashedDummyCounterCommitment = Digest.hashDigest(dummyCounterCommitment)
     val commitmentData =
       ParticipantCommitmentData(counterParticipant, period, hashedDummyCommitment)
     val sent = SentAcsCommitment(
@@ -268,15 +270,16 @@ sealed trait SyncStateInspectionTest
   private lazy val intervalInt: Int = 1
   private lazy val interval: PositiveSeconds = PositiveSeconds.tryOfSeconds(intervalInt.toLong)
   private def ts(time: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(time.toLong)
-  private def period(fromExclusive: Int, toInclusive: Int): CommitmentPeriod = CommitmentPeriod
-    .create(ts(fromExclusive), ts(toInclusive), interval)
-    .value
+  private def period(fromExclusive: Int, toInclusive: Int): LegacyCommitmentPeriod =
+    LegacyCommitmentPeriod
+      .create(ts(fromExclusive), ts(toInclusive), interval)
+      .value
 
-  private def periods(fromExclusive: Int, toInclusive: Int): NonEmpty[Set[CommitmentPeriod]] =
+  private def periods(fromExclusive: Int, toInclusive: Int): NonEmpty[Set[LegacyCommitmentPeriod]] =
     NonEmptyUtil
       .fromUnsafe(
         (fromExclusive until toInclusive by intervalInt).map { i =>
-          CommitmentPeriod.create(ts(i), ts(i + intervalInt), interval).value
+          LegacyCommitmentPeriod.create(ts(i), ts(i + intervalInt), interval).value
         }
       )
       .toSet

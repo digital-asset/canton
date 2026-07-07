@@ -52,8 +52,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   P2PNetworkInModule,
   P2PNetworkOutModule,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PruningModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.data.BftOrdererPruningSchedulerStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.{
+  PartitionManager,
+  PruningModule,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.{
   SystemInitializationResult,
@@ -124,7 +127,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           P2PConnectionEventListener,
           ModuleRef[BftOrderingMessage],
       ) => P2PNetworkManagerT,
-  ): SystemInitializationResult[
+  )(implicit traceContext: TraceContext): SystemInitializationResult[
     E,
     P2PNetworkManagerT,
     BftOrderingMessage,
@@ -133,11 +136,10 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     implicit val c: BftBlockOrdererConfig = config
     val leaderSelectionPolicyFactory = LeaderSelectionInitializer.create[E](
       node,
-      config,
       synchronizerProtocolVersion,
       stores.outputStore,
-      timeouts,
-      msg => implicit context => failBootstrap(msg),
+      config.initQueryTimeout,
+      msg => context => failBootstrap(msg)(context),
       metrics,
       loggerFactory,
     )
@@ -232,6 +234,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             bootstrapTopologyInfo.thisNode,
             isGenesis = initialEpoch == Bootstrap.BootstrapEpochNumber,
             p2pNetworkOutModuleStateFactory(bootstrapTopologyInfo.currentMembership),
+            random,
             stores.p2pEndpointsStore,
             metrics,
             dependencies,
@@ -275,7 +278,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
               storePbftMessages = true,
               stores.epochStore,
               dependencies,
-              config.consensusBlockCompletionTimeout,
               config.consensusEmptyBlockCreationTimeout,
               loggerFactory,
               timeouts,
@@ -289,7 +291,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             clock,
             metrics,
             segmentModuleRefFactory,
-            random,
             dependencies,
             loggerFactory,
             timeouts,
@@ -311,6 +312,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             requestInspector,
             epochChecker,
             previousStoredBlock = outputPreviousStoredBlock,
+            stores.partitionManager.map(_._1),
           ),
         pruning = () =>
           new PruningModule(
@@ -318,6 +320,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             clock,
             loggerFactory,
             timeouts,
+            stores.partitionManager.map(_._2),
           ),
       )
     ).initialize(moduleSystem, createP2PNetworkManager)
@@ -326,8 +329,9 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
   private def fetchBootstrapTopologyInfo(
       moduleSystem: ModuleSystem[E],
       leaderSelectionPolicyFactory: LeaderSelectionInitializer[E],
+  )(implicit
+      traceContext: TraceContext
   ): (EpochNumber, OrderingTopologyInfo[E], BlacklistLeaderSelectionPolicyState) = {
-    import TraceContext.Implicits.Empty.*
 
     val bti @ BootstrapTopologyInfo(
       initialEpochNumber,
@@ -337,33 +341,51 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     ) =
       getInitialAndPreviousTopologyQueryTimestamps(moduleSystem)
 
-    logger.debug(s"Retrieved bootstrap topologies timestamps: $bti")
+    logger.info(s"Retrieved bootstrap topologies timestamps: $bti")
 
     val (initialTopology, initialCryptoProvider) =
       getOrderingTopologyAt(moduleSystem, initialTopologyQueryTimestampO, "initial")
 
-    val leaderSelectionPolicyState = leaderSelectionPolicyFactory.stateForInitial(
-      moduleSystem,
-      sequencerSnapshotAdditionalInfo,
-      initialEpochNumber,
-    )
+    val leaderSelectionPolicyState =
+      leaderSelectionPolicyFactory.stateForInitial(
+        moduleSystem,
+        sequencerSnapshotAdditionalInfo,
+        initialEpochNumber,
+      )
     val initialLeaders =
-      leaderSelectionPolicyFactory.leaderFromState(
+      leaderSelectionPolicyFactory.leadersFromState(
+        leaderSelectionPolicyState,
+        initialTopology,
+      )
+    val initialBlacklistedNodes =
+      leaderSelectionPolicyFactory.blacklistedNodesFromState(
         leaderSelectionPolicyState,
         initialTopology,
       )
 
     val (previousTopology, previousCryptoProvider) =
       getOrderingTopologyAt(moduleSystem, previousTopologyQueryTimestampO, "previous")
-
     // the previousLeaders is not really used unless we are doing onboarding, in that case we should use previousTopology
     // to compute the "currentLeaders"
-    val previousLeaders = leaderSelectionPolicyFactory.leaderFromState(
-      leaderSelectionPolicyState,
-      previousTopology,
-    )
+    val previousLeaders =
+      leaderSelectionPolicyFactory.leadersFromState(
+        leaderSelectionPolicyState,
+        previousTopology,
+      )
+    val previousBlacklistedNodes =
+      leaderSelectionPolicyFactory.blacklistedNodesFromState(
+        leaderSelectionPolicyState,
+        previousTopology,
+      )
 
-    val maybeOnboardingTopologyAndCryptoProvider = maybeOnboardingTopologyQueryTimestamp
+    val effectiveOnboardingTopologyQueryTimestamp =
+      maybeOnboardingTopologyQueryTimestamp.orElse {
+        Option
+          .when(!initialTopology.contains(node))(reconstructOwnActivationTime(moduleSystem))
+          .flatten
+      }
+
+    val maybeOnboardingTopologyAndCryptoProvider = effectiveOnboardingTopologyQueryTimestamp
       .map(onboardingTopologyQueryTimestamp =>
         getOrderingTopologyAt(moduleSystem, Some(onboardingTopologyQueryTimestamp), "onboarding")
       )
@@ -386,9 +408,11 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
               )
           },
         currentLeaders = initialLeaders,
+        currentBlacklistedNodes = initialBlacklistedNodes,
         previousTopology, // for canonical commit set verification
         previousCryptoProvider, // for canonical commit set verification
         previousLeaders,
+        previousBlacklistedNodes,
       ),
       leaderSelectionPolicyState,
     )
@@ -460,8 +484,19 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         topologyQueryTimestampO,
         checkPendingChanges = false,
       ),
-      s"Fetch $topologyDesignation ordering topology for bootstrap",
+      s"Fetching $topologyDesignation ordering topology for bootstrap",
     ).getOrElse(failBootstrap(s"Failed to fetch $topologyDesignation ordering topology"))
+
+  private def reconstructOwnActivationTime(
+      moduleSystem: ModuleSystem[E]
+  )(implicit traceContext: TraceContext): Option[TopologyActivationTime] = {
+    val (headTopology, _) = getOrderingTopologyAt(moduleSystem, None, "head")
+    awaitFuture(
+      moduleSystem,
+      orderingTopologyProvider.getFirstKnownAt(headTopology.activationTime),
+      "Fetching this node's activation time for onboarding crash recovery",
+    ).flatMap(_.get(node))
+  }
 
   private def fetchLatestEpoch(
       moduleSystem: ModuleSystem[E],
@@ -472,7 +507,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     awaitFuture(
       moduleSystem,
       stores.epochStore.latestEpoch(includeInProgress),
-      s"Fetch latest${if (includeInProgress) " in-progress " else " "}epoch",
+      s"Fetching latest${if (includeInProgress) " in-progress " else " "}epoch",
     )
 
   private def failBootstrap(msg: String)(implicit traceContext: TraceContext) = {
@@ -485,10 +520,10 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       future: E#FutureUnlessShutdownT[X],
       description: String,
   )(implicit traceContext: TraceContext): X = {
-    logger.debug(description)
+    logger.info(description)
     moduleSystem.rootActorContext.blockingAwait(
       future,
-      timeouts.default.asFiniteApproximation,
+      config.initQueryTimeout.underlying,
     )
   }
 }
@@ -502,6 +537,9 @@ object BftOrderingModuleSystemInitializer {
       epochStoreReader: EpochStoreReader[E],
       outputStore: OutputMetadataStore[E],
       pruningSchedulerStore: BftOrdererPruningSchedulerStore[E],
+      partitionManager: Option[
+        (PartitionManager.PartitionCreator[E], PartitionManager.PartitionPruner[E])
+      ],
   )
 
   /** In case of onboarding, the topology query timestamps look as follows:

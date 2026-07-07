@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.nonempty.NonEmpty
+import cats.syntax.option.*
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -19,21 +19,9 @@ import com.digitalasset.canton.version.{
   VersioningCompanionContext,
 }
 
-/** INTERNAL protocol message type used for ACS commitments in transit starting with PV35. Do NOT
-  * USE this message outside of envelope transit (e.g.,
-  * `ClosedUncompressedEnvelope.tryFromProtocolMessage` and
-  * `ClosedUncompressedEnvelope.toOpenEnvelope`).
-  *
-  * This type allows us to hide the signatures from the sequencer so that they are not verified when
-  * inspecting the closed envelope. It is converted to a `SignedProtocolMessage[AcsCommitment]`
-  * immediately upon deserialization when the envelope is opened.
-  *
-  * TODO(#30888): Make `AcsCommitmentProtocolMessage` the default and get rid of
-  * `SignedProtocolMessage[AcsCommitment]`
-  */
 final case class AcsCommitmentProtocolMessage(
     acsCommitment: AcsCommitment,
-    signatures: NonEmpty[Seq[Signature]],
+    signature: Signature,
 ) extends UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[AcsCommitmentProtocolMessage] {
 
@@ -46,10 +34,10 @@ final case class AcsCommitmentProtocolMessage(
     AcsCommitmentProtocolMessage.type
   ] = AcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
-  protected def toProtoV30: v30.AcsCommitmentProtocolMessage =
-    v30.AcsCommitmentProtocolMessage(
+  protected def toProtoV32: v32.AcsCommitmentProtocolMessage =
+    v32.AcsCommitmentProtocolMessage(
       acsCommitment = acsCommitment.toByteString,
-      signatures = signatures.map(_.toProtoV30),
+      signature = signature.toProtoV30.some,
     )
 
   override protected[messages] def toProtoSomeEnvelopeContentV30
@@ -60,8 +48,13 @@ final case class AcsCommitmentProtocolMessage(
 
   override protected[messages] def toProtoSomeEnvelopeContentV31
       : v31.EnvelopeContent.SomeEnvelopeContent =
-    v31.EnvelopeContent.SomeEnvelopeContent.AcsCommitmentProtocolMessage(toProtoV30)
+    throw new UnsupportedOperationException(
+      s"${this.getClass.getSimpleName} cannot be serialized to envelope content v31"
+    )
 
+  override protected[messages] def toProtoSomeEnvelopeContentV32
+      : v32.EnvelopeContent.SomeEnvelopeContent =
+    v32.EnvelopeContent.SomeEnvelopeContent.AcsCommitmentProtocolMessage(toProtoV32)
 }
 
 object AcsCommitmentProtocolMessage
@@ -74,24 +67,24 @@ object AcsCommitmentProtocolMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
-      v30.AcsCommitmentProtocolMessage
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
+      v32.AcsCommitmentProtocolMessage
     )(
-      supportedProtoVersion(_)(fromProtoV30),
-      _.toProtoV30,
+      supportedProtoVersion(_)(fromProtoV32),
+      _.toProtoV32,
     ),
   )
 
-  private[messages] def fromProtoV30(
+  private[messages] def fromProtoV32(
       expectedProtocolVersion: ProtocolVersion,
-      message: v30.AcsCommitmentProtocolMessage,
+      message: v32.AcsCommitmentProtocolMessage,
   ): ParsingResult[AcsCommitmentProtocolMessage] = {
-    val v30.AcsCommitmentProtocolMessage(acsCommitmentP, signaturesP) = message
+    val v32.AcsCommitmentProtocolMessage(acsCommitmentP, signaturesP) = message
     for {
       acsCommitment <- AcsCommitment.fromByteString(expectedProtocolVersion, acsCommitmentP)
-      signatures <- ProtoConverter.parseRequiredNonEmpty(
+      signatures <- ProtoConverter.parseRequired(
         Signature.fromProtoV30,
-        "signatures",
+        "signature",
         signaturesP,
       )
     } yield AcsCommitmentProtocolMessage(acsCommitment, signatures)

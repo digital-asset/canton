@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.digitalasset.canton.topology.admin.v30;
 
+import "com/digitalasset/canton/protocol/v30/sequencing_parameters.proto";
 import "com/digitalasset/canton/protocol/v30/synchronizer_parameters.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
 import "com/digitalasset/canton/topology/admin/v30/common.proto";
@@ -27,6 +28,7 @@ service TopologyManagerReadService {
   rpc ListPartyToParticipant(ListPartyToParticipantRequest) returns (ListPartyToParticipantResponse);
 
   rpc ListSynchronizerParametersState(ListSynchronizerParametersStateRequest) returns (ListSynchronizerParametersStateResponse);
+  rpc ListSequencingParametersState(ListSequencingParametersStateRequest) returns (ListSequencingParametersStateResponse);
   rpc ListMediatorSynchronizerState(ListMediatorSynchronizerStateRequest) returns (ListMediatorSynchronizerStateResponse);
   rpc ListSequencerSynchronizerState(ListSequencerSynchronizerStateRequest) returns (ListSequencerSynchronizerStateResponse);
 
@@ -34,13 +36,22 @@ service TopologyManagerReadService {
   rpc ListLsuSequencerConnectionSuccessor(ListLsuSequencerConnectionSuccessorRequest) returns (ListLsuSequencerConnectionSuccessorResponse);
 
   rpc ListAvailableStores(ListAvailableStoresRequest) returns (ListAvailableStoresResponse);
-  rpc ListAll(ListAllRequest) returns (ListAllResponse);
-  rpc ExportTopologySnapshot(ExportTopologySnapshotRequest) returns (stream ExportTopologySnapshotResponse);
+  rpc ListAll(ListAllRequest) returns (ListAllResponse) {
+    option deprecated = true;
+  }
+  rpc ListAllV2(ListAllV2Request) returns (ListAllV2Response);
+  // Deprecated in favor of ExportTopologySnapshotV2
+  rpc ExportTopologySnapshot(ExportTopologySnapshotRequest) returns (stream ExportTopologySnapshotResponse) {
+    option deprecated = true;
+  }
   rpc ExportTopologySnapshotV2(ExportTopologySnapshotV2Request) returns (stream ExportTopologySnapshotV2Response);
 
   // Fetch the genesis topology state.
   // The returned bytestring can be used directly to initialize a sequencer.
-  rpc GenesisState(GenesisStateRequest) returns (stream GenesisStateResponse);
+  // Deprecated in favor of GenesisStateV2
+  rpc GenesisState(GenesisStateRequest) returns (stream GenesisStateResponse) {
+    option deprecated = true;
+  }
   rpc GenesisStateV2(GenesisStateV2Request) returns (stream GenesisStateV2Response);
 
   // Fetch the topology state
@@ -215,6 +226,19 @@ message ListSynchronizerParametersStateResponse {
   repeated Result results = 1;
 }
 
+message ListSequencingParametersStateRequest {
+  BaseQuery base_query = 1;
+  string filter_synchronizer_id = 2;
+}
+
+message ListSequencingParametersStateResponse {
+  message Result {
+    BaseResult context = 1;
+    com.digitalasset.canton.protocol.v30.DynamicSequencingParameters item = 2;
+  }
+  repeated Result results = 1;
+}
+
 message ListMediatorSynchronizerStateRequest {
   BaseQuery base_query = 1;
   string filter_synchronizer_id = 2;
@@ -275,6 +299,7 @@ message ListAvailableStoresResponse {
 }
 
 message ListAllRequest {
+  option deprecated = true;
   BaseQuery base_query = 1;
   /** The list of topology mappings to exclude from the result.*/
   repeated string exclude_mappings = 2;
@@ -282,6 +307,21 @@ message ListAllRequest {
 }
 
 message ListAllResponse {
+  option deprecated = true;
+  com.digitalasset.canton.topology.admin.v30.TopologyTransactions result = 1;
+}
+
+message ListAllV2Request {
+  BaseQuery base_query = 1;
+  /** The list of topology mappings to include in the result.
+   * Empty means no inclusion filter (all mappings returned).
+   * Use this instead of ListAllRequest to avoid sending mapping codes
+   * unknown to older servers. */
+  repeated string include_mappings = 2;
+  string filter_namespace = 3;
+}
+
+message ListAllV2Response {
   com.digitalasset.canton.topology.admin.v30.TopologyTransactions result = 1;
 }
 

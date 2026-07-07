@@ -5,4 +5,4 @@ package com.digitalasset.transcode
 
 class IncorrectVariantRepresentationException(
     val message: String
-) extends Exception(message) {}
+) extends Exception(message)

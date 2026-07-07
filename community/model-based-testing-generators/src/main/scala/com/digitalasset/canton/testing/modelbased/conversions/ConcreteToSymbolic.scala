@@ -83,12 +83,6 @@ object ConcreteToSymbolic {
           ctx.mkInt(fetch.keyId),
           toSymbolic(fetch.maintainers),
         )
-      case lookup: Conc.LookupByKey =>
-        Sym.LookupByKey(
-          lookup.contractId.map(ctx.mkInt),
-          ctx.mkInt(lookup.keyId),
-          toSymbolic(lookup.maintainers),
-        )
       case query: Conc.QueryByKey =>
         Sym.QueryByKey(
           toSymbolicBoundedList(query.contractIds),

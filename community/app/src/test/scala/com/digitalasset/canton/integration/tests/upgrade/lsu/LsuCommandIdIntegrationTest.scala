@@ -15,9 +15,10 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestEnvironment}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
+import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SequencerRequest
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects
-import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
+import com.digitalasset.canton.sequencing.protocol.{SequencerErrors, SubmissionRequest}
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.PartyId
 import com.google.rpc.Code
@@ -143,15 +144,20 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
         withClue("test command at upgrade time") {
           // Move to upgrade time so that command submissions will fail due to overlap with LSU
           environment.simClock.value.advanceTo(upgradeTime)
-          waitForTargetTimeOnSequencer(sequencer1, environment.clock.now, logger)
+          // wait for the mediator to observe the upgrade time on the old synchronizer.
+          mediator1.testing.await_synchronizer_time(upgradeTime, commandTimeouts.ledgerCommand)
 
           assertThrowsAndLogsCommandFailures(
             participant1.ledger_api.javaapi.commands
               .submit(Seq(bank), createIouCmd, commandId = cmdIdAtUpgradeTime),
-            _.commandFailureMessage should (
+            _.message should (
               include(SyncServiceInjectionError.NotConnectedToAnySynchronizer.id) or
                 include(ConfigurationErrors.SubmissionSynchronizerNotReady.id) or
-                include(SubmissionErrors.TimeoutError.id)
+                include(SubmissionErrors.TimeoutError.id) or
+                include(SequencerErrors.PassedUpgradeTime.id) or
+                // the command gets rejected with this error, when the synthetic LSU tombstone gets sequenced and processed
+                // before the command gets submitted, and therefore it gets rejected directly during the synchronous processing of sendAsync
+                include(SequencerRequest.id)
             ),
           )
 

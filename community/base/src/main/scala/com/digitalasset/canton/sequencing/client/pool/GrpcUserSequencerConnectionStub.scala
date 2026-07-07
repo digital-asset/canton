@@ -21,7 +21,7 @@ import com.digitalasset.canton.sequencer.api.v30.{
   AcknowledgeSignedResponse,
   SendAsyncRequest,
 }
-import com.digitalasset.canton.sequencing.SequencedEventHandler
+import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
 import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionError
 import com.digitalasset.canton.sequencing.client.transports.{
@@ -91,9 +91,8 @@ class GrpcUserSequencerConnectionStub(
             SendAsyncRequest(signedSubmissionRequest = request.toByteString)
           )
         )
-        .leftMap(
-          SequencerConnectionStubError.ConnectionError.apply
-        )
+        .leftMap(SequencerConnectionStubError.ConnectionError.apply)
+
     } yield ()
   }
 
@@ -259,7 +258,7 @@ class GrpcUserSequencerConnectionStub(
 
   override def subscribe[E](
       request: SubscriptionRequest,
-      handler: SequencedEventHandler[E],
+      handler: MaybeCompressedSequencedEventHandler[E],
       timeout: Duration,
   )(implicit
       traceContext: TraceContext

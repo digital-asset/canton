@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.{CreationTime, TransactionCoder}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import io.grpc.StatusRuntimeException
 
@@ -102,7 +102,7 @@ object ValidateDisclosedContracts extends ValidateDisclosedContracts {
           .emptyStringAsNone(disclosedContract.synchronizerId)
           .map(requireSynchronizerId(_, "DisclosedContract.synchronizer_id").map(Some(_)))
           .getOrElse(Right(None))
-        fatContractInstance <- TransactionCoder
+        fatContractInstance <- ContractInstanceCoder
           .decodeFatContractInstance(disclosedContract.createdEventBlob)
           .left
           .map(decodeError =>

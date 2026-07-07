@@ -16,12 +16,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
   ActivenessChangeDetail,
   ReassignmentType,
 }
-import com.digitalasset.canton.protocol.{
-  ContractInstance,
-  LfContractId,
-  ReassignmentId,
-  SerializableContract,
-}
+import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedSynchronizer}
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -439,33 +434,6 @@ object CommitmentInspectContract extends HasVersionedMessageCompanion[Commitment
     val ndjson = items.map(p => write(p)).mkString("\n")
     val _ = file.overwrite(ndjson)
   }
-}
-
-final case class CommitmentMismatchInfo(
-    // This is the reference synchronizer for contract mismatch info
-    synchronizerId: SynchronizerId,
-    timestamp: CantonTimestamp,
-    participant: ParticipantId,
-    counterParticipant: ParticipantId,
-    mismatches: Seq[ContractMismatchInfo],
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[CommitmentMismatchInfo] = prettyOfClass(
-    param("synchronizer id", _.synchronizerId),
-    param("synchronizer mismatch timestamp", _.timestamp),
-    param("participant", _.participant),
-    param("counter-participant", _.counterParticipant),
-    param("mismatching contracts", _.mismatches),
-  )
-}
-
-final case class ContractMismatchInfo(
-    contract: SerializableContract,
-    reason: MismatchReason,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[ContractMismatchInfo] = prettyOfClass(
-    param("contract", _.contract),
-    param("mismatch reason", _.reason),
-  )
 }
 
 sealed trait MismatchReason extends Product with Serializable with PrettyPrinting

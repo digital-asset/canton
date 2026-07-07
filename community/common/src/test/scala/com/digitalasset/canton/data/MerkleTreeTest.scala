@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.data
 
+import cats.Id
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -211,11 +212,12 @@ object MerkleTreeTest {
       with IgnoreInSerializationTestExhaustivenessCheck {
     override def name: String = "AbstractLeaf"
     override val versioningTable: VersioningTable = VersioningTable(
-      ProtoVersion(30) -> VersionedProtoCodec.raw(
-        ProtocolVersion.v34,
-        (_, _, bytes) => fromProto(30)(bytes),
-        _.getCryptographicEvidence,
-      )
+      ProtoVersion(30) -> VersionedProtoCodec
+        .raw[Id, VersionedAbstractLeaf, Unit, VersionedAbstractLeaf, this.type](
+          ProtocolVersion.v34,
+          (_, _, bytes) => fromProto(30)(bytes),
+          _.getCryptographicEvidence,
+        )
     )
 
     def fromProto(protoVersion: Int)(bytes: ByteString): ParsingResult[Leaf1] =
@@ -298,8 +300,8 @@ object MerkleTreeTest {
   }
 
   final case class InnerNode1(override val subtrees: MerkleTree[?]*)
-      extends AbstractInnerNode[InnerNode1](InnerNode1.apply, subtrees*) {}
+      extends AbstractInnerNode[InnerNode1](InnerNode1.apply, subtrees*)
 
   final case class InnerNode2(override val subtrees: MerkleTree[?]*)
-      extends AbstractInnerNode[InnerNode2](InnerNode2.apply, subtrees*) {}
+      extends AbstractInnerNode[InnerNode2](InnerNode2.apply, subtrees*)
 }

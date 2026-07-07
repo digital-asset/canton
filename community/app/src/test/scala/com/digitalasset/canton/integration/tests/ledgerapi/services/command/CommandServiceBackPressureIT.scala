@@ -8,9 +8,9 @@ import com.daml.ledger.api.v2.command_service.CommandServiceGrpc
 import com.daml.ledger.api.v2.commands.CreateCommand
 import com.daml.ledger.api.v2.value.{Record, RecordField, Value}
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
+import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{CantonConfig, DbConfig}
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.ValueConversions.*
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{CantonFixture, CreatesParties}
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
@@ -109,5 +109,5 @@ final case class BackpressureOverrideConfig(
 class CommandServiceBackPressureITPostgres extends CommandServiceBackPressureITBase {
   registerPlugin(BackpressureOverrideConfig(loggerFactory))
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

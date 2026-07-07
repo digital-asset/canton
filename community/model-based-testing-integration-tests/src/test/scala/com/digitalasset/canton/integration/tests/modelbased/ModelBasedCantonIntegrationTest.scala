@@ -18,10 +18,9 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.projections.Projections
 import com.digitalasset.canton.testing.modelbased.runner.{CantonInterpreter, ReferenceInterpreter}
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
+import com.digitalasset.canton.topology.PartyKind
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.language.LanguageVersion
 
 import scala.concurrent.duration.DurationInt
 
@@ -53,15 +52,18 @@ abstract class ModelBasedCantonIntegrationTest
       }
 
   private val numParticipants = environmentDefinition.baseConfig.participants.size
-  private val numParties = 3
+  private val externalPartyTesting = partiesKind match {
+    case PartyKind.External(_) => true
+    case PartyKind.Local => false
+  }
+  // TODO(i27461): Remove when multi-party submissions are supported
+  private val numParties = if (externalPartyTesting) 1 else 3
   private val numPackages = 1
 
   private val generators =
     new ConcreteGenerators(
-      languageVersion = LanguageVersion.v2_3,
+      contractKeys = true,
       readOnlyRollbacks = true,
-      keyMode = KeyMode.NonUniqueContractKeys,
-      generateQueryByKey = true,
     )
 
   "The canton interpreter" should {
@@ -72,12 +74,21 @@ abstract class ModelBasedCantonIntegrationTest
         val cantonInterpreter = CantonInterpreter.initializeAndUpload(
           participants = participants.all.toIndexedSeq,
           synchronizerId = daId,
-          allocateParties =
-            (ps, newParties, targetTopology) => PartiesAllocator(ps)(newParties, targetTopology),
+          allocateParties = (ps, newParties, targetTopology) =>
+            PartiesAllocator(ps, enableExternalParties = true)(newParties, targetTopology),
         )
 
+        // TODO(i29530): Remove when multi-node submissions are supported
+        val numCommands = Option.when(externalPartyTesting)(1)
+
         val generator =
-          generators.validScenarioGenerator(numParties, numPackages, numParticipants)
+          generators.validScenarioGenerator(
+            numParties,
+            numPackages,
+            numParticipants,
+            numCommands = numCommands,
+            singletonCommands = externalPartyTesting,
+          )
 
         val result = PropertyChecker
           .checkProperty(
@@ -112,7 +123,7 @@ object ModelBasedCantonIntegrationTest {
       cantonInterpreter: CantonInterpreter,
       scenario: Concrete.Scenario,
       cancelled: () => Boolean,
-  )(implicit loggingContext: NamedLoggingContext): Either[String, Unit] = {
+  )(implicit loggingContext: NamedLoggingContext, partyKind: PartyKind): Either[String, Unit] = {
     val referenceResult = ReferenceInterpreter(loggingContext.loggerFactory)
       .runAndProject(scenario)(loggingContext.traceContext)
     val cantonResult = cantonInterpreter.runAndProject(scenario, cancelled)

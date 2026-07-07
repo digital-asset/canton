@@ -7,7 +7,6 @@ import cats.Monoid
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -25,7 +24,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.{IndexedStringStore, IndexedTopologyStoreId}
+import com.digitalasset.canton.store.{ChunkPurgeable, IndexedStringStore, IndexedTopologyStoreId}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v30 as adminTopoV30
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
@@ -63,12 +62,14 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
 }
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
@@ -249,7 +250,8 @@ object ValidatedTopologyTransaction {
 
 abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     protected val ec: ExecutionContext
-) extends FlagCloseable {
+) extends FlagCloseable
+    with ChunkPurgeable {
   this: NamedLogging =>
 
   def storeId: StoreID
@@ -257,6 +259,8 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   def protocolVersion: ProtocolVersion
 
   def predecessor: Option[SynchronizerPredecessor]
+
+  def name: String = s"topology-store ($storeId)"
 
   /** fetch the effective time updates greater than or equal to a certain timestamp
     *
@@ -333,6 +337,33 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[PositiveStoredTopologyTransactions]
 
+  /** Returns the upgrade time of the LSU that lead to current synchronizer.
+    */
+  def findUpgradeTimeFromPredecessor()(implicit
+      ev: StoreID <:< SynchronizerStore,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[
+    Option[CantonTimestamp]
+  ] = {
+    val currentPsid = ev(storeId).psid
+
+    inspect(
+      proposals = false,
+      timeQuery = TimeQuery.Range(None, None),
+      asOfExclusiveO = None,
+      op = Some(TopologyChangeOp.Replace),
+      types = Seq(TopologyMapping.Code.LsuAnnouncement),
+      idFilter = Some(currentPsid.identifier.toProtoPrimitive),
+      namespaceFilter = Some(currentPsid.namespace.toProtoPrimitive),
+    ).map(
+      _.collectOfMapping[LsuAnnouncement]
+        .filter(_.mapping.successor.psid == currentPsid)
+        .result
+        .maxByOption(_.serial)
+        .map(_.mapping.upgradeTime)
+    )
+  }
+
   /** Same as [[findPositiveTransactions]] but returns negative transactions (with a remove
     * operation)
     */
@@ -402,7 +433,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   @VisibleForTesting
-  protected[topology] def dumpStoreContent()(implicit
+  protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions]
 
@@ -485,15 +516,23 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       transaction: GenericSignedTopologyTransaction
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     findStored(CantonTimestamp.MaxValue, transaction).map(_.forall { inStore =>
-      // check whether source still could provide an additional signature
-      transaction.signatures
-        .map(_.authorizingLongTermKey)
-        .diff(inStore.transaction.signatures.map(_.authorizingLongTermKey))
-        .nonEmpty &&
-      // but only if the transaction in the target store is a valid proposal
-      inStore.transaction.isProposal &&
-      inStore.validUntil.isEmpty
+      TopologyStore.providesAdditionalSignatures(transaction, inStore)
     })
+
+  /** Filters a sequence of topology transactions, returning only those that provide additional
+    * signatures not yet present in the store for unexpired proposals.
+    *
+    * @note
+    *   Callers (e.g., the queue-based outbox) typically pre-batch transactions based on network
+    *   broadcast limits (e.g., `topologyConfig.broadcastBatchSize`). I/O implementations of this
+    *   method (e.g., database) should independently ensure safety (e.g., via
+    *   `batchingConfig.maxItemsInBatch`).
+    */
+  def filterProvidesAdditionalSignatures(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]]
 
   /** Returns initial set of onboarding transactions that should be dispatched to the synchronizer.
     * Includes:
@@ -576,22 +615,6 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
 
   def deleteAllData()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
-  /** Deletes a chunk of items from this store. No guarantees are made around transactionality, nor
-    * about which specific items are deleted.
-    *
-    * After this call, the data should be considered corrupted and should no longer be read. The
-    * intended use case is incremental cleanup after the store is no longer needed, e.g. after an
-    * LSU, where calling deleteAllData may be cause an undesirable load spike.
-    *
-    * @param chunkSize
-    *   Number of items to delete.
-    * @return
-    *   Whether any items were found to delete.
-    */
-  def deleteDataChunk(chunkSize: Int)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean]
-
   /** Dedups concurrent copies from the predecessor (handshake + connect paths can both trigger
     * one). The first caller runs it, and subsequent callers await the same promise. The reference
     * is cleared once the copy completes (success, failure, or shutdown) so a later caller can
@@ -607,6 +630,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     * @param sourceStore
     *   The store from which the topology state should be copied.
     */
+  @tailrec
   final def copyFromPredecessorSynchronizerStore(
       sourceStore: TopologyStore[SynchronizerStore]
   )(implicit
@@ -621,7 +645,14 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
             .map(_.psid)}]"
       )
     } else if (ongoingCopyFromPredecessor.compareAndSet(None, newRef)) {
-      val work = doCopyFromPredecessorSynchronizerStore(sourceStore)
+      errorLoggingContext.info(
+        s"LSU: About to copy topology from ${sourceStore.storeId.psid.suffix}"
+      )
+      val work = doCopyFromPredecessorSynchronizerStore(sourceStore).map { _ =>
+        errorLoggingContext.info(
+          s"LSU: Done copying topology from ${sourceStore.storeId.psid.suffix}"
+        )
+      }
       newPromise
         .completeWithUS(
           work.thereafter(_ => ongoingCopyFromPredecessor.compareAndSet(newRef, None).discard)
@@ -817,6 +848,20 @@ object TopologyStore {
     )
   }
 
+  /** Shared predicate to determine if an incoming transaction provides fresh signatures compared to
+    * the currently stored transaction.
+    */
+  def providesAdditionalSignatures(
+      incomingTx: GenericSignedTopologyTransaction,
+      inStoreTx: StoredTopologyTransaction[TopologyChangeOp, TopologyMapping],
+  ): Boolean =
+    incomingTx.signatures
+      .map(_.authorizingLongTermKey)
+      .diff(inStoreTx.transaction.signatures.map(_.authorizingLongTermKey))
+      .nonEmpty &&
+      inStoreTx.transaction.isProposal &&
+      inStoreTx.validUntil.isEmpty
+
 }
 
 sealed trait TimeQuery {
@@ -893,14 +938,42 @@ final case class UnknownOrUnvettedPackages(
     MapsUtil.mergeMapsOfSets(unknown, unvetted)
 }
 
+/** Wrapper for resolved packages and their dependencies
+  *
+  * @param mainPackageIds
+  *   Requested packages to-be-resolved
+  * @param mainPackageAndDependencyIds
+  *   all dependencies of packages in `mainPackages`, including the packages in `mainPackages`
+  *   themselves
+  */
+final case class ResolvedPackagesAndDependencies(
+    mainPackageIds: Set[PackageId],
+    mainPackageAndDependencyIds: Set[PackageId],
+) {
+  def packageIds(withDependencies: Boolean): Set[PackageId] =
+    if (withDependencies) mainPackageAndDependencyIds else mainPackageIds
+}
+
+object ResolvedPackagesAndDependencies {
+  val empty: ResolvedPackagesAndDependencies = ResolvedPackagesAndDependencies(Set.empty, Set.empty)
+}
+
 trait PackageDependencyResolver {
-  def packageDependencies(packages: Set[PackageId])(implicit
+
+  /** Checks whether all provided packages are known to the participant. If some are not, a Left is
+    * returned with the participant and the set of unknown packages. If all packages are known, a
+    * Right is returned with the requested packages and all their direct and transitive
+    * dependencies.
+    */
+  def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
       traceContext: TraceContext
-  ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]]
+  ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies]
 }
 
 object NoPackageDependencies extends PackageDependencyResolver {
-  override def packageDependencies(packages: Set[PackageId])(implicit
+  override def resolvePackagesAndDependencies(packages: Set[PackageId])(implicit
       traceContext: TraceContext
-  ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] = Right(Set.empty[PackageId])
+  ): Either[(ParticipantId, Set[PackageId]), ResolvedPackagesAndDependencies] = Right(
+    ResolvedPackagesAndDependencies.empty
+  )
 }

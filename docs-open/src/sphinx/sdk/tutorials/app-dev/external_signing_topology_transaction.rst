@@ -62,7 +62,7 @@ To proceed, gather the following information by running the commands below in th
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1, mediator1),
           synchronizerThreshold = 2,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         )
     .. success:: participant1.config.adminApi.address
     .. success:: participant1.config.adminApi.port.unwrap
@@ -119,7 +119,6 @@ For a terminal-based approach, install the following tools:
 - `openssl <https://www.openssl.org/>`_
 - `buf <https://buf.build/docs/cli/installation/>`_
 - `jq <https://jqlang.org/>`_
-- `xxd <https://linux.die.net/man/1/xxd>`_
 
 The tutorial uses a buf proto image to (de)serialize proto messages.
 
@@ -367,7 +366,7 @@ The Canton console on a sequencer node of the target synchronizer also provides 
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1, mediator1),
           synchronizerThreshold = 2,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         )
     .. success:: sequencer1.synchronizer_parameters.static.get.protocolVersion
 

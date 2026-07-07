@@ -138,8 +138,14 @@ Configure JWKS cache expiration
 
 The JWKS cache stores recently obtained public keys, which reduces the need for expensive, repeated calls to
 the JWKS HTTP endpoint. Keys are kept in the cache for a default period of 5 minutes. After this time, a key is evicted,
-and the participant must contact the JWKS address again to retrieve the latest keys. You can modify this behavior
-by setting:
+and the participant must contact the JWKS address again to retrieve the latest keys.
+
+You can also enable background refresh of cached keys by setting ``auto-refresh-time`` to a positive duration
+(less than ``cache-expiration``). When enabled, the cache asynchronously refreshes keys in the background
+on first access after this duration has elapsed, so that clients never experience latency from a cache miss. If a background refresh fails,
+the previously cached verifier continues to be served until hard eviction at ``cache-expiration``.
+
+You can modify this behavior by setting:
 
 .. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/jwks-cache.conf
 

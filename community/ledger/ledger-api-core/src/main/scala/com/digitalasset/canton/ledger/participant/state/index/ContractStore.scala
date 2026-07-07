@@ -24,11 +24,7 @@ trait ContractStore {
       loggingContext: LoggingContextWithTrace
   ): Future[Option[LfFatContractInst]]
 
-  def lookupContractKey(readers: Set[Ref.Party], key: GlobalKey)(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[ContractId]]
-
-  def lookupNonUniqueContractKey(
+  def lookupContractKey(
       readers: Set[Ref.Party],
       key: GlobalKey,
       pageToken: Option[Long],

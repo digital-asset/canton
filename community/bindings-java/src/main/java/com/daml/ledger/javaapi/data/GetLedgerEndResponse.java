@@ -6,15 +6,20 @@ package com.daml.ledger.javaapi.data;
 import com.daml.ledger.api.v2.StateServiceOuterClass;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public final class GetLedgerEndResponse {
 
   @NonNull private final Long offset;
+  @NonNull private final List<@NonNull SynchronizerTime> synchronizerTimes;
 
-  public GetLedgerEndResponse(@NonNull Long offset) {
+  public GetLedgerEndResponse(
+      @NonNull Long offset, @NonNull List<@NonNull SynchronizerTime> synchronizerTimes) {
     this.offset = offset;
+    this.synchronizerTimes = synchronizerTimes;
   }
 
   @NonNull
@@ -24,29 +29,45 @@ public final class GetLedgerEndResponse {
 
   public static GetLedgerEndResponse fromProto(
       StateServiceOuterClass.GetLedgerEndResponse response) {
-    return new GetLedgerEndResponse(response.getOffset());
+    return new GetLedgerEndResponse(
+        response.getOffset(),
+        response.getSynchronizerTimesList().stream()
+            .map(SynchronizerTime::fromProto)
+            .collect(Collectors.toList()));
+  }
+
+  public @NonNull List<@NonNull SynchronizerTime> getSynchronizerTimes() {
+    return synchronizerTimes;
   }
 
   public StateServiceOuterClass.GetLedgerEndResponse toProto() {
-    return StateServiceOuterClass.GetLedgerEndResponse.newBuilder().setOffset(this.offset).build();
+    return StateServiceOuterClass.GetLedgerEndResponse.newBuilder()
+        .setOffset(this.offset)
+        .addAllSynchronizerTimes(
+            this.synchronizerTimes.stream().map(SynchronizerTime::toProto).toList())
+        .build();
   }
 
   @Override
   public String toString() {
-    return "GetLedgerEndResponse{" + "offset=" + offset + '}';
+    return "GetLedgerEndResponse{"
+        + "offset="
+        + offset
+        + ", synchronizerTimes="
+        + synchronizerTimes
+        + '}';
   }
 
   @Override
   public boolean equals(Object o) {
-    if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     GetLedgerEndResponse that = (GetLedgerEndResponse) o;
-    return Objects.equals(offset, that.offset);
+    return Objects.equals(offset, that.offset)
+        && Objects.equals(synchronizerTimes, that.synchronizerTimes);
   }
 
   @Override
   public int hashCode() {
-
-    return Objects.hash(offset);
+    return Objects.hash(offset, synchronizerTimes);
   }
 }

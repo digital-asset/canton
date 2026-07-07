@@ -121,6 +121,7 @@ trait DataContinuityTest
       oldEnv: TestConsoleEnvironment,
       protocolVersion: ProtocolVersion,
   )(f: TestConsoleEnvironment => Unit): Unit = {
+
     oldEnv.nodes.local.foreach(_.stop())
     val newEnv = manualCreateEnvironment(
       initialConfig = oldEnv.environment.config,
@@ -135,9 +136,9 @@ trait DataContinuityTest
       logger.info(s"About to run with protocol version $protocolVersion")
       f(newEnv)
     } finally {
-      // we need to properly destroy the environment here in order to ensure that the db is wiped.
       destroyEnvironment(newEnv)
     }
+
   }
 
   override def beforeAll(): Unit = {
@@ -378,7 +379,14 @@ trait BasicDataContinuityTestEnvironment extends CommunityIntegrationTest with S
         )
       )
       .addConfigTransforms(ConfigTransforms.setBetaSupport(testedProtocolVersion.isBeta)*)
-      .addConfigTransform(ConfigTransforms.setStartupMemoryReportLevel(Ignore))
+      .addConfigTransforms(
+        ConfigTransforms.setStartupMemoryReportLevel(Ignore),
+        // Processing an incoming commitment that covers a long period takes a long time because the period is exploded into intervals.
+        // This flag ensures that this explosion does not block record order publishing, which could cause timeouts in the tests.
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.doNotAwaitOnCheckingIncomingCommitments).replace(true)
+        ),
+      )
       .updateTestingConfig(
         _.focus(_.participantsWithoutLapiVerification).replace(
           Set(
@@ -538,14 +546,6 @@ trait SynchronizerChangeDataContinuityTestSetup
           .focus(_.monitoring.logging.delayLoggingThreshold)
           .replace(config.NonNegativeFiniteDuration.ofDays(100))
       )
-      // Flake prevention: Disable ACS commitment catch-ups by setting an arbitrarily long interval.
-      // This prevents a multi-second `DbAcsCommitmentStore.markPeriod` database freeze after a data dump restore,
-      // which can cause ping assertions between participants to time out.
-      .addConfigTransform(
-        ConfigTransforms.updateCommitmentCheckpointInterval(
-          config.PositiveDurationSeconds.ofDays(10 * 365)
-        )
-      )
       .addConfigTransform(
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory)
       )
@@ -614,9 +614,14 @@ trait SynchronizerChangeDataContinuityTestSetup
         // We don't need it and it is one less port to worry about
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.httpLedgerApi.enabled).replace(false)
-        )
+        ),
+        ConfigTransforms.setStartupMemoryReportLevel(Ignore),
+        // Processing an incoming commitment that covers a long period takes a long time because the period is exploded into intervals.
+        // This flag ensures that this explosion does not block record order publishing, which could cause timeouts in the tests.
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.doNotAwaitOnCheckingIncomingCommitments).replace(true)
+        ),
       )
-      .addConfigTransform(ConfigTransforms.setStartupMemoryReportLevel(Ignore))
       .updateTestingConfig(
         _.focus(_.participantsWithoutLapiVerification).replace(
           Set(

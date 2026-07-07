@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.CantonRequireTypes.String300
@@ -20,7 +19,9 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.Assertions.fail
 import org.scalatest.concurrent.ScalaFutures.convertScalaFuture
 
@@ -31,15 +32,13 @@ import scala.concurrent.ExecutionContext
 class TopologyStoreTestData(
     testedProtocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
-    executionContext: ExecutionContext,
-) {
+)(implicit executionContext: ExecutionContext) {
   def makeSignedTx[Op <: TopologyChangeOp, M <: TopologyMapping](
       mapping: M,
       op: Op = TopologyChangeOp.Replace,
       isProposal: Boolean = false,
       serial: PositiveInt = PositiveInt.one,
   )(signingKeys: SigningPublicKey*): SignedTopologyTransaction[Op, M] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
     val tx = TopologyTransaction(
       op,
       serial,
@@ -57,7 +56,7 @@ class TopologyStoreTestData(
       .from(
         keysWithUsage.toSeq.map { case (keyId, usage) =>
           factory.syncCryptoClient.crypto.privateCrypto
-            .sign(tx.hash.hash, keyId, usage)
+            .sign(tx.hash.hash, keyId, usage)(executionContext, TraceContext.empty)
             .value
             .onShutdown(fail("shutdown"))(
               DirectExecutionContext(loggerFactory.getLogger(this.getClass))
@@ -67,7 +66,6 @@ class TopologyStoreTestData(
         }
       )
       .getOrElse(fail("no keys provided"))
-
     SignedTopologyTransaction.withSignatures[Op, M](
       tx,
       signatures = signatures,

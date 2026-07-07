@@ -21,6 +21,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
+  HasCloseContext,
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -56,6 +57,11 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 }
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.transaction.{
+  LsuSequencerConnectionSuccessor,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -86,7 +92,8 @@ class ProgrammableSequencer(
 )(implicit ec: ExecutionContext)
     extends Sequencer
     with NamedLogging
-    with FlagCloseable {
+    with FlagCloseable
+    with HasCloseContext {
   import ProgrammableSequencer.QueuedSubmission
 
   override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
@@ -268,7 +275,13 @@ class ProgrammableSequencer(
       }
 
       FutureUtil.doNotAwait(
-        clock.scheduleAt(run, at).unwrap,
+        clock
+          .scheduleAtCancelledOnShutdown(
+            run,
+            s"${getClass.getName}: sending submission request",
+            at,
+          )
+          .unwrap,
         s"Programmable sequencer scheduled for message ID ${submission.messageId} at $at",
       )
       EitherT(promise.futureUS)
@@ -451,10 +464,18 @@ class ProgrammableSequencer(
     baseSequencer.awaitContainingBlockLastTimestamp(timestamp)
 
   override private[sequencer] def updateLsuSuccessor(
-      successorO: Option[SynchronizerSuccessor],
+      successor: SynchronizerSuccessor,
       announcementEffectiveTime: EffectiveTime,
+      isReplace: Boolean,
   )(implicit traceContext: TraceContext): Unit =
-    baseSequencer.updateLsuSuccessor(successorO, announcementEffectiveTime)
+    baseSequencer.updateLsuSuccessor(successor, announcementEffectiveTime, isReplace = isReplace)
+
+  override def handleLsuSequencerConnectionSuccessor(
+      successor: TopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor]
+  )(implicit
+      traceContext: TraceContext
+  ): Unit =
+    baseSequencer.handleLsuSequencerConnectionSuccessor(successor)
 
   override private[canton] def orderer: Option[BlockOrderer] = baseSequencer.orderer
 

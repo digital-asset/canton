@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer.time
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
@@ -14,6 +13,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   TopologyTransactionsBroadcast,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -45,13 +45,16 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
+@nowarn("cat=deprecation")
 class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
 
   import TimeAdvancingTopologySubscriberV2Test.*
@@ -108,6 +111,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
             any[MessageId],
             any[Option[AggregationRule]],
             any[SendCallback],
+            any[TrafficCostValidator],
             amplify = any[Boolean],
             useConfirmationResponseAmplificationParameters = eqTo(false),
           )(any[TraceContext], any[MetricsContext])
@@ -131,6 +135,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -169,9 +174,8 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         TopologyTransactionsBroadcast(aPhysicalSynchronizerId, Seq.empty) ->
           Recipients.cc(AllMembersOfSynchronizer),
       )
-      val expectedAggregationRule = AggregationRule(
+      val expectedAggregationRule = AggregationRule.sequencerTimeAdvancingRequest(
         NonEmptyUtil.fromUnsafe(sequencerGroup.active),
-        threshold = PositiveInt.one,
         testedProtocolVersion,
       )
 
@@ -201,6 +205,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = eqTo(Some(expectedAggregationRule)),
           callback = any[SendCallback],
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -274,6 +279,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = any[Boolean],
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -310,6 +316,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = any[Boolean],
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -388,6 +395,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -410,6 +418,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -483,6 +492,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
             messageId = any[MessageId],
             aggregationRule = any[Option[AggregationRule]],
             callback = any[SendCallback],
+            trafficCostValidator = any[TrafficCostValidator],
             amplify = any[Boolean],
             useConfirmationResponseAmplificationParameters = eqTo(false),
           )(any[TraceContext], any[MetricsContext])
@@ -506,6 +516,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -569,6 +580,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
             messageId = any[MessageId],
             aggregationRule = any[Option[AggregationRule]],
             callback = any[SendCallback],
+            trafficCostValidator = any[TrafficCostValidator],
             amplify = any[Boolean],
             useConfirmationResponseAmplificationParameters = eqTo(false),
           )(any[TraceContext], any[MetricsContext])

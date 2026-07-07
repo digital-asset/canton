@@ -70,6 +70,11 @@ final case class ClosedCompressedEnvelope(
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedCompressedEnvelope =
     ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(maxBytesToDecompress)
+
+  override def withMaxBytesToDecompress(
+      maxBytesToDecompress: MaxBytesToDecompress
+  ): ClosedCompressedEnvelope =
+    ClosedCompressedEnvelope(bytes, recipients, algorithm)(maxBytesToDecompress)
 }
 
 object ClosedCompressedEnvelope {

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.manual.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{InstanceReference, SequencerReference}
 import com.digitalasset.canton.crypto.{KeyPurpose, PublicKey}
@@ -11,6 +10,7 @@ import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.language.implicitConversions
 

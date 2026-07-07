@@ -383,10 +383,7 @@ class PackageService(
     //     - Already un-vetted
     //     - Or can be automatically un-vetted, by revoking a vetting transaction corresponding to all packages in the DAR
 
-    val packages = {
-      import scalaz.syntax.traverse.*
-      dar.map(readPackageId)
-    }
+    val packages = dar.map(readPackageId)
 
     val mainPkg = readPackageId(dar.main)
     for {

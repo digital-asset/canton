@@ -571,6 +571,10 @@ object Ast {
   final case object BFailWithStatus
       extends BuiltinFunction // : ∀a. Text → FailureCategory → Text → TextMap Text → a
 
+  // External Call
+  final case object BExternalCall
+      extends BuiltinFunction // : Text → Text → Text → Text → Update Text
+
   final case class EExperimental(name: String, typ: Type) extends Expr
 
   //
@@ -611,7 +615,6 @@ object Ast {
   case object UpdateGetTime extends Update
   final case class UpdateLedgerTimeLT(time: Expr) extends Update
   final case class UpdateFetchByKey(templateId: TypeConId) extends Update
-  final case class UpdateLookupByKey(templateId: TypeConId) extends Update
   final case class UpdateQueryNByKey(templateId: TypeConId) extends Update
   final case class UpdateEmbedExpr(typ: Type, body: Expr) extends Update
   final case class UpdateTryCatchV1(

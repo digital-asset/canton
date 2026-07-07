@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.sync
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{
   Alarm,
   AlarmErrorCode,
@@ -33,6 +32,7 @@ import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, Physi
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.rpc.status.Status
 import io.grpc.Status.Code
 import org.slf4j.event.Level
@@ -121,6 +121,13 @@ object SyncServiceError extends SyncServiceErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"The synchronizer with alias ${synchronizerAlias.unwrap} is unknown."
+        )
+        with SyncServiceError
+
+    final case class UnknownPhysicalSynchronizerId(psid: PhysicalSynchronizerId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"The synchronizer with physical synchronizer id $psid is unknown."
         )
         with SyncServiceError
   }
@@ -292,7 +299,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
     "This error is logged when a synchronizer has a non-active status."
   )
   @Resolution(
-    """If you attempt to connect to a synchronizer that has either been migrated off or has a pending migration,
+    """If you attempt to modify the configuration of a synchronizer or connect to a synchronizer that has either been migrated off or has a pending migration or upgrade,
       |this error will be emitted. Please complete the migration before attempting to connect to it."""
   )
   object SyncServiceSynchronizerIsNotActive
@@ -304,10 +311,12 @@ object SyncServiceError extends SyncServiceErrorGroup {
     final case class Error(
         synchronizerAlias: SynchronizerAlias,
         inactive: Seq[(ConfiguredPhysicalSynchronizerId, SynchronizerConnectionConfigStore.Status)],
+        operation: String,
     )(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"$synchronizerAlias is not active and can therefore not be connected to."
+          cause =
+            s"$synchronizerAlias is not active which prevents operation `$operation` from being performed."
         )
         with SyncServiceError
   }

@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.integration.tests
 
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{DbConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -46,9 +47,17 @@ abstract class DownloadTopologyForInitIntegrationTest
               Map(
                 // A threshold of 2 ensures that the mediators connect to all sequencers.
                 // TODO(#19911) Make this properly configurable
-                mediator1 -> (Seq(sequencer1, sequencer2), PositiveInt.two, NonNegativeInt.zero),
+                mediator1 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
                 // Have this so that mediator2 gets registered in the topology state.
-                mediator2 -> (Seq(sequencer2), PositiveInt.one, NonNegativeInt.zero),
+                mediator2 -> MediatorSequencersConfiguration(
+                  Seq(sequencer2),
+                  trustThreshold = PositiveInt.one,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
               )
             ),
           )
@@ -130,8 +139,6 @@ abstract class DownloadTopologyForInitIntegrationTest
 
 class DownloadTopologyForInitIntegrationTestPostgres
     extends DownloadTopologyForInitIntegrationTest {
-
   registerPlugin(new UsePostgres(loggerFactory))
-  // TODO(#29833): Graceful shutdown of BftBlockOrderer
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

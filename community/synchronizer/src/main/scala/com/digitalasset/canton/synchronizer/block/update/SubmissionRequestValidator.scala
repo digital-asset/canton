@@ -7,9 +7,14 @@ import cats.data.{EitherT, WriterT}
 import cats.kernel.Monoid
 import cats.syntax.either.*
 import com.digitalasset.base.error.BaseAlarm
-import com.digitalasset.canton.config.BatchingConfig
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SignatureCheckError.GeneralError
-import com.digitalasset.canton.crypto.{HashPurpose, SignatureCheckError, SyncCryptoApi}
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SignatureCheckError,
+  SyncCryptoApi,
+  SynchronizerSnapshotSyncCryptoApi,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
@@ -18,13 +23,14 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
+import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent
 import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl.PrevalidationOutcome
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, TracedPossiblyPrevalidated}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -35,15 +41,70 @@ import SubmissionRequestValidator.*
   *
   * Can run in parallel to other submission requests.
   *
+  * @param enablePrevalidation
+  *   if true then we will move the signature validation into its separate stage
+  *
   * NOTE RENAME ME INTO PARALLESUBMISSIONREQUESTVALIDATOR
   */
 private[update] final class SubmissionRequestValidator(
     inFlightAggregationHandler: InFlightAggregationHandler,
-    batchingConfig: BatchingConfig,
-    override val loggerFactory: NamedLoggerFactory,
     memberValidator: SequencerMemberValidator,
     protocolVersion: ProtocolVersion,
+    enablePrevalidation: Boolean,
+    parallelism: PositiveInt,
+    override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
+
+  def prevalidateEvent(
+      approxCryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      event: LedgerBlockEvent,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[TracedPossiblyPrevalidated[LedgerBlockEvent]] = if (!enablePrevalidation)
+    FutureUnlessShutdown.pure(TracedPossiblyPrevalidated(event, prevalidated = false))
+  else
+    // pre-validate all signatures mechanically that are used.
+    // whether the key used is really valid at the time of sequencing is then checked again, but
+    // that check is much cheaper than checking the signatures
+    event match {
+      case send: LedgerBlockEvent.Send =>
+        val submissionSignatureFE =
+          checkSignatureOnSubmissionRequest(
+            TracedPossiblyPrevalidated.notValidated(send.signedSubmissionRequest),
+            approxCryptoSnapshot,
+            reportError = false,
+          ).value
+        val batchSignatureFE = checkClosedEnvelopesSignatures(
+          approxCryptoSnapshot,
+          TracedPossiblyPrevalidated.notValidated(send.signedSubmissionRequest.content),
+          approxCryptoSnapshot.ipsSnapshot.timestamp,
+          reportError = false,
+        ).value
+        for {
+          submissionIsValidSignature <- submissionSignatureFE
+          envelopesHaveValidSignature <- batchSignatureFE
+        } yield {
+          // if all have valid signatures, then we'll mark this event as prevalidated, which means that the signature
+          // validation will be skipped and we only need to check that the key used was really the one valid
+          // at the given time (using verifyKeyOwner)
+          TracedPossiblyPrevalidated(
+            send,
+            prevalidated = submissionIsValidSignature.isRight && envelopesHaveValidSignature.isRight,
+          )
+        }
+      case ack: LedgerBlockEvent.Acknowledgment =>
+        ack.request
+          .verifySignature(
+            approxCryptoSnapshot,
+            ack.request.content.member,
+            HashPurpose.AcknowledgementSignature,
+          )
+          .value
+          .map { result =>
+            TracedPossiblyPrevalidated(ack, prevalidated = result.isRight)
+          }
+    }
 
   /** Performs validations that don't affect any state and resolves groups to members. Can and
     * should be run in parallel on many submissions (e.g. in a chunk).
@@ -59,7 +120,7 @@ private[update] final class SubmissionRequestValidator(
     */
   def performIndependentValidations(
       sequencingTimestamp: CantonTimestamp,
-      signedSubmissionRequest: Traced[SignedContent[SubmissionRequest]],
+      signedSubmissionRequest: TracedPossiblyPrevalidated[SignedContent[SubmissionRequest]],
       snapshotToValidateSubmissionRequest: SyncCryptoApi,
       topologySnapshotFromRequestO: Option[SyncCryptoApi],
       topologyTimestampError: Option[SequencerDeliverError],
@@ -143,8 +204,6 @@ private[update] final class SubmissionRequestValidator(
           topologyTimestampError,
         )
       )
-      // TODO(i17584): revisit the consequences of no longer enforcing that
-      //  aggregated submissions with signed envelopes define a topology snapshot
       topologyOrSequencingSnapshot = topologySnapshotFromRequestO.getOrElse(
         snapshotToValidateSubmissionRequest
       )
@@ -173,6 +232,7 @@ private[update] final class SubmissionRequestValidator(
       aggregationInfo <- inFlightAggregationHandler
         .computeAggregationIdAndValidateAggregationRule(
           sequencingTimestamp,
+          snapshotToValidateSubmissionRequest,
           topologyOrSequencingSnapshot,
           submissionRequest,
           skipFreshInFlightValidationCheck,
@@ -287,7 +347,7 @@ private[update] final class SubmissionRequestValidator(
               ),
             ): SubmissionOutcome
           )
-        _ <- MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(groups) { group =>
+        _ <- MonadUtil.parTraverseWithLimit(parallelism)(groups) { group =>
           val nonRegisteredF =
             memberValidator
               .areMembersRegisteredAt(group.active ++ group.passive, sequencingTimestamp)
@@ -318,14 +378,15 @@ private[update] final class SubmissionRequestValidator(
 
   private def checkClosedEnvelopesSignatures(
       topologyOrSequencingSnapshot: SyncCryptoApi,
-      submissionRequest: Traced[SubmissionRequest],
+      submissionRequest: TracedPossiblyPrevalidated[SubmissionRequest],
       sequencingTimestamp: CantonTimestamp,
+      reportError: Boolean = true,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] =
     MonadUtil
-      .parTraverseWithLimit_(batchingConfig.parallelism)(submissionRequest.value.batch.envelopes) {
+      .parTraverseWithLimit_(parallelism)(submissionRequest.value.batch.envelopes) {
         closedEnvelope =>
           EitherT
             .fromEither[FutureUnlessShutdown](
@@ -335,21 +396,29 @@ private[update] final class SubmissionRequestValidator(
                 }
             )
             .flatMap { closedUncompressedEnvelope =>
-              closedUncompressedEnvelope.verifySignatures(
-                topologyOrSequencingSnapshot,
-                submissionRequest.value.sender,
-              )
+              if (submissionRequest.prevalidated) {
+                closedUncompressedEnvelope.verifyKeyUsage(
+                  topologyOrSequencingSnapshot,
+                  submissionRequest.value.sender,
+                )
+              } else
+                closedUncompressedEnvelope.verifySignatures(
+                  topologyOrSequencingSnapshot,
+                  submissionRequest.value.sender,
+                )
             }
       }
       .leftMap { error =>
-        SequencerError.InvalidEnvelopeSignature
-          .Error(
-            submissionRequest.value,
-            error,
-            sequencingTimestamp,
-            topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
-          )
-          .report()
+        if (reportError) {
+          SequencerError.InvalidEnvelopeSignature
+            .Error(
+              submissionRequest.value,
+              error,
+              sequencingTimestamp,
+              topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
+            )
+            .report()
+        }
         SubmissionOutcome.Discard
       }
 
@@ -385,33 +454,40 @@ private[update] final class SubmissionRequestValidator(
     } yield res
 
   private def checkSignatureOnSubmissionRequest(
-      signedSubmissionRequest: Traced[SignedContent[SubmissionRequest]],
+      signedSubmissionRequest: TracedPossiblyPrevalidated[SignedContent[SubmissionRequest]],
       topologyOrSequencingSnapshot: SyncCryptoApi,
+      reportError: Boolean = true,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] = {
 
     val alarm = for {
-      _ <-
-        signedSubmissionRequest.value
-          .verifySignature(
-            topologyOrSequencingSnapshot,
-            signedSubmissionRequest.value.content.sender,
-            HashPurpose.SubmissionRequestSignature,
+      _ <- (if (signedSubmissionRequest.prevalidated)
+              signedSubmissionRequest.value.verifyKeyUsage(
+                topologyOrSequencingSnapshot,
+                signedSubmissionRequest.value.content.sender,
+              )
+            else
+              signedSubmissionRequest.value
+                .verifySignature(
+                  topologyOrSequencingSnapshot,
+                  signedSubmissionRequest.value.content.sender,
+                  HashPurpose.SubmissionRequestSignature,
+                ))
+        .leftMap[BaseAlarm](error =>
+          SequencerError.InvalidSubmissionRequestSignature.Error(
+            signedSubmissionRequest.value,
+            error,
+            topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
+            signedSubmissionRequest.value.timestampOfSigningKey,
           )
-          .leftMap[BaseAlarm](error =>
-            SequencerError.InvalidSubmissionRequestSignature.Error(
-              signedSubmissionRequest.value,
-              error,
-              topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
-              signedSubmissionRequest.value.timestampOfSigningKey,
-            )
-          )
+        )
     } yield ()
 
     alarm.leftMap { a =>
-      a.report()
+      if (reportError)
+        a.report()
       SubmissionOutcome.Discard
     }
   }

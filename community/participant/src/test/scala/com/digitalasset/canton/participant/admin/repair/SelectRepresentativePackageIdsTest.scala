@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.admin.repair
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.Counter
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
@@ -23,6 +22,7 @@ import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueUnit
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 

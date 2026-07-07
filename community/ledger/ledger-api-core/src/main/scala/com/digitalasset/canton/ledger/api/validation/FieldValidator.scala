@@ -13,7 +13,7 @@ import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator
 }
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, SubmissionId, WorkflowId}
+import com.digitalasset.canton.ledger.api.{SubmissionId, WorkflowId}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.topology.{
   ParticipantId,
@@ -21,10 +21,13 @@ import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SynchronizerId,
 }
+import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Party, TypeConRef}
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
+import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
 
 import scala.util.{Failure, Success, Try}
 
@@ -321,5 +324,18 @@ object FieldValidator {
       errorLogger: ErrorLoggingContext
   ): Either[StatusRuntimeException, U] =
     t.map(validation).getOrElse(Left(missingField(fieldName)))
+
+  def validateProtobufEncodedField[T <: GeneratedMessage](
+      byteString: ByteString,
+      companion: GeneratedMessageCompanion[T],
+      fieldName: String,
+      errorMessage: String,
+  )(implicit errorLoggingContext: ErrorLoggingContext): Either[StatusRuntimeException, T] =
+    Try(companion.parseFrom(byteString.toByteArray)).toEither.left.map(_ =>
+      ValidationErrors.invalidField(
+        fieldName = fieldName,
+        message = errorMessage,
+      )
+    )
 
 }

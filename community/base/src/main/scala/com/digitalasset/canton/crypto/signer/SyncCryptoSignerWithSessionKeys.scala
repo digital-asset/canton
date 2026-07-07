@@ -5,9 +5,10 @@ package com.digitalasset.canton.crypto.signer
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout, SessionSigningKeysConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.RsaOaepSha256
@@ -16,22 +17,22 @@ import com.digitalasset.canton.crypto.SymmetricKeyScheme.Aes128Gcm
 import com.digitalasset.canton.crypto.provider.jce.{JcePrivateCrypto, JcePureCrypto}
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys.{
-  PendingUsableSessionKeysAndMetadata,
+  PendingSessionKeyGenerationContext,
   SessionKeyAndDelegation,
 }
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
   LifeCycle,
   PromiseUnlessShutdown,
-  UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.KmsMetrics
+import com.digitalasset.canton.metrics.{CryptoMetrics, SigningHistograms, SigningMetrics}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
@@ -39,6 +40,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{EitherTUtil, Mutex}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.github.benmanes.caffeine.cache.Scheduler
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
@@ -46,7 +48,7 @@ import com.google.common.annotations.VisibleForTesting
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Success
+import scala.util.{Failure, Success}
 
 /** Defines the methods for protocol message signing using a session signing key. This requires
   * signatures to include information about which session key is being used, as well as an
@@ -66,20 +68,24 @@ class SyncCryptoSignerWithSessionKeys(
     staticSynchronizerParameters: StaticSynchronizerParameters,
     member: Member,
     signPrivateApiWithLongTermKeys: SigningPrivateOps,
-    kmsMetrics: Option[KmsMetrics],
+    cryptoMetrics: CryptoMetrics,
     override protected val cryptoPrivateStore: CryptoPrivateStore,
     sessionSigningKeysConfig: SessionSigningKeysConfig,
     publicKeyConversionCacheConfig: CacheConfig,
     futureSupervisor: FutureSupervisor,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
+    maxSessionKeyRetries: NonNegativeInt = NonNegativeInt.tryCreate(5),
 )(implicit executionContext: ExecutionContext)
     extends SyncCryptoSigner
     with FlagCloseable
     with HasCloseContext {
 
   // session signing keys can only be used with PV35+
-  require(staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v35)
+  require(
+    staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v35,
+    s"Session signing keys are only supported in protocol versions 35 and above. Found PV: ${staticSynchronizerParameters.protocolVersion}",
+  )
 
   private val scheduledExecutorService = Threading.singleThreadScheduledExecutor(
     "session-signing-key-cache",
@@ -106,6 +112,14 @@ class SyncCryptoSignerWithSessionKeys(
       // this `JcePureCrypto` object only holds private key conversions spawned from sign calls
       privateKeyConversionCacheTtl = Some(sessionSigningKeysConfig.keyEvictionPeriod.underlying),
       signatureVerificationParallelism = PositiveInt.one, // not used
+      encryptionParallelism = PositiveInt.one, // not used
+      signingMetrics = new SigningMetrics(
+        new SigningHistograms(MetricName("signing"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(
+        MetricsContext.Empty
+      ), // not used since we only want to record latency for KMS signing requests
+      decryptionMetrics = cryptoMetrics.decryptionMetrics, // not used
       loggerFactory = loggerFactory,
     )
 
@@ -157,7 +171,7 @@ class SyncCryptoSignerWithSessionKeys(
     * messages.
     */
   @VisibleForTesting
-  private[crypto] val sessionKeysSigningCache: Cache[Fingerprint, SessionKeyAndDelegation] =
+  private[crypto] val sessionSigningKeysCache: Cache[Fingerprint, SessionKeyAndDelegation] =
     Scaffeine()
       .expireAfter[Fingerprint, SessionKeyAndDelegation](
         create = (_, _) => sessionKeyEvictionPeriod.get(),
@@ -172,15 +186,15 @@ class SyncCryptoSignerWithSessionKeys(
     LifeCycle.close(
       {
         // Invalidate all cache entries and run pending maintenance tasks
-        sessionKeysSigningCache.invalidateAll()
-        sessionKeysSigningCache.cleanUp()
+        sessionSigningKeysCache.invalidateAll()
+        sessionSigningKeysCache.cleanUp()
         ExecutorServiceExtensions(scheduledExecutorService)(logger, timeouts)
       }
     )(logger)
     super.onClosed()
   }
 
-  /** To control access to the [[sessionKeysSigningCache]] and the [[pendingRequests]]. */
+  /** To control access to the [[sessionSigningKeysCache]] and the [[pendingRequests]]. */
   private val lock = new Mutex()
 
   /** Creates a delegation signature that authorizes the session key to act on behalf of the
@@ -229,13 +243,17 @@ class SyncCryptoSignerWithSessionKeys(
     validityPeriod.covers(start) && endO.forall(end => validityPeriod.covers(end))
   }
 
-  private def generateNewSessionKey(
+  /** Generates a new software-based session keypair, signs its public key, validity period, and the
+    * synchronizerId with the long-term key to create the signature delegation, and returns both.
+    *
+    * * NOTE: Concurrency and cache-miss checks are expected to be handled by the caller.
+    */
+  private def generateNewSessionKeyInternal(
       validityPeriod: SignatureDelegationValidityPeriod,
       activeLongTermKey: SigningPublicKey,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SessionKeyAndDelegation] =
-    // no one is creating it yet, create it ourselves
     for {
       // session keys are only used to sign protocol messages
       sessionKeyPair <- JcePrivateCrypto
@@ -254,7 +272,7 @@ class SyncCryptoSignerWithSessionKeys(
         sessionKeyPair.privateKey,
         signatureDelegation,
       )
-      _ = sessionKeysSigningCache
+      _ = sessionSigningKeysCache
         .put(
           sessionKeyPair.publicKey.id,
           sessionKeyAndDelegation,
@@ -295,36 +313,35 @@ class SyncCryptoSignerWithSessionKeys(
   private def determineValidityPeriod(
       signingInfo: SigningInfo
   ): SignatureDelegationValidityPeriod = {
-    val (validityIntervalToCoverStart, validityIntervalToCoverEndO) =
-      signingInfo.validityIntervalToCover
-
-    val validityStart = validityIntervalToCoverEndO match {
+    val validityStart = signingInfo.validityIntervalToCover match {
       // we know the "full" validity interval
-      case Some(_) if !signingInfo.generateFromTimestampOnly =>
+      case (intervalStart, Some(_)) if !signingInfo.generateFromTimestampOnly =>
         // Use `validityIntervalToCoverStart` as the starting point without any shift.
         // This timestamp already includes the `cutOff`, giving some margin in the past,
         // and by not shifting further, we extend the key's future margin, increasing
         // the likelihood that the key can be reused more often.
-        validityIntervalToCoverStart
+        intervalStart
       // we are either using a SINGLE exact or approximate timestamp
       // (i.e., the validity period end is unknown).
       case _ =>
         signingInfo.signingTs.minus(toleranceShiftDuration.asJava)
     }
 
-    SignatureDelegationValidityPeriod(
-      validityStart,
-      sessionKeyValidityDuration,
-    )
+    SignatureDelegationValidityPeriod(validityStart, sessionKeyValidityDuration)
   }
 
-  /** The selection of a session key is based on its validity. If multiple options are available, we
-    * retrieve the newest key. If no session key is available, we create a new one or wait if
-    * another is already being created.
+  /** Coordinates the retrieval, deduplication, and generation of session signing keys based on
+    * temporal validity.
+    *
+    * If multiple valid options are available in the key cache, the newest key is retrieved. If no
+    * session key is available, either a new one is generated and used to populate a created
+    * promise, or if an existing promise is found for the validity window, its outcome is waited
+    * for.
     */
   private def getSessionKey(
       signingInfo: SigningInfo,
       activeLongTermKey: SigningPublicKey,
+      retriesLeft: Int = maxSessionKeyRetries.value,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SessionKeyAndDelegation] = {
@@ -332,12 +349,10 @@ class SyncCryptoSignerWithSessionKeys(
     val sessionKeyOrGenerationData = lock.exclusive {
       // get hold of all existing or pending session keys
       val pendingSessionKeys = pendingRequests.toMap
-      val keysInCache = sessionKeysSigningCache.asMap().values.toSeq
+      val keysInCache = sessionSigningKeysCache.asMap().values.toSeq
 
-      // check if there is a session key in the cache that is valid and can be used. Since
-      // we only use a session key if the authorizing long-term key is still active,
-      // the actual usable interval may be shorter if the active long-term key has been
-      // replaced in the meantime.
+      // Filter the cache for session keys whose validity period fully covers the required intervaland whose
+      // delegation key matches our current activeLongTermKey. Session keys with stale delegation keys are ignored.
       val validUsableSessionKeysInCache = keysInCache.filter { skD =>
         isUsableDelegation(
           skD.signatureDelegation.validityPeriod,
@@ -347,41 +362,44 @@ class SyncCryptoSignerWithSessionKeys(
       }
 
       NonEmpty.from(validUsableSessionKeysInCache) match {
+        // Case: no cached key is usable
         case None =>
-          // find if there is a pending session key that is valid and can be used
+          // Find if there is a pending session key that is valid and can be used
           val validUsablePendingRequests =
-            pendingSessionKeys.view.filterKeys { case (validityPeriod, signedBy) =>
+            pendingSessionKeys.view.filterKeys { case (existingValidityPeriod, signedBy) =>
               isUsableDelegation(
-                validityPeriod,
+                existingValidityPeriod,
                 signingInfo.validityIntervalToCover,
               ) &&
               activeLongTermKey.id == signedBy
             }.toMap
 
-          val validityPeriod = determineValidityPeriod(signingInfo)
+          val targetValidityPeriod = determineValidityPeriod(signingInfo)
 
-          // if there are no pending keys valid and usable, we add a promise to the [[pendingRequests]] map
-          // and store this information in the [[PendingValidSessionKeysAndMetadata]].
+          // If there are no valid and usable pending keys, we add a placeholder promise to the [[pendingRequests]] map,
+          // add this to the pendingRequests TrieMap and store this information in the [[PendingSessionKeyGenerationContext]].
           val promiseO = Option
             .when(validUsablePendingRequests.isEmpty) {
               val promise: PromiseUnlessShutdown[Option[SessionKeyAndDelegation]] =
                 mkPromise[Option[SessionKeyAndDelegation]](
-                  s"sync-crypto-signer-pending-requests-$validityPeriod",
+                  s"sync-crypto-signer-pending-requests-$targetValidityPeriod",
                   futureSupervisor,
                 )
-              pendingRequests.put((validityPeriod, activeLongTermKey.id), promise).discard
+              pendingRequests.put((targetValidityPeriod, activeLongTermKey.id), promise).discard
               promise
             }
 
+          // Evaluate the result to return from the lock. The promiseO and validUsablePendingRequests
+          // form a binary toggle with exactly one having a non-trivial value.
           Left(
-            PendingUsableSessionKeysAndMetadata(
+            PendingSessionKeyGenerationContext(
               promiseO,
               validUsablePendingRequests,
               activeLongTermKey,
-              validityPeriod,
+              targetValidityPeriod,
             )
           )
-        // there is a usable and valid session key in the cache
+        // Case: there is a usable and valid session key in the cache
         case Some(validUsableSessionKeysInCacheNE) =>
           // retrieve newest key
           Right(validUsableSessionKeysInCacheNE.maxBy1 { skD =>
@@ -392,41 +410,110 @@ class SyncCryptoSignerWithSessionKeys(
 
     // based on result of synchronized block, either return cached key or wait/generate
     sessionKeyOrGenerationData match {
-      case Left(metadata: PendingUsableSessionKeysAndMetadata) =>
-        metadata.pendingSessionKeyGenerationPromiseO match {
-          // no one else is generating a key yet — we are responsible for generating it
+      // CASE 1: No usable session key found; instead we have the context (in Left) for a pending session key promise
+      case Left(generationContext: PendingSessionKeyGenerationContext) =>
+        generationContext.pendingSessionKeyGenerationPromiseO match {
+          // CASE 1A:
+          // An empty promise exists in the context (validUsablePendingRequests was evaluated as empty above).
+          // This execution path registers a new empty promise to pendingRequests and fulfills it.
+          // The use of `lock.exclusive` enforces that only one at a time thread can create
+          // a promise deemed usable for a given validity period and active long term key.
           case Some(pendingSessionKeyGenerationPromise) =>
-            generateNewSessionKey(
-              metadata.validityPeriod,
-              metadata.activeLongTermKey,
+            generateNewSessionKeyInternal(
+              generationContext.validityPeriod,
+              generationContext.activeLongTermKey,
             ).thereafter { result =>
+              // The generation task has terminated. If it was successful, sessionKeysSigningCache has been updated.
               pendingRequests
-                .remove((metadata.validityPeriod, metadata.activeLongTermKey.id))
+                .remove(
+                  (generationContext.validityPeriod, generationContext.activeLongTermKey.id),
+                  pendingSessionKeyGenerationPromise,
+                )
                 .discard
-              // maps an AbortedDueToShutdown to None, indicating to other signing calls that this session signing key
-              // will not be available.
               result match {
-                case Success(UnlessShutdown.Outcome(Right(sessionKeyAndDelegation))) =>
+                case Success(Outcome(Right(sessionKeyAndDelegation))) =>
                   pendingSessionKeyGenerationPromise.outcome_(Some(sessionKeyAndDelegation))
-                case _ => pendingSessionKeyGenerationPromise.outcome_(None)
+                case Success(Outcome(Left(err: SyncCryptoError))) =>
+                  logger.debug(
+                    s"Failed to generate session key for period ${generationContext.validityPeriod}: $err"
+                  )
+                  pendingSessionKeyGenerationPromise.outcome_(None)
+                // In case of a shutdown, pass the shutdown signal cleanly to the promise. Do not retry.
+                case Success(AbortedDueToShutdown) =>
+                  logger.debug(
+                    s"Session key generation aborted due to node shutdown for period ${generationContext.validityPeriod}"
+                  )
+                  pendingSessionKeyGenerationPromise.shutdown_()
+                // In case of an unhandled exception, pass fail the promise. Do not retry.
+                case Failure(exception) =>
+                  logger.error(
+                    s"Session key generation encountered an unexpected exception for period ${generationContext.validityPeriod}",
+                    exception,
+                  )
+                  pendingSessionKeyGenerationPromise.unwrap.tryFailure(exception).discard
               }
             }
+          // CASE 1B:
+          // An active request has already created an empty promise, validUsablePendingRequests was evaluated as non-empty
+          // This path extracts and awaits the in-flight Futures from the promise.
           case None =>
-            // someone else is already creating a new session key, so we wait
-            val futures = metadata.validUsablePendingRequests.values.map(_.futureUS.unwrap).toSeq
+            // For a single (SignatureDelegationValidityPeriod, Fingerprint) key tuple,
+            // there can only be a single in-flight promise.
+            // However, multiple distinct validity periods may simultaneously satisfy and cover this request's
+            // target interval through `isUsableDelegation`, leading to multiple validUsablePendingRequests.
+            val futures =
+              generationContext.validUsablePendingRequests.values.map(_.futureUS.unwrap).toSeq
 
             // wait for the first future to complete
             val first = FutureUnlessShutdown(Future.firstCompletedOf(futures))
             EitherT(first.transformWith {
-              case Success(UnlessShutdown.Outcome(Some(sessionKeyAndDelegation))) =>
+              case Success(Outcome(Some(sessionKeyAndDelegation))) =>
                 FutureUnlessShutdown.pure(Right(sessionKeyAndDelegation))
-              case _ =>
-                getSessionKey(
-                  signingInfo,
-                  activeLongTermKey,
-                ).value
+
+              // Case where the worker ran but failed due to an expected issue (wrapped in a Left)
+              //  (e.g., KMS network drop), which it safely translated into `None`.
+              // In this case, we retry a fixed number of times.
+              case Success(Outcome(None)) =>
+                if (retriesLeft > 0) {
+                  logger.debug(
+                    s"Awaited session key generation returned None. Retrying getSessionKey for $signingInfo. Attempt ${maxSessionKeyRetries.value - retriesLeft + 1}."
+                  )
+                  getSessionKey(
+                    signingInfo,
+                    activeLongTermKey,
+                    retriesLeft - 1,
+                  ).value
+                } else {
+                  logger.debug(
+                    s"Exhausted concurrency retries of getSessionKey for $signingInfo.."
+                  )
+                  FutureUnlessShutdown.pure(
+                    Left(
+                      SyncCryptoError.SyncCryptoSessionKeyGenerationError(
+                        SigningKeyGenerationError.GeneralError(
+                          new RuntimeException("Exhausted retries for getSessionKey.")
+                        )
+                      )
+                    )
+                  )
+                }
+
+              // Shutdown case: stop the recursion and pass the shutdown signal up.
+              case Success(AbortedDueToShutdown) =>
+                logger.info(
+                  s"Aborting session key consumer retry loop because the node is shutting down"
+                )
+                FutureUnlessShutdown(Future.successful(AbortedDueToShutdown))
+
+              // Failure case: The underlying future crashed with an unhandled exception
+              // (e.g., NullPointerException) that bypassed the `EitherT` wrapper.
+              // Do not retry. Retrying with zero backoff can cause a CPU-burning infinite loop.
+              case Failure(exception) =>
+                logger.error(s"Awaited session key future chain failed.", exception)
+                FutureUnlessShutdown.failed(exception)
             })
         }
+      // CASE 2: Found a usable session key
       case Right(sessionKeyAndDelegation) =>
         EitherT.pure[FutureUnlessShutdown, SyncCryptoError](sessionKeyAndDelegation)
     }
@@ -548,7 +635,9 @@ class SyncCryptoSignerWithSessionKeys(
                   _.validityPeriodEnd.contains(CantonTimestamp.MaxValue)
                 )
               )
-                kmsMetrics.foreach(_.sessionSigningKeysFallback.inc())
+                cryptoMetrics.kmsMetricsO.foreach(kmsMetrics =>
+                  kmsMetrics.sessionSigningKeysFallback.inc()
+                )
               signPrivateApiWithLongTermKeys
                 .sign(hash, activeLongTermKey.id, usage)
                 .leftMap[SyncCryptoError](SyncCryptoError.SyncCryptoSigningError.apply)
@@ -570,7 +659,7 @@ object SyncCryptoSignerWithSessionKeys {
   ]
 
   // metadata used to track whether we need to generate a new session key, or wait for a pending one.
-  private final case class PendingUsableSessionKeysAndMetadata(
+  private final case class PendingSessionKeyGenerationContext(
       // if no valid pending session key exists, we will create this promise to notify others
       pendingSessionKeyGenerationPromiseO: Option[
         PromiseUnlessShutdown[Option[SessionKeyAndDelegation]]

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -17,7 +16,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.RequestSigner
@@ -32,6 +31,7 @@ import com.digitalasset.canton.version.{
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, config}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -164,9 +164,11 @@ class SequencerTest
         }
       )
 
-    def asDeliverEvent(event: SequencedEvent[ClosedEnvelope]): Deliver[ClosedEnvelope] =
+    def asDeliverEvent(
+        event: DecompressedSequencedEvent[ClosedEnvelope]
+    ): Deliver[Batch[ClosedEnvelope]] =
       event match {
-        case deliver: Deliver[ClosedEnvelope] => deliver
+        case deliver: Deliver[Batch[ClosedEnvelope]] => deliver
         case other => fail(s"Expected deliver event but got $other")
       }
 
@@ -207,6 +209,9 @@ class SequencerTest
 
     override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
       v31.EnvelopeContent.SomeEnvelopeContent.Empty
+
+    override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+      v32.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def productElement(n: Int): Any = fail("shouldn't be used")
     override def productArity: Int = fail("shouldn't be used")

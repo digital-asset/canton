@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Promise
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /** Objective: Test party replication of non-local parties such as a decentralized party with
@@ -185,8 +186,8 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
 
     // Wait until the party is authorized for onboarding on the TP, before archiving replicated contracts.
     canSourceProceedWithOnPR = false
-    eventually() {
-      val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
+    eventually(timeUntilSuccess = 1.minute) {
+      val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)
       logger.info(s"Waiting until party onboarding topology has been authorized: $tpStatus")
       tpStatus.authorizationO.nonEmpty shouldBe true
     }

@@ -55,6 +55,7 @@ object Debug {
       case Descriptor.Date => buf.append("date")
       case Descriptor.Party => buf.append("party")
       case ContractId(value) => buf.append("contractId("); go(value); buf.append(")")
+      case Unknown => buf.append(s"<unknown>")
 
     buf.append("--- Dictionary ---").append(System.lineSeparator()): Unit
     buf
@@ -123,6 +124,6 @@ object Debug {
     buf.toSeq.sortBy(x => (x._1.packageName, x._1.moduleName, x._1.entityName)).map(_._2)
 
   extension (id: Identifier)
-    private def show: String =
+    def show: String =
       s"${id.packageName}:${id.moduleName}:${id.entityName}#${id.packageVersion}/${id.packageId}"
 }

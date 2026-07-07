@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.version
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 /** Objects and variables of this file are used as part of the release process. Be mindful when
   * removing them. See:
@@ -44,8 +44,8 @@ object ReleaseVersionToProtocolVersions {
       ReleaseVersions.v3_2_0 -> List(v32),
       ReleaseVersions.v3_3_0 -> List(v33),
       ReleaseVersions.v3_4_0 -> List(v34),
-      ReleaseVersions.v3_5_0_snapshot -> List(v34),
-      ReleaseVersions.v3_6_0_snapshot -> List(v34),
+      ReleaseVersions.v3_5_0 -> List(v34, v35),
+      ReleaseVersions.v3_6_0_snapshot -> List(v34, v35),
     ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
 
   val majorMinorToBetaProtocolVersions: Map[(Int, Int), NonEmpty[List[BetaProtocolVersion]]] = Map(

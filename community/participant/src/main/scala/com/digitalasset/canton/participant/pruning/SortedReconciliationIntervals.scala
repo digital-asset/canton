@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.pruning
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals.ReconciliationInterval
 import com.digitalasset.canton.protocol.SynchronizerParameters
-import com.digitalasset.canton.protocol.messages.CommitmentPeriod
+import com.digitalasset.canton.protocol.messages.LegacyCommitmentPeriod
 import com.digitalasset.canton.time.PositiveSeconds
 
 import java.time.temporal.ChronoUnit
@@ -112,11 +112,11 @@ final case class SortedReconciliationIntervals private (
   def commitmentPeriodPreceding(
       periodEnd: CantonTimestampSecond,
       endOfPreviousPeriod: Option[CantonTimestampSecond],
-  ): Option[CommitmentPeriod] = {
+  ): Option[LegacyCommitmentPeriod] = {
     val periodStart = endOfPreviousPeriod.getOrElse(CantonTimestampSecond.MinValue)
     val periodLength = PositiveSeconds.between(periodStart, periodEnd)
 
-    periodLength.toOption.map(CommitmentPeriod(periodStart, _))
+    periodLength.toOption.map(LegacyCommitmentPeriod(periodStart, _))
   }
 
   /** calls `commitPeriodPreceding`
@@ -129,7 +129,7 @@ final case class SortedReconciliationIntervals private (
   def commitmentPeriodPrecedingFixedLowerBound(
       periodEnd: CantonTimestampSecond,
       endOfPreviousPeriod: Option[CantonTimestampSecond],
-  ): Option[CommitmentPeriod] =
+  ): Option[LegacyCommitmentPeriod] =
     if (endOfPreviousPeriod.isDefined)
       commitmentPeriodPreceding(periodEnd, endOfPreviousPeriod)
     else {

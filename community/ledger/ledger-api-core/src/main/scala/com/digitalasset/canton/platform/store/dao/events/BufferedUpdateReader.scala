@@ -4,10 +4,11 @@
 package com.digitalasset.canton.platform.store.dao.events
 
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.AcsRangeInfo
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
@@ -29,7 +30,10 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[events] class BufferedUpdateReader(
     delegate: LedgerDaoUpdateReader,
-    bufferedUpdatesReader: BufferedStreamsReader[InternalUpdateFormat, GetUpdatesResponse],
+    bufferedUpdatesReader: BufferedStreamsReader[
+      InternalUpdateFormat,
+      UpdateResponse,
+    ],
     bufferedUpdateReader: BufferedUpdatePointwiseReader[
       (LookupKey, InternalUpdateFormat),
       GetUpdateResponse,
@@ -47,7 +51,10 @@ private[events] class BufferedUpdateReader(
       skipPruningChecks: Boolean = false,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, GetUpdatesResponse), NotUsed] =
+  ): Source[
+    (Offset, UpdateResponse),
+    NotUsed,
+  ] =
     bufferedUpdatesReader
       .stream(
         startInclusive = startInclusive,
@@ -56,7 +63,7 @@ private[events] class BufferedUpdateReader(
         bufferFilter = TransactionLogUpdatesConversions
           .filter(internalUpdateFormat),
         toApiResponse = TransactionLogUpdatesConversions
-          .toGetUpdatesResponse(internalUpdateFormat, lfValueTranslation)(
+          .toUpdateResponse(internalUpdateFormat, lfValueTranslation)(
             loggingContext,
             directEC,
           ),
@@ -102,9 +109,9 @@ private[platform] object BufferedUpdateReader {
     )
 
     val updatesStreamReader =
-      new BufferedStreamsReader[InternalUpdateFormat, GetUpdatesResponse](
+      new BufferedStreamsReader[InternalUpdateFormat, UpdateResponse](
         inMemoryFanoutBuffer = updatesBuffer,
-        fetchFromPersistence = new FetchFromPersistence[InternalUpdateFormat, GetUpdatesResponse] {
+        fetchFromPersistence = new FetchFromPersistence[InternalUpdateFormat, UpdateResponse] {
           override def apply(
               startInclusive: Offset,
               endInclusive: Offset,
@@ -113,7 +120,7 @@ private[platform] object BufferedUpdateReader {
               skipPruningChecks: Boolean,
           )(implicit
               loggingContext: LoggingContextWithTrace
-          ): Source[(Offset, GetUpdatesResponse), NotUsed] =
+          ): Source[(Offset, UpdateResponse), NotUsed] =
             delegate
               .getUpdates(
                 startInclusive = startInclusive,

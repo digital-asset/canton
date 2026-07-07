@@ -71,6 +71,7 @@ private[health] trait StatusIntegrationTestUtil extends Matchers {
 
     status.supportedProtocolVersions shouldBe ProtocolVersionCompatibility
       .supportedProtocols(
+        testedProtocolVersion.isDev,
         testedProtocolVersion.isAlpha,
         testedProtocolVersion.isBeta,
         ReleaseVersion.current,

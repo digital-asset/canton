@@ -7,9 +7,13 @@ import com.daml.logging.entries.{LoggingEntry, LoggingValue, ToLoggingValue}
 import com.digitalasset.base.error.GrpcStatuses
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.RejectionReasonTemplate
+import com.digitalasset.canton.ledger.participant.state.Update.EmptyAcsPublicationRequired.{
+  param,
+  prettyOfClass,
+}
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.participant.store.PersistedContractInstance
@@ -27,6 +31,7 @@ import com.digitalasset.daml.lf.transaction.{
   TransactionNodeStatistics,
 }
 import com.digitalasset.daml.lf.value.Value
+import com.google.protobuf.ByteString
 import com.google.rpc.status.Status as RpcStatus
 
 import java.util.UUID
@@ -123,7 +128,7 @@ object Update {
 
   object TopologyTransactionEffective extends PrettyUtil {
 
-    sealed trait AuthorizationLevel
+    sealed trait AuthorizationLevel extends Product with Serializable
     object AuthorizationLevel {
       final case object Submission extends AuthorizationLevel
 
@@ -132,7 +137,7 @@ object Update {
       final case object Observation extends AuthorizationLevel
     }
 
-    sealed trait AuthorizationEvent
+    sealed trait AuthorizationEvent extends Product with Serializable
     object AuthorizationEvent {
       sealed trait ActiveAuthorization extends AuthorizationEvent {
         def level: AuthorizationLevel
@@ -201,10 +206,11 @@ object Update {
 
     def updateId: UpdateId
 
-    /** Transaction hash signed by the external party to authorize the transaction. Only on
-      * externally signed transactions
+    /** Transaction hash from the phase 1 execute request, signed by the external party to authorize
+      * the transaction. Only populated for externally signed transactions currently, but will be
+      * set for all transactions as the design progresses.
       */
-    def externalTransactionHash: Option[Hash]
+    def transactionHash: Option[Hash]
 
     def isAcsDelta(contractId: Value.ContractId): Boolean
 
@@ -294,7 +300,7 @@ object Update {
       recordTime: CantonTimestamp,
       acsChangeFactory: AcsChangeFactory,
       contractInfos: Map[Value.ContractId, ContractInfo],
-      externalTransactionHash: Option[Hash] = None,
+      transactionHash: Option[Hash] = None,
   )(implicit override val traceContext: TraceContext)
       extends TransactionAccepted
       with SequencedEventUpdate
@@ -331,7 +337,7 @@ object Update {
       extends TransactionAccepted
       with RepairUpdate {
 
-    override def externalTransactionHash: Option[Hash] = None
+    override def transactionHash: Option[Hash] = None
     override def completionInfoO: Option[CompletionInfo] = None
 
     // Repair transactions have only contracts which affect the ACS.
@@ -504,6 +510,10 @@ object Update {
       */
     def completionInfo: CompletionInfo
 
+    /** The transaction hash, if this was an interactive submission.
+      */
+    def transactionHash: Option[Hash]
+
     /** A template for generating the gRPC status code with error details. See ``error.proto`` for
       * the status codes of common rejection reasons.
       */
@@ -527,6 +537,7 @@ object Update {
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       isTransaction: Boolean,
+      transactionHash: Option[Hash],
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with SequencedEventUpdate
@@ -538,6 +549,7 @@ object Update {
       recordTime: CantonTimestamp,
       messageUuid: UUID,
       isTransaction: Boolean,
+      transactionHash: Option[Hash],
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with FloatingUpdate
@@ -688,6 +700,38 @@ object Update {
     override protected def pretty: Pretty[CommitRepair] = prettyOfClass()
   }
 
+  final case class ReceivedAcsCommitment(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+      payload: ByteString,
+  )(implicit override val traceContext: TraceContext)
+      extends SequencedUpdate {
+
+    lazy val updateId: UpdateId = {
+      val builder = Hash.build(HashPurpose.AcsCommitmentUpdateId, HashAlgorithm.Sha256)
+      builder.addString(synchronizerId.toProtoPrimitive)
+      builder.addLong(recordTime.toProtoPrimitive)
+      UpdateId(builder.finish())
+    }
+
+    override protected def pretty: Pretty[ReceivedAcsCommitment] = ReceivedAcsCommitment.pretty
+  }
+
+  object ReceivedAcsCommitment {
+    implicit val `ReceivedAcsCommitment to LoggingValue`: ToLoggingValue[ReceivedAcsCommitment] =
+      receivedAcsCommitment =>
+        LoggingValue.Nested.fromEntries(
+          Logging.synchronizerId(receivedAcsCommitment.synchronizerId),
+          "sequencerTimestamp" -> receivedAcsCommitment.recordTime.toInstant,
+        )
+
+    val pretty: Pretty[ReceivedAcsCommitment] =
+      prettyOfClass(
+        param("synchronizerId", _.synchronizerId.uid),
+        param("sequencerTimestamp", _.recordTime),
+      )
+  }
+
   implicit val `Update to LoggingValue`: ToLoggingValue[Update] = {
     case update: TopologyTransactionEffective =>
       TopologyTransactionEffective.`TopologyTransactionEffective to LoggingValue`.toLoggingValue(
@@ -712,6 +756,8 @@ object Update {
       SequencerIndexMoved.`SequencerIndexMoved to LoggingValue`.toLoggingValue(update)
     case _: CommitRepair =>
       LoggingValue.Empty
+    case update: ReceivedAcsCommitment =>
+      ReceivedAcsCommitment.`ReceivedAcsCommitment to LoggingValue`.toLoggingValue(update)
   }
 
   private object Logging {

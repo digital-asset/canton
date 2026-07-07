@@ -3,18 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.Error.Transport
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
 import com.digitalasset.canton.common.sequencer.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{
-  CryptoConfig,
-  CryptoProvider,
-  ProcessingTimeout,
-  RequireTypes,
-}
+import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, RequireTypes}
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -34,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 
 trait SequencerConnectServiceIntegrationTest
     extends CommunityIntegrationTest
@@ -77,28 +72,34 @@ trait SequencerConnectServiceIntegrationTest
 
       val unsupportedPV = TestProtocolVersions.UnsupportedPV
 
+      val includeDevVersions = testedProtocolVersion.isDev
       val includeAlphaVersions = testedProtocolVersion.isAlpha
       val includeBetaVersions = testedProtocolVersion.isBeta
 
       val successfulRequest =
         HandshakeRequest(
           ProtocolVersionCompatibility.supportedProtocols(
+            includeDevVersion = includeDevVersions,
             includeAlphaVersions = includeAlphaVersions,
             includeBetaVersions = includeBetaVersions,
             release = ReleaseVersion.current,
           ),
           None,
+          clientVersion = ReleaseVersion.current,
         )
       val successfulRequestWithMinimumVersion =
         HandshakeRequest(
           ProtocolVersionCompatibility.supportedProtocols(
+            includeDevVersion = includeDevVersions,
             includeAlphaVersions = includeAlphaVersions,
             includeBetaVersions = includeBetaVersions,
             release = ReleaseVersion.current,
           ),
           Some(testedProtocolVersion),
+          clientVersion = ReleaseVersion.current,
         )
-      val failingRequest = HandshakeRequest(Seq(unsupportedPV), None)
+      val failingRequest =
+        HandshakeRequest(Seq(unsupportedPV), None, clientVersion = ReleaseVersion.current)
 
       grpcSequencerConnectClient
         .handshake(successfulRequest, dontWarnOnDeprecatedPV = true)
@@ -132,19 +133,8 @@ trait SequencerConnectServiceIntegrationTest
 
       val fetchedSynchronizerParameters =
         grpcSequencerConnectClient.getSynchronizerParameters().futureValueUS.value
-      val cryptoProvider = CryptoProvider.Jce
 
-      val defaultSynchronizerParametersConfig = SynchronizerParametersConfig(
-        requiredSigningAlgorithmSpecs = Some(cryptoProvider.signingAlgorithms.supported),
-        requiredEncryptionAlgorithmSpecs = Some(cryptoProvider.encryptionAlgorithms.supported),
-        requiredSymmetricKeySchemes = Some(cryptoProvider.symmetric.supported),
-        requiredHashAlgorithms = Some(cryptoProvider.hash.supported),
-        requiredCryptoKeyFormats =
-          Some(cryptoProvider.supportedCryptoKeyFormatsForProtocol(testedProtocolVersion)),
-        requiredSignatureFormats =
-          Some(cryptoProvider.supportedSignatureFormatsForProtocol(testedProtocolVersion)),
-      )
-      val expectedSynchronizerParameters = defaultSynchronizerParametersConfig
+      val expectedSynchronizerParameters = SynchronizerParametersConfig()
         .toStaticSynchronizerParameters(CryptoConfig(), testedProtocolVersion, NonNegativeInt.zero)
         .value
 
@@ -212,7 +202,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
     new GrpcSequencerConnectClient(
       member = member,
       sequencerConnection = grpcSequencerConnection,
-      synchronizerAlias = alias,
+      synchronizerIdentifier = alias.unwrap,
       timeouts = timeouts,
       params = ClientChannelParams.ForTesting
         .copy(traceContextPropagation = TracingConfig.Propagation.Enabled),

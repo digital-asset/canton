@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.implicits.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -50,6 +49,7 @@ import com.digitalasset.canton.{
   SequencerCounter,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level
 
@@ -307,6 +307,7 @@ class QueueBasedSynchronizerOutboxTest
           tx.mapping,
           tx.serial.some,
           signingKeys = Seq(publicKey.fingerprint),
+          namespacesToSignFor = Seq.empty,
           testedProtocolVersion,
           expectFullAuthorization = true,
           waitToBecomeEffective = waitToBecomeEffective,
@@ -558,7 +559,6 @@ class QueueBasedSynchronizerOutboxTest
       }
     }
 
-    // TODO(#30401) re-enable when fixed
     "handle being closed while transactions are pending" in {
       // This test executes the following scenario:
       // 1. submit TB1 (topology broadcast 1) and keep it from being fully flushed to the topology store.

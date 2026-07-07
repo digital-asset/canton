@@ -7,7 +7,6 @@ import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
@@ -64,6 +63,7 @@ import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordO
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.client.SendResult.Success
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -90,6 +90,7 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.eq as isEq
 import org.scalatest.Tag
@@ -160,6 +161,7 @@ class ProtocolProcessorTest
       any[MessageId],
       any[Option[AggregationRule]],
       any[SendCallback],
+      any[TrafficCostValidator],
       amplify = any[Boolean],
       useConfirmationResponseAmplificationParameters = any[Boolean],
     )(anyTraceContext, any[MetricsContext])
@@ -461,6 +463,7 @@ class ProtocolProcessorTest
         ),
         TransactionSubmissionTrackingData.TimeoutCause,
         psid,
+        transactionHash = None,
       ),
     ),
     TraceContext.empty,
@@ -492,6 +495,7 @@ class ProtocolProcessorTest
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
+          any[TrafficCostValidator],
           amplify = any[Boolean],
           useConfirmationResponseAmplificationParameters = any[Boolean],
         )(anyTraceContext, any[MetricsContext])
@@ -1035,6 +1039,62 @@ class ProtocolProcessorTest
         case _ => fail(s"Bad information in in-flight submission tracker:\n$sub")
       }
     }
+
+    "log a warning for future topology timestamps and replace them with request timestamps" in {
+      val (sut, _persistent, ephemeral, _) = testProcessingSteps()
+
+      val submissionTopologyTimestamp = CantonTimestamp.MaxValue
+
+      val maliciousRootHashMessage = RootHashMessage(
+        rootHash,
+        DefaultTestIdentities.physicalSynchronizerId,
+        TestViewType,
+        submissionTopologyTimestamp, // Crafted submission timestamp (far) in the future
+        SerializedRootHashMessagePayload.empty,
+      )
+
+      val maliciousBatch = RequestAndRootHashMessage(
+        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)(testedProtocolVersion)),
+        maliciousRootHashMessage,
+        MediatorGroupRecipient(MediatorGroupIndex.zero),
+        isReceipt = false,
+      )
+
+      val asyncResult = loggerFactory
+        .assertLogs(
+          sut
+            .processRequest(
+              CantonTimestamp.Epoch,
+              rc,
+              requestSc,
+              maliciousBatch,
+              publishNoop,
+              NonNegativeLong.zero,
+            )
+            .onShutdown(fail()),
+          _.shouldBeCantonError(
+            SubmissionTopologyHelper.SubmissionTopologyErrors.TopologyAlarm,
+            _ shouldBe s"Received future-dated submission timestamp $submissionTopologyTimestamp. Falling back to request timestamp ${CantonTimestamp.Epoch}.",
+          ),
+        )
+        .futureValue
+      // This awaits the full asynchronous completion of the request processing.
+      // If the future timestamp was not being replaced, this call would hang indefinitely.
+      waitForAsyncResult(asyncResult)
+
+      // BeforeHead confirms the TaskScheduler has successfully processed the event and advanced the queue pointer
+      ephemeral.requestTracker.taskScheduler.readSequencerCounterQueue(
+        requestSc
+      ) shouldBe BeforeHead
+
+      // Verify the request transitioned to the Pending state.
+      ephemeral.requestJournal
+        .query(rc)
+        .value
+        .futureValueUS
+        .value
+        .state shouldBe RequestState.Pending
+    }
   }
 
   "perform result processing" should {
@@ -1104,7 +1164,7 @@ class ProtocolProcessorTest
         .processResultInternal1(
           NoOpeningErrors(
             SignedContent(
-              mock[Deliver[DefaultOpenEnvelope]],
+              mock[Deliver[Batch[DefaultOpenEnvelope]]],
               Signature.noSignature,
               None,
               testedProtocolVersion,

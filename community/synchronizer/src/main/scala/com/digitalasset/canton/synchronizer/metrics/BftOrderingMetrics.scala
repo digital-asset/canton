@@ -12,9 +12,15 @@ import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.pretty.PrettyNameOnlyCase
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
+  CryptoMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,
+  DecryptionHistograms,
+  DecryptionMetrics,
+  KmsMetrics,
+  SigningHistograms,
+  SigningMetrics,
 }
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
@@ -45,6 +51,9 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
   private[metrics] val prefix = parent :+ BftOrderingMetrics.Prefix
 
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
+
+  private[metrics] val signingHistograms = new SigningHistograms(parent)
+  private[metrics] val decryptionHistograms = new DecryptionHistograms(parent)
 
   // Private constructor to avoid being instantiated multiple times by accident
   private[metrics] final class PerformanceHistograms private[BftOrderingHistograms] {
@@ -99,6 +108,13 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
       summary = "Consensus commit latency",
       description =
         "Records the rate and latency it takes to commit a block at the consensus level.",
+      qualification = MetricQualification.Latency,
+    )
+
+    private[metrics] val viewChangeProgressLatency: Item = Item(
+      prefix :+ "view-change-progress-latency",
+      summary = "View change progress latency",
+      description = "Records the rate and latency it takes to make progress on a view.",
       qualification = MetricQualification.Latency,
     )
   }
@@ -202,14 +218,23 @@ class BftOrderingMetrics private[metrics] (
 
   private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
+  override val prefix: MetricName = histograms.prefix
+
   val dbStorage: DbStorageMetrics =
     new DbStorageMetrics(histograms.dbStorage, openTelemetryMetricsFactory)
 
-  override val prefix: MetricName = histograms.prefix
+  val crypto = new CryptoMetrics(
+    new SigningMetrics(histograms.signingHistograms, openTelemetryMetricsFactory),
+    new DecryptionMetrics(histograms.decryptionHistograms, openTelemetryMetricsFactory),
+    Some(new KmsMetrics(prefix, openTelemetryMetricsFactory)),
+  )
+
   override val declarativeApiMetrics: DeclarativeApiMetrics =
     new DeclarativeApiMetrics(prefix, openTelemetryMetricsFactory)
 
   override def storageMetrics: DbStorageMetrics = dbStorage
+
+  override def cryptoMetrics: CryptoMetrics = crypto
 
   // Private constructor to avoid being instantiated multiple times by accident
   final class PerformanceMetrics private[BftOrderingMetrics] {
@@ -275,12 +300,14 @@ class BftOrderingMetrics private[metrics] (
                 // Time spent by consensus messages in the postponed queue during state transfer
                 val PostponedMessagesQueueLatency =
                   "state-transfer-postponed-consensus-messages-queue-latency"
+                val TotalEpochTransferLatency = "state-transfer-total-epoch-transfer-latency"
               }
             }
 
             object output {
               val Fetch = "output-block-fetch-batches"
               val Inspection = "output-block-inspection"
+              val Backpressure = "output-backpressure"
             }
           }
         }
@@ -410,7 +437,6 @@ class BftOrderingMetrics private[metrics] (
   final class GlobalMetrics private[BftOrderingMetrics] {
 
     object labels {
-      val ReportingSequencer: String = "reporting-sequencer"
       val IsBlockEmpty: String = "is-block-empty" // true or false
     }
 
@@ -474,6 +500,7 @@ class BftOrderingMetrics private[metrics] (
           case object RequestTooBig extends OutcomeValue
           case object InvalidTag extends OutcomeValue
           case object P2PNotReady extends OutcomeValue
+          case object BlackListed extends OutcomeValue
         }
       }
     }
@@ -674,6 +701,10 @@ class BftOrderingMetrics private[metrics] (
   final class ConsensusMetrics private[BftOrderingMetrics] {
     private val prefix = histograms.consensus.prefix
 
+    object labels {
+      val Leader = "Leader"
+    }
+
     val epoch: Gauge[Long] = openTelemetryMetricsFactory.gauge(
       MetricInfo(
         prefix :+ "epoch",
@@ -750,6 +781,9 @@ class BftOrderingMetrics private[metrics] (
 
     val commitLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.consensus.consensusCommitLatency.info)
+
+    val viewChangeProgressLatency: Timer =
+      openTelemetryMetricsFactory.timer(histograms.consensus.viewChangeProgressLatency.info)
 
     // Private constructor to avoid being instantiated multiple times by accident
     final class RetransmissionsMetrics private[BftOrderingMetrics] {
@@ -968,6 +1002,28 @@ class BftOrderingMetrics private[metrics] (
 
     val blockDelay: Timer =
       openTelemetryMetricsFactory.timer(histograms.output.blockDelay.info)
+
+    val sequencerCoreSubscriptionBufferSize: Gauge[Int] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "sequencer-core-subscription-buffer-size",
+        summary = "Sequencer core subscription buffer size",
+        description = "Size of the buffer for the subscription to the sequencer core output, " +
+          "which is used to apply backpressure to the sequencer core when the output is not consumed fast enough.",
+        qualification = MetricQualification.Saturation,
+      ),
+      0,
+    )
+
+    val currentSequencerCoreBackpressureDelayMillis: Gauge[Long] =
+      openTelemetryMetricsFactory.gauge(
+        MetricInfo(
+          prefix :+ "sequencer-core-backpressure-current-delay-millis",
+          summary = "Current sequencer core backpressure delay (ms)",
+          description = "Current sequencer core backpressure delay in milliseconds.",
+          qualification = MetricQualification.Latency,
+        ),
+        0L,
+      )
   }
   val output = new OutputMetrics
 
@@ -1238,6 +1294,7 @@ class BftOrderingMetrics private[metrics] (
       private val prefix = histograms.p2p.send.prefix
 
       object labels {
+        val SourceSequencer: String = "source-sequencer"
         val TargetSequencer: String = "target-sequencer"
         val DroppedAsUnauthenticated: String = "dropped-as-unauthenticated"
 

@@ -77,36 +77,67 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
 
   private def filterKnownKeysForNamespace(
       namespace: Namespace,
-      mappingToAuthorize: TopologyMapping.Code,
+      mappingToAuthorize: TopologyMapping,
       returnAllValidKeys: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, CryptoPrivateStoreError, Seq[Fingerprint]] =
-    tryGetAuthorizationCheckForNamespace(namespace)
-      .authorizedDelegations()
-      // if `namespace` happens to be a decentralized namespace, we must check the "highest level"
-      // for each namespace separately
-      .values
-      .toSeq
-      .parFlatTraverse { delegations =>
-        delegations
-          .collect {
-            case (delegation, level) if delegation.mapping.canSign(mappingToAuthorize) =>
+  ): EitherT[FutureUnlessShutdown, CryptoPrivateStoreError, Seq[Fingerprint]] = {
+    // Group and pre-filter candidates, extracting only what's needed (fingerprint and level).
+    // If `namespace` happens to be a decentralized namespace, we must check the "highest level"
+    // for each namespace separately.
+    val candidatesPerOwnerNamespace: List[(Namespace, List[(Fingerprint, Int)])] =
+      tryGetAuthorizationCheckForNamespace(namespace)
+        .authorizedDelegations(
+          keyToAuthorizeO = mappingToAuthorize.select[NamespaceDelegation].map(_.target.fingerprint)
+        )
+        .view
+        .map { case (ownerNamespace, delegations) =>
+          val candidates = delegations.view.collect {
+            case (delegation, level) if delegation.mapping.canSign(mappingToAuthorize.code) =>
               (delegation.mapping.target.fingerprint, level)
-          }
-          .parFilterA { case (fingerprint, _) =>
-            cryptoPrivateStore.existsSigningKey(fingerprint)
-          }
-          .map { usableKeys =>
-            val selectedKeys =
-              if (returnAllValidKeys) usableKeys
-              else
-                // find the highest level, and within the level the lexicographically highest fingerprint
-                usableKeys.maxByOption { case (fingerprint, level) => (level, fingerprint) }.toList
+          }.toList
+          (ownerNamespace, candidates)
+        }
+        .filter { case (_, candidates) => candidates.nonEmpty }
+        .toList
 
-            selectedKeys.map { case (fingerprint, _) => fingerprint }
-          }
+    // Flatten to extract unique fingerprints for the pointwise lookup query.
+    // We deduplicate because distinct owner namespaces might delegate to the same key
+    // (e.g., when a node acts on behalf of multiple owners).
+    //
+    // Example scenario:
+    // - Decentralized Namespace D is owned by Namespace A and Namespace B.
+    // - Both Namespace A and Namespace B have a NamespaceDelegation authorizing Fingerprint X.
+    val uniqueCandidates = candidatesPerOwnerNamespace.flatMap { case (_, candidates) =>
+      candidates.map { case (fingerprint, _) => fingerprint }
+    }.distinct
+
+    // TODO(#33650) - replace with unboundedFilterA; safe because the number of distinct candidate keys per namespace
+    //  should be small, certainly not a very large number
+    uniqueCandidates
+      .parFilterA { fingerprint =>
+        cryptoPrivateStore.existsSigningKey(fingerprint)
       }
+      .map { usableKeysSeq =>
+        val usableKeysSet = usableKeysSeq.toSet
+
+        candidatesPerOwnerNamespace.flatMap { case (_, candidates) =>
+          val usableKeys = candidates.filter { case (fingerprint, _) =>
+            usableKeysSet.contains(fingerprint)
+          }
+
+          if (returnAllValidKeys) {
+            usableKeys.map { case (fingerprint, _) => fingerprint }
+          } else {
+            // find the highest level, and within the level the lexicographically highest fingerprint
+            usableKeys
+              .maxByOption { case (fingerprint, level) => (level, fingerprint) }
+              .map { case (fingerprint, _) => fingerprint }
+              .toList
+          }
+        }
+      }
+  }
 
   /** @param asOfExclusive
     *   the timestamp used to query topology state
@@ -114,6 +145,8 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
     *   the topology transaction to sign
     * @param inStore
     *   the latest fully authorized topology transaction with the same unique key as `toSign`
+    * @param namespacesToSignFor
+    *   if non empty, only keys for the specified namespaces are returned
     * @param returnAllValidKeys
     *   if true, returns all keys that can be used to sign. if false, only returns the most specific
     *   keys per namespace/uid.
@@ -124,6 +157,7 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
       asOfExclusive: CantonTimestamp,
       toSign: GenericTopologyTransaction,
       inStore: Option[GenericTopologyTransaction],
+      namespacesToSignFor: Seq[Namespace],
       returnAllValidKeys: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -142,16 +176,23 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
             relaxChecksForBackwardsCompatibility = false,
           )
         )
+      requestedAuthScope = Option.when(namespacesToSignFor.nonEmpty)(
+        ReferencedAuthorizations(namespaces = namespacesToSignFor.toSet)
+      )
 
-      referencedAuth = requiredAuthFor(
-        toSign,
-        inStore,
-        relaxChecksForBackwardsCompatibility = false,
-      ).referenced
+      referencedAuth = requestedAuthScope.getOrElse(
+        requiredAuthFor(
+          toSign,
+          inStore,
+          relaxChecksForBackwardsCompatibility = false,
+        ).referenced
+      )
 
       knownNsKeys = referencedAuth.namespaces.toSeq
+        // TODO(#33650) – replace with unboundedFlatTraverse; safe because the number of required namespaces
+        //  for a single topology transaction is bounded to a low number by protocol definitions (requiredAuth).
         .parFlatTraverse(namespace =>
-          filterKnownKeysForNamespace(namespace, toSign.mapping.code, returnAllValidKeys)
+          filterKnownKeysForNamespace(namespace, toSign.mapping, returnAllValidKeys)
             .map { keys =>
               if (keys.nonEmpty) logger.debug(s"Keys for $namespace: $keys")
               keys
@@ -159,6 +200,7 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
         )
 
       knownExtraKeys = referencedAuth.extraKeys.toSeq
+        // TODO(#33650) – replace with unboundedFilterA; safe because the number of extra keys should not be large
         .parFilterA { key =>
           cryptoPrivateStore.existsSigningKey(key)
         }
@@ -169,7 +211,8 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
       selfSigned = EitherT.rightT[FutureUnlessShutdown, CryptoPrivateStoreError](
         toSign.mapping match {
           case nsd @ NamespaceDelegation(ns, target, _)
-              if ns.fingerprint == target.fingerprint && nsd.canSign(Code.NamespaceDelegation) =>
+              if ns.fingerprint == target.fingerprint && nsd
+                .canSign(Code.NamespaceDelegation) && referencedAuth.namespaces.contains(ns) =>
             Seq(target.fingerprint)
           case _ => Seq.empty
         }

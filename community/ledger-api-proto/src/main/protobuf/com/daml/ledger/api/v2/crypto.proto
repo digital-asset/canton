@@ -31,6 +31,8 @@ enum SigningKeySpec {
   // commonly used in bitcoin and ethereum
   // as defined in https://www.secg.org/sec2-v2.pdf
   SIGNING_KEY_SPEC_EC_SECP256K1 = 4;
+
+  SIGNING_KEY_SPEC_ML_DSA_65 = 5;
 }
 
 // Serialization format for crypto keys and signatures
@@ -98,6 +100,8 @@ enum SigningAlgorithmSpec {
 
   // Elliptic Curve Digital Signature Algorithm with SHA384
   SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_384 = 3;
+
+  SIGNING_ALGORITHM_SPEC_ML_DSA_65 = 4;
 }
 
 enum SignatureFormat {

@@ -11,7 +11,6 @@ import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30.{
@@ -126,7 +125,7 @@ object MediatorRuntimeFactory {
       topologyManagerStatus: TopologyManagerStatus,
       synchronizerOutboxFactory: SynchronizerOutboxFactory,
       timeTracker: SynchronizerTimeTracker,
-      nodeParameters: CantonNodeParameters,
+      nodeParameters: MediatorNodeParameters,
       clock: Clock,
       metrics: MediatorMetrics,
       config: MediatorConfig,
@@ -190,7 +189,6 @@ object MediatorRuntimeFactory {
       synchronizerOutbox,
       timeTracker,
       state,
-      asynchronousProcessing = config.asynchronousProcessing,
       sequencerCounterTrackerStore,
       sequencedEventStore,
       nodeParameters,

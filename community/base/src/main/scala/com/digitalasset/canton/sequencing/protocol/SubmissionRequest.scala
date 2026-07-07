@@ -70,31 +70,47 @@ final case class SubmissionRequest private (
     SubmissionRequestType.submissionRequestType(batch.allRecipients, sender)
 
   // Caches the serialized request to be able to do checks on its size without re-serializing
-  lazy val toProtoV30: v30.SubmissionRequest = v30.SubmissionRequest(
-    sender = sender.toProtoPrimitive,
-    messageId = messageId.toProtoPrimitive,
-    batch = Some(batch.toProtoV30),
-    maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-    topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
-    aggregationRule = aggregationRule.map(_.toProtoV30),
-    submissionCost = submissionCost.map(_.toProtoV30),
-  )
+  lazy val toProtoV30: v30.SubmissionRequest =
+    v30.SubmissionRequest(
+      sender = sender.toProtoPrimitive,
+      messageId = messageId.toProtoPrimitive,
+      batch = Some(batch.toProtoV30),
+      maxSequencingTime = maxSequencingTime.toProtoPrimitive,
+      topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
+      aggregationRule = aggregationRule.map(_.toProtoV30),
+      submissionCost = submissionCost.map(_.toProtoV30),
+    )
 
-  lazy val toProtoV31: v31.SubmissionRequest = v31.SubmissionRequest(
-    sender = sender.toProtoPrimitive,
-    messageId = messageId.toProtoPrimitive,
-    batch = Some(batch.toProtoV31),
-    maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-    topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
-    aggregationRule = aggregationRule.map(_.toProtoV30),
-    submissionCost = submissionCost.map(_.toProtoV30),
-  )
+  lazy val toProtoV31: v31.SubmissionRequest =
+    v31.SubmissionRequest(
+      sender = sender.toProtoPrimitive,
+      messageId = messageId.toProtoPrimitive,
+      batch = Some(batch.toProtoV31),
+      maxSequencingTime = maxSequencingTime.toProtoPrimitive,
+      topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
+      aggregationRule = aggregationRule.map(_.toProtoV30),
+      submissionCost = submissionCost.map(_.toProtoV30),
+    )
 
   def updateAggregationRule(aggregationRule: AggregationRule): SubmissionRequest =
     copy(aggregationRule = Some(aggregationRule))
 
   def updateMaxSequencingTime(maxSequencingTime: CantonTimestamp): SubmissionRequest =
     copy(maxSequencingTime = maxSequencingTime)
+
+  /** Sets the bound for the deferred decompression of the batch's envelopes. Does not affect
+    * serialization, so the memoized bytes are preserved.
+    */
+  def withMaxBytesToDecompress(maxBytesToDecompress: MaxBytesToDecompress): SubmissionRequest =
+    new SubmissionRequest(
+      sender,
+      messageId,
+      batch.map(_.withMaxBytesToDecompress(maxBytesToDecompress)),
+      maxSequencingTime,
+      topologyTimestamp,
+      aggregationRule,
+      submissionCost,
+    )(representativeProtocolVersion, deserializedFrom)
 
   @VisibleForTesting
   def copy(
@@ -142,17 +158,16 @@ final case class SubmissionRequest private (
     *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.bytes]] are
     *     interpreted.
     *   - The [[sender]] and the [[messageId]], as they are specific to the sender of a particular
-    *     submission request
+    *     submission request (except if the aggregation rule is SenderDedup starting with PV35)
     *   - The [[isConfirmationRequest]] flag because it is irrelevant for delivery or aggregation
     */
   def aggregationId(hashOps: HashOps): ParsingResult[Option[(AggregationId, AggregationRule)]] = {
     // TODO(#12075) Use a deterministic serialization scheme for the recipients
     val recipientsSerializerE: ParsingResult[Recipients => ByteString] =
       SubmissionRequest.converterFor(representativeProtocolVersion).map(_.dependencySerializer)
-
     aggregationRule.traverse { rule =>
       recipientsSerializerE.flatMap { recipientsSerializer =>
-        aggregationIdInternal(hashOps, rule, recipientsSerializer).map((_, rule))
+        aggregationIdInternal(hashOps, rule, sender, recipientsSerializer).map((_, rule))
       }
     }
   }
@@ -160,6 +175,7 @@ final case class SubmissionRequest private (
   private def aggregationIdInternal(
       hashOps: HashOps,
       rule: AggregationRule,
+      sender: Member,
       recipientsSerializer: Recipients => ByteString,
   ): ParsingResult[AggregationId] =
     batch.toClosedUncompressedBatchResult.map { uncompressedBatch =>
@@ -180,11 +196,10 @@ final case class SubmissionRequest private (
         )
       }
       builder.addLong(maxSequencingTime.underlying.micros)
-      // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MaxValue as the default.
+      // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MinValue as the default.
       builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
-      builder.addInt(rule.eligibleSenders.size)
-      rule.eligibleSenders.foreach(member => builder.addString(member.toProtoPrimitive))
-      builder.addInt(rule.threshold.value)
+      rule.input.appendForAggregationId(builder, sender)
+
       val hash = builder.finish()
 
       AggregationId(hash)
@@ -218,10 +233,6 @@ object SubmissionRequest
   )
 
   override def name: String = "submission request"
-
-  // TODO(i17584): revisit the consequences of no longer enforcing that
-  //  aggregated submissions with signed envelopes define a topology snapshot
-  override lazy val invariants: Invariants = Seq.empty
 
   def create(
       sender: Member,
@@ -325,7 +336,10 @@ object SubmissionRequest
           wrapped.messageId,
           wrapped.maxSequencingTime,
           wrapped.topologyTimestamp,
-          wrapped.aggregationRule,
+          (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
+            wrapped.aggregationRule.traverse(
+              AggregationRule.fromProtoV30(useMemberIdsAsEligibleMembers, _)
+            ),
           wrapped.submissionCost,
         )
       case ProtoSubmissionRequestV31(wrapped) =>
@@ -334,7 +348,10 @@ object SubmissionRequest
           wrapped.messageId,
           wrapped.maxSequencingTime,
           wrapped.topologyTimestamp,
-          wrapped.aggregationRule,
+          (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
+            wrapped.aggregationRule.traverse(
+              AggregationRule.fromProtoV30(useMemberIdsAsEligibleMembers, _)
+            ),
           wrapped.submissionCost,
         )
     }
@@ -350,8 +367,9 @@ object SubmissionRequest
       maxSequencingTime <- CantonTimestamp.fromProtoPrimitive(maxSequencingTimeP)
       batch <- batchFromProto
       ts <- topologyTimestamp.traverse(CantonTimestamp.fromProtoPrimitive)
-      aggregationRule <- aggregationRuleP.traverse(AggregationRule.fromProtoV30)
       rpv <- protocolVersionRepresentativeFor(protoVersion)
+      shipAllUids = LegacyUseMemberIdsAsEligibleMembers(protoVersion.v == 30)
+      aggregationRule <- aggregationRuleP(shipAllUids)
       submissionCost <- submissionCostP.traverse(SequencingSubmissionCost.fromProtoV30)
     } yield new SubmissionRequest(
       sender,

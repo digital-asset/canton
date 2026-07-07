@@ -3,16 +3,17 @@
 
 package com.digitalasset.daml.lf
 package engine
+package refinement
 
 import cats.Order
 import cats.data.NonEmptySet
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast.{TNat, TTyCon, Type}
-import com.digitalasset.daml.lf.language.Util._
 import com.digitalasset.daml.lf.language.Ast
+import com.digitalasset.daml.lf.language.Ast.{TNat, TTyCon, Type}
+import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -27,7 +28,7 @@ import com.digitalasset.daml.lf.transaction.test.{
 }
 import com.digitalasset.daml.lf.transaction.{CommittedTransaction, NodeId, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value._
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -35,9 +36,14 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrivenPropertyChecks with SuppressingLogging {
+class EnricherSpec
+    extends AnyWordSpec
+    with Matchers
+    with Inside
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
-  import TransactionBuilder.Implicits.{defaultPackageId => _, _}
+  import TransactionBuilder.Implicits.{defaultPackageId as _, *}
 
   implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default[this.type]
@@ -50,7 +56,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
   private def cid(key: String): ContractId =
     ContractId.V1.assertBuild(Hash.hashPrivateKey(key), nonEmptySuffix)
 
-  val pkg = {
+  val pkg =
     p"""metadata ( 'pkg' : '1.0.0' )
 
         module Mod {
@@ -106,7 +112,6 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
         }
 
     """
-  }
 
   val pkgId1 = Ref.PackageId.assertFromString("-pkg-id-1-")
   val pkg1 =
@@ -163,14 +168,18 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
   preloadPackage(pkgId2, pkg2)
   preloadPackage(pkgId3, pkg3)
 
-  "enrichValue" should {
+  "Enricher.enrichValue" should {
 
     val testCases = Table[Type, Value, Value](
       ("type", "input", "expected output"),
       (TUnit, ValueUnit, ValueUnit),
       (TBool, ValueTrue, ValueTrue),
       (TInt64, ValueInt64(42), ValueInt64(42)),
-      (TTimestamp, ValueTimestamp("1969-07-20T20:17:00Z"), ValueTimestamp("1969-07-20T20:17:00Z")),
+      (
+        TTimestamp,
+        ValueTimestamp("1969-07-20T20:17:00Z"),
+        ValueTimestamp("1969-07-20T20:17:00Z"),
+      ),
       (TDate, ValueDate("1879-03-14"), ValueDate("1879-03-14")),
       (TText, ValueText("daml"), ValueText("daml")),
       (
@@ -191,8 +200,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       ),
       (
         TTextMap(TBool),
-        ValueTextMap(SortedLookupList(Map("0" -> ValueTrue, "1" -> ValueFalse))),
-        ValueTextMap(SortedLookupList(Map("0" -> ValueTrue, "1" -> ValueFalse))),
+        ValueTextMap(SortedLookupList.from(Map("0" -> ValueTrue, "1" -> ValueFalse))),
+        ValueTextMap(SortedLookupList.from(Map("0" -> ValueTrue, "1" -> ValueFalse))),
       ),
       (
         TOptional(TText),
@@ -229,15 +238,15 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       (TTyCon("Mod:Enum"), ValueEnum(None, "value1"), ValueEnum(Some("Mod:Enum"), "value1")),
     )
 
-    "enrich values as expected" in {
-      val enricher = new Enricher(engine)
+    "enriches values as expected" in {
+      val enricher = Enricher(engine)
       forEvery(testCases) { (typ, input, output) =>
         enricher.enrichValue(typ, input) shouldBe ResultDone(output)
       }
     }
 
-    "not add trailing None fields when instructed" in {
-      val enricher = new Enricher(engine, addTrailingNoneFields = false)
+    "does not add trailing None fields when instructed" in {
+      val enricher = Enricher(engine, addTrailingNoneFields = false)
 
       val testCases = Table[Type, Value, Value](
         ("type", "input", "expected output"),
@@ -263,16 +272,20 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       }
     }
 
-    "blow up if it encounters texts with null characters" in {
-      val enricher = new Enricher(engine, addTrailingNoneFields = false)
+    "blows up if it encounters texts with null characters" in {
+      val enricher = Enricher(engine, addTrailingNoneFields = false)
 
       val testCases = Table(
         "type" -> "LF value with null character",
         TText -> ValueText("->\u0000<-"),
         TOptional(TText) -> ValueOptional(Some(ValueText("\u0000"))),
-        TTextMap(TInt64) -> ValueTextMap(SortedLookupList(Map("key\u0000" -> ValueInt64(0)))),
         TTextMap(TInt64) -> ValueTextMap(
-          SortedLookupList(Map("key\u0001" -> ValueInt64(1), "key\u0001\u0000" -> ValueInt64(2)))
+          SortedLookupList.from(Map("key\u0000" -> ValueInt64(0)))
+        ),
+        TTextMap(TInt64) -> ValueTextMap(
+          SortedLookupList.from(
+            Map("key\u0001" -> ValueInt64(1), "key\u0001\u0000" -> ValueInt64(2))
+          )
         ),
       )
 
@@ -283,8 +296,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       }
     }
 
-    "blow up if it encounters too deeply nested values" in {
-      val enricher = new Enricher(engine, addTrailingNoneFields = false)
+    "blows up if it encounters too deeply nested values" in {
+      val enricher = Enricher(engine, addTrailingNoneFields = false)
 
       def toNat(i: Int): ValueVariant =
         if (i <= 0) ValueVariant(None, "Z", ValueUnit)
@@ -295,7 +308,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       enricher.enrichValue(
         TList(TNat),
         ValueList(List.range(0, 99).map(toNat).to(FrontStack)),
-      ) shouldBe a[ResultDone[_]]
+      ) shouldBe a[ResultDone[?]]
       enricher.enrichValue(TNat, toNat(100)) shouldBe a[ResultError]
       enricher.enrichValue(
         TList(TNat),
@@ -304,10 +317,9 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
     }
   }
 
-  "enrichTransaction" should {
-    val enricher = new Enricher(engine)
+  "Enricher.enrichTransaction" should {
 
-    import TreeTransactionBuilder._
+    import TreeTransactionBuilder.*
 
     def buildTransaction(
         contract: Value,
@@ -324,16 +336,15 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       }
 
       val nodeBuilder = TestNodeBuilder
-      val create =
-        nodeBuilder.create(
-          id = cid("#01"),
-          templateId = "Mod:Contract",
-          argument = contract,
-          signatories = Set("Alice"),
-          observers = Set("Alice"),
-          key = CreateKey.SignatoryMaintainerKey(key, keyHash),
-          version = CreateSerializationVersion.Version(SerializationVersion.minVersion),
-        )
+      val create = nodeBuilder.create(
+        id = cid("#01"),
+        templateId = "Mod:Contract",
+        argument = contract,
+        signatories = Set("Alice"),
+        observers = Set("Alice"),
+        key = CreateKey.SignatoryMaintainerKey(key, keyHash),
+        version = CreateSerializationVersion.Version(SerializationVersion.minVersion),
+      )
       txBuilder.toCommittedTransaction(
         create,
         nodeBuilder.fetch(create, byKey = false),
@@ -350,8 +361,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       )
     }
 
-    "enrich transaction as expected" in {
-
+    "enriches transaction as expected" in {
+      val enricher = Enricher(engine)
       val inputKeySValue: SValue.SRecord = SValue.SRecord(
         "Mod:Key",
         ImmArray("party", "idx"),
@@ -418,8 +429,8 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
 
     }
 
-    "enricher can keep field name without type annotation" in {
-      val enrich = new Enricher(
+    "keeps field name without type annotation" in {
+      val enrich = Enricher(
         engine,
         addTypeInfo = false,
         addFieldNames = true,
@@ -442,7 +453,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
 
     // enrichContractWithPackages test cases
     {
-      val enrich = new Enricher(
+      val enrich = Enricher(
         engine,
         addTypeInfo = true,
         addFieldNames = true,
@@ -460,7 +471,7 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
       implicit val `Package ID Order`: Order[PackageId] =
         Order.fromOrdering(PackageId.ordering)
 
-      "enrich a fat contract instance with packages that agree on the enrichment" in {
+      "enriches a fat contract instance with packages that agree on the enrichment" in {
         // pkgId1 and pkgId2 agree on the enrichment
         val expectedPkgId = Order[PackageId].min(pkgId1, pkgId2)
         inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId2))) {
@@ -472,12 +483,82 @@ class EnricherSpec extends AnyWordSpec with Matchers with Inside with TableDrive
         }
       }
 
-      "fail to enrich a fat contract instance with packages that disagree on the enrichment" in {
+      "fails to enrich a fat contract instance with packages that disagree on the enrichment" in {
         // pkgId1 and pkgId3 disagree on the enrichment
         inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId3))) {
           case ResultDone(result) =>
-            result shouldBe a[Left[_, _]]
+            result shouldBe a[Left[?, ?]]
         }
+      }
+
+      s"does not stack overflow " in {
+        val largeTx = {
+
+          val inputKeySValue: SValue.SRecord = SValue.SRecord(
+            "Mod:Key",
+            ImmArray("party", "idx"),
+            ArraySeq(SValue.SParty("Alice"), SValue.SInt64(0)),
+          )
+
+          val inputKey: Value = inputKeySValue.toNormalizedValue
+
+          val inputKeyHash: Hash = SValueHash.assertHashContractKey(
+            TestNodeBuilder.defaultPackageName,
+            "Mod:Key",
+            inputKeySValue,
+          )
+
+          val inputContract: ValueRecord =
+            ValueRecord(
+              "",
+              ImmArray(
+                "" -> inputKey,
+                "" -> Value.ValueNil,
+              ),
+            )
+
+          val inputRecord =
+            ValueRecord(None, ImmArray(None -> ValueInt64(33)))
+
+          val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId.apply)
+
+          // We want the same node ids used each time for this test to create a new tree builder
+          val txBuilder = new TreeTransactionBuilder {
+            override def nextNodeId(): NodeId = ids.next()
+          }
+
+          val nodeBuilder = TestNodeBuilder
+          val create = nodeBuilder.create(
+            id = cid("#01"),
+            templateId = "Mod:Contract",
+            argument = inputContract,
+            signatories = Set("Alice"),
+            observers = Set("Alice"),
+            key = CreateKey.SignatoryMaintainerKey(inputKey, inputKeyHash),
+            version = CreateSerializationVersion.Version(SerializationVersion.minVersion),
+          )
+          val exe: NodeWrapper = nodeBuilder.exercise(
+            contract = create,
+            choice = "Noop",
+            consuming = false,
+            actingParties = Set("Alice"),
+            argument = inputRecord,
+            result = Some(inputRecord),
+            byKey = false,
+          )
+          txBuilder.toCommittedTransaction(
+            (create: NodeWrapper) :: List.fill(50000)(exe): _*
+          )
+        }
+        val enricher = Enricher(Engine.DevEngine(loggerFactory))
+
+        val result = for {
+          _ <- ResultDone.Unit
+          _ <- enricher.enrichVersionedTransaction(largeTx)
+          _ <- ResultDone.Unit
+        } yield ()
+        result.consume(pkgs = Map(defaultPackageId -> pkg))
+        succeed
       }
     }
   }

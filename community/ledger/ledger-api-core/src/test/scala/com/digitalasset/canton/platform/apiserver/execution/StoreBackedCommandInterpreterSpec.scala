@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.TestSalt
+import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.ledger.api.Commands
 import com.digitalasset.canton.ledger.api.util.TimeProvider
@@ -21,24 +22,32 @@ import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandIn
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.InterpretationTimeExceeded
 import com.digitalasset.canton.platform.config.CommandServiceConfig
+import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestEngine
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPartyId, LfValue}
+import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.interpretation.Error.UnsupportedContractId
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
+import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
+import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
+  ExternalCallResult,
   FatContractInstance,
   GlobalKey,
   NeedKeyProgression,
-  NextGenContractStateMachine,
   Node as LfNode,
 }
 import com.digitalasset.daml.lf.value.Value
@@ -49,7 +58,7 @@ import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.concurrent.Future
 
 class StoreBackedCommandInterpreterSpec
@@ -67,6 +76,69 @@ class StoreBackedCommandInterpreterSpec
       loggerFactory = loggerFactory,
     )
   private val alice = LfPartyId.assertFromString("Alice")
+  private val externalCallPackageId = Ref.PackageId.assertFromString("-external-call-test-")
+
+  implicit private val parserParameters: ParserParameters[this.type] =
+    ParserParameters(
+      defaultPackageId = externalCallPackageId,
+      languageVersion = LanguageVersion.v2_dev,
+    )
+
+  private val externalCallPackage: Ast.Package = p"""
+    metadata ( '-external-call-test-' : '1.0.0' )
+
+    module M {
+      record @serializable T = { party: Party };
+
+      template (this: T) = {
+        precondition True;
+        signatories Cons @Party [M:T {party} this] (Nil @Party);
+        observers Nil @Party;
+
+        choice Call (self) (arg: Unit) : Text,
+          controllers Cons @Party [M:T {party} this] (Nil @Party)
+          to EXTERNAL_CALL "ext" "fun" "0a0b" "c0ff";
+      };
+    }
+  """
+  private val externalCallPackageResolver: PackageResolver = new PackageResolver {
+    override protected def resolveInternal(packageId: Ref.PackageId)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[Ast.Package]] =
+      FutureUnlessShutdown.pure(
+        Option.when(packageId == externalCallPackageId)(externalCallPackage)
+      )
+  }
+  private val externalCallTemplateId =
+    Ref.Identifier(externalCallPackageId, Ref.QualifiedName.assertFromString("M:T"))
+  private val externalCallApiCommands: Commands = Commands(
+    workflowId = None,
+    userId = Ref.UserId.assertFromString("external-call-user"),
+    commandId = com.digitalasset.canton.ledger.api.CommandId(
+      Ref.CommandId.assertFromString("external-call-command")
+    ),
+    submissionId = None,
+    actAs = Set(alice),
+    readAs = Set.empty,
+    submittedAt = Time.Timestamp.now(),
+    deduplicationPeriod = DeduplicationPeriod.DeduplicationOffset(None),
+    commands = ApiCommands(
+      commands = ImmArray(
+        ApiCommand.CreateAndExercise(
+          externalCallTemplateId.toRef,
+          Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
+          Ref.ChoiceName.assertFromString("Call"),
+          Value.ValueUnit,
+        )
+      ),
+      ledgerEffectiveTime = Time.Timestamp.now(),
+      commandsReference = "external-call-command",
+    ),
+    disclosedContracts = ImmArray.empty,
+    synchronizerId = None,
+    prefetchKeys = Seq.empty,
+    tapsMaxPasses = None,
+  )
 
   private val createCycleApiCommand: Commands =
     testEngine.validateCommand(new Cycle("id", alice).create().commands.loneElement, alice)
@@ -109,7 +181,7 @@ class StoreBackedCommandInterpreterSpec
         Ref.Party.assertFromString("unexpectedObs"),
       ),
       keyOpt = Some(
-        KeyWithMaintainers.assertBuild(
+        KeyWithMaintainers(
           templateId = identifier,
           LfValue.ValueTrue,
           crypto.Hash.hashPrivateKey("dummy-key-hash"),
@@ -130,7 +202,7 @@ class StoreBackedCommandInterpreterSpec
     )
   )
 
-  private val mode = NextGenContractStateMachine.Mode.default
+  private val interpretationConfig = InterpretationConfig.Default
 
   private val submissionSeed = Hash.hashPrivateKey("a key")
 
@@ -138,12 +210,14 @@ class StoreBackedCommandInterpreterSpec
       engine: Engine,
       contractStore: ContractStore = mock[ContractStore],
       contractAuthenticator: ContractAuthenticatorFn = (_, _) => Left("Not authorized"),
+      packageResolver: PackageResolver = testEngine.packageResolver,
       tolerance: NonNegativeFiniteDuration = NonNegativeFiniteDuration.tryOfSeconds(60),
+      externalCallHandler: ExternalCallHandler = ExternalCallHandler.Unsupported,
   ) =
     new StoreBackedCommandInterpreter(
       engine = engine,
       participant = Ref.ParticipantId.assertFromString("anId"),
-      packageResolver = testEngine.packageResolver,
+      packageResolver = packageResolver,
       contractStore = contractStore,
       contractAuthenticator = contractAuthenticator,
       metrics = LedgerApiServerMetrics.ForTesting,
@@ -151,15 +225,19 @@ class StoreBackedCommandInterpreterSpec
       loggerFactory = loggerFactory,
       dynParamGetter = new TestDynamicSynchronizerParameterGetter(tolerance),
       timeProvider = TimeProvider.UTC,
+      externalCallHandler = externalCallHandler,
     )
 
   "StoreBackedCommandExecutor" should {
     "add interpretation time and used disclosed contracts to result" in {
 
-      val sut = mkSut(testEngine.engine, tolerance = NonNegativeFiniteDuration.Zero)
+      val sut = mkSut(
+        testEngine.engine,
+        tolerance = NonNegativeFiniteDuration.Zero,
+      )
 
       sut
-        .interpret(createCycleApiCommand, mode, submissionSeed)(
+        .interpret(createCycleApiCommand, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
@@ -174,12 +252,15 @@ class StoreBackedCommandInterpreterSpec
 
     "interpret successfully if time limit is not exceeded" in {
       val tolerance = NonNegativeFiniteDuration.tryOfSeconds(60)
-      val sut = mkSut(testEngine.engine, tolerance = tolerance)
+      val sut = mkSut(
+        testEngine.engine,
+        tolerance = tolerance,
+      )
 
       val commands =
         createCycleApiCommand.focus(_.commands.ledgerEffectiveTime).replace(Time.Timestamp.now())
       sut
-        .interpret(commands, mode, submissionSeed)(
+        .interpret(commands, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
@@ -193,15 +274,79 @@ class StoreBackedCommandInterpreterSpec
       val tolerance = NonNegativeFiniteDuration.tryOfSeconds(10)
       val let = Time.Timestamp.now().subtract(Duration.ofSeconds(20))
       val commands = createCycleApiCommand.focus(_.commands.ledgerEffectiveTime).replace(let)
-      val sut = mkSut(testEngine.engine, tolerance = tolerance)
+      val sut = mkSut(
+        testEngine.engine,
+        tolerance = tolerance,
+      )
       sut
-        .interpret(commands, mode, submissionSeed)(
+        .interpret(commands, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
         .map {
           case Left(InterpretationTimeExceeded(`let`, `tolerance`, _)) => succeed
           case other => fail(s"Did not expect: $other")
+        }
+    }
+
+    "dispatch external calls to the handler in submission mode" in {
+      val externalCallEngine = new Engine(Engine.DevConfig, loggerFactory)
+      inside(externalCallEngine.preloadPackage(externalCallPackageId, externalCallPackage)) {
+        case ResultDone(()) => succeed
+      }
+
+      val observedCall =
+        new AtomicReference[Option[(String, String, String, String, ExternalCallMode)]](None)
+      val handler = new ExternalCallHandler {
+        override def handleExternalCall(
+            extensionId: String,
+            functionId: String,
+            configHash: String,
+            input: String,
+            mode: ExternalCallMode,
+        )(implicit
+            tc: TraceContext
+        ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] = {
+          observedCall.set(Some((extensionId, functionId, configHash, input, mode)))
+          FutureUnlessShutdown.pure(Right("beef"))
+        }
+      }
+
+      val sut = mkSut(
+        externalCallEngine,
+        packageResolver = externalCallPackageResolver,
+        externalCallHandler = handler,
+      )
+
+      sut
+        .interpret(
+          externalCallApiCommands,
+          InterpretationConfig.Dev,
+          submissionSeed,
+        )(
+          LoggingContextWithTrace(loggerFactory),
+          executionContext,
+        )
+        .map {
+          case Right(result) =>
+            observedCall.get() shouldBe Some(
+              ("ext", "fun", "0a0b", "c0ff", ExternalCallMode.Submission)
+            )
+
+            val exerciseNodes = result.transaction.nodes.collect {
+              case (_, exercise: LfNode.Exercise) => exercise
+            }
+            exerciseNodes should have size 1
+            exerciseNodes.head.externalCallResults shouldBe ImmArray(
+              ExternalCallResult(
+                extensionId = "ext",
+                functionId = "fun",
+                config = Bytes.assertFromString("0a0b"),
+                input = Bytes.assertFromString("c0ff"),
+                output = Bytes.assertFromString("beef"),
+              )
+            )
+          case other => fail(s"Expected successful interpretation, got $other")
         }
     }
   }
@@ -315,15 +460,27 @@ class StoreBackedCommandInterpreterSpec
 
       val commands = repeatCycleApiCommand(invalidCid)
 
-      val sut = mkSut(testEngine.engine, contractStore = contractStore)
+      val sut = mkSut(
+        testEngine.engine,
+        contractStore = contractStore,
+      )
       sut
-        .interpret(commands, mode, submissionSeed)(
+        .interpret(commands, interpretationConfig, submissionSeed)(
           LoggingContextWithTrace(loggerFactory),
           executionContext,
         )
-        .failed
-        .map { _ =>
-          succeed
+        .map {
+          case Left(
+                ErrorCause.DamlLf(
+                  engine.Error.Interpretation(
+                    engine.Error.Interpretation.DamlException(UnsupportedContractId(`invalidCid`)),
+                    _,
+                  )
+                )
+              ) =>
+            succeed
+          case result =>
+            fail(s"Expected failure due to unsupported contract id, but got $result")
         }
 
     }
@@ -364,7 +521,7 @@ class StoreBackedCommandInterpreterSpec
         )
 
         sut
-          .interpret(commands, mode, submissionSeed)(
+          .interpret(commands, interpretationConfig, submissionSeed)(
             LoggingContextWithTrace(loggerFactory),
             executionContext,
           )
@@ -408,7 +565,7 @@ class StoreBackedCommandInterpreterSpec
         )
 
         sut
-          .interpret(commands, mode, submissionSeed)(
+          .interpret(commands, interpretationConfig, submissionSeed)(
             LoggingContextWithTrace(loggerFactory),
             executionContext,
           )
@@ -424,7 +581,7 @@ class StoreBackedCommandInterpreterSpec
 
   private val keyHash: crypto.Hash = crypto.Hash.hashPrivateKey("nuck-test-key")
   private val globalKey: GlobalKey =
-    GlobalKey.assertBuild(identifier, packageName, Value.ValueText("key"), keyHash)
+    GlobalKey(identifier, packageName, Value.ValueText("key"), keyHash)
 
   private def mkContract(id: String): LfFatContractInst = {
     val (_, _, contract) = createCycleContract(id)
@@ -441,7 +598,7 @@ class StoreBackedCommandInterpreterSpec
   ): ContractStore = {
     val store = mock[ContractStore]
     when(
-      store.lookupNonUniqueContractKey(
+      store.lookupContractKey(
         readers = any[Set[Ref.Party]],
         key = any[GlobalKey],
         pageToken = any[Option[Long]],
@@ -466,7 +623,7 @@ class StoreBackedCommandInterpreterSpec
   private val invalidContractStore: ContractStore = {
     val store = mock[ContractStore]
     when(
-      store.lookupNonUniqueContractKey(
+      store.lookupContractKey(
         readers = any[Set[Ref.Party]],
         key = any[GlobalKey],
         pageToken = any[Option[Long]],

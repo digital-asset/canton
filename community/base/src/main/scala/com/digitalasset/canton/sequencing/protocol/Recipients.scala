@@ -5,13 +5,12 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.reducible.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.nonempty.NonEmpty
 
 /** Recipients of a batch. Uses a list of
   * [[com.digitalasset.canton.sequencing.protocol.RecipientsTree]]s that define the members

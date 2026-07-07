@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 import cats.Traverse
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionState
@@ -41,6 +40,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.HexString
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertions.fail
 
 import java.time.Instant
@@ -178,10 +178,6 @@ object SimulationModuleSystem {
     override def abort(failure: Throwable): Nothing =
       fail(failure)
 
-    override def blockingAwait[X](future: SimulationFuture[X]): X = future
-      .resolveValue()
-      .fold(abort(_), identity)
-
     override def blockingAwait[X](future: SimulationFuture[X], duration: FiniteDuration): X = future
       .resolveValue()
       .fold(abort(_), identity)
@@ -256,11 +252,13 @@ object SimulationModuleSystem {
     override def setModule[NewModuleMessageT](
         moduleRef: SimulationModuleRef[NewModuleMessageT],
         module: Module[SimulationEnv, NewModuleMessageT],
-    ): Unit =
-      addSetBehaviorEvent(collector, moduleRef.name, module, ready = false)
+    )(implicit traceContext: TraceContext): Unit =
+      addSetBehaviorEvent(collector, moduleRef.name, module, ready = false, traceContext)
 
-    override def become(module: Module[SimulationEnv, MessageT]): Unit =
-      addSetBehaviorEvent(collector, to, module, ready = true)
+    override def become(module: Module[SimulationEnv, MessageT])(implicit
+        traceContext: TraceContext
+    ): Unit =
+      addSetBehaviorEvent(collector, to, module, ready = true, traceContext)
 
     override def stop(onStop: () => Unit): Unit =
       collector.addInternalEvent(to, ModuleControl.Stop(onStop))
@@ -286,7 +284,7 @@ object SimulationModuleSystem {
     override def setModule[NewModuleMessageT](
         moduleRef: SimulationModuleRef[NewModuleMessageT],
         module: Module[SimulationEnv, NewModuleMessageT],
-    ): Unit =
+    )(implicit traceContext: TraceContext): Unit =
       unsupportedForClientModules()
 
     override def self: SimulationModuleRef[MessageT] = unsupportedForClientModules()
@@ -304,7 +302,9 @@ object SimulationModuleSystem {
     )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
       unsupportedForClientModules()
 
-    override def become(module: Module[SimulationEnv, MessageT]): Unit =
+    override def become(module: Module[SimulationEnv, MessageT])(implicit
+        traceContext: TraceContext
+    ): Unit =
       unsupportedForClientModules()
 
     override def stop(onStop: () => Unit): Unit =
@@ -335,8 +335,8 @@ object SimulationModuleSystem {
     override def setModule[NewModuleMessageT](
         moduleRef: SimulationModuleRef[NewModuleMessageT],
         module: Module[SimulationEnv, NewModuleMessageT],
-    ): Unit =
-      addSetBehaviorEvent(collector, moduleRef.name, module, ready = false)
+    )(implicit traceContext: TraceContext): Unit =
+      addSetBehaviorEvent(collector, moduleRef.name, module, ready = false, traceContext)
 
     override def self: SimulationModuleRef[MessageT] = unsupportedForSystem()
 
@@ -354,7 +354,9 @@ object SimulationModuleSystem {
     private def unsupportedForSystem(): Nothing =
       sys.error("Unsupported for system object")
 
-    override def become(module: Module[SimulationEnv, MessageT]): Unit = unsupportedForSystem()
+    override def become(module: Module[SimulationEnv, MessageT])(implicit
+        traceContext: TraceContext
+    ): Unit = unsupportedForSystem()
 
     override def stop(onStop: () => Unit): Unit = unsupportedForSystem()
 
@@ -388,8 +390,8 @@ object SimulationModuleSystem {
     override def setModule[MessageT](
         moduleRef: SimulationModuleRef[MessageT],
         module: Module[SimulationEnv, MessageT],
-    ): Unit =
-      addSetBehaviorEvent(collector, moduleRef.name, module, ready = false)
+    )(implicit traceContext: TraceContext): Unit =
+      addSetBehaviorEvent(collector, moduleRef.name, module, ready = false, traceContext)
   }
 
   private final case class SimulatedRefForClient[MessageT](collector: ClientCollector)
@@ -480,8 +482,9 @@ object SimulationModuleSystem {
       moduleName: ModuleName,
       module: Module[SimulationEnv, MessageT],
       ready: Boolean,
+      traceContext: TraceContext,
   ): Unit =
-    collector.addInternalEvent(moduleName, ModuleControl.SetBehavior(module, ready))
+    collector.addInternalEvent(moduleName, ModuleControl.SetBehavior(module, ready, traceContext))
 
   def apply[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, ClientMessageT](
       endpointsToInitializers: Map[
@@ -572,7 +575,7 @@ object SimulationModuleSystem {
                 timeouts,
                 loggerFactory,
               ),
-          )
+          )(TraceContext.createNew("dabft_pekko_module_system_simulation"))
         val clientCollector = new ClientCollector(getSimulationName(resultFromInit.inputModuleRef))
         val client = simulationInitializer.clientInitializer.createClient(
           SimulatedRefForClient(clientCollector)

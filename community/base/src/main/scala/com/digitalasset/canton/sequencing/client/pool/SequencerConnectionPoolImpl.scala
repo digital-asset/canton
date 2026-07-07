@@ -8,8 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -46,6 +44,8 @@ import com.digitalasset.canton.util.{
   SingleUseCell,
 }
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{SequencerAlias, checked}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.Materializer
 
@@ -64,7 +64,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
     crypto: Crypto,
     seedForRandomnessO: Option[Long],
     metrics: SequencerConnectionPoolMetrics,
-    metricsContext: MetricsContext,
+    override val metricsContext: MetricsContext,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -138,7 +138,8 @@ class SequencerConnectionPoolImpl private[sequencing] (
   override def staticSynchronizerParametersO: Option[StaticSynchronizerParameters] =
     bootstrapCell.get.map(_.staticParameters)
 
-  private implicit def mc: MetricsContext = metricsContext
+  private implicit val mc: MetricsContext = metricsContext
+
   metrics.trustThreshold.updateValue(config.trustThreshold.value)
 
   override def start()(implicit
@@ -153,7 +154,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
       updateTrackedConnections(
         toBeAdded = config.connections,
         toBeRemoved = Set.empty,
-        isInitialUpdate = true,
       )
     }
 
@@ -236,7 +236,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
   private def updateTrackedConnections(
       toBeAdded: immutable.Iterable[ConnectionConfig],
       toBeRemoved: Set[ConnectionConfig],
-      isInitialUpdate: Boolean,
   )(implicit traceContext: TraceContext): Unit =
     lock.exclusive {
       val removedConnections =
@@ -260,11 +259,8 @@ class SequencerConnectionPoolImpl private[sequencing] (
       removedConnections.foreach { connection =>
         connection.fatal("Removed from configuration")
       }
-      if (isInitialUpdate) {
-        metrics.removeMetricsForAllConnections()
-      } else {
-        metrics.removeMetricsForConnection(toBeRemoved.map(_.name))
-      }
+
+      metrics.removeMetricsForConnection(toBeRemoved.map(_.name), mc.labels.get("psid"))
 
       // If start() or updateConfig() is called after the pool has been closed, we don't want to start new connections
       if (!isClosing) {
@@ -464,7 +460,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
         updateTrackedConnections(
           toBeAdded = changedConnections.added,
           toBeRemoved = changedConnections.removed,
-          isInitialUpdate = false,
         )
       }
     }
@@ -573,6 +568,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
     // We close the connections outside the critical section to avoid shutdown problems in case
     // it triggers health callbacks
     LifeCycle.close(instances*)(logger)
+    metrics.removeMetricsForAllConnections(mc.labels.get("psid"))
     super.onClosed()
   }
 
@@ -717,17 +713,21 @@ class SequencerConnectionPoolImpl private[sequencing] (
   override def getConnections(
       requester: String,
       requestedNumber: PositiveInt,
-      exclusions: Set[SequencerId],
+      excluded: Set[SequencerId],
+      acceptableO: Option[Set[SequencerId]],
   )(implicit traceContext: TraceContext): Set[SequencerConnection] =
     // Always return connections randomly for now
     lock.exclusive {
+      val allowedMsg =
+        acceptableO.fold("")(acceptable => s" allowing only ${acceptable.map(_.uid.identifier)}")
       logger.debug(
-        s"[$requester] requesting $requestedNumber connection(s) excluding ${exclusions.map(_.uid.identifier)}"
+        s"[$requester] requesting $requestedNumber connection(s) excluding ${excluded
+            .map(_.uid.identifier)}$allowedMsg"
       )
 
-      // Pick up to `requestedNumber` non-excluded sequencer IDs from the pool
+      // Pick up to `requestedNumber` allowed and non-excluded sequencer IDs from the pool
       val randomSeqIds = SeqUtil.randomSubsetShuffle(
-        pool.keySet.diff(exclusions).toIndexedSeq,
+        acceptableO.fold(pool.keySet)(_.intersect(pool.keySet)).diff(excluded).toIndexedSeq,
         requestedNumber.unwrap,
         random,
       )
@@ -750,19 +750,44 @@ class SequencerConnectionPoolImpl private[sequencing] (
       pickedConnections
     }
 
-  override def getOneConnectionPerSequencer(requester: String)(implicit
+  override def getOneConnectionPerSequencer(
+      requester: String,
+      acceptableO: Option[Set[SequencerId]],
+  )(implicit
       traceContext: TraceContext
   ): Map[SequencerId, SequencerConnection] = {
     logger.debug(s"[$requester] requesting one connection per sequencer")
     // Upper bound on number of connections. Note: `checked` because `connections` is `NonEmpty`.
     val nb = checked(PositiveInt.tryCreate(config.connections.size))
-    getConnections(requester, nb, exclusions = Set.empty)
+    getConnections(requester, nb, excluded = Set.empty, acceptableO = acceptableO)
       .map(c => c.attributes.sequencerId -> c)
       .toMap
   }
 
-  override def getAllConnections()(implicit traceContext: TraceContext): Seq[SequencerConnection] =
-    (lock.exclusive(pool.values.flatten.toSeq))
+  override def getAllConnections: Seq[SequencerConnection] =
+    lock.exclusive(pool.values.flatten.toSeq)
+
+  override def getAllSequencerIds(implicit
+      traceContext: TraceContext
+  ): Map[SequencerAlias, SequencerId] =
+    getAllConnections.mapFilter { connection =>
+      val name = connection.config.name
+
+      // TODO(i31759): The only reason the connection name is not the alias was to support multiple endpoints
+      //  per connection (see `SequencerConnectionPoolConfig.fromSequencerConnections`).
+      //  Remove this when we only have one endpoint per connection.
+      val alias = name.substring(0, name.lastIndexOf('-'))
+
+      SequencerAlias
+        .create(alias)
+        .map { sequencerAlias =>
+          val sequencerId = connection.attributes.sequencerId
+          sequencerAlias -> sequencerId
+        }
+        .leftMap(error => logger.warn(s"Cannot convert connection name to sequencer alias: $error"))
+        .toOption
+    }.toMap
+
 }
 
 object SequencerConnectionPoolImpl {

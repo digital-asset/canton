@@ -41,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Mempool
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.{
@@ -136,7 +137,6 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
       val simulationTestSettings = generateSettings
       val numberOfInitialNodes = simulationTestSettings.numberOfInitialNodes
-      val epochLength = simulationTestSettings.epochLength
 
       val sendQueue = mutable.Queue.empty[(BftNodeId, Traced[BlockFormat.Block])]
 
@@ -179,8 +179,9 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                 new SimulationAvailabilityStore(),
                 simulationEpochStore,
                 epochStoreReader = simulationEpochStore,
-                new SimulationOutputMetadataStore(fail(_)),
+                new SimulationOutputMetadataStore(endpointToTestBftNodeId(endpoint), fail(_)),
                 new SimulationBftOrdererPruningSchedulerStore(),
+                None,
               )
             },
             initializeImmediately = true,
@@ -190,7 +191,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
       logger.debug(s"$alreadyOnboardedAll")
 
       val epochChecker = new SimEpochChecker(
-        simulationTestSettings.epochLength, // TODO(#24184) make this dynamic sequencing parameter
+        simulationTestSettings.segmentLength.epochLength(numberOfInitialNodes.toLong),
         loggerFactory,
       )
       val allSimulationTestNodeDataCell =
@@ -216,8 +217,9 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                   new SimulationAvailabilityStore(),
                   simulationEpochStore,
                   epochStoreReader = simulationEpochStore,
-                  new SimulationOutputMetadataStore(fail(_)),
+                  new SimulationOutputMetadataStore(endpointToTestBftNodeId(endpoint), fail(_)),
                   new SimulationBftOrdererPruningSchedulerStore(),
+                  None,
                 )
               }
               endpointToTestBftNodeId(endpoint) -> SimulationTestNodeData(
@@ -255,7 +257,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                 },
               stores,
               sendQueue,
-              epochLength,
+              simulationTestSettings.segmentLength,
               clock,
               availabilityRandom,
               epochChecker,
@@ -362,7 +364,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                    |
                    |  override def generateSettings: SimulationTestSettings = SimulationTestSettings(
                    |    numberOfInitialNodes = $numberOfInitialNodes,
-                   |    epochLength = EpochLength($epochLength),
+                   |    segmentLength = SegmentLength(PositiveLong.tryCreate(${simulationTestSettings.segmentLength.length.value})),
                    |    stages = NonEmpty(
                    |      Seq,
                    |      ${stages
@@ -397,7 +399,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
       getAllEndpointsToTopologyData: () => Map[P2PEndpoint, NodeSimulationTopologyData],
       stores: BftOrderingStores[SimulationEnv],
       sendQueue: mutable.Queue[(BftNodeId, Traced[BlockFormat.Block])],
-      epochLength: EpochLength,
+      segmentLength: SegmentLength,
       clock: Clock,
       availabilityRandom: Random,
       epochChecker: EpochChecker,
@@ -411,13 +413,12 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
     val p2pGrpcConnectionState = new P2PGrpcConnectionState(thisBftNodeId, logger)
     val config = BftBlockOrdererConfig(
-      epochLength = epochLength,
-      availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning = 100,
+      availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning = 100
     )
     val orderingTopologyProvider =
       new SimulationOrderingTopologyProvider(
         thisBftNodeId,
-        EpochLength(config.epochLength),
+        segmentLength,
         getAllEndpointsToTopologyData,
         loggerFactory,
       )

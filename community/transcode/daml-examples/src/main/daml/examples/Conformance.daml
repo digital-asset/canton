@@ -8,6 +8,7 @@ import qualified Com.Digitalasset.Transcode.Conformance.Data.Enums
 import qualified Com.Digitalasset.Transcode.Conformance.Data.Keywords.Enums
 import qualified Com.Digitalasset.Transcode.Conformance.Data.Keywords.RecordFields
 import qualified Com.Digitalasset.Transcode.Conformance.Data.Keywords.Variants
+import qualified Com.Digitalasset.Transcode.Conformance.Data.Primitives
 import qualified Com.Digitalasset.Transcode.Conformance.Data.Records
 import qualified Com.Digitalasset.Transcode.Conformance.Data.Recursive
 import qualified Com.Digitalasset.Transcode.Conformance.Data.Traversables
@@ -195,6 +196,11 @@ template Roundtrip
         return payload
 
     nonconsuming choice Primitives_ContractId_Roundtrip_1: ContractId Conformance.Roundtrip  with payload: ContractId Conformance.Roundtrip  controller party
+      do
+        assert (payload == payload)
+        return payload
+
+    nonconsuming choice Primitives_ContractId_Void_1: ContractId Com.Digitalasset.Transcode.Conformance.Data.Primitives.Void  with payload: ContractId Com.Digitalasset.Transcode.Conformance.Data.Primitives.Void  controller party
       do
         assert (payload == payload)
         return payload

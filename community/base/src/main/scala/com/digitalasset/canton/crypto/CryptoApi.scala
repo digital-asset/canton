@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.show.*
 import com.daml.metrics.ExecutorServiceMetrics
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -44,6 +43,7 @@ import com.digitalasset.canton.health.{
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.CryptoMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.Storage
@@ -55,6 +55,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.{HasToByteString, ReleaseProtocolVersion}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
@@ -76,6 +77,7 @@ sealed trait BaseCrypto extends NamedLogging {
   def privateCrypto: CryptoPrivateApi
   def cryptoPrivateStore: CryptoPrivateStore
   def cryptoPublicStore: CryptoPublicStore
+  def cryptoMetrics: CryptoMetrics
 
   /** Helper method to generate a new signing key pair and store the public key in the public store
     * as well.
@@ -113,9 +115,10 @@ sealed trait BaseCrypto extends NamedLogging {
   */
 class Crypto private[crypto] (
     override val pureCrypto: CryptoPureApi,
-    override val privateCrypto: CryptoPrivateApi,
+    override val privateCrypto: CryptoPrivateApi & CloseableHealthComponent,
     override val cryptoPrivateStore: CryptoPrivateStore,
     override val cryptoPublicStore: CryptoPublicStore,
+    override val cryptoMetrics: CryptoMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(override implicit val ec: ExecutionContext)
@@ -155,12 +158,13 @@ final case class SynchronizerCrypto(
     new SynchronizerCryptoPrivateApi(
       staticSynchronizerParameters,
       crypto.privateCrypto,
-      crypto.timeouts,
-      crypto.loggerFactory,
+      crypto.cryptoMetrics.signingMetrics,
+      crypto.cryptoMetrics.decryptionMetrics,
     )
 
   override val cryptoPrivateStore: CryptoPrivateStore = crypto.cryptoPrivateStore
   override val cryptoPublicStore: CryptoPublicStore = crypto.cryptoPublicStore
+  override val cryptoMetrics: CryptoMetrics = crypto.cryptoMetrics
   override protected val loggerFactory: NamedLoggerFactory = crypto.loggerFactory
 }
 
@@ -171,6 +175,7 @@ trait CryptoPureApi
     with HashOps
     with RandomOps
     with PasswordBasedEncryptionOps
+    with JwksOps
 
 sealed trait CryptoPureApiError extends Product with Serializable with PrettyPrinting
 object CryptoPureApiError {
@@ -181,17 +186,11 @@ object CryptoPureApiError {
   }
 }
 
-trait CryptoPrivateApi
-    extends EncryptionPrivateOps
-    with SigningPrivateOps
-    with CloseableHealthComponent {
-
-  private[crypto] def getInitialHealthState: ComponentHealthState
-
-}
+trait CryptoPrivateApi extends EncryptionPrivateOps with SigningPrivateOps
 
 trait CryptoPrivateStoreApi
     extends CryptoPrivateApi
+    with CloseableHealthComponent
     with EncryptionPrivateStoreOps
     with SigningPrivateStoreOps
 
@@ -385,6 +384,7 @@ object Crypto {
       releaseProtocolVersion: ReleaseProtocolVersion,
       futureSupervisor: FutureSupervisor,
       clock: Clock,
+      cryptoMetrics: CryptoMetrics,
       executionContext: ExecutionContext,
       timeouts: ProcessingTimeout,
       batchingConfig: BatchingConfig,
@@ -431,6 +431,7 @@ object Crypto {
           publicKeyConversionCacheConfig,
           cryptoPrivateStore,
           cryptoPublicStore,
+          cryptoMetrics,
           timeouts,
           loggerFactory,
         )
@@ -478,6 +479,7 @@ object Crypto {
           kmsSchemes.encryptionSchemes,
           cryptoPublicStore,
           kmsCryptoPrivateStore,
+          cryptoMetrics,
           timeouts,
           loggerFactory,
         )
@@ -488,6 +490,7 @@ object Crypto {
             sessionEncryptionKeyCacheConfig,
             publicKeyConversionCacheConfig,
             cryptoSchemes,
+            cryptoMetrics,
             loggerFactory,
           )
           .toEitherT[FutureUnlessShutdown]
@@ -496,6 +499,7 @@ object Crypto {
         kmsPrivateCrypto,
         kmsCryptoPrivateStore,
         cryptoPublicStore,
+        cryptoMetrics,
         timeouts,
         loggerFactory,
       )

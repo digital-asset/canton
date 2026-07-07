@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v32;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "scalapb/scalapb.proto";
+
+message CommitmentPeriod {
+  int64 from_exclusive = 1; // in microseconds of UTC time since Unix epoch
+  int64 to_inclusive = 2; // in microseconds of UTC time since Unix epoch
+}
+
+// A commitment to the active contract set (ACS) that is shared between two participants on a given synchronizer at a given time.
+// Given a commitment scheme to the ACS, the semantics are as follows: the sender declares that the shared ACS was
+// exactly the one committed to, at every point in time during the specified period.
+// All fields are mandatory.
+message AcsCommitment {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  string physical_synchronizer_id = 1;
+  string sending_participant_uid = 2;
+  string counterparticipant_uid = 3;
+  CommitmentPeriod period = 4;
+  bytes digest = 5;
+}
+
+// Represents a protocol message containing an ACS commitment along with its associated signatures.
+message AcsCommitmentProtocolMessage {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  bytes acs_commitment = 1;
+  com.digitalasset.canton.crypto.v30.Signature signature = 2;
+}
+
+message AcsCommitmentSummary {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  string physical_synchronizer_id = 1;
+  // The interval grid point that triggered sending the commitments
+  uint64 commitment_tick = 2;
+  // The counterparticipants addressed in this batch
+  repeated string counterparticipants = 3;
+  // The digests for counterparticipants that should have been included in this
+  // batch, but could not be sent.
+  repeated DigestForCounterparticipant unsent_digests = 4;
+  // The index of this batch among all batches for the same commitment tick.
+  uint32 batch_index = 5;
+  // Indicates whether this is the last batch of all the batches for the same commitment tick.
+  bool last_batch = 6;
+}
+
+message DigestForCounterparticipant {
+  bytes digest = 1;
+  string counterparticipant = 2;
+}
+
+message AcsCommitmentSummaryProtocolMessage {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  bytes acs_commitment_summary = 1;
+  com.digitalasset.canton.crypto.v30.Signature signature = 2;
+}

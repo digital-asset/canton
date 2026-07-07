@@ -8,8 +8,10 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
@@ -24,11 +26,16 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{DefaultNewPV, Fixture}
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.metrics.MetricValue
 import com.digitalasset.canton.metrics.MetricValue.LongPoint
-import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{
+  Member,
+  ParticipantId,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
@@ -65,7 +72,7 @@ private[lsu] trait LsuBase
         // Retry more frequently so that eventually blocks don't need to wait for too long
         .replace(config.NonNegativeFiniteDuration.ofSeconds(2))
     ),
-  ) ++ ConfigTransforms.enableAlphaVersionSupport
+  ) ++ ConfigTransforms.enableDevVersionSupport
     ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
       // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
       config.NonNegativeFiniteDuration.ofHours(1)
@@ -209,6 +216,7 @@ private[lsu] trait LsuBase
         sequencerLivenessMargin = NonNegativeInt.zero,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       ),
     )
   }
@@ -229,7 +237,7 @@ private[lsu] trait LsuBase
       newSynchronizerNodes = newSynchronizerNodes,
       newOldNodesResolution = newOldNodesResolution,
       oldSynchronizerOwners = env.synchronizerOwners1,
-      newPV = newPVOverride.getOrElse(ProtocolVersion.dev),
+      newPV = newPVOverride.getOrElse(DefaultNewPV),
       // increasing the serial as well, so that the test also works when running with PV=dev
       newSerial = newSerialOverride.getOrElse(currentPsid.serial.increment.toNonNegative),
     )
@@ -318,6 +326,8 @@ object LsuBase {
   import org.scalatest.OptionValues.*
   import org.scalatest.EitherValues.*
 
+  val DefaultNewPV: ProtocolVersion = ProtocolVersion.dev
+
   // Returns the number of received messages per sender
   def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] =
     getMetricValues(node, "daml.received-lsu-sequencing-test-messages").value.collect {
@@ -358,6 +368,18 @@ object LsuBase {
     })
   }.toMap
 
+  // Return the status of the contact of the successor per psid
+  def getLsuSuccessorContactStatusMetricValues(
+      node: LocalSequencerReference
+  ): Map[PhysicalSynchronizerId, Int] = {
+    getMetricValues(node, "daml.sequencer.lsu_contact_successor_status").toList.flatMap(_.collect {
+      case l: LongPoint =>
+        PhysicalSynchronizerId.tryFromString(
+          l.attributes.get("successor_psid").value
+        ) -> l.value.toInt
+    })
+  }.toMap
+
   private def getMetricValues(
       node: LocalInstanceReference,
       metricName: String,
@@ -377,11 +399,14 @@ object LsuBase {
       overridePsid: Option[PhysicalSynchronizerId] = None,
   ) {
     val newStaticSynchronizerParameters: StaticSynchronizerParameters =
-      StaticSynchronizerParameters.defaultsWithoutKMS(
+      StaticSynchronizerParameters.defaults(
+        CryptoConfig(),
         newPV,
         newSerial,
         topologyChangeDelay = config.NonNegativeFiniteDuration.Zero,
       )
+
+    val lsid: SynchronizerId = currentPsid.logical
 
     val newPsid: PhysicalSynchronizerId =
       overridePsid.getOrElse(

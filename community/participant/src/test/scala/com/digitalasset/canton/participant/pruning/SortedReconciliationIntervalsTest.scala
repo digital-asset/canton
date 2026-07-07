@@ -7,7 +7,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals.ReconciliationInterval
 import com.digitalasset.canton.protocol.SynchronizerParameters
-import com.digitalasset.canton.protocol.messages.CommitmentPeriod
+import com.digitalasset.canton.protocol.messages.LegacyCommitmentPeriod
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import org.scalacheck.{Arbitrary, Gen, Shrink}
 import org.scalatest.EitherValues
@@ -491,12 +491,12 @@ private[pruning] object SortedReconciliationIntervalsTestHelpers extends EitherV
   def timeProofPeriodFlow(
       dynamicSynchronizerParameters: SynchronizerParameters.WithValidity[PositiveSeconds],
       times: Seq[CantonTimestamp],
-  ): Seq[CommitmentPeriod] = {
+  ): Seq[LegacyCommitmentPeriod] = {
     val reconciliationIntervals = SortedReconciliationIntervals
       .create(Seq(dynamicSynchronizerParameters), CantonTimestamp.MaxValue)
       .value
 
-    times.foldLeft((None: Option[CantonTimestampSecond], Seq.empty[CommitmentPeriod])) {
+    times.foldLeft((None: Option[CantonTimestampSecond], Seq.empty[LegacyCommitmentPeriod])) {
       case ((lastTick, periods), ts) =>
         reconciliationIntervals.tickBefore(ts).flatMap { periodEnd =>
           reconciliationIntervals.commitmentPeriodPreceding(periodEnd, lastTick)

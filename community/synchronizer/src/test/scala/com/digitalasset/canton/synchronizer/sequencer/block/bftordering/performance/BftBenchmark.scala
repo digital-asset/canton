@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.perform
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBenchmark.{
   Separator,
@@ -23,6 +22,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performa
   successfulWriteMeters,
   writeNanosHistograms,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 import java.util.concurrent.{
@@ -76,14 +76,14 @@ final class BftBenchmark(
   log.info(s"Payloads will be $AdjustedTransactionSizesAndWeights")
 
   private val readNodes =
-    config.nodes.flatMap {
-      case node: BftBenchmarkConfig.ReadNode[?] => Some(node)
+    config.nodes.zipWithIndex.flatMap {
+      case (node: BftBenchmarkConfig.ReadNode[?], nodeIx) => Some(nodeIx -> node)
       case _ => None
     }
 
   private val writeNodes =
-    config.nodes.flatMap {
-      case node: BftBenchmarkConfig.WriteNode[?] => Some(node)
+    config.nodes.zipWithIndex.flatMap {
+      case (node: BftBenchmarkConfig.WriteNode[?], nodeIx) => Some(nodeIx -> node)
       case _ => None
     }
 
@@ -106,12 +106,12 @@ final class BftBenchmark(
       txsToBeRead: ConcurrentHashMap[String, TxStatus],
       metrics: MetricRegistry,
   ): Unit =
-    readNodes.zipWithIndex.foreach { case (node, nodeIndex) =>
+    readNodes.foreach { case (nodeIx, node) =>
       bftBinding.subscribeOnce(
         node,
         txIdFuture => {
           // Executes in the read task itself, avoiding delays and starvation.
-          txIdFuture.thenAccept(processRead(nodeIndex, txsToBeRead, metrics, _))
+          txIdFuture.thenAccept(processRead(nodeIx, txsToBeRead, metrics, _))
           ()
         },
       )
@@ -122,11 +122,19 @@ final class BftBenchmark(
       metrics: MetricRegistry,
   )(scheduler: ScheduledExecutorService): Seq[ScheduledFuture[?]] = {
     log.info(s"Starting scheduled writes every ${config.perNodeWritePeriod.toNanos} nanos")
+    val testCatchup = config.testCatchup
 
-    writeNodes.zipWithIndex.map { case (node, nodeIndex) =>
+    val delayForNodesThatAreDown =
+      testCatchup.durationNodesAreDown.plus(testCatchup.durationNodeNeedToStartup).toNanos
+    writeNodes.map { case (nodeIx, node) =>
+      val initialDelay = if (testCatchup.nodesToStop.contains(nodeIx)) {
+        delayForNodesThatAreDown
+      } else {
+        0L // No initial delay.
+      }
       scheduler.scheduleAtFixedRate(
-        writeRunnable(node, nodeIndex, txsToBeRead, metrics),
-        0, // No initial delay.
+        writeRunnable(node, nodeIx, txsToBeRead, metrics),
+        initialDelay,
         config.perNodeWritePeriod.toNanos, // Repeated write period.
         TimeUnit.NANOSECONDS,
       )

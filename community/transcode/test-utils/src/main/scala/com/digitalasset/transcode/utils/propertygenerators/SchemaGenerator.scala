@@ -69,6 +69,7 @@ object SchemaGenerator:
                   .map((ix, v) => DynamicValue.Variant(ix, v))
               case Descriptor.Enumeration(cases) =>
                 Gen.int(0, cases.length - 1).map(DynamicValue.Enumeration)
+              case Descriptor.Unknown => Gen.empty
           yield result
       )
 

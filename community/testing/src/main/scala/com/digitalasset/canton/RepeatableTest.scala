@@ -6,11 +6,9 @@ package com.digitalasset.canton
 import cats.implicits.*
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MonadUtil
 import org.scalatest.*
 
 import scala.annotation.tailrec
-import scala.concurrent.Future
 
 /** A trait containing the tag to enable repeat runs of tests.
   */
@@ -61,15 +59,18 @@ trait RepeatableAsyncTestSuiteTest extends RepeatableTest with AsyncTestSuite {
 
     val repeat = RepeatableTest.repeats(test.tags)
     if (repeat > 1) logger.info(s"Repeating async test $repeat times")
-    val init = super.withFixture(test).toFuture
 
-    def process(outcome: Outcome): Future[Outcome] =
-      if (outcome.isSucceeded)
-        // Run the test again
-        super.withFixture(test).toFuture
-      else Future.successful(outcome)
-    val result = MonadUtil.repeatFlatmap(init, process, repeat - 1);
-    new FutureOutcome(result)
+    val finalResult = repeat.tailRecM { remaining =>
+      super.withFixture(test).toFuture.map { outcome =>
+        if (!outcome.isSucceeded || remaining <= 1) {
+          Right(outcome)
+        } else {
+          Left(remaining - 1)
+        }
+      }
+    }
+
+    new FutureOutcome(finalResult)
   }
 
 }

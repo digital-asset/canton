@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxEither
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.connection.v30
@@ -34,7 +33,8 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Channel, ClientInterceptors}
 import org.apache.pekko.stream.Materializer
 
@@ -83,7 +83,8 @@ class GrpcSequencerConnectionStub(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError, HandshakeResponse] = {
-    val handshakeRequest = HandshakeRequest(clientProtocolVersions, minimumProtocolVersion)
+    val handshakeRequest =
+      HandshakeRequest(clientProtocolVersions, minimumProtocolVersion, ReleaseVersion.current)
 
     for {
       handshakeResponseP <- connection

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.traffic.store.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -19,6 +18,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -85,7 +85,7 @@ class DbTrafficPurchasedStore(
 
         storage
           .queryAndUpdate(
-            DbStorage.bulkOperation_(insertSql, items, storage.profile) { pp => balance =>
+            DbStorage.bulkOperation(insertSql, items, storage.profile) { pp => balance =>
               val memberId = memberMap(balance.value.member).memberId
 
               pp >> memberId
@@ -94,7 +94,7 @@ class DbTrafficPurchasedStore(
               pp >> balance.value.serial
             },
             functionFullName,
-          )(traceContext, callerCloseContext)
+          )(traceContext, callerCloseContext, implicitly)
           .map(_ => Seq.fill(items.size)(()))
       }
 

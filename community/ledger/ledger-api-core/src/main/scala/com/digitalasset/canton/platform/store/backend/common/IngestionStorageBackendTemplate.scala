@@ -5,11 +5,7 @@ package com.digitalasset.canton.platform.store.backend.common
 
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-import com.digitalasset.canton.platform.store.backend.{
-  DbDto,
-  IngestionStorageBackend,
-  ParameterStorageBackend,
-}
+import com.digitalasset.canton.platform.store.backend.{DbDto, IngestionStorageBackend, LedgerEnd}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.sql.Connection
@@ -19,7 +15,7 @@ private[backend] class IngestionStorageBackendTemplate(
 ) extends IngestionStorageBackend[AppendOnlySchema.Batch] {
 
   override def deletePartiallyIngestedData(
-      ledgerEnd: Option[ParameterStorageBackend.LedgerEnd]
+      ledgerEnd: Option[LedgerEnd]
   )(connection: Connection): Unit = {
     val ledgerOffset = ledgerEnd.map(_.lastOffset)
     val lastStringInterningIdO = ledgerEnd.map(_.lastStringInterningId)
@@ -54,6 +50,8 @@ private[backend] class IngestionStorageBackendTemplate(
       },
       SQL"DELETE FROM lapi_update_meta WHERE ${QueryStrategy
           .offsetIsGreater("event_offset", ledgerOffset)}",
+      SQL"DELETE FROM lapi_events_acs_commitments WHERE ${QueryStrategy
+          .eventSeqIdIsGreater("event_sequential_id", lastEventSequentialId)}",
       // As reassignment global offsets are persisted before the ledger end, they might change after indexer recovery, so in the cleanup
       // phase here we make sure that all the persisted global offsets are revoked which are after the ledger end.
       SQL"UPDATE par_reassignments SET unassignment_global_offset = null WHERE ${QueryStrategy

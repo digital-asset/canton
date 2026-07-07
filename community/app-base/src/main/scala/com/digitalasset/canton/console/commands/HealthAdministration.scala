@@ -131,7 +131,13 @@ abstract class HealthAdministration[S <: NodeStatus.Status](
                 "Since node is already initialized, it will never be ready to have its id set"
               )(TraceContext.empty)
               false
-            case NodeStatus.NotInitialized(_active, waitingFor) =>
+            case NodeStatus.NotInitialized(_active, waitingFor, _version) =>
+              if (waitingFor.contains(WaitingForInitialization)) {
+                logger.warn(
+                  "Node is waiting for initialization, it will never be ready to have its id set"
+                )(TraceContext.empty)
+              }
+
               waitingFor.contains(WaitingForId)
           },
         )
@@ -164,7 +170,7 @@ abstract class HealthAdministration[S <: NodeStatus.Status](
   @Help.Summary("Check if the node is running and is the active instance (mediator, participant)")
   def active: Boolean = status match {
     case NodeStatus.Success(status) => status.active
-    case NodeStatus.NotInitialized(active, _) => active
+    case NodeStatus.NotInitialized(active, _, _) => active
     case _ => false
   }
 

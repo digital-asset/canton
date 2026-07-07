@@ -16,7 +16,10 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
+  AuthServiceJWTSuppressionRule,
+  AuthStartupConfigSuppressionRule,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -34,6 +37,13 @@ trait MultipleAuthServicesIntegrationTest
 
   private val mySecret1 = NonEmptyString.tryCreate("pyjama")
   private val mySecret2 = NonEmptyString.tryCreate("underpants")
+
+  // TODO (i#33090): Scope-only tokens are deprecated starting Canton 3.5 and will be removed in Canton version 3.7.
+  //  This suppression shouldn't be needed anymore when we switch to audience-based tokens.
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -144,7 +154,6 @@ trait MultipleAuthServicesIntegrationTest
 
           loggerFactory.assertThrowsAndLogs[CommandFailure](
             client.ledger_api.state.acs.of_party(owner),
-            _.warningMessage should include("The Token's Signature resulted invalid"),
             _.warningMessage should include("The Token's Signature resulted invalid"),
             _.warningMessage should include regex
               """UNAUTHENTICATED\(6,.{8}\): The command is missing a \(valid\) JWT token""".r,

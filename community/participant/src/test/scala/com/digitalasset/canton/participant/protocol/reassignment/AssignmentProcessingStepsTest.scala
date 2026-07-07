@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
@@ -83,6 +82,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag, ResourceUtil}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest
 import org.scalatest.wordspec.AsyncWordSpec
@@ -262,7 +262,7 @@ final class AssignmentProcessingStepsTest
 
     ParsedReassignmentRequest(
       RequestCounter(1),
-      CantonTimestamp.Epoch,
+      CantonTimestamp.Epoch.immediateSuccessor,
       SequencerCounter(1),
       view,
       recipients,
@@ -403,10 +403,10 @@ final class AssignmentProcessingStepsTest
       // We need to change the contract instance otherwise we get another error (AssignmentSubmitterMustBeStakeholder)
       val contract = ExampleTransactionFactory.asContractInstance(
         contractId = coidAbs1,
-        contractInstance = ExampleTransactionFactory.contractInstance(),
+        arg = ExampleTransactionFactory.defaultVersionedValue,
         ledgerTime = CreationTime.CreatedAt(CantonTimestamp.Epoch.toLf),
         metadata = ContractMetadata.tryCreate(Set(party3), Set(party3), None),
-      )()
+      )
 
       val unassignmentData2 = ReassignmentStoreTest.mkUnassignmentDataForSynchronizer(
         sourceMediator,
@@ -576,7 +576,7 @@ final class AssignmentProcessingStepsTest
             ),
             _.shouldBeCantonError(
               SyncServiceAlarm,
-              _ shouldBe s"Received 2 instead of 1 views in Request ${CantonTimestamp.Epoch}. Discarding all but the first view.",
+              _ shouldBe s"Received 2 instead of 1 views in Request ${parsedRequest.requestTimestamp}. Discarding all but the first view.",
             ),
           )
       } yield {
@@ -631,44 +631,15 @@ final class AssignmentProcessingStepsTest
       }
     }
 
-    def shouldFailWithInvalidPackage(
-        invalidRpId: ReassignmentTag[LfPackageId]
-    ): Future[scalatest.Assertion] = {
-      val testContract = ExampleContractFactory.build()
-
-      val expected = "bad-contract"
-
-      val contractValidator =
-        new TestValidator(Map((testContract.contractId, invalidRpId.unwrap) -> expected))
-
-      val assignmentProcessingSteps =
-        testInstance(targetPsid, cryptoClient, None, contractValidator)
-
+    "abstain when the unassignment data is not found" in {
       for {
         deps <- statefulDependencies
-        (persistentState, ephemeralState) = deps
+        (_, ephemeralState) = deps
 
-        _ <- valueOrFail(persistentState.reassignmentStore.addUnassignmentData(unassignmentData))(
-          "add reassignment data failed"
-        ).failOnShutdown
+        // The unassignment data is deliberately not added, so it cannot be found during validation.
+        fullAssignmentTree = fullAssignmentTreeFromUnassignmentData(unassignmentData)
 
-        fullAssignmentTree = makeFullAssignmentTree(
-          party1,
-          testContract,
-          invalidRpId match {
-            case source: Source[?] => source
-            case _ => Source(testContract.templateId.packageId)
-          },
-          invalidRpId match {
-            case target: Target[?] => target
-            case _ => Target(testContract.templateId.packageId)
-          },
-          targetPsid,
-          targetMediator,
-          reassigningParticipants = Set(participant),
-        )
-
-        result <-
+        result <- valueOrFail(
           assignmentProcessingSteps
             .constructPendingDataAndResponse(
               mkParsedRequest(fullAssignmentTree),
@@ -679,29 +650,92 @@ final class AssignmentProcessingStepsTest
               DummyTickRequest,
               PublishUpdateViaRecordOrderPublisher.noop,
             )
-            .failOnShutdown
+        )("construction of pending data and response failed").failOnShutdown
         confirmationResponse <- result.confirmationResponsesF.failOnShutdown
-
       } yield {
         confirmationResponse.valueOrFail("no response")._1.responses should matchPattern {
           case Seq(ConfirmationResponse(_, LocalAbstain(_), _)) =>
         }
-        val assignmentValidationResult = result.pendingData.assignmentValidationResult
-        val modelConformanceError =
-          assignmentValidationResult.commonValidationResult.contractAuthenticationResultF.value.futureValueUS
-
-        modelConformanceError.left.value match {
-          case ContractValidationError(ref, contractId, rpId, reason) =>
-            ref shouldBe fullAssignmentTree.reassignmentRef
-            contractId shouldBe testContract.contractId
-            reason should include(expected)
-          case other => fail(s"Did not expect $other")
-        }
-
-        assignmentValidationResult.reassigningParticipantValidationResult.errors should contain(
+        result.pendingData.assignmentValidationResult.reassigningParticipantValidationResult.errors should contain(
           UnassignmentDataNotFound(fullAssignmentTree.reassignmentId)
         )
       }
+    }
+
+    def shouldFailWithInvalidPackage(
+        invalidRpId: ReassignmentTag[LfPackageId]
+    ): scalatest.Assertion = {
+      val testContract = ExampleContractFactory.build()
+
+      val expected = "bad-contract"
+
+      val contractValidator =
+        new TestValidator(Map((testContract.contractId, invalidRpId.unwrap) -> expected))
+
+      val assignmentProcessingSteps =
+        testInstance(targetPsid, cryptoClient, None, contractValidator)
+
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        (for {
+          deps <- statefulDependencies
+          (persistentState, ephemeralState) = deps
+
+          _ <- valueOrFail(persistentState.reassignmentStore.addUnassignmentData(unassignmentData))(
+            "add reassignment data failed"
+          ).failOnShutdown
+
+          fullAssignmentTree = makeFullAssignmentTree(
+            party1,
+            testContract,
+            invalidRpId match {
+              case source: Source[?] => source
+              case _ => Source(testContract.templateId.packageId)
+            },
+            invalidRpId match {
+              case target: Target[?] => target
+              case _ => Target(testContract.templateId.packageId)
+            },
+            targetPsid,
+            targetMediator,
+            reassigningParticipants = Set(participant),
+          )
+
+          result <-
+            assignmentProcessingSteps
+              .constructPendingDataAndResponse(
+                mkParsedRequest(fullAssignmentTree),
+                ephemeralState.reassignmentCache,
+                FutureUnlessShutdown.pure(mkActivenessResult()),
+                engineController =
+                  EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
+                DummyTickRequest,
+                PublishUpdateViaRecordOrderPublisher.noop,
+              )
+              .failOnShutdown
+          confirmationResponse <- result.confirmationResponsesF.failOnShutdown
+
+        } yield {
+          confirmationResponse.valueOrFail("no response")._1.responses should matchPattern {
+            case Seq(ConfirmationResponse(_, _: LocalReject, _)) =>
+          }
+          val assignmentValidationResult = result.pendingData.assignmentValidationResult
+          val modelConformanceError =
+            assignmentValidationResult.commonValidationResult.contractAuthenticationResultF.value.futureValueUS
+
+          modelConformanceError.left.value match {
+            case ContractValidationError(ref, contractId, rpId, reason) =>
+              ref shouldBe fullAssignmentTree.reassignmentRef
+              contractId shouldBe testContract.contractId
+              reason should include(expected)
+            case other => fail(s"Did not expect $other")
+          }
+
+          assignmentValidationResult.reassigningParticipantValidationResult.errors should contain(
+            UnassignmentDataNotFound(fullAssignmentTree.reassignmentId)
+          )
+        }).futureValue,
+        modelConformanceError,
+      )
     }
 
     "fail when an invalid source validation package is given" in {
@@ -826,7 +860,7 @@ final class AssignmentProcessingStepsTest
       PublishUpdateViaRecordOrderPublisher.noop,
       trafficCost = NonNegativeLong.tryCreate(123L),
     )
-    val mockDeliver = mock[Deliver[DefaultOpenEnvelope]]
+    val mockDeliver = mock[Deliver[Batch[DefaultOpenEnvelope]]]
     when(mockDeliver.timestamp).thenReturn(CantonTimestamp.Epoch)
 
     "succeed without errors" in {

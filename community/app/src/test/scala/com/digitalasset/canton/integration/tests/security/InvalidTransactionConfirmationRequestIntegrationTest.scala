@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.security
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
@@ -22,8 +21,8 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{
   GenTransactionTree,
   LightTransactionViewTree,
+  SubviewReferenceAndKey,
   TransactionView,
-  ViewHashAndKey,
 }
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -67,8 +66,9 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.{MaliciousParticipantNode, MaxBytesToDecompress}
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueText}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.scalatest.Tag
@@ -190,7 +190,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               contract.inst.createdAt,
               contract.inst.authenticationData,
             )
-            val _serialization = new TransactionCoder(allowNullCharacters = true)
+            val _serialization = new ContractInstanceCoder(allowNullCharacters = true)
               .encodeFatContractInstance(_inst)
               .value
             val _createdContract = CreatedContract.tryCreate(
@@ -693,15 +693,17 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
           }
 
           // change the randomness assigned to the first subview in the view tree
-          val subviewHash =
-            viewTree.subviewHashesAndKeys.headOption.valueOrFail("retrieve subview").viewHash
+          val subviewReference =
+            viewTree.subviewReferencesAndKeys.headOption
+              .valueOrFail("retrieve subview")
+              .subviewReference
 
           val newLtvt = LightTransactionViewTree.tryCreate(
             viewTree.tree,
-            viewTree.subviewHashesAndKeys.updated(
+            viewTree.subviewReferencesAndKeys.updated(
               0,
-              ViewHashAndKey(
-                subviewHash,
+              SubviewReferenceAndKey(
+                subviewReference,
                 pureCrypto.generateSecureRandomness(
                   EncryptedViewMessage.computeRandomnessLength(pureCrypto)
                 ),

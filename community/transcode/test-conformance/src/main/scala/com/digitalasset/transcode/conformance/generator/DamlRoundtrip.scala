@@ -133,6 +133,10 @@ data ${id.entityName} = ${cases.mkString(" | ")}
   deriving (Eq, Show, Ord)"""
           val _ = defs.put(id, (Seq.empty, content))
 
+        case Descriptor.Unknown =>
+          val content = s"data ${id.entityName} ${params.mkString(" ")}"
+          val _ = defs.put(id, (List.empty, content))
+
   def toDamlValue(descriptor: Descriptor, dv: DynamicValue)(using
       vars: Map[TypeVarName, Descriptor]
   ): String =
@@ -161,6 +165,7 @@ data ${id.entityName} = ${cases.mkString(" | ")}
               case other => s"(${toDamlValue(other, caseValue)})"
             )
           case Descriptor.Enumeration(cases) => s"${id.moduleName}.${cases(dv.enumeration)}"
+          case Descriptor.Unknown => throw RuntimeException(s"Unexpected value of unknown type")
 
       case Descriptor.Variable(name) => toDamlValue(vars(name), dv)
 

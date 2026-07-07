@@ -55,10 +55,12 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.InitialTopologySnapshotValidator
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
@@ -85,6 +87,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       syncPersistentStateManager: SyncPersistentStateManager,
       sequencerAggregatedInfo: SequencerAggregatedInfo,
       connectionPool: SequencerConnectionPool,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(
       cryptoApiProvider: SyncCryptoApiParticipantProvider,
       clock: Clock,
@@ -265,6 +268,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
               psid,
               config.synchronizerAlias,
               client,
+              onboardingTransactions,
             )
             _ <- EitherT.cond[FutureUnlessShutdown](
               success,
@@ -360,7 +364,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
     synchronizeWithClosing("check-for-synchronizer-topology-initialization")(
-      EitherT.right[SynchronizerRegistryError](connectivityStatusStore.isTopologyInitialized)
+      EitherT.right[SynchronizerRegistryError](connectivityStatusStore.isTopologyInitialized())
     ).flatMap {
       case true =>
         EitherT.right[SynchronizerRegistryError](FutureUnlessShutdown.unit)
@@ -386,7 +390,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
   )(implicit
       loggingContext: ErrorLoggingContext
   ): Either[SynchronizerIdMismatch.Error, Unit] =
-    config.synchronizerId match {
+    config.psid match {
       case None => Either.unit
       case Some(configuredSynchronizerId) =>
         Either.cond(
@@ -521,16 +525,28 @@ object SynchronizerRegistryHelpers {
       predecessorSyncStateO
         .traverse_ { case (predecessor, predecessorSyncState) =>
           for {
-            isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized
-            // if topology is not initialized, transfer the topology state from the predecessor,
-            // but only if this is not a late upgrade
-            _ <- MonadUtil.when(!isTopologyInitialized && !predecessor.isLateUpgrade)(
-              persistentState.topologyStore
-                .copyFromPredecessorSynchronizerStore(
-                  predecessorSyncState.topologyStore
-                )
-                .flatMap(_ => persistentState.connectivityStatusStore.setTopologyInitialized())
-            )
+            isTopologyInitialized <- persistentState.connectivityStatusStore.isTopologyInitialized()
+
+            shouldCopyTopology = !isTopologyInitialized && !predecessor.isLateUpgrade
+            _ <-
+              if (shouldCopyTopology) {
+                for {
+                  _ <- persistentState.topologyStore
+                    .copyFromPredecessorSynchronizerStore(
+                      predecessorSyncState.topologyStore
+                    )
+
+                  _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
+                } yield ()
+              } else {
+                if (predecessor.isLateUpgrade)
+                  loggingContext.info(
+                    s"LSU to ${persistentState.psid.suffix}: Topology will not be copied because of late upgrade"
+                  )
+
+                FutureUnlessShutdown.unit
+              }
+
             _ = metrics.setLsuStatus(
               ParticipantMetrics.LsuStatus.LocalCopyDone,
               persistentState.psid,

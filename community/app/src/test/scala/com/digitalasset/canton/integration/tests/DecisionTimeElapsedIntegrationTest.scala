@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -21,9 +21,11 @@ import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.util.FutureUtil
 
 import java.time.Duration
 import java.util.UUID
+import scala.concurrent.Promise
 import scala.jdk.CollectionConverters.*
 
 trait DecisionTimeElapsedIntegrationTest
@@ -70,17 +72,31 @@ trait DecisionTimeElapsedIntegrationTest
     // we delay sequencing the result until after the decision-time has elapsed
     // as the max-sequencing-time should be set to the decision-time this will cause the sequencer to drop the send
     // however the time-proofs should cause the transaction to timeout at the participant
+    val receivedSubmissionRequest = Promise[Unit]()
+    val releasedDecision = Promise[Unit]()
     sequencer.setPolicy_("advance sim clock to after mediator timeout") {
       (submissionRequest: SubmissionRequest) =>
         submissionRequest.sender match {
           case _: MediatorId =>
-            env.environment.simClock.value
-              .advance(Duration.ofMillis(decisionTimeout.toMillis).plusSeconds(1))
-            SendDecision.Process
+            receivedSubmissionRequest.success(())
+            SendDecision.HoldBack(releasedDecision.future)
           case _: ParticipantId | _: SequencerId =>
             SendDecision.Process
         }
     }
+
+    FutureUtil.doNotAwait(
+      receivedSubmissionRequest.future.map { _ =>
+        env.environment.simClock.value
+          .advance(Duration.ofMillis(decisionTimeout.toMillis).plusSeconds(1))
+        TestUtils.waitForTargetTimeOnSynchronizerNode(
+          targetTime = environment.simClock.value.now,
+          logger = logger,
+        )(sequencer1)
+        releasedDecision.success(())
+      },
+      "advancing the clock to after the mediator timeout has failed",
+    )
 
     val pingCommand =
       new Ping(
@@ -128,6 +144,6 @@ trait DecisionTimeElapsedIntegrationTest
 
 class DecisionTimeElapsedIntegrationTestPostgres extends DecisionTimeElapsedIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

@@ -127,7 +127,6 @@ The following tools are required for running those scripts:
 
 - `openssl <https://docs.openssl.org/3.5/man1/openssl/>`_: CLI tool used to detect key formats and encode data to base64. It's also used in the example scripts (see below) to generate keys and signatures.
 - `buf <https://buf.build/product/cli>`_: CLI tool used to convert between protobuf binary and JSON formats. Used to build and visualize transactions before signing them.
-- `xxd <https://linux.die.net/man/1/xxd>`_: Linux command to convert between bytes and hexadecimal representation
 - `gunzip <https://linux.die.net/man/1/gunzip>`_: Linux command to decompress gzipped files. Used to inspect the buf image and provide better error reporting.
 - `jq <https://jqlang.org/>`_: CLI tool used to manipulate JSON data, used to build and display protobuf messages in JSON format.
 

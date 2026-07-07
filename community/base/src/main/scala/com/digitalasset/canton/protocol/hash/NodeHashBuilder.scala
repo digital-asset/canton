@@ -5,76 +5,115 @@ package com.digitalasset.canton.protocol.hash
 
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.protocol.LfHash
-import com.digitalasset.canton.protocol.hash.NodeBuilder.NodeEncodingV1
+import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
+import com.digitalasset.canton.util.RoseTree
 import com.digitalasset.canton.version.HashingSchemeVersion
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{Node, NodeId, SerializationVersion}
-import com.digitalasset.daml.lf.value.Value
 
-import TransactionHash.*
+import scala.collection.immutable.SortedMap
 
-/** Hash builder with additional methods to encode and hash nodes.
+/** Hash builder with additional methods to encode and hash nodes. Specific hashing version schemes
+  * must implement this class.
   */
-private sealed abstract class NodeHashBuilder(
+private[hash] abstract class NodeHashBuilder(
     purpose: HashPurpose,
     hashTracer: HashTracer,
+    protected val hashingSchemeVersion: HashingSchemeVersion,
 ) extends LfValueHashBuilder(purpose, hashTracer) {
 
-  def addHashingSchemeVersion(hashingSchemeVersion: HashingSchemeVersion): this.type =
-    addByte(
-      hashingSchemeVersion.index.byteValue,
-      byte => s"${formatByteToHexString(byte)} (Hashing Scheme Version)",
-    )
+  /** Initializes this builder with a node's fields. For exercise and rollback nodes (which have
+    * children), writes all fields including the children array length prefix, but NOT the children
+    * hashes themselves. Use [[hashNode]] to hash a complete subtree iteratively.
+    */
+  protected def initNode(
+      node: Node,
+      nodeSeedO: Option[LfHash],
+  ): this.type
 
-  def addNodeEncodingVersion(nodeVersion: Int): this.type =
-    addByte(
-      nodeVersion.byteValue,
-      byte => s"${formatByteToHexString(byte)} (Node Encoding Version)",
-    )
+  /** Creates a new builder, using the provided hash tracer
+    */
+  private[hash] def newBuilder(hashTracer: HashTracer): NodeHashBuilder
 
-  def addMetadataEncodingVersion(metadataVersion: Int): this.type =
-    addByte(
-      metadataVersion.byteValue,
-      byte => s"${formatByteToHexString(byte)} (Metadata Encoding Version)",
-    )
-
-  private[hash] def hashNode(
+  /** Hashes a node and its entire subtree using an iterative (stack-safe) traversal powered by
+    * [[RoseTree.foldLeft]]. Exercise and rollback nodes are handled by writing the children array
+    * length prefix in [[initNode]], then adding each child hash via the fold update step, avoiding
+    * recursive JVM stack frames. Takes a `Node` directly rather than a `NodeId` because the
+    * metadata hasher calls this for disclosed Create nodes that have no NodeId. Using NodeId as the
+    * item type would require Option[NodeId] or a fake id at the metadata callsite.
+    */
+  private[hash] final def hashNode(
       node: Node,
       nodeSeed: Option[LfHash],
       nodes: Map[NodeId, Node],
       nodeSeeds: Map[NodeId, LfHash],
-      hashTracer: HashTracer = this.hashTracer,
-  ): Hash
+      hashTracer: HashTracer,
+  ): Hash = {
+    // Validate the root node's LF serialization version upfront.
+    node.optVersion.foreach(
+      NodeHashBuilder
+        .assertHashingVersionSupportsLfSerializationVersion(_, hashingSchemeVersion)
+    )
 
-  @throws[NodeHashingError]
-  private def addNodeFromNodeId(
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): (this.type, NodeId) => this.type =
-    (builder, nodeId) => {
-      val node = nodes.getOrElse(nodeId, throw NodeHashingError.IncompleteTransactionTree(nodeId))
-      addHash(
-        builder.hashNode(node, nodeSeeds.get(nodeId), nodes, nodeSeeds, hashTracer.subNodeTracer),
-        "(Hashed Inner Node)",
-      )
+    // Each item carries the node, its seed, and the tracer to use when creating its builder.
+    // The tracer is threaded through the children iterator so that nesting depth is preserved for
+    // debug tracers (each level uses subNodeTracer of its parent).
+    // Node is used directly rather than NodeId because we don't know the nodeId of root nodes here.
+    // It also keeps the RoseTree.foldLeft call very simple because we keep the NodeId -> Node lookup
+    // localized to the children call.
+    type Item = (Node, Option[LfHash], HashTracer)
+
+    val treeOps = new RoseTree.TreeOps[Item] {
+      override def children(item: Item): Iterator[Item] = {
+        val (n, _, itemTracer) = item
+        val childTracer = itemTracer.subNodeTracer
+        val childIds: Iterator[NodeId] = n match {
+          case e: Node.Exercise => e.children.iterator
+          case r: Node.Rollback => r.children.iterator
+          case _ => Iterator.empty
+        }
+        childIds.map { id =>
+          val child =
+            nodes.getOrElse(id, throw NodeHashingError.IncompleteTransactionTree(id))
+          // Validate each child's LF serialization version before descending.
+          child.optVersion.foreach(
+            NodeHashBuilder
+              .assertHashingVersionSupportsLfSerializationVersion(_, hashingSchemeVersion)
+          )
+          (child, nodeSeeds.get(id), childTracer)
+        }
+      }
     }
 
-  def addNodesFromNodeIds(
-      nodeIds: ImmArray[NodeId],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): this.type =
-    addArray(nodeIds)(addNodeFromNodeId(nodes, nodeSeeds))
+    RoseTree.foldLeft(treeOps, (node, nodeSeed, hashTracer))(
+      init = { case (n, seedOpt, tracer) => newBuilder(tracer).initNode(n, seedOpt) }
+    )(
+      finish = _.finish()
+    )(
+      update = { (builder, childHash) => builder.addHash(childHash, "(Hashed Inner Node)") }
+    )
+  }
 }
 
-private object NodeBuilder {
-  // Version of the protobuf used to encode nodes defined in the interactive_submission_data.proto
-  private[hash] val NodeEncodingV1 = 1
-  private[hash] val HashingVersionToSupportedLFSerializationVersionMapping
-      : Map[HashingSchemeVersion, Set[SerializationVersion]] =
-    Map(
-      HashingSchemeVersion.V2 -> Set(SerializationVersion.V1)
+private[hash] object NodeHashBuilder {
+  private[hash] val HashingVersionToMaxSupportedLFSerializationVersionMapping
+      : SortedMap[HashingSchemeVersion, SerializationVersion] =
+    SortedMap(
+      HashingSchemeVersion.V2 -> SerializationVersion.V1,
+      HashingSchemeVersion.V3 -> SerializationVersion.V2,
+      HashingSchemeVersion.V4 -> SerializationVersion.VDev,
     )
+
+  private[hash] def minimumHashingSchemeVersionForLfSerializationVersion(
+      serializationVersion: SerializationVersion
+  ): Option[HashingSchemeVersion] =
+    HashingVersionToMaxSupportedLFSerializationVersionMapping.collectFirst {
+      case (hashingSchemeVersion, maximumSupportedLfVersion)
+          if Ordering[SerializationVersion].lteq(
+            serializationVersion,
+            maximumSupportedLfVersion,
+          ) =>
+        hashingSchemeVersion
+    }
 
   private[hash] sealed abstract class NodeTag(val tag: Byte)
 
@@ -83,197 +122,45 @@ private object NodeBuilder {
     case object ExerciseTag extends NodeTag(1)
     case object FetchTag extends NodeTag(2)
     case object RollbackTag extends NodeTag(3)
+    case object QueryByKey extends NodeTag(4)
   }
 
   @throws[NodeHashingError]
   private[hash] def assertHashingVersionSupportsLfSerializationVersion(
-      version: SerializationVersion,
-      nodeHashVersion: HashingSchemeVersion,
-  ): Unit =
-    if (
-      !HashingVersionToSupportedLFSerializationVersionMapping
-        // This really shouldn't happen, unless someone removed an entry from the HashingVersionToSupportedLFVersionMapping map
+      nodeLfSerializationVersion: SerializationVersion,
+      hashingSchemeVersion: HashingSchemeVersion,
+  ): Unit = {
+    val maximumLfSerializationVersionSupportedByHashingSchemeVersion: SerializationVersion =
+      HashingVersionToMaxSupportedLFSerializationVersionMapping
         .getOrElse(
-          nodeHashVersion,
-          throw NodeHashingError.UnsupportedHashingVersion(nodeHashVersion),
+          hashingSchemeVersion,
+          // This really shouldn't happen, unless someone removed an entry from the HashingVersionToMaxSupportedLFSerializationVersionMapping map
+          throw NodeHashingError.UnsupportedHashingVersion(hashingSchemeVersion),
         )
-        .contains(version)
-    ) throw NodeHashingError.UnsupportedSerializationVersion(nodeHashVersion, version)
-}
-
-private class NodeBuilderV1(
-    purpose: HashPurpose,
-    hashTracer: HashTracer,
-    enforceNodeSeedForCreateNodes: Boolean,
-) extends NodeHashBuilder(purpose, hashTracer) {
-
-  // TODO(#32003): stop hardcoding V2
-  override private[hash] def hashNode(
-      node: Node,
-      nodeSeed: Option[LfHash],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-      hashTracer: HashTracer = this.hashTracer,
-  ): Hash = {
-    node.optVersion
-      .foreach(
-        NodeBuilder
-          .assertHashingVersionSupportsLfSerializationVersion(_, HashingSchemeVersion.V2)
+    if (
+      // If the node version is > the max supported version, throw
+      Ordering[SerializationVersion].gt(
+        nodeLfSerializationVersion,
+        maximumLfSerializationVersionSupportedByHashingSchemeVersion,
       )
-
-    new NodeBuilderV1(purpose, hashTracer, enforceNodeSeedForCreateNodes)
-      .addNodeEncodingVersion(NodeEncodingV1)
-      .addNode(node, nodeSeed, nodes, nodeSeeds)
-      .finish()
-  }
-
-  private def addCreateNode(nodeSeed: Option[LfHash]): Node.Create => this.type = {
-    // Pattern match to make it more obvious which fields are part of the hashing and which are not
-    case Node.Create(
-          coid,
-          packageName,
-          templateId,
-          arg,
-          signatories,
-          stakeholders,
-          keyOpt,
-          version,
-        ) =>
-      if (keyOpt.isDefined) notSupported("keyOpt in Create node") // 2.dev feature
-      addContext("Create Node")
-        .withContext("Node Version")(_.addString(SerializationVersion.toProtoValue(version)))
-        .addByte(NodeBuilder.NodeTag.CreateTag.tag, _ => "Create Node Tag")
-        .withContext("Node Seed")(
-          _.addOptional(nodeSeed, builder => seed => builder.addLfHash(seed, "node seed"))
-        )
-        .withContext("Contract Id")(_.addCid(coid))
-        .withContext("Package Name")(_.addString(packageName))
-        .withContext("Template Id")(_.addIdentifier(templateId))
-        .withContext("Arg")(_.addTypedValue(arg))
-        .withContext("Signatories")(_.addStringSet(signatories))
-        .withContext("Stakeholders")(_.addStringSet(stakeholders))
-  }
-
-  private val addFetchNode: Node.Fetch => this.type = {
-    case Node.Fetch(
-          coid,
-          packageName,
-          templateId,
-          actingParties,
-          signatories,
-          stakeholders,
-          keyOpt,
-          byKey,
-          interfaceId,
-          version,
-        ) =>
-      if (keyOpt.nonEmpty) notSupported("keyOpt in Fetch node") // 2.dev feature
-      if (byKey) notSupported("byKey in Fetch node") // 2.dev feature
-      addContext("Fetch Node")
-        .withContext("Node Version")(_.addString(SerializationVersion.toProtoValue(version)))
-        .addByte(NodeBuilder.NodeTag.FetchTag.tag, _ => "Fetch Node Tag")
-        .withContext("Contract Id")(_.addCid(coid))
-        .withContext("Package Name")(_.addString(packageName))
-        .withContext("Template Id")(_.addIdentifier(templateId))
-        .withContext("Signatories")(_.addStringSet(signatories))
-        .withContext("Stakeholders")(_.addStringSet(stakeholders))
-        .withContext("Interface Id")(_.addOptional(interfaceId, _.addIdentifier))
-        .withContext("Acting Parties")(_.addStringSet(actingParties))
-  }
-
-  private def addExerciseNode(
-      nodes: Map[NodeId, Node],
-      nodeSeed: LfHash,
-      nodeSeeds: Map[NodeId, LfHash],
-  ): Node.Exercise => this.type = {
-    case Node.Exercise(
-          targetCoid,
-          packageName,
-          templateId,
-          interfaceId,
-          choiceId,
-          consuming,
-          actingParties,
-          chosenValue,
-          stakeholders,
-          signatories,
-          choiceObservers,
-          choiceAuthorizers,
-          children,
-          exerciseResult,
-          keyOpt,
-          byKey,
-          // TODO(https://github.com/digital-asset/canton/issues/513)
-          // handle external calls
-          _,
-          version,
-        ) =>
-      if (choiceAuthorizers.nonEmpty)
-        notSupported("choiceAuthorizers in Exercise node") // 2.dev feature
-      if (keyOpt.nonEmpty) notSupported("keyOpt in Exercise node") // 2.dev feature
-      if (byKey) notSupported("byKey in Exercise node") // 2.dev feature
-      addContext("Exercise Node")
-        .withContext("Node Version")(_.addString(SerializationVersion.toProtoValue(version)))
-        .addByte(NodeBuilder.NodeTag.ExerciseTag.tag, _ => "Exercise Node Tag")
-        .withContext("Node Seed")(_.addLfHash(nodeSeed, "seed"))
-        .withContext("Contract Id")(_.addCid(targetCoid))
-        .withContext("Package Name")(_.addString(packageName))
-        .withContext("Template Id")(_.addIdentifier(templateId))
-        .withContext("Signatories")(_.addStringSet(signatories))
-        .withContext("Stakeholders")(_.addStringSet(stakeholders))
-        .withContext("Acting Parties")(_.addStringSet(actingParties))
-        .withContext("Interface Id")(_.addOptional(interfaceId, _.addIdentifier))
-        .withContext("Choice Id")(_.addString(choiceId))
-        .withContext("Chosen Value")(_.addTypedValue(chosenValue))
-        .withContext("Consuming")(_.addBool(consuming))
-        .withContext("Exercise Result")(
-          _.addOptional[Value](
-            exerciseResult,
-            builder => value => builder.addTypedValue(value),
-          )
-        )
-        .withContext("Choice Observers")(_.addStringSet(choiceObservers))
-        .withContext("Children")(_.addNodesFromNodeIds(children, nodes, nodeSeeds))
-  }
-
-  private def addRollbackNode(
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): Node.Rollback => this.type = { case Node.Rollback(children) =>
-    addContext("Rollback Node")
-      .addByte(NodeBuilder.NodeTag.RollbackTag.tag, _ => "Rollback Node Tag")
-      .withContext("Children")(_.addNodesFromNodeIds(children, nodes, nodeSeeds))
-  }
-
-  private def addNode(
-      node: Node,
-      nodeSeedO: Option[LfHash],
-      nodes: Map[NodeId, Node],
-      nodeSeeds: Map[NodeId, LfHash],
-  ): this.type = (node, nodeSeedO) match {
-    // Create nodes in a transaction should have a node seed, but we also need to encode create nodes for disclosed contracts
-    // which do not have one.
-    // We could differentiate between the 2 cases but to keep the encoding simpler we encode create nodes with an optional seed
-    case (create: Node.Create, nodeSeed) =>
-      // We can still enforce that create nodes within a transaction have a seed, even if we then encode it as an optional
-      if (enforceNodeSeedForCreateNodes && nodeSeed.isEmpty) missingNodeSeed(node)
-      addCreateNode(nodeSeed)(create)
-    case (fetch: Node.Fetch, _) => addFetchNode(fetch)
-    case (exercise: Node.Exercise, Some(nodeSeed)) =>
-      addExerciseNode(nodes, nodeSeed, nodeSeeds)(exercise)
-    case (_: Node.Exercise, None) => missingNodeSeed(node)
-    case (rollback: Node.Rollback, _) => addRollbackNode(nodes, nodeSeeds)(rollback)
-    case (_: Node.LookupByKey, _) =>
-      notSupported(s"LookupByKey node")
-  }
-
-  private[this] def notSupported(str: String): Nothing =
-    throw NodeHashingError.UnsupportedFeature(
-      s"$str is not supported in version ${HashingSchemeVersion.V2.index}"
     )
+      throw NodeHashingError.UnsupportedSerializationVersion(
+        hashingSchemeVersion,
+        nodeLfSerializationVersion,
+      )
+  }
 
-  private[this] def missingNodeSeed(node: Node): Nothing =
-    throw NodeHashingError.MissingNodeSeed(
-      s"Missing node seed for node $node"
-    )
+  def apply(
+      purpose: HashPurpose,
+      hashTracer: HashTracer,
+      enforceNodeSeedForCreateNodes: Boolean,
+      hashingSchemeVersion: HashingSchemeVersion,
+  ): NodeHashBuilder = hashingSchemeVersion match {
+    case HashingSchemeVersion.V2 =>
+      new v2.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+    case HashingSchemeVersion.V3 =>
+      new v3.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+    case HashingSchemeVersion.V4 =>
+      new v4.NodeHashBuilder(purpose, hashTracer, enforceNodeSeedForCreateNodes)
+  }
 }

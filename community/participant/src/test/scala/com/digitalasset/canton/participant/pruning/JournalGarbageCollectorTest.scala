@@ -23,8 +23,8 @@ class JournalGarbageCollectorTest extends BaseTestWordSpec with HasExecutionCont
         traceContext: TraceContext
     ): FutureUnlessShutdown[Unit] = {
       val ret = Promise[Unit]()
-      runningPromise.getAndSet(Some((ret))) match {
-        case Some(value) => fail("should not be running")
+      runningPromise.getAndSet(Some(ret)) match {
+        case Some(_value) => fail("should not be running")
         case None =>
           FutureUnlessShutdown.outcomeF(ret.future.map { _ =>
             runningPromise.set(None)
@@ -40,7 +40,6 @@ class JournalGarbageCollectorTest extends BaseTestWordSpec with HasExecutionCont
   }
 
   "journal cleaning" should {
-
     "rerun if scheduled while running" in {
       val t = new TestScheduler()
       t.flush(TraceContext.empty)
@@ -62,32 +61,5 @@ class JournalGarbageCollectorTest extends BaseTestWordSpec with HasExecutionCont
       // shut down in background
       t.runningPromise.get().value.success(())
     }
-    "not run if blocked" in {
-      val t = new TestScheduler()
-      t.flush(TraceContext.empty)
-      val f1 = t.addOneLock()
-      val f2 = t.addOneLock()
-      f1.isCompleted shouldBe false
-      f2.isCompleted shouldBe false
-      // complete running job
-      t.runningPromise.get().value.success(())
-      // eventually we should be done
-      eventually() {
-        t.runningPromise.get() shouldBe empty
-        f1.isCompleted shouldBe true
-        f2.isCompleted shouldBe true
-      }
-      // when rescheduled, shouldn't start
-      t.flush(TraceContext.empty)
-      t.runningPromise.get() shouldBe empty
-      // not start when removing one lock
-      t.removeOneLock()
-      t.runningPromise.get() shouldBe empty
-      // start when last lock is removed
-      t.removeOneLock()
-      t.runningPromise.get() should not be empty
-      t.runningPromise.get().value.success(())
-    }
   }
-
 }

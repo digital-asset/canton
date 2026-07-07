@@ -501,4 +501,4 @@ class AcsCommitmentNoWaitCounterParticipantIntegrationTestPostgres
 //}
 
 class AcsCommitmentNoWaitCounterParticipantIntegrationTestDefault
-    extends AcsCommitmentNoWaitCounterParticipantIntegrationTest {}
+    extends AcsCommitmentNoWaitCounterParticipantIntegrationTest

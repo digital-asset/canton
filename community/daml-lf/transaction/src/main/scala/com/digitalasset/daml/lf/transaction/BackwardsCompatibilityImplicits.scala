@@ -12,7 +12,10 @@ object BackwardsCompatibilityImplicits {
     def asCidOption: Option[ContractId] = underlying match {
       case Vector() => None
       case Vector(v) => Some(v)
-      case _ => throw new IllegalArgumentException(s"Expected a contractId vector of size 0 or 1, got ${underlying.size}")
+      case _ =>
+        throw new IllegalArgumentException(
+          s"Expected a contractId vector of size 0 or 1, got ${underlying.size}"
+        )
     }
   }
 
@@ -23,12 +26,14 @@ object BackwardsCompatibilityImplicits {
     }
   }
 
-  implicit class KeyMapVectorOps(val underlying: Map[GlobalKey, Vector[ContractId]]) extends AnyVal {
+  implicit class KeyMapVectorOps(val underlying: Map[GlobalKey, Vector[ContractId]])
+      extends AnyVal {
     def asCidOptionMap: Map[GlobalKey, Option[ContractId]] =
       underlying.transform((_, v) => v.asCidOption)
   }
 
-  implicit class KeyMapOptionOps(val underlying: Map[GlobalKey, Option[ContractId]]) extends AnyVal {
+  implicit class KeyMapOptionOps(val underlying: Map[GlobalKey, Option[ContractId]])
+      extends AnyVal {
     def asCidVectorMap: Map[GlobalKey, Vector[ContractId]] =
       underlying.transform((_, v) => v.asCidVector)
   }

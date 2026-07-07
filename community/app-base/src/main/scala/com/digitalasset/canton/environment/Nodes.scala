@@ -18,7 +18,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.resource.DbMigrations
-import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.synchronizer.mediator.{
   MediatorNode,
   MediatorNodeBootstrap,
@@ -97,7 +96,7 @@ trait Nodes[+Node <: CantonNode, +NodeBootstrap <: CantonNodeBootstrap[Node]]
 
 private sealed trait ManagedNodeStage[T]
 
-private final case class PreparingDatabase[T](
+private final case class Preparing[T](
     promise: Promise[Either[StartupError, T]]
 ) extends ManagedNodeStage[T]
 
@@ -215,15 +214,18 @@ class ManagedNodes[
     def runStartup(
         promise: Promise[Either[StartupError, NodeBootstrap]]
     ): EitherT[Future, StartupError, NodeBootstrap] = {
-      val params = parametersFor(name)
       val startup = for {
-        // start migration
-        _ <- EitherT(Future(checkMigration(name, config.storage, params)))
-        instance = {
-          val instance = create(name, config)
-          nodes.put(name, StartingUp(promise, instance)).discard
-          instance
-        }
+        // TODO(#3168): Handle node startup errors gracefully
+        // We use Future here to properly capture and process exception in `create`
+        instance <- EitherT.right(
+          Future(
+            {
+              val instance = create(name, config)
+              nodes.put(name, StartingUp(promise, instance)).discard
+              instance
+            }
+          )
+        )
         declarativeHandler <-
           instance
             .start()
@@ -244,9 +246,9 @@ class ManagedNodes[
     }
 
     val promise = Promise[Either[StartupError, NodeBootstrap]]()
-    nodes.putIfAbsent(name, PreparingDatabase(promise)) match {
+    nodes.putIfAbsent(name, Preparing(promise)) match {
       case None => runStartup(promise) // startup will run async
-      case Some(PreparingDatabase(promise)) => EitherT(promise.future)
+      case Some(Preparing(promise)) => EitherT(promise.future)
       case Some(StartingUp(promise, _)) => EitherT(promise.future)
       case Some(Running(node, _)) => EitherT.rightT(node)
     }
@@ -266,7 +268,7 @@ class ManagedNodes[
       for {
         cAndP <- configAndParams(name)
         (config, params) = cAndP
-        _ <- runMigration(name, config.storage, params.alphaVersionSupport)
+        _ <- runMigration(name, config.storage, devVersionSupport = params.devVersionSupport)
       } yield ()
     }
   )
@@ -276,7 +278,7 @@ class ManagedNodes[
       for {
         cAndP <- configAndParams(name)
         (config, params) = cAndP
-        _ <- runRepairMigration(name, config.storage, params.alphaVersionSupport)
+        _ <- runRepairMigration(name, config.storage, devVersionSupport = params.devVersionSupport)
       } yield ()
     }
   )
@@ -327,7 +329,7 @@ class ManagedNodes[
   ): EitherT[Future, ShutdownError, Unit] =
     EitherT(stage match {
       // wait for the node to complete startup
-      case PreparingDatabase(promise) => promise.future
+      case Preparing(promise) => promise.future
       case StartingUp(promise, _) => promise.future
       case Running(node, _) => Future.successful(Right(node))
     }).transform {
@@ -364,42 +366,14 @@ class ManagedNodes[
   private def createDbMigration(
       name: InstanceName,
       dbConfig: DbConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
   ): DbMigrations =
-    DbMigrations.create(dbConfig, alphaVersionSupport, timeouts, loggerFactory.append("node", name))
-
-  // if database is fresh, we will migrate it. Otherwise, we will check if there is any pending migrations,
-  // which need to be triggered manually.
-  private def checkMigration(
-      name: InstanceName,
-      storageConfig: StorageConfig,
-      params: CantonNodeParameters,
-  )(implicit traceContext: TraceContext): Either[StartupError, Unit] =
-    runIfUsingDatabase[Id](storageConfig) { dbConfig =>
-      val migrations = createDbMigration(name, dbConfig, params.alphaVersionSupport)
-
-      logger.info(s"Setting up database schemas for $name")
-
-      def errorMapping(err: DbMigrations.Error): StartupError =
-        err match {
-          case DbMigrations.PendingMigrationError(msg) => PendingDatabaseMigration(name, msg)
-          case err: DbMigrations.FlywayError => FailedDatabaseMigration(name, err)
-          case err: DbMigrations.DatabaseError => FailedDatabaseMigration(name, err)
-          case err: DbMigrations.DatabaseVersionError => FailedDatabaseVersionChecks(name, err)
-          case err: DbMigrations.DatabaseConfigError => FailedDatabaseConfigChecks(name, err)
-        }
-      val retryConfig =
-        if (storageConfig.parameters.failFastOnStartup) RetryConfig.failFast
-        else RetryConfig.forever
-
-      val result = migrations
-        .checkAndMigrate(params, retryConfig)
-        .leftMap(errorMapping)
-
-      result.value.onShutdown(
-        Left(ShutdownDuringStartup(name, "DB migration check interrupted due to shutdown"))
-      )
-    }
+    DbMigrations.create(
+      dbConfig,
+      devVersionSupport = devVersionSupport,
+      timeouts,
+      loggerFactory.append("node", name),
+    )
 
   private def checkNotRunning(name: InstanceName): Either[StartupError, Unit] =
     Either.cond(!isRunning(name), (), AlreadyRunning(name))
@@ -407,10 +381,10 @@ class ManagedNodes[
   private def runMigration(
       name: InstanceName,
       storageConfig: StorageConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig =>
-      createDbMigration(name, dbConfig, alphaVersionSupport)
+      createDbMigration(name, dbConfig, devVersionSupport = devVersionSupport)
         .migrateDatabase()
         .leftMap(FailedDatabaseMigration(name, _))
         .value
@@ -420,10 +394,10 @@ class ManagedNodes[
   private def runRepairMigration(
       name: InstanceName,
       storageConfig: StorageConfig,
-      alphaVersionSupport: Boolean,
+      devVersionSupport: Boolean,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig =>
-      createDbMigration(name, dbConfig, alphaVersionSupport)
+      createDbMigration(name, dbConfig, devVersionSupport = devVersionSupport)
         .repairFlywayMigration()
         .leftMap(FailedDatabaseRepairMigration(name, _))
         .value
@@ -454,7 +428,7 @@ class ParticipantNodes[B <: CantonNodeBootstrap[N], N <: CantonNode](
         DeclarativeApiManager
           .forParticipants(runnerFactory, timeouts.dynamicStateConsistencyTimeout, loggerFactory)
       ),
-    ) {}
+    )
 
 class SequencerNodes(
     create: (String, SequencerNodeConfig) => SequencerNodeBootstrap,

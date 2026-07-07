@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{
@@ -11,6 +10,7 @@ import com.digitalasset.canton.protocol.{
   TestSynchronizerParameters,
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 

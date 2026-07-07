@@ -109,6 +109,12 @@ private class LfSchemaProcessor[R](
             visitor.constructor(id, Seq.empty, lazyBody())
           },
         )
+      case TUnknown(id, args) =>
+        val typeParams = 1.to(args.size).map(i => TypeVarName(s"X$i")) // synthetic type params
+        val ctor =
+          tpeCache.getOrElseUpdate(id, visitor.constructor(id, typeParams, visitor.unknown))
+        if args.nonEmpty then visitor.application(ctor, typeParams, args.map(fromType))
+        else ctor
       case TTyConApp(id, cons, params, args) =>
         val ctor = tpeCache.getOrElseUpdate(
           id, {
@@ -190,6 +196,12 @@ private class LfSchemaProcessor[R](
       .contains(id.qualifiedName.name)
   }
 
+  private val isUnknown = cached { (id: Ref.Identifier) =>
+    val pkg = getPackage(id.packageId)
+    !pkg.modules.contains(id.qualifiedName.module) ||
+    !pkg.modules(id.qualifiedName.module).definitions.contains(id.qualifiedName.name)
+  }
+
   private val getPackageInfo = cached { (id: Ref.PackageId) =>
     getMetadataDetails(getPackage(id), id)
   }
@@ -234,6 +246,12 @@ private class LfSchemaProcessor[R](
       }
       dataCons <- condOpt(viewDef) { case Ast.DDataType(_, _, cons) => cons }
     yield (getIdentifier(id), dataCons)
+  }
+  private object TUnknown {
+    def unapply(tpe: Ast.Type): Option[(Identifier, Seq[Ast.Type])] = condOpt(tpe) {
+      case Util.TTyConApp(id, args) if isUnknown(id) => (getIdentifier(id), args.toSeq)
+      case Ast.TSynApp(id, args) if isUnknown(id) => (getIdentifier(id), args.toSeq)
+    }
   }
 
   private val logger = LoggerFactory.getLogger(getClass.getName)

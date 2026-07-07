@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.client
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -23,9 +22,9 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
+  SequencingParametersWithValidity,
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -41,10 +40,12 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable
@@ -577,6 +578,11 @@ trait VettedPackagesSnapshotClient {
     *   the participant for which we want to check the package vettings
     * @param packages
     *   the set of packages that should be vetted
+    * @param ledgerTime
+    *   the ledger time at which the vetting state should be checked
+    * @param checkDependencyVetting
+    *   Whether check the vetting state of the dependencies of the given packages. If false, only
+    *   the given packages are checked
     * @return
     *   Right the set of unvetted packages (which is empty if all packages are vetted) Left if a
     *   package is missing locally such that we can not verify the vetting state of the package
@@ -586,6 +592,8 @@ trait VettedPackagesSnapshotClient {
       participantId: ParticipantId,
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
+      // TODO(#33919): Remove flag once support for PV34 (checkDependencyVetting=true) is removed
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages]
 
   /** Checks the vetting state for the given packages and returns the packages that have no entry in
@@ -650,7 +658,7 @@ trait SynchronizerGovernanceSnapshotClient {
 
   def findDynamicSequencingParameters()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]]
+  ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]]
 
   /** List all the dynamic synchronizer parameters (past and current) */
   @deprecated(
@@ -697,7 +705,9 @@ trait SynchronizerUpgradeClient {
     */
   def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]]
+  ): FutureUnlessShutdown[
+    Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+  ]
 }
 
 trait TopologySnapshot
@@ -723,8 +733,8 @@ trait SynchronizerTopologyClientWithInit
     with HasFutureSupervision
     with NamedLogging {
 
-  /** Initializes the topology client with the topology store state and optionally with externally
-    * provided timestamps.
+  /** Updates the topology client with the topology store state and optionally with externally
+    * provided timestamps during startup.
     *
     * For `latestTopologyChangeTimestamp` uses:
     *   - latest accepted (non-proposal & non-rejected) topology change from the store
@@ -739,8 +749,8 @@ trait SynchronizerTopologyClientWithInit
     * @param synchronizerUpgradeTime
     *   upgradeTime from the predecessor synchronizer
     */
-  def initialize(
-      sequencerSnapshotTimestamp: Option[EffectiveTime] = None,
+  def updateKnownTimestampsDuringStartup(
+      sequencerSnapshotTimestamp: Option[SequencedTime] = None,
       synchronizerUpgradeTime: Option[SequencedTime] = None,
   )(implicit
       traceContext: TraceContext
@@ -1114,15 +1124,23 @@ trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient with Vet
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages
 
   override final def loadUnvettedPackagesOrDependencies(
       participantId: ParticipantId,
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
+      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages] =
     for (vettedPackages <- loadVettedPackages(participantId))
-      yield findUnvettedPackagesOrDependencies(participantId, packages, ledgerTime, vettedPackages)
+      yield findUnvettedPackagesOrDependencies(
+        participantId,
+        packages,
+        ledgerTime,
+        vettedPackages,
+        checkDependencyVetting,
+      )
 
   override final def determinePackagesWithNoVettingEntry(
       participantId: ParticipantId,

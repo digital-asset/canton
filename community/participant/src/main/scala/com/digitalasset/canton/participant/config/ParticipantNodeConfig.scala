@@ -7,7 +7,6 @@ import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.{ReplicationConfig, *}
 import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig}
@@ -28,6 +27,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
+  TrafficEnforcementConfig,
   UpdateServiceConfig,
   UserManagementServiceConfig,
 }
@@ -49,6 +49,7 @@ trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
 
 final case class ParticipantProtocolConfig(
     minimumProtocolVersion: Option[ProtocolVersion],
+    override val devVersionSupport: Boolean,
     override val alphaVersionSupport: Boolean,
     override val betaVersionSupport: Boolean,
     override val dontWarnOnDeprecatedPV: Boolean,
@@ -95,6 +96,7 @@ final case class ParticipantNodeConfig(
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig(),
     override val topology: TopologyConfig = TopologyConfig(),
     alphaDynamic: DeclarativeParticipantConfig = DeclarativeParticipantConfig(),
+    trafficEnforcement: TrafficEnforcementConfig = TrafficEnforcementConfig(),
 ) extends LocalNodeConfig
     with BaseParticipantConfig
     with ConfigDefaults[Option[DefaultPorts], ParticipantNodeConfig] {
@@ -128,33 +130,6 @@ final case class ParticipantNodeConfig(
       .modify(ReplicationConfig.withDefaultO(storage, _))
 }
 
-object ParticipantNodeConfig {
-  trait ParticipantNodeConfigDeprecationsImplicits {
-    implicit def deprecatedParticipantNodeConfig[X <: ParticipantNodeConfig]
-        : DeprecatedFieldsFor[X] = new DeprecatedFieldsFor[ParticipantNodeConfig] {
-      override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-        DeprecatedConfigUtils.MovedConfigPath(
-          "http-ledger-api.server",
-          since = "3.4.0",
-          to = Seq("http-ledger-api"),
-        ),
-        DeprecatedConfigUtils.MovedConfigPath(
-          "features.profileDir",
-          since = "3.5.0",
-          to = Seq("parameters.engine"),
-        ),
-        DeprecatedConfigUtils.MovedConfigPath(
-          "features.snapshotDir",
-          since = "3.5.0",
-          to = Seq("parameters.engine"),
-        ),
-      )
-    }
-  }
-
-  object DeprecatedImplicits extends ParticipantNodeConfigDeprecationsImplicits
-}
-
 /** Participant features configuration */
 final case class ParticipantFeaturesConfig()
 
@@ -176,9 +151,11 @@ final case class RemoteParticipantConfig(
     ledgerApi: FullClientConfig,
     ledgerJsonApi: Option[JsonClientConfig] = None,
     token: Option[String] = None,
+    httpHealth: Option[HttpHealthServerConfig] = None,
 ) extends BaseParticipantConfig {
   override def clientAdminApi: ClientConfig = adminApi
   override def clientLedgerApi: ClientConfig = ledgerApi
+  override def httpHealthClientConfig: Option[HttpHealthServerConfig] = httpHealth
 }
 
 /** Canton configuration case class to pass-through configuration options to the ledger api server
@@ -206,8 +183,6 @@ final case class RemoteParticipantConfig(
   *   config for ledger api server when using postgres
   * @param databaseConnectionTimeout
   *   database connection timeout
-  * @param initSyncTimeout
-  *   ledger api server startup delay
   * @param indexService
   *   configurations pertaining to the ledger api server's internal "index service"
   * @param commandService
@@ -262,7 +237,7 @@ final case class LedgerApiServerConfig(
       InteractiveSubmissionServiceConfig.Default,
     topologyAwarePackageSelection: TopologyAwarePackageSelectionConfig =
       TopologyAwarePackageSelectionConfig.Default,
-    maxTokenLifetime: NonNegativeDuration = config.NonNegativeDuration(5.minutes),
+    maxTokenLifetime: config.NonNegativeDuration = config.NonNegativeDuration(5.minutes),
     jwksCacheConfig: JwksCacheConfig = JwksCacheConfig(),
     limits: Option[ActiveRequestLimitsConfig] = None,
 ) extends ServerConfig // We can't currently expose enterprise server features at the ledger api anyway
@@ -310,12 +285,6 @@ object TestingTimeServiceConfig {
   *
   * @param adminWorkflow
   *   Configuration options for Canton admin workflows
-  * @param partyChangeNotification
-  *   Determines how eagerly the participant nodes notify the ledger api of party changes. By
-  *   default ensure that parties are added via at least one synchronizer before ACKing party
-  *   creation to ledger api server indexer. This not only avoids flakiness in tests, but reflects
-  *   that a party is not actually usable in canton until it's available through at least one
-  *   synchronizer.
   * @param maxUnzippedDarSize
   *   maximum allowed size of unzipped DAR files (in bytes) the participant can accept for
   *   uploading. Defaults to 1GB.
@@ -329,12 +298,13 @@ object TestingTimeServiceConfig {
   * @param minimumProtocolVersion
   *   The minimum protocol version that this participant will speak when connecting to a
   *   synchronizer
-  * @param initialProtocolVersion
-  *   The initial protocol version used by the participant (default latest), e.g., used to create
-  *   the initial topology transactions.
-  * @param alphaVersionSupport
+  * @param devVersionSupport
   *   If set to true, will allow the participant to connect to a synchronizer with dev protocol
-  *   version and will turn on unsafe Daml LF versions.
+  *   version, it will turn on Daml LF dev version, and applies the dev database schema, which does
+  *   not provide data continuity and must not be used in production.
+  * @param alphaVersionSupport
+  *   If set to true, will allow the participant to connect to a synchronizer with alpha protocol
+  *   version.
   * @param dontWarnOnDeprecatedPV
   *   If true, then this participant will not emit a warning when connecting to a sequencer using a
   *   deprecated protocol version (such as 2.0.0).
@@ -352,10 +322,8 @@ object TestingTimeServiceConfig {
   *   are logged as warning instead.
   * @param packageMetadataView
   *   Initialization parameters for the package metadata in-memory store.
-  * @param automaticallyPerformLsu
-  *   Whether the participant automatically performs a handshake with the upgraded synchronizer
-  *   after receiving enough sequencer connections, and whether the participants automatically
-  *   connects to the synchronizer after the upgrade time.
+  * @param alphaOnlinePartyReplicationSupport
+  *   Enables online party replication. DO NOT ENABLE IN PRODUCTION!
   * @param activationFrequencyForWarnAboutConsistencyChecks
   *   controls how often warning messages about
   *   [[com.digitalasset.canton.config.CantonParameters.enableAdditionalConsistencyChecks]] being
@@ -386,14 +354,25 @@ object TestingTimeServiceConfig {
   * @param autoSyncProtocolFeatureFlags
   *   When true (default), protocol feature flags will be automatically updated when the node
   *   connects to a synchronizer.
-  * @param alphaMultiSynchronizerSupport
-  *   Determines whether ACS imports use Create/Archive or Assign/Unassign events. Only enable if
-  *   your Ledger API consumers can process (un)assign events and require non-zero reassignment
-  *   counters.
-  *   - false (Default): Uses Create/Archive; resets reassignment counters to zero.
-  *   - true: Uses Assign/Unassign; preserves existing reassignment counters.
+  * @param enableAllLedgerApiReassignments
+  *   Determines whether ACS imports use Created or Assigned events. Similarly, determines whether
+  *   the repair service uses Created/Archive events or Assigned/Unassigned events for add and purge
+  *   respectively. Only enable if your Ledger API consumers can process (un)assigned events and
+  *   require non-zero reassignment counters.
+  *   - false (Default): Uses Created/Archive; resets reassignment counters to zero.
+  *   - true: Uses Assigned/Unassigned; preserves existing reassignment counters.
+  *
+  * Note: If multi-synchronizer is enabled via the EnableMultiSynchronizer flag, then Assigned and
+  * Unassigned event will be emitted when processing reassignments messages from the synchronizer
+  * regardless of the value of enableAllLedgerApiReassignments.
   * @param commitAfterFailedActivenessCheck
   *   For internal testing only. Do not enable this in production.
+  * @param validateLegacyContractsV11
+  *   Enables an extra validation for contracts with contract id version V11. Keep this enabled in
+  *   production.
+  * @param connectToSynchronizersOnStartup
+  *   If true, connects to synchronizers that have manualConnect=false on startup. Default: true.
+  *   Has impact only if manual-start is false.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -404,6 +383,7 @@ final case class ParticipantNodeParameterConfig(
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(ProtocolVersion.v34)
     ),
+    devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,
     betaVersionSupport: Boolean = false,
     dontWarnOnDeprecatedPV: Boolean = false,
@@ -431,9 +411,11 @@ final case class ParticipantNodeParameterConfig(
     commitmentReduceParallelism: NonNegativeInt = NonNegativeInt.one,
     commitmentUseDbSnapshotForParticipantLookup: Boolean = false,
     autoSyncProtocolFeatureFlags: Boolean = true,
-    alphaMultiSynchronizerSupport: Boolean = false,
+    enableAllLedgerApiReassignments: Boolean = false,
     commitAfterFailedActivenessCheck: Boolean = false,
     lsu: LsuConfig = LsuConfig(),
+    validateLegacyContractsV11: Boolean = true,
+    connectToSynchronizersOnStartup: Boolean = true,
 ) extends LocalNodeParametersConfig
 
 /** Config for LSU.
@@ -442,9 +424,12 @@ final case class ParticipantNodeParameterConfig(
   *   Whether to automatically perform LSU. Default is true.
   * @param lsuRetry
   *   Config for the retries of the LSU operation. Retries are done aggressively.
-  * @param handshakeRetry
-  *   Config for the retries of the handshake prior to LSU. Retries are infrequent since the
-  *   handshake runs as a non-urgent background task.
+  *
+  * @param sequencerIdsRetrievalRetry
+  *   Config for the retries of the task that fetches the sequencer ids.
+  * @param purgeObsoleteTopology
+  *   Config for purging of the topology store of the old physical synchronizer id, after the LSU is
+  *   complete. Default: no purging.
   */
 final case class LsuConfig(
     // TODO(#25344): check whether this should be removed
@@ -454,12 +439,65 @@ final case class LsuConfig(
       maxDelay = config.NonNegativeDuration.ofSeconds(5),
       maxRetries = Int.MaxValue,
     ),
-    handshakeRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+    handshake: LsuHandshake = LsuHandshake(),
+    sequencerIdsRetrievalRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofSeconds(10),
+      maxDelay = config.NonNegativeDuration.ofSeconds(30),
+      maxRetries = Int.MaxValue,
+    ),
+    purgeObsoleteTopology: Option[PurgeConfig] = None,
+)
+
+/** Config for the handshake with the successor.
+  *
+  * @param retry
+  *   Config for the retries of the handshake prior to LSU. Retries are infrequent since the
+  *   handshake runs as a non-urgent background task.
+  * @param minimumDuration
+  *   If defined: after a successful handshake, will continue to perform handshake with the
+  *   sequencers for the specified duration. Should not be too big (in the order of a few seconds).
+  * @param periodicCheck
+  *   Duration between two checks whether the wait should be interrupted. Has an impact only if the
+  *   following two conditions hold:
+  *   - minimumDuration is non-empty
+  *   - is smaller than minimumDuration
+  */
+final case class LsuHandshake(
+    retry: ExponentialBackoffConfig = ExponentialBackoffConfig(
       initialDelay = config.NonNegativeFiniteDuration.ofMinutes(1),
       maxDelay = config.NonNegativeDuration.ofMinutes(5),
       maxRetries = Int.MaxValue,
     ),
+    minimumDuration: Option[config.NonNegativeFiniteDuration] = Some(
+      config.NonNegativeFiniteDuration.ofSeconds(5)
+    ),
+    periodicCheck: config.NonNegativeFiniteDuration = config.NonNegativeFiniteDuration.ofSeconds(1),
 )
+
+/** Control incremental purges
+  *
+  * @param chunkSize
+  *   The amount of data that should be removed per purge iteration.
+  * @param cron
+  *   A cron expression, defining when the purges can take place
+  * @param maxDuration
+  *   Once triggered, the amount of time to repeatedly purge chunks, before having to wait for the
+  *   next cron-defined trigger.
+  */
+final case class PurgeConfig(
+    chunkSize: PositiveInt = PurgeConfig.DefaultChunkSize,
+    cron: String = PurgeConfig.DefaultCron,
+    maxDuration: config.PositiveFiniteDuration = PurgeConfig.DefaultMaxDuration,
+    purgeableStoresListValidity: config.NonNegativeFiniteDuration =
+      config.NonNegativeFiniteDuration.ofMinutes(1),
+)
+
+object PurgeConfig {
+  private val DefaultChunkSize: PositiveInt = PositiveInt.tryCreate(1000)
+  private val DefaultCron: String = "0 0 0 * * ?" // Daily on the stroke of midnight
+  private val DefaultMaxDuration: config.PositiveFiniteDuration =
+    config.PositiveFiniteDuration.ofMinutes(30)
+}
 
 /** Parameters for the participant node's stores
   *
@@ -525,16 +563,18 @@ object JournalPruningConfig {
   * @param contractIdSeeding
   *   test-only way to override the contract-id seeding scheme. Must be Strong in production (and
   *   Strong is the default). Only configurable to reduce the amount of secure random numbers
-  *   consumed by tests and to avoid flaky timeouts during continuous integration.
+  *   consumed by tests and to avoid flaky timeouts during continuous integration. **This parameter
+  *   is deprecated and no longer used** (see `ledgerApiServerParametersConfigReader` in
+  *   CantonConfig.scala). The seeding is now always of the `Strong` type.
   * @param indexer
   *   parameters how the participant populates the index db used to serve the ledger api
   * @param tokenExpiryGracePeriodForStreams
   *   grace periods for streams that postpone termination beyond the JWT expiry
   */
 final case class LedgerApiServerParametersConfig(
-    contractIdSeeding: Seeding = Seeding.Strong,
+    contractIdSeeding: Seeding = Seeding.Strong, // TODO(i33818): Remove
     indexer: IndexerConfig = IndexerConfig(),
-    tokenExpiryGracePeriodForStreams: Option[NonNegativeDuration] = None,
+    tokenExpiryGracePeriodForStreams: Option[config.NonNegativeDuration] = None,
     contractLoader: ContractLoaderConfig = ContractLoaderConfig(),
 )
 

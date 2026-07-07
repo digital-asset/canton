@@ -7,9 +7,10 @@ import cats.Applicative
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
-import com.digitalasset.canton.admin.api.client.data.ListPartiesResult
+import com.digitalasset.canton.admin.api.client.data.{
+  KnownPhysicalSynchronizerId,
+  ListPartiesResult,
+}
 import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
@@ -36,7 +37,6 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{
   ExternalParty,
-  KnownPhysicalSynchronizerId,
   Namespace,
   ParticipantId,
   PartyId,
@@ -47,10 +47,12 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{SynchronizerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import java.time.Instant
 import scala.concurrent.ExecutionContext
+import scala.util.chaining.*
 
 /** Subset of commands and external party related logic ONLY USED FOR TESTING, but still part of the
   * console to make it seamlessly usable in integration tests.
@@ -91,7 +93,7 @@ private[canton] class ExternalPartiesTestingAdministration(
 
     val onboardingET = for {
       psid <- EitherT
-        .fromEither[FutureUnlessShutdown](lookupOrDetectSynchronizerId(synchronizer))
+        .fromEither[FutureUnlessShutdown](lookupOrDetectActivePsid(synchronizer))
         .leftMap(err => s"Cannot find physical synchronizer id: $err")
 
       onboardingData <- onboarding_transactions(
@@ -224,7 +226,7 @@ private[canton] class ExternalPartiesTestingAdministration(
     val res = for {
       psid <- EitherT
         .fromEither[FutureUnlessShutdown](
-          lookupOrDetectSynchronizerId(synchronizer)
+          lookupOrDetectActivePsid(synchronizer)
         )
         .leftMap(err => s"Cannot find protocol version: $err")
 
@@ -305,7 +307,7 @@ private[canton] class ExternalPartiesTestingAdministration(
       for {
         synchronizerId <- EitherT
           .fromEither[FutureUnlessShutdown](
-            lookupOrDetectSynchronizerId(synchronizer)
+            lookupOrDetectActivePsid(synchronizer)
           )
           .leftMap(err => s"Cannot find protocol version: $err")
         partyKey <- consoleEnvironment.tryGlobalCrypto
@@ -349,7 +351,7 @@ private[canton] class ExternalPartiesTestingAdministration(
       for {
         synchronizerId <- EitherT
           .fromEither[FutureUnlessShutdown](
-            lookupOrDetectSynchronizerId(synchronizer)
+            lookupOrDetectActivePsid(synchronizer)
           )
           .leftMap(err => s"Cannot find synchronizer id: $err")
         protocolVersion = synchronizerId.protocolVersion
@@ -478,7 +480,7 @@ private[canton] class ExternalPartiesTestingAdministration(
 
     val onboardingET = for {
       psid <- EitherT
-        .fromEither[FutureUnlessShutdown](lookupOrDetectSynchronizerId(Some(synchronizer)))
+        .fromEither[FutureUnlessShutdown](lookupOrDetectActivePsid(Some(synchronizer)))
         .leftMap(err => s"Cannot find physical synchronizer id: $err")
 
       onboardingTxs <- onboarding_transactions_for_existing(
@@ -536,7 +538,7 @@ private[canton] class ExternalPartiesTestingAdministration(
     for {
       protocolVersion <- EitherT
         .fromEither[FutureUnlessShutdown](
-          lookupOrDetectSynchronizerId(Some(synchronizer)).map(_.protocolVersion)
+          lookupOrDetectActivePsid(Some(synchronizer)).map(_.protocolVersion)
         )
         .leftMap(err => s"Cannot find protocol version: $err")
 
@@ -690,27 +692,33 @@ private[canton] class ExternalPartiesTestingAdministration(
     }
   }
 
-  /** @return
-    *   if SynchronizerAlias is set, the SynchronizerId that corresponds to the alias. if
-    *   SynchronizerAlias is not set, the synchronizer id of the only connected synchronizer. if the
-    *   participant is connected to multiple synchronizers, it returns an error.
+  /** Fetch the physical synchronizer id corresponding to an active synchronizer.
+    *
+    * @param alias
+    *   If defined, restricts the lookup to that alias. If empty, only succeeds if there is a single
+    *   registered synchronizer.
     */
-  private[canton] def lookupOrDetectSynchronizerId(
+  private[canton] def lookupOrDetectActivePsid(
       alias: Option[SynchronizerAlias]
-  ): Either[String, PhysicalSynchronizerId] = {
-    lazy val singleConnectedSynchronizer = reference.synchronizers.list_connected() match {
-      case Seq() =>
-        Left("not connected to any synchronizer")
-      case Seq(onlyOneSynchronizer) => Right(onlyOneSynchronizer.physicalSynchronizerId)
+  ): Either[String, PhysicalSynchronizerId] =
+    reference.synchronizers.list_registered().pipe { synchronizers =>
+      alias.fold(synchronizers)(alias =>
+        synchronizers.filter { case (config, _, _) => config.synchronizerAlias == alias }
+      )
+    } match {
+      case Seq() => Left("No active synchronizer is registered")
+      case Seq((_, configuredPsid, _)) =>
+        configuredPsid.toOption.toRight(
+          "The active synchronizer has unknown physical synchronizer id"
+        )
+
       case multiple =>
-        val psids = multiple.map(_.physicalSynchronizerId)
+        val ids = multiple.map { case (connection, configuredPsid, _) =>
+          s"(${connection.synchronizerAlias}, $configuredPsid)"
+        }
 
         Left(
-          s"cannot automatically determine synchronizer, because participant is connected to more than 1 synchronizer: $psids"
+          s"Cannot automatically determine synchronizer, because participant is connected to more than 1 synchronizer: $ids"
         )
     }
-    alias
-      .map(a => Right(reference.synchronizers.physical_id_of(a)))
-      .getOrElse(singleConnectedSynchronizer)
-  }
 }

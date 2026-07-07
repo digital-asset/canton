@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.shortcircuit
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.BftBinding.TxConsumer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.{
@@ -11,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performa
   BftBinding,
   BftBindingFactory,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap}
 import scala.jdk.CollectionConverters.ConcurrentMapHasAsScala

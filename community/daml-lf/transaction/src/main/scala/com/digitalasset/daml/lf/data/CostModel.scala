@@ -6,9 +6,10 @@ package lf
 package data
 
 import com.digitalasset.daml.lf.command.ApiContractKey
-import com.digitalasset.daml.lf.{transaction => tx}
+import com.digitalasset.daml.lf.transaction as tx
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
+  ExternalCallResult,
   FatContractInstance,
   FatContractInstanceImpl,
   GlobalKey,
@@ -95,6 +96,8 @@ private[lf] object CostModel {
     implicit def costOfNodeId(value: tx.NodeId): Cost
 
     implicit def costOfTxNode(value: tx.Node): Cost
+
+    implicit def costOfExternalCallResult(value: ExternalCallResult): Cost
   }
 
   object EmptyCostModelImplicits extends CostModelImplicits {
@@ -168,6 +171,8 @@ private[lf] object CostModel {
     implicit def costOfNodeId(value: tx.NodeId): Cost = 0L
 
     implicit def costOfTxNode(value: tx.Node): Cost = 0L
+
+    implicit def costOfExternalCallResult(value: ExternalCallResult): Cost = 0L
   }
 
   object StructuralCostModelImplicits extends CostModelImplicits {
@@ -224,9 +229,8 @@ private[lf] object CostModel {
       case Value.ValueParty(p) =>
         1 + costOfString(p)
       case Value.ValueRecord(tyCon, fields) =>
-        implicit def costOfFieldEntry(value: (Option[Ref.Name], Value)): Cost = {
+        implicit def costOfFieldEntry(value: (Option[Ref.Name], Value)): Cost =
           costOfTuple2(value)(costOfOption, costOfValue)
-        }
 
         1 + costOfOption(tyCon) + costOfImmArray(fields)
       case Value.ValueTextMap(ls) =>
@@ -289,21 +293,20 @@ private[lf] object CostModel {
     }
 
     implicit def costOfApiContractKey(value: ApiContractKey): Cost = {
-      val ApiContractKey(templateRef, contractKey) = value
+      val ApiContractKey(templateRef, contractKey, _) = value
 
-      1 + costOfTypeConRef(templateRef) + costOfValue(contractKey)
+      2 + costOfTypeConRef(templateRef) + costOfValue(contractKey)
     }
 
     implicit def costOfBytes(value: Bytes): Cost = 1 + value.length.toLong
 
     implicit def costOfHash(value: crypto.Hash): Cost = 1 + value.bytes.length.toLong
 
-    implicit def costOfGlobalKey(value: GlobalKey): Cost = {
+    implicit def costOfGlobalKey(value: GlobalKey): Cost =
       1 + costOfIdentifier(value.templateId) +
         costOfString(value.packageName) +
         costOfValue(value.key) +
         costOfHash(value.hash)
-    }
 
     implicit def costOfGlobalKeyWithMaintainers(value: GlobalKeyWithMaintainers): Cost = {
       val GlobalKeyWithMaintainers(key, maintainers) = value
@@ -387,11 +390,12 @@ private[lf] object CostModel {
           costOfBoolean(byKey) +
           costOfOption(interfaceId) +
           costOfSerializationVersion(version)
-      case Node.LookupByKey(packageName, templateId, key, result, version) =>
+      case Node.QueryByKey(packageName, templateId, exhaustive, key, result, version) =>
         1 + costOfString(packageName) +
           costOfIdentifier(templateId) +
           costOfGlobalKeyWithMaintainers(key) +
-          costOfOption(result) +
+          costOfSeq(result) +
+          costOfBoolean(exhaustive) +
           costOfSerializationVersion(version)
       case Node.Exercise(
             targetCoid,
@@ -410,7 +414,7 @@ private[lf] object CostModel {
             exerciseResult,
             keyOpt,
             byKey,
-            _,
+            externalCallResults,
             version,
           ) =>
         1 + costOfContractId(targetCoid) +
@@ -429,9 +433,17 @@ private[lf] object CostModel {
           costOfOption(exerciseResult) +
           costOfOption(keyOpt) +
           costOfBoolean(byKey) +
+          costOfImmArray(externalCallResults) +
           costOfSerializationVersion(version)
       case Node.Rollback(children) =>
         1 + costOfImmArray(children)
     }
+
+    implicit def costOfExternalCallResult(value: ExternalCallResult): Cost =
+      1 + costOfString(value.extensionId) +
+        costOfString(value.functionId) +
+        costOfBytes(value.config) +
+        costOfBytes(value.input) +
+        costOfBytes(value.output)
   }
 }

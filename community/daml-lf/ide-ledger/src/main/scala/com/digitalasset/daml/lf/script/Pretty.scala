@@ -6,11 +6,11 @@ package script
 
 import com.digitalasset.daml.lf.language.Ast.PackageMetadata
 import org.typelevel.paiges.Doc
-import org.typelevel.paiges.Doc._
+import org.typelevel.paiges.Doc.*
 
 private[lf] object Pretty {
 
-  import speedy.Pretty._
+  import speedy.Pretty.*
 
   def prettyError(err: Error): Doc =
     err match {
@@ -63,16 +63,16 @@ private[lf] object Pretty {
         text("Evaluation was cancelled because the test was changed and rerun in a new thread.")
 
       case Error.LookupError(err, packageMetadata, packageId) =>
-        val packageName = packageMetadata.fold(packageId.toString)({
+        val packageName = packageMetadata.fold(packageId.toString) {
           case PackageMetadata(name, version, _) => s"$name-$version"
-        })
+        }
         text(
-          s"Error: ${err.pretty}\nin package ${packageName}"
+          s"Error: ${err.pretty}\nin package $packageName"
         )
       case Error.DisclosureDecoding(message) =>
         // TODO https://github.com/digital-asset/daml/issues/17647
         // improve error report
-        text(s"decoding of disclosure fails: ${message}")
+        text(s"decoding of disclosure fails: $message")
     }
 
 }

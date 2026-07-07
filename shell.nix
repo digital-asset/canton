@@ -10,6 +10,7 @@ let
 in
 pkgs.mkShell {
   packages = with pkgs; [
+    actionlint
     (ammonite_2_13.override { inherit jre; })
     awscli2
     azure-storage-azcopy
@@ -17,6 +18,8 @@ pkgs.mkShell {
     buf
     circleci-cli
     curl
+    docker
+    docker-compose
     dpm
     (flyway.override { jre_headless = jre; })
     gh
@@ -44,7 +47,7 @@ pkgs.mkShell {
     toxiproxy
     unzip
     (sbt.override { inherit jre; })
-    xxd
+    yamllint
     zip
     tinyproxy
 

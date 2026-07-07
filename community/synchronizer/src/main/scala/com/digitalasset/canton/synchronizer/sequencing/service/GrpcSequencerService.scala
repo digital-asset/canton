@@ -27,9 +27,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
-import com.digitalasset.canton.protocol.DynamicSynchronizerParametersLookup
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
+import com.digitalasset.canton.protocol.SynchronizerParametersLookup
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.{
   DownloadTopologyStateForInitHashRequest,
@@ -39,6 +38,7 @@ import com.digitalasset.canton.sequencer.api.v30.{
 }
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.synchronizer.block.update.InFlightAggregationHandler
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerParameters
@@ -50,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencing.service.GrpcSequencerServ
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
   TopologyStateForInitializationService,
@@ -60,6 +61,7 @@ import com.digitalasset.canton.tracing.{
   TraceContextGrpc,
   Traced,
 }
+import com.digitalasset.canton.util.GrpcStreamingUtils.withServerCallStreamObserver
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{
   EitherTUtil,
@@ -72,7 +74,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
-import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 import org.apache.pekko.stream.{
   Materializer,
@@ -143,10 +145,10 @@ object GrpcSequencerService {
       authenticationCheck: AuthenticationCheck,
       clock: Clock,
       checkMemberActive: (Member, TraceContext) => FutureUnlessShutdown[Boolean],
-      synchronizerParamsLookup: DynamicSynchronizerParametersLookup[
-        SequencerSynchronizerParameters
-      ],
+      topologyClient: SynchronizerTopologyClient,
+      overrideMaxRequestSize: Option[NonNegativeInt],
       parameters: SequencerParameters,
+      logEventDetails: Boolean,
       protocolVersion: ProtocolVersion,
       topologyStateForInitializationService: TopologyStateForInitializationService,
       loggerFactory: NamedLoggerFactory,
@@ -174,8 +176,10 @@ object GrpcSequencerService {
         parameters.processingTimeouts,
         loggerFactory,
       ),
-      synchronizerParamsLookup,
+      topologyClient,
+      overrideMaxRequestSize,
       parameters,
+      logEventDetails = logEventDetails,
       topologyStateForInitializationService,
       protocolVersion,
       acknowledgementsConflateWindow = acknowledgementsConflateWindow,
@@ -205,8 +209,10 @@ class GrpcSequencerService(
     checkMemberActive: (Member, TraceContext) => FutureUnlessShutdown[Boolean],
     subscriptionPool: SubscriptionPool[GrpcManagedSubscription[?]],
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
-    synchronizerParamsLookup: DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters],
+    topologyClient: SynchronizerTopologyClient,
+    overrideMaxRequestSize: Option[NonNegativeInt],
     parameters: SequencerParameters,
+    logEventDetails: Boolean,
     topologyStateForInitializationService: TopologyStateForInitializationService,
     protocolVersion: ProtocolVersion,
     maxItemsInTopologyResponse: PositiveInt = PositiveInt.tryCreate(100),
@@ -215,6 +221,13 @@ class GrpcSequencerService(
     extends v30.SequencerServiceGrpc.SequencerService
     with NamedLogging
     with FlagCloseable {
+
+  private val synchronizerParamsLookup =
+    SynchronizerParametersLookup.forSequencerSynchronizerParameters(
+      overrideMaxRequestSize,
+      topologyClient,
+      loggerFactory,
+    )
 
   override protected val timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -238,30 +251,61 @@ class GrpcSequencerService(
   ): Future[v30.SendAsyncResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
+    // TODO(#32317) - reorganize validations into deterministic and snapshot dependent.
+    //   all validations other than authentication and stuff related to proto deserialization
+    //   need to go into BaseSequencer instead. Also, we should have the same validation
+    //   logic on the write as well as the read path.
+    //   right now it is just a mess with validations split across BaseSequencer, BlockSequencer
+    //   and GrpcSequencerService
     // This has to run at the beginning, because it reads from a thread-local.
     val senderFromMetadata = authenticationCheck.lookupCurrentMember()
     def parseAndValidate(
-        maxRequestSize: MaxRequestSize
-    ): Either[SequencerDeliverError, SignedContent[SubmissionRequest]] = for {
-      signedContent <- SignedContent
-        .fromByteString(protocolVersion, requestP.signedSubmissionRequest)
-        .leftMap(requestDeserializationError(_, maxRequestSize))
-      signedSubmissionRequest <- signedContent
-        .deserializeContent(
-          SubmissionRequest
-            .fromByteString(
-              protocolVersion,
-              MaxBytesToDecompress(maxRequestSize.value),
-            )
+        maxRequestSize: MaxRequestSize,
+        topologySnapshot: TopologySnapshot,
+    ): EitherT[FutureUnlessShutdown, SequencerDeliverError, SignedContent[SubmissionRequest]] =
+      for {
+        signedContent <- EitherT.fromEither[FutureUnlessShutdown](
+          SignedContent
+            .fromByteString(protocolVersion, requestP.signedSubmissionRequest)
+            .leftMap(requestDeserializationError(_, maxRequestSize))
         )
-        .leftMap(requestDeserializationError(_, maxRequestSize))
-      _ <- validateSubmissionRequest(
-        requestP.serializedSize,
-        signedSubmissionRequest.content,
-        senderFromMetadata,
-        maxRequestSize,
-      )
-    } yield signedSubmissionRequest
+        _ = if (logEventDetails) {
+          // escape hatch to log the content of the submission request for debugging purposes.
+          // decoding can then be performed using
+          // SubmissionRequest.fromByteString(PV, MaxBytesToDecompress(...))(ByteString.copyFrom(Base64.getDecoder.decode(str)))
+          logger.info(
+            s"Received sendAsync from $senderFromMetadata with payload ${java.util.Base64.getEncoder
+                .encodeToString(signedContent.content.bytes.toByteArray)}"
+          )
+        }
+        signedSubmissionRequest <- EitherT.fromEither[FutureUnlessShutdown](
+          signedContent
+            .deserializeContent(
+              SubmissionRequest
+                .fromByteString(
+                  protocolVersion,
+                  MaxBytesToDecompress(maxRequestSize.value),
+                )
+            )
+            .leftMap(requestDeserializationError(_, maxRequestSize))
+        )
+        _ <- signedSubmissionRequest.content.aggregationRule.traverse_(
+          validateAggregationRule(
+            signedSubmissionRequest.content.sender,
+            signedSubmissionRequest.content.messageId,
+            _,
+            topologySnapshot,
+          )
+        )
+        _ <- EitherT.fromEither[FutureUnlessShutdown](
+          validateSubmissionRequest(
+            requestP.serializedSize,
+            signedSubmissionRequest.content,
+            senderFromMetadata,
+            maxRequestSize,
+          )
+        )
+      } yield signedSubmissionRequest
 
     lazy val sendET = for {
       synchronizerParameters <- EitherT
@@ -270,9 +314,8 @@ class GrpcSequencerService(
             warnOnUsingDefaults(senderFromMetadata)
           )
         )
-      request <- EitherT.fromEither[FutureUnlessShutdown](
-        parseAndValidate(synchronizerParameters.maxRequestSize)
-      )
+      snapshot <- EitherT.right(topologyClient.currentSnapshotApproximation)
+      request <- parseAndValidate(synchronizerParameters.maxRequestSize, snapshot)
       _ <- checkRate(request.content)
       _ <- sequencer.sendAsyncSigned(request)
     } yield v30.SendAsyncResponse()
@@ -306,78 +349,83 @@ class GrpcSequencerService(
       request: SubmissionRequest,
       memberFromMetadata: Option[Member],
       maxRequestSize: MaxRequestSize,
-  )(implicit traceContext: TraceContext): Either[SequencerDeliverError, Unit] = {
-    val messageId = request.messageId
+  )(implicit traceContext: TraceContext): Either[SequencerDeliverError, Unit] =
+    if (parameters.disableSubmissionChecksForTesting) Right(())
+    else {
+      val messageId = request.messageId
 
-    def refuseUnless(
-        sender: Member
-    )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
-      Either.cond(condition, (), refuse(messageId.toProtoPrimitive, sender)(message))
+      def refuseUnless(
+          sender: Member
+      )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
+        Either.cond(condition, (), refuse(messageId.toProtoPrimitive, sender)(message))
 
-    def invalidUnless(
-        sender: Member
-    )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
-      Either.cond(condition, (), invalid(messageId.toProtoPrimitive, sender)(message))
+      def invalidUnless(
+          sender: Member
+      )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
+        Either.cond(condition, (), invalid(messageId.toProtoPrimitive, sender)(message))
 
-    def maxBytesExceededUnless(
-        sender: Member
-    )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
-      Either.cond(
-        condition,
-        (),
-        maxBytesExceeded(messageId.toProtoPrimitive, sender, maxRequestSize)(message),
-      )
-
-    val sender = request.sender
-    for {
-      // do the security checks
-      _ <- authenticationCheck
-        .authenticate(sender, memberFromMetadata)
-        .leftMap(err =>
-          refuse(messageId.toProtoPrimitive, sender)(s"$sender is not authorized to send: $err")
+      def maxBytesExceededUnless(
+          sender: Member
+      )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
+        Either.cond(
+          condition,
+          (),
+          maxBytesExceeded(messageId.toProtoPrimitive, sender, maxRequestSize)(message),
         )
 
-      _ = {
-        val envelopesCount = request.batch.envelopesCount
-        logger.info(
-          s"'$sender' sends request with id '$messageId' of size $requestSize bytes with $envelopesCount envelopes."
+      val sender = request.sender
+      for {
+        // do the security checks
+        _ <- authenticationCheck
+          .authenticate(sender, memberFromMetadata)
+          .leftMap(err =>
+            refuse(messageId.toProtoPrimitive, sender)(s"$sender is not authorized to send: $err")
+          )
+
+        _ = {
+          val envelopesCount = request.batch.envelopesCount
+          logger.info(
+            s"'$sender' sends request with id '$messageId' of size $requestSize bytes with $envelopesCount envelopes."
+          )
+        }
+
+        // check everything else
+        _ <- invalidUnless(sender)(
+          request.batch.envelopes.forall(_.recipients.allRecipients.nonEmpty),
+          "Batch contains envelope without recipients.",
         )
+        _ <- invalidUnless(sender)(
+          request.batch.envelopes.forall(!_.bytes.isEmpty),
+          "Batch contains envelope without content.",
+        )
+        _ <- maxBytesExceededUnless(sender)(
+          request.batch.envelopes.forall(_.toClosedUncompressedEnvelopeResult.isRight),
+          s"Batch contains envelope with max bytes exceeded. The limit is ${maxRequestSize.value.value} bytes.",
+        )
+        _ <- refuseUnless(sender)(
+          SubmissionRequestValidations.checkToAtMostOneMediator(request),
+          "Batch contains multiple mediators as recipients.",
+        )
+
+      } yield {
+        metrics.publicApi.bytesProcessed.mark(requestSize.toLong)(MetricsContext.Empty)
+        metrics.publicApi.messagesProcessed.mark()
+        if (TimeProof.isTimeProofSubmission(request)) metrics.publicApi.timeRequests.mark()
+
+        ()
       }
-
-      // check everything else
-      _ <- invalidUnless(sender)(
-        request.batch.envelopes.forall(_.recipients.allRecipients.nonEmpty),
-        "Batch contains envelope without recipients.",
-      )
-      _ <- invalidUnless(sender)(
-        request.batch.envelopes.forall(!_.bytes.isEmpty),
-        "Batch contains envelope without content.",
-      )
-      _ <- maxBytesExceededUnless(sender)(
-        request.batch.envelopes.forall(_.toClosedUncompressedEnvelopeResult.isRight),
-        s"Batch contains envelope with max bytes exceeded. The limit is ${maxRequestSize.value.value} bytes.",
-      )
-      _ <- refuseUnless(sender)(
-        SubmissionRequestValidations.checkToAtMostOneMediator(request),
-        "Batch contains multiple mediators as recipients.",
-      )
-      _ <- request.aggregationRule.traverse_(validateAggregationRule(sender, messageId, _))
-    } yield {
-      metrics.publicApi.bytesProcessed.mark(requestSize.toLong)(MetricsContext.Empty)
-      metrics.publicApi.messagesProcessed.mark()
-      if (TimeProof.isTimeProofSubmission(request)) metrics.publicApi.timeRequests.mark()
-
-      ()
     }
-  }
 
   private def validateAggregationRule(
       sender: Member,
       messageId: MessageId,
       aggregationRule: AggregationRule,
-  )(implicit traceContext: TraceContext): Either[SequencerDeliverError, Unit] =
-    SubmissionRequestValidations
-      .wellformedAggregationRule(sender, aggregationRule)
+      snapshot: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
+    InFlightAggregationHandler
+      .senderIsAuthorizedAndAggregationRuleIsWellFormed(sender, aggregationRule, snapshot)
       .leftMap(message => invalid(messageId.toProtoPrimitive, sender)(message))
 
   private def invalid(messageIdP: String, sender: Member)(
@@ -520,7 +568,7 @@ class GrpcSequencerService(
         override def onCompleted(): Unit = queue.complete()
 
         override def onNext(elem: T): FutureUnlessShutdown[Unit] =
-          if (!isClosing)
+          if (!isClosing && !isCancelled)
             FutureUnlessShutdown
               .outcomeF(queue.offer(elem))
               .recover { case ex: StreamDetachedException =>
@@ -720,26 +768,6 @@ class GrpcSequencerService(
     )
     subscription.initialize().map(_ => subscription)
   }
-
-  /** Ensure observer is a ServerCalLStreamObserver
-    *
-    * @param observer
-    *   underlying observer
-    * @param handler
-    *   handler requiring a ServerCallStreamObserver
-    */
-  private def withServerCallStreamObserver[R](
-      observer: StreamObserver[R]
-  )(handler: ServerCallStreamObserver[R] => Unit)(implicit traceContext: TraceContext): Unit =
-    observer match {
-      case serverCallStreamObserver: ServerCallStreamObserver[R] =>
-        handler(serverCallStreamObserver)
-      case _ =>
-        val statusException =
-          Status.INTERNAL.withDescription("Unknown stream observer request").asException()
-        logger.warn(statusException.getMessage)
-        observer.onError(statusException)
-    }
 
   private def checkAuthenticatedMemberPermissionWithCurrentMember(
       member: Member,

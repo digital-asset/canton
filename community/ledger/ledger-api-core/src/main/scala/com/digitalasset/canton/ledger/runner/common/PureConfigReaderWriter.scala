@@ -9,7 +9,6 @@ import com.digitalasset.canton.ledger.runner.common.OptConfigValue.{
   optConvertEnabled,
   optProductHint,
 }
-import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
@@ -62,25 +61,6 @@ class PureConfigReaderWriter(secure: Boolean = true) {
   implicit val portWriter: ConfigWriter[Port] = ConfigWriter.intConfigWriter.contramap[Port] {
     _.value
   }
-
-  implicit val seedingReader: ConfigReader[Seeding] =
-    // Not using deriveEnumerationReader[Seeding] as we prefer "testing-static" over static (that appears
-    // in Seeding.name, but not in the case object name).
-    ConfigReader.fromString[Seeding] {
-      case Seeding.Strong.name => Right(Seeding.Strong)
-      case Seeding.Weak.name => Right(Seeding.Weak)
-      case Seeding.Static.name => Right(Seeding.Static)
-      case unknownSeeding =>
-        Left(
-          CannotConvert(
-            unknownSeeding,
-            Seeding.getClass.getName,
-            s"Seeding is neither ${Seeding.Strong.name}, ${Seeding.Weak.name}, nor ${Seeding.Static.name}: $unknownSeeding",
-          )
-        )
-    }
-
-  implicit val seedingWriter: ConfigWriter[Seeding] = ConfigWriter.toString(_.name)
 
   implicit val userManagementServiceConfigHint: ProductHint[UserManagementServiceConfig] =
     ProductHint[UserManagementServiceConfig](allowUnknownKeys = false)

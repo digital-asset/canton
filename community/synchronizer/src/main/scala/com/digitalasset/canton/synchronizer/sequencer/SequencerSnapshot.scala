@@ -10,12 +10,16 @@ import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencer.admin.v30
-import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregationBySender,
+  AggregationId,
+  AggregationRule,
+  LegacyUseMemberIdsAsEligibleMembers,
+}
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus.implicitPrettyString
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.*
@@ -47,7 +51,7 @@ final case class SequencerSnapshot(
       // sequencing time for the aggregation.
       val (
         aggregationId,
-        InFlightAggregation(aggregatedSenders, maxSequencingTime, rule),
+        InFlightAggregation(aggregatedSenders, maxSequencingTime, rule, _),
       ) = args
       v30.SequencerSnapshot.InFlightAggregationWithId(
         aggregationId.toProtoPrimitive,
@@ -112,7 +116,7 @@ final case class SequencerSnapshot(
       trafficConsumed.toSet == otherSnapshot.trafficConsumed.toSet
 }
 
-object SequencerSnapshot extends VersioningCompanion[SequencerSnapshot] {
+object SequencerSnapshot extends VersioningCompanionContext[SequencerSnapshot, ProtocolVersion] {
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV30),
@@ -153,7 +157,8 @@ object SequencerSnapshot extends VersioningCompanion[SequencerSnapshot] {
   }
 
   def fromProtoV30(
-      request: v30.SequencerSnapshot
+      expectedProtocolVersion: ProtocolVersion,
+      request: v30.SequencerSnapshot,
   ): ParsingResult[SequencerSnapshot] = {
     def parseInFlightAggregationWithId(
         proto: v30.SequencerSnapshot.InFlightAggregationWithId
@@ -167,7 +172,8 @@ object SequencerSnapshot extends VersioningCompanion[SequencerSnapshot] {
       for {
         aggregationId <- AggregationId.fromProtoPrimitive(aggregationIdP)
         aggregationRule <- ProtoConverter.parseRequired(
-          AggregationRule.fromProtoV30,
+          AggregationRule
+            .fromProtoV30(LegacyUseMemberIdsAsEligibleMembers(expectedProtocolVersion), _),
           "v30.SequencerSnapshot.InFlightAggregationWithId.aggregation_rule",
           aggregationRuleP,
         )

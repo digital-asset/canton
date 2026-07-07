@@ -5,16 +5,16 @@ package com.digitalasset.daml.lf
 package speedy
 package compiler
 
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.speedy.Pretty.SExpr.*
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
+import com.digitalasset.daml.lf.speedy.SExpr as target
+import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.compiler.Anf.flattenToAnf
+import com.digitalasset.daml.lf.speedy.compiler.SExpr1 as source
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.daml.lf.speedy.compiler.{SExpr1 => source}
-import com.digitalasset.daml.lf.speedy.{SExpr => target}
-import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.speedy.SBuiltinFun._
-import com.digitalasset.daml.lf.speedy.compiler.Anf.flattenToAnf
-import com.digitalasset.daml.lf.speedy.Pretty.SExpr._
-import com.digitalasset.daml.lf.data.Ref._
 
 import scala.collection.immutable.ArraySeq
 
@@ -305,15 +305,14 @@ class AnfTest extends AnyWordSpec with Matchers {
   ): Assertion = {
     val transformed = flattenToAnf(original)
     if (show || transformed != expected) {
-      println(s"**original:\n${original}\n")
+      println(s"**original:\n$original\n")
       println(s"**transformed:\n${pp(transformed)}\n")
       println(s"**expected:\n${pp(expected)}\n")
     }
     transformed shouldBe (expected)
   }
 
-  private def pp(e: target.SExpr): String = {
+  private def pp(e: target.SExpr): String =
     prettySExpr(0)(e).render(80)
-  }
 
 }

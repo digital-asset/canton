@@ -12,8 +12,8 @@ import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction.*
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalSequencerReference
-import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -50,7 +50,7 @@ trait AuthenticationTokenIntegrationTest
     with SharedEnvironment
     with SecurityTestSuite {
 
-  lazy private val securityAsset: SecurityTest =
+  lazy val securityAsset: SecurityTest =
     SecurityTest(property = Authenticity, asset = "synchronizer public api client")
 
   private var daChannel: ManagedChannel = _
@@ -602,6 +602,70 @@ trait AuthenticationTokenIntegrationTest
         }
       }
     }
+    "revoked signing key" should {
+      "surgically invalidate the authentication token across the network when an OwnerToKeyMapping is replaced" in {
+        implicit env =>
+          import env.*
+
+          // Request a valid token for the participant
+          val crypto = SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1)
+          val validToken = requestToken(daId, participant1, crypto).futureValueUS.value
+
+          // Verify the token is accepted by the sequencer
+          assertRefused(
+            sendSubmissionUsingToken(daId, participant1, validToken)
+          )
+
+          // Find the participant's active OwnerToKeyMapping
+          val currentMapping = sequencer1.topology.owner_to_key_mappings
+            .list(filterKeyOwnerUid = participant1.id.uid.toProtoPrimitive)
+            .headOption
+            .value
+
+          val oldKey = currentMapping.item.keys
+            .find(_.purpose == com.digitalasset.canton.crypto.KeyPurpose.Signing)
+            .value
+
+          // Rotate the key mapping
+          loggerFactory.assertLoggedWarningsAndErrorsSeq(
+            {
+              // Generate a new signing key for the participant
+              val newKey = participant1.keys.secret.generate_signing_key(
+                usage = Set(SigningKeyUsage.Protocol)
+              )
+
+              // rotate_key handles the serial increments and multi-stage Replace transactions under the hood
+              participant1.topology.owner_to_key_mappings.rotate_key(
+                member = currentMapping.item.member,
+                currentKey = oldKey,
+                newKey = newKey,
+              )
+
+              // Wait for the topology transaction to propagate
+              sequencer1.topology.synchronisation.await_idle()
+              participant1.topology.synchronisation.await_idle()
+
+              // verify that the existing token (bound to the evicted old key) is now rejected
+              eventually() {
+                assertUnauthenticated(
+                  sendSubmissionUsingToken(daId, participant1, validToken)
+                )
+              }
+              participant2.synchronizers.disconnect_all()
+            },
+            LogEntry.assertLogSeq(
+              mustContainWithClue = Seq.empty,
+              mayContain = Seq(
+                _.warningMessage should include("No connection available"),
+                _.warningMessage should include("Token refresh encountered error"),
+                _.errorMessage should include(
+                  "Authentication token refresh error: Bad challenge request"
+                ),
+              ),
+            ),
+          )
+      }
+    }
   }
 
   private def requestToken(
@@ -645,7 +709,7 @@ trait AuthenticationTokenIntegrationTest
   // helper for removal of individual sequencers and mediators from their groups
   // do not use for participants
   // parameters include one of the members remaining in the group and their crypto object
-  private def testMemberRemoval[T <: Member](
+  def testMemberRemoval[T <: Member](
       daId: PhysicalSynchronizerId,
       leaverIdentity: T,
       leaverCrypto: SynchronizerCrypto,

@@ -12,16 +12,19 @@ import com.daml.tls.TlsClientConfig
 class V2_3(override val testDars: TestDars) extends AvailableTests {
   override def defaultTests(timeoutScaleFactor: Double): Vector[LedgerTestSuite] =
     new V2_2(testDars).defaultTests(timeoutScaleFactor) ++ Vector(
-      new ContractKeysCommandDeduplicationIT,
-      new ContractKeysContractIdIT,
+      new ContractKeysCommandDeduplicationIT(testDars),
+      new ContractKeysContractIdIT(testDars),
       new ContractKeysDeeplyNestedValueIT,
       new ContractKeysDivulgenceIT,
-      new ContractKeysExplicitDisclosureIT,
-      new ContractKeysIT,
+      new ContractKeysExplicitDisclosureIT(testDars),
+      new ContractKeysIT(testDars),
       new ContractKeysMultiPartySubmissionIT,
-      new ContractKeysWronglyTypedContractIdIT,
-      new PrefetchContractKeysIT,
+      new ContractKeysWronglyTypedContractIdIT(testDars),
+      new PrefetchContractKeysIT(testDars),
       new RaceConditionIT,
+      new ExceptionsIT,
+      new ExceptionRaceConditionIT,
+      new EventsDescendantsIT(testDars),
     )
 
   override def optionalTests(tlsConfig: Option[TlsClientConfig]): Vector[LedgerTestSuite] =

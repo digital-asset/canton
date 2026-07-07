@@ -23,7 +23,7 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{Party, SubmissionId, UserId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Time.Timestamp
-import com.google.protobuf.any
+import com.google.protobuf.{ByteString, any}
 import com.google.rpc.status.Status as StatusProto
 
 import java.sql.Connection
@@ -66,11 +66,14 @@ class CompletionStorageBackendTemplate(
     private val publishSource: RowDef[PublishSource] =
       (messageUuid.?, recordTime).mapN(publishSourceFromColumns)
 
+    private val transactionHash: RowDef[Option[ByteString]] =
+      column("transaction_hash", byteArray).?.map(_.map(ByteString.copyFrom(_)))
+
     private def commandCompletionSharedColumns(
         stringInterning: StringInterning,
-        parties: Set[Party],
+        filterSubmitters: Seq[Party] => Set[String],
     ): RowDef[CompletionFromTransaction.CommonCompletionProperties] = (
-      submitters(stringInterning).map(_.view.filter(parties).toSet[String]),
+      submitters(stringInterning).map(filterSubmitters),
       recordTime,
       completionOffset,
       commandId,
@@ -82,28 +85,48 @@ class CompletionStorageBackendTemplate(
       deduplicationOffset,
       deduplicationDurationSeconds,
       deduplicationDurationNanos,
+      transactionHash,
     ).mapN(
       CompletionFromTransaction.CommonCompletionProperties.createFromRecordTimeAndSynchronizerId
     )
 
+    private def filteredCommandCompletionSharedColumns(
+        stringInterning: StringInterning,
+        parties: Set[Party],
+    ): RowDef[CompletionFromTransaction.CommonCompletionProperties] =
+      commandCompletionSharedColumns(stringInterning, _.view.filter(parties).toSet[String])
+
+    private def unfilteredCommandCompletionSharedColumns(
+        stringInterning: StringInterning
+    ): RowDef[CompletionFromTransaction.CommonCompletionProperties] =
+      commandCompletionSharedColumns(stringInterning, _.toSet[String])
+
     def commandCompletionParser(
         parties: Set[Party]
+    ): RowDef[CompletionStreamResponse] =
+      commandCompletionParser(filteredCommandCompletionSharedColumns(stringInterning, parties))
+
+    def unfilteredCommandCompletionParser: RowDef[CompletionStreamResponse] =
+      commandCompletionParser(unfilteredCommandCompletionSharedColumns(stringInterning))
+
+    private def commandCompletionParser(
+        sharedColumns: RowDef[CompletionFromTransaction.CommonCompletionProperties]
     ): RowDef[CompletionStreamResponse] = updateId.?.map(_.isDefined).branch(
-      (true, acceptedCommand(parties)),
-      (false, rejectedCommand(parties)),
+      (true, acceptedCommand(sharedColumns)),
+      (false, rejectedCommand(sharedColumns)),
     )
 
     private def acceptedCommand(
-        parties: Set[Party]
+        sharedColumns: RowDef[CompletionFromTransaction.CommonCompletionProperties]
     ): RowDef[CompletionStreamResponse] = (
-      commandCompletionSharedColumns(stringInterning, parties),
+      sharedColumns,
       updateId,
     ).mapN(CompletionFromTransaction.acceptedCompletion)
 
     private def rejectedCommand(
-        parties: Set[Party]
+        sharedColumns: RowDef[CompletionFromTransaction.CommonCompletionProperties]
     ): RowDef[CompletionStreamResponse] = (
-      commandCompletionSharedColumns(stringInterning, parties),
+      sharedColumns,
       rejectionStatus,
     ).mapN(CompletionFromTransaction.rejectedCompletion)
 
@@ -138,38 +161,51 @@ class CompletionStorageBackendTemplate(
   override def commandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse] = {
     import ComposableQuery.*
-    if (parties.isEmpty) {
-      Vector.empty
-    } else {
-      stringInterning.userId.tryInternalize(userId) match {
-        case Some(internedUserId) =>
-          val query = (columns: CompositeSql) =>
-            SQL"""
+
+    // If userId is specified but not yet interned, that user never wrote completions
+    val userFilter: Option[CompositeSql] = userId match {
+      case Some(uid) =>
+        stringInterning.userId.tryInternalize(uid) match {
+          case Some(internedUserId) => Some(cSQL"AND user_id = $internedUserId")
+          case None => None // short-circuit below
+        }
+      case None => Some(cSQL"") // no user filter needed
+    }
+
+    userFilter match {
+      case None => Vector.empty
+      case Some(userClause) =>
+        val parser =
+          if (parties.nonEmpty) RowDefs.commandCompletionParser(parties)
+          else RowDefs.unfilteredCommandCompletionParser
+
+        val query = (columns: CompositeSql) =>
+          SQL"""
             SELECT
               $columns
             FROM
               lapi_command_completions
             WHERE
               ${QueryStrategy.offsetIsBetween(
-                nonNullableColumn = "completion_offset",
-                startInclusive = startInclusive,
-                endInclusive = endInclusive,
-              )} AND
-              user_id = $internedUserId
+              nonNullableColumn = "completion_offset",
+              startInclusive = startInclusive,
+              endInclusive = endInclusive,
+            )}
+              $userClause
             ORDER BY completion_offset ASC
             ${QueryStrategy.limitClause(Some(limit))}"""
 
-          RowDefs.commandCompletionParser(parties).queryMultipleRows(query)(connection).collect {
-            case response if response.getCompletion.actAs.nonEmpty =>
-              response
-          }
-        case None => Vector.empty
-      }
+        val results = parser.queryMultipleRows(query)(connection)
+
+        if (parties.nonEmpty)
+          results.filter(_.getCompletion.actAs.nonEmpty)
+        else
+          results
     }
   }
 

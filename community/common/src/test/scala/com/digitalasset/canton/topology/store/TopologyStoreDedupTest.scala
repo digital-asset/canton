@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, RequireTypes}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
@@ -36,6 +36,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
@@ -82,7 +83,7 @@ class TopologyStoreDedupTest
   * `doCopyFromPredecessorSynchronizerStore` is implemented — it records invocations and returns the
   * future of a controllable promise so the test can release in-flight copies deterministically.
   */
-private final class DummyCopyTopologyStore(
+private[canton] class DummyCopyTopologyStore(
     override val predecessor: Option[SynchronizerPredecessor],
     val loggerFactory: com.digitalasset.canton.logging.NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -201,7 +202,7 @@ private final class DummyCopyTopologyStore(
   override def bulkInsert(initialSnapshot: GenericStoredTopologyTransactions)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = ???
-  override protected[topology] def dumpStoreContent()(implicit
+  override protected[canton] def dumpStoreContent()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = ???
   override def inspect(
@@ -244,6 +245,11 @@ private final class DummyCopyTopologyStore(
       materializer: Materializer,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Hash] = ???
+  override def filterProvidesAdditionalSignatures(
+      transactions: Seq[GenericSignedTopologyTransaction]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = ???
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,
       synchronizerId: SynchronizerId,
@@ -281,7 +287,7 @@ private final class DummyCopyTopologyStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = ???
 
-  override def deleteDataChunk(chunkSize: Int)(implicit
+  override def deleteDataChunk(chunkSize: PositiveInt)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] = ???
 }

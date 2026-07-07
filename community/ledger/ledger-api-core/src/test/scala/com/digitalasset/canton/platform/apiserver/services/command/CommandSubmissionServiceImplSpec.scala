@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.services.command
 
 import cats.data.EitherT
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.{DeduplicationPeriod, LedgerTimeBoundaries}
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
@@ -20,13 +21,13 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.apiserver.FatContractInstanceHelper
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
   CommandInterpretationResult,
 }
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
-import com.digitalasset.canton.platform.apiserver.{FatContractInstanceHelper, SeedService}
 import com.digitalasset.canton.protocol.LfSerializationVersion
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -129,13 +130,12 @@ class CommandSubmissionServiceImplSpec
             LfError.Interpretation(
               LfError.Interpretation.DamlException(
                 LfInterpretationError.DuplicateContractKey(
-                  GlobalKey
-                    .assertBuild(
-                      tmplId,
-                      PackageName.assertFromString("pkg-name"),
-                      Value.ValueUnit,
-                      crypto.Hash.hashPrivateKey("dummy-key-hash"),
-                    )
+                  GlobalKey(
+                    tmplId,
+                    PackageName.assertFromString("pkg-name"),
+                    Value.ValueUnit,
+                    crypto.Hash.hashPrivateKey("dummy-key-hash"),
+                  )
                 )
               ),
               None,
@@ -225,7 +225,6 @@ class CommandSubmissionServiceImplSpec
     val syncService = mock[state.SyncService]
     val timeProvider = TimeProvider.Constant(Instant.now)
     val timeProviderType = TimeProviderType.Static
-    val seedService = SeedService.WeakRandom
     val commandExecutor = mock[CommandExecutor]
     val metrics = LedgerApiServerMetrics.ForTesting
     val alice = Ref.Party.assertFromString("alice")
@@ -279,6 +278,7 @@ class CommandSubmissionServiceImplSpec
       deduplicationPeriod = DeduplicationDuration(Duration.ofMinutes(1)),
       submissionId = None,
       externallySignedSubmission = None,
+      transactionHash = None,
     )
     val transactionMeta = TransactionMeta(
       ledgerEffectiveTime = Timestamp.Epoch,
@@ -299,7 +299,6 @@ class CommandSubmissionServiceImplSpec
       transaction = transaction,
       dependsOnLedgerTime = false,
       interpretationTimeNanos = estimatedInterpretationCost,
-      globalKeyMapping = Map.empty,
       processedDisclosedContracts = processedDisclosedContracts,
     )
     val synchronizerRank =
@@ -314,6 +313,8 @@ class CommandSubmissionServiceImplSpec
     when(syncService.getRoutingSynchronizerState(traceContext)).thenReturn(
       FutureUnlessShutdown.pure(routingSynchronizerState)
     )
+
+    when(syncService.randomOps).thenReturn(new SymbolicPureCrypto)
 
     when(
       commandExecutor.execute(
@@ -338,7 +339,6 @@ class CommandSubmissionServiceImplSpec
         eqTo(submitterInfo),
         eqTo(transactionMeta),
         eqTo(estimatedInterpretationCost),
-        eqTo(Map.empty),
         eqTo(processedDisclosedContracts),
       )(any[TraceContext])
     ).thenReturn(Future(SubmissionResult.Acknowledged))
@@ -349,7 +349,6 @@ class CommandSubmissionServiceImplSpec
       syncService = syncService,
       timeProviderType = timeProviderType,
       timeProvider = timeProvider,
-      seedService = seedService,
       commandExecutor = commandExecutor,
       checkOverloaded = checkOverloaded,
       metrics = metrics,

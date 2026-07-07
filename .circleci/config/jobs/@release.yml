@@ -50,6 +50,23 @@ publish_release:
         nightly_release: << parameters.is_nightly_workflow >>
     - publish_release_on_oci_registry:
         nightly_release: << parameters.is_nightly_workflow >>
+    - when:
+        condition:
+          or:
+            - << parameters.is_nightly_workflow >>
+            - << parameters.is_manual >>
+        steps:
+          - publish_api_to_gar:
+              gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven-unstable
+    - when:
+        condition:
+          and:
+            - not: << parameters.is_nightly_workflow >>
+            - not: << parameters.is_manual >>
+        steps:
+          - publish_api_to_gar:
+              gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven
+          - publish_api_to_maven_central
     - run:
         name: Publish to GitHub releases
         command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-github.sh"

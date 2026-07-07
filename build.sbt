@@ -17,6 +17,13 @@ addCommandAlias(
   "packageDocsWithExistingRelease",
   "; licenseFileMappings; docs-open/makeSiteFull; docs/makeSite",
 )
+// Like `packageDocsWithExistingRelease` but reuses already-generated snippet JSON data (see
+// `docs-open/makeSiteFromExistingSnippets`). Used by the fan-in `build_docs` CI job after the
+// snippets have been generated in parallel by `build_docs_snippets`.
+addCommandAlias(
+  "packageDocsFromExistingSnippets",
+  "; licenseFileMappings; docs-open/makeSiteFromExistingSnippets; docs/makeSite",
+)
 addCommandAlias("packageDocs", "; package; packageDocsWithExistingRelease")
 addCommandAlias("packRelease", "; bundle")
 addCommandAlias("package", "; packRelease; unidoc")
@@ -219,7 +226,7 @@ lazy val root = (project in file("."))
     scalacOptions --= HouseRules.scalacOptionsToDisableForTests, // To build test libraries in `compile` scope
     ScalaUnidoc / unidoc / unidocProjectFilter := inAnyProject -- inProjects(
       (
-        Seq(CommunityProjects.`performance-driver`)
+        Seq(CommunityProjects.`performance-driver`, CommunityProjects.microbench)
           ++ testLibraries
           ++ Seq(DamlProjects.`bindings-java`)
           ++ transcodeLibraries // Cannot run scaladoc 2.13 on transcode because written in Scala 3
@@ -266,8 +273,25 @@ lazy val `docs-open` = project
         )
       )
       .value,
+    // Same as `makeSiteFull` but reuses already-generated snippet JSON data instead of running the
+    // (expensive) snippet generation tests. This lets CI fan out snippet generation across parallel
+    // containers (`build_docs_snippets`) and then build the site once from the collected output.
+    docsBuild.makeSiteFromExistingSnippets := docsBuild.checkDocErrors
+      .dependsOn(makeSite)
+      .dependsOn(
+        Def.sequential(
+          docsBuild.resetExceptSnippets,
+          docsBuild.generateIncludes,
+          docsBuild.resolve,
+        )
+      )
+      .value,
     docsBuild.reset := {
       docsBuild.resetGeneratedSnippets().value
+      docsBuild.resetGeneratedIncludes().value
+      docsBuild.resetPreprocessed().value
+    },
+    docsBuild.resetExceptSnippets := {
       docsBuild.resetGeneratedIncludes().value
       docsBuild.resetPreprocessed().value
     },
@@ -436,7 +460,6 @@ lazy val `dam-grpc-utils` = CommunityProjects.`daml-grpc-utils`
 lazy val `daml-adjustable-clock` = CommunityProjects.`daml-adjustable-clock`
 lazy val `kms-driver-api` = CommunityProjects.`kms-driver-api`
 lazy val `kms-driver-testing` = CommunityProjects.`kms-driver-testing`
-lazy val `kms-driver-testing-lib` = CommunityProjects.`kms-driver-testing-lib`
 lazy val `aws-kms-driver` = CommunityProjects.`aws-kms-driver`
 lazy val `mock-kms-driver` = CommunityProjects.`mock-kms-driver`
 lazy val `transcode-schema` = CommunityProjects.`transcode-schema`
@@ -464,14 +487,16 @@ lazy val `model-based-testing-drivers` =
   CommunityProjects.`model-based-testing-drivers`
 lazy val `model-based-testing-integration-tests` =
   CommunityProjects.`model-based-testing-integration-tests`
+lazy val `traffic-enforcement-api` =
+  CommunityProjects.`traffic-enforcement-api`
+lazy val `traffic-enforcement-component` =
+  CommunityProjects.`traffic-enforcement-component`
 
 lazy val `scalatest-utils` = DamlProjects.`scalatest-utils`
 lazy val `scala-utils` = DamlProjects.`scala-utils`
 lazy val `nonempty` = DamlProjects.`nonempty`
-lazy val `nonempty-cats` = DamlProjects.`nonempty-cats`
 lazy val `rs-grpc-bridge` = DamlProjects.`rs-grpc-bridge`
 lazy val `rs-grpc-pekko` = DamlProjects.`rs-grpc-pekko`
-lazy val `rs-grpc-pekko-test` = DamlProjects.`rs-grpc-pekko-test`
 lazy val `logging-entries` = DamlProjects.`logging-entries`
 lazy val `contextualized-logging` = DamlProjects.`contextualized-logging`
 lazy val `daml-resources` = DamlProjects.`daml-resources`

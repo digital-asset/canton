@@ -7,7 +7,11 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -29,7 +33,7 @@ import java.util.UUID
 final case class FullInformeeTree private (tree: GenTransactionTree)(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree.type]
 ) extends HasProtocolVersionedWrapper[FullInformeeTree]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   def validated: Either[String, this.type] = for {
     _ <- FullInformeeTree.checkGlobalMetadata(tree)
@@ -60,11 +64,15 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
   def toProtoV30: v30.FullInformeeTree =
     v30.FullInformeeTree(tree = Some(tree.toProtoV30))
 
-  override protected def pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
+  override def prettyCompanion: PrettyPrintingCompanion[FullInformeeTree] = FullInformeeTree
 }
 
-object FullInformeeTree extends VersioningCompanionContextPVValidation2[FullInformeeTree, HashOps] {
+object FullInformeeTree
+    extends VersioningCompanionContextPVValidation2[FullInformeeTree, HashOps]
+    with PrettyPrintingCompanion[FullInformeeTree] {
   override val name: String = "FullInformeeTree"
+
+  override val pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.FullInformeeTree)(
@@ -154,17 +162,20 @@ object FullInformeeTree extends VersioningCompanionContextPVValidation2[FullInfo
       .toMap
 
   /** Indicates an attempt to create an invalid [[FullInformeeTree]]. */
-  final case class InvalidInformeeTree(message: String) extends RuntimeException(message) {}
+  final case class InvalidInformeeTree(message: String) extends RuntimeException(message)
 
   /** Lens for modifying the [[GenTransactionTree]] inside of a full informee tree. It does not
     * check if the new `tree` actually constitutes a valid full informee tree, therefore: DO NOT USE
     * IN PRODUCTION.
     */
   @VisibleForTesting
-  lazy val genTransactionTreeUnsafe: Lens[FullInformeeTree, GenTransactionTree] =
-    Lens[FullInformeeTree, GenTransactionTree](_.tree)(newTree =>
-      fullInformeeTree => FullInformeeTree(newTree)(fullInformeeTree.representativeProtocolVersion)
-    )
+  object Optics {
+    val genTransactionTreeUnsafe: Lens[FullInformeeTree, GenTransactionTree] =
+      Lens[FullInformeeTree, GenTransactionTree](_.tree)(newTree =>
+        fullInformeeTree =>
+          FullInformeeTree(newTree)(fullInformeeTree.representativeProtocolVersion)
+      )
+  }
 
   def fromProtoV30(
       context: (HashOps, ProtocolVersion),

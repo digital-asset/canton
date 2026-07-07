@@ -5,7 +5,11 @@ package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeterministicEncoding}
 import com.google.common.annotations.VisibleForTesting
@@ -30,7 +34,7 @@ object SaltSeed {
 }
 
 /** Indicates the algorithm used to generate and derive salts. */
-sealed trait SaltAlgorithm extends Product with Serializable with PrettyPrinting {
+sealed trait SaltAlgorithm extends Product with Serializable with PrettyPrintingFromCompanion {
   def toProtoOneOf: v30.Salt.Algorithm
   def length: Long
 }
@@ -42,7 +46,10 @@ object SaltAlgorithm {
     override def toProtoOneOf: v30.Salt.Algorithm =
       v30.Salt.Algorithm.Hmac(hmacAlgorithm.toProtoEnum)
     override def length: Long = hmacAlgorithm.hashAlgorithm.length
-    override protected def pretty: Pretty[Hmac] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[Hmac] = Hmac
+  }
+  object Hmac extends PrettyPrintingCompanion[Hmac] {
+    override val pretty: Pretty[Hmac] = prettyOfClass(
       param("hmacAlgorithm", _.hmacAlgorithm.name.unquoted)
     )
   }
@@ -64,7 +71,7 @@ object SaltAlgorithm {
   * the salt generation.
   */
 final case class Salt private (private val salt: ByteString, private val algorithm: SaltAlgorithm)
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
 
   require(!salt.isEmpty, "Salt must not be empty")
   require(
@@ -83,10 +90,11 @@ final case class Salt private (private val salt: ByteString, private val algorit
   @VisibleForTesting
   private[crypto] def unwrap: ByteString = salt
 
-  override val pretty: Pretty[Salt] = prettyOfParam(_.salt)
+  override def prettyCompanion: PrettyPrintingCompanion[Salt] = Salt
 }
 
-object Salt {
+object Salt extends PrettyPrintingCompanion[Salt] {
+  override val pretty: Pretty[Salt] = prettyOfParam(_.salt)
 
   private[crypto] def create(bytes: ByteString, algorithm: SaltAlgorithm): Either[SaltError, Salt] =
     Either.cond(
@@ -133,12 +141,15 @@ object Salt {
 
 }
 
-sealed trait SaltError extends Product with Serializable with PrettyPrinting
+sealed trait SaltError extends Product with Serializable with PrettyPrintingFromCompanion
 
 object SaltError {
   final case class InvalidSaltCreation(bytes: ByteString, algorithm: SaltAlgorithm)
       extends SaltError {
-    override protected def pretty: Pretty[InvalidSaltCreation] =
+    override def prettyCompanion: PrettyPrintingCompanion[InvalidSaltCreation] = InvalidSaltCreation
+  }
+  object InvalidSaltCreation extends PrettyPrintingCompanion[InvalidSaltCreation] {
+    override val pretty: Pretty[InvalidSaltCreation] =
       prettyOfClass(
         param("bytes", _.bytes),
         param("algorithm", _.algorithm),
@@ -146,7 +157,10 @@ object SaltError {
   }
 
   final case class HmacGenerationError(error: HmacError) extends SaltError {
-    override protected def pretty: Pretty[HmacGenerationError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[HmacGenerationError] = HmacGenerationError
+  }
+  object HmacGenerationError extends PrettyPrintingCompanion[HmacGenerationError] {
+    override val pretty: Pretty[HmacGenerationError] = prettyOfClass(
       param("error", _.error)
     )
   }

@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.update
 
-import com.digitalasset.canton.ledger.api.User
-import com.digitalasset.canton.ledger.localstore.api.{ObjectMetaUpdate, UserUpdate}
+import com.digitalasset.canton.user.{ObjectMetaUpdate, User, UserUpdate}
 import com.digitalasset.daml.lf.data.Ref
 
 object UserUpdateMapper extends UpdateMapperBase {

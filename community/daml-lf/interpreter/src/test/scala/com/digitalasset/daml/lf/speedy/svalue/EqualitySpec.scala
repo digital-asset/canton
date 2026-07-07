@@ -7,7 +7,7 @@ package svalue
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{Bytes, Time}
 import com.digitalasset.daml.lf.interpretation.Error.ContractIdComparability
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers

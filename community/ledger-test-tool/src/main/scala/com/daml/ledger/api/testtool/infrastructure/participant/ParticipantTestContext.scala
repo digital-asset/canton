@@ -23,6 +23,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
   SubmitAndWaitForTransactionRequest,
@@ -61,6 +62,7 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
+  GetLedgerEndResponse,
 }
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
 import com.daml.ledger.api.v2.transaction.Transaction
@@ -100,6 +102,8 @@ trait ParticipantTestContext extends UserManagementTestContext {
   /** Gets the absolute offset of the ledger end at a point in time.
     */
   def currentEnd(): Future[Long]
+
+  def getLedgerEnd(): Future[GetLedgerEndResponse]
 
   /** Returns an absolute offset (positive integer) that is beyond the current ledger end.
     *
@@ -434,6 +438,23 @@ trait ParticipantTestContext extends UserManagementTestContext {
     */
   def updateById(request: GetUpdateByIdRequest): Future[GetUpdateResponse]
 
+  /** Non-managed version for looking up an update by its transaction hash. Use this only if you
+    * need to tweak the request (i.e. to test low-level details).
+    */
+  def updateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse]
+
+  /** Managed version of
+    * [[updateByHash(request:com\.daml\.ledger\.api\.v2\.update_service\.GetUpdateByHashRequest):*]]
+    * for transactions, use this unless you need to tweak the request (i.e. to test low-level
+    * details)
+    */
+  def transactionByHash(
+      hash: ByteString,
+      parties: Seq[Party],
+      transactionShape: TransactionShape = AcsDelta,
+      templateIds: Seq[Identifier] = Seq.empty,
+  ): Future[Transaction]
+
   /** Managed version of
     * [[updateById(request:com\.daml\.ledger\.api\.v2\.update_service\.GetUpdateByIdRequest):*]] for
     * transactions, use this unless you need to tweak the request (i.e. to test low-level details)
@@ -612,6 +633,25 @@ trait ParticipantTestContext extends UserManagementTestContext {
   def findCompletion(parties: Party*)(
       p: Completion => Boolean
   ): Future[Option[Completion]]
+
+  // GetCompletions replaces the deprecated completionStream. These helpers duplicate the
+  // completionStream ones above on purpose: those go away once everything moves to GetCompletions,
+  // so sharing code now isn't worth it.
+  def getCompletionsRequest(from: Long = referenceOffset)(
+      parties: Party*
+  ): GetCompletionsRequest
+  def completions(
+      within: NonNegativeFiniteDuration,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]]
+  def completions(
+      take: Int,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]]
+  def findCompletion(
+      request: GetCompletionsRequest
+  )(p: Completion => Boolean): Future[Option[Completion]]
+
   def offsets(n: Int, request: CompletionStreamRequest): Future[Vector[Long]]
   def checkHealth(): Future[HealthCheckResponse]
   def watchHealth(): Future[Seq[HealthCheckResponse]]

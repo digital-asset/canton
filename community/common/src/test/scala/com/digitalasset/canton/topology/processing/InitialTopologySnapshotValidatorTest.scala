@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
@@ -26,6 +25,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersionValidation}
 import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
+import com.digitalasset.nonempty.NonEmpty
 
 abstract class InitialTopologySnapshotValidatorTest
     extends TopologyTransactionHandlingBase
@@ -53,6 +53,7 @@ abstract class InitialTopologySnapshotValidatorTest
       TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
       staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
       timeouts,
+      futureSupervisor = futureSupervisor,
       loggerFactory,
       cleanupTopologySnapshot = true,
     )
@@ -347,7 +348,7 @@ abstract class InitialTopologySnapshotValidatorTest
           // is broken. Maybe somebody tampered with the topology snapshot after exporting it or there
           // is a bug in the export logic.
           // Regardless, we want the validator to report the inconsistency
-          ns1k3_k2,
+          ns1k3_k2_restrict_nsd,
           rejectionReason = None,
         )
         val (validator, _) = mkDefault()

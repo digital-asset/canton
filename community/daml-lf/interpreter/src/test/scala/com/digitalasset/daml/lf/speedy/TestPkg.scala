@@ -18,7 +18,7 @@ import com.digitalasset.daml.lf.transaction.SerializationVersion
 object TestPkg {
   val packageId: Ref.PackageId = Ref.PackageId.assertFromString("-pkg-")
 
-  private def tuple2TyCon: String = {
+  private[speedy] def tuple2TyCon: String = {
     val Tuple2 =
       com.digitalasset.daml.lf.stablepackages.StablePackages.stablePackages.Tuple2
     s"'${Tuple2.packageId}':${Tuple2.qualifiedName}"
@@ -212,11 +212,6 @@ $ifKey    \(fetchingParty: Party) (maintainers: Option Party) (optCid: Option (C
 $ifKey       ubind helperId: ContractId Test:Helper <- Test:createHelper fetchingParty
 $ifKey       in exercise @Test:Helper FetchByKey helperId (Test:TKeyParams {maintainers = Test:optToList @Party maintainers, optCid = optCid, nesting = nesting});
 
-$ifKey  val lookup_by_key: Party -> Option Party -> Option (ContractId Unit) -> Int64 -> Update Unit =
-$ifKey    \(lookingParty: Party) (maintainers: Option Party) (optCid: Option (ContractId Unit)) (nesting: Int64) ->
-$ifKey       ubind helperId: ContractId Test:Helper <- Test:createHelper lookingParty
-$ifKey       in exercise @Test:Helper LookupByKey helperId (Test:TKeyParams {maintainers = Test:optToList @Party maintainers, optCid = optCid, nesting = nesting});
-
 $ifKey  val query_n_by_key: Int64 -> Party -> Option Party -> Option (ContractId Unit) -> Int64 -> Update Unit =
 $ifKey    \(n: Int64) (lookingParty: Party) (maintainers: Option Party) (optCid: Option (ContractId Unit)) (nesting: Int64) ->
 $ifKey       ubind helperId: ContractId Test:Helper <- Test:createHelper lookingParty
@@ -301,11 +296,6 @@ $ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
 $ifKey      observers Nil @Party
 $ifKey      to let key: M:TKey = Test:buildTKey params
 $ifKey         in Test:run @($tuple2TyCon (ContractId M:T) M:T) (fetch_by_key @M:T key);
-$ifKey    choice LookupByKey (self) (params: Test:TKeyParams): Unit,
-$ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-$ifKey      observers Nil @Party
-$ifKey      to let key: M:TKey = Test:buildTKey params
-$ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
 
 $ifKey    choice QueryNByKey (self) (paramsAndInt: ($tuple2TyCon Int64 Test:TKeyParams)): Unit,
 $ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),

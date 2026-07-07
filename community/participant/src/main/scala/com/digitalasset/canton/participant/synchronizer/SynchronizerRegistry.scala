@@ -15,6 +15,7 @@ import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
+import com.digitalasset.canton.participant.config.LsuHandshake
 import com.digitalasset.canton.participant.store.{
   StoredSynchronizerConnectionConfig,
   SyncPersistentState,
@@ -22,16 +23,18 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.SyncServiceError.SynchronizerRegistryErrorGroup
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
+import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SynchronizerId,
   TopologyManagerError,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
 /** A registry of synchronizers. */
@@ -46,25 +49,30 @@ trait SynchronizerRegistry extends AutoCloseable {
     *   set).
     */
   def connect(
-      storedConfig: StoredSynchronizerConnectionConfig
+      storedConfig: StoredSynchronizerConnectionConfig,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SynchronizerHandle, SequencerConnections)]
+    Either[SynchronizerRegistryError, SynchronizerHandle]
   ]
 
   /** Performs the handshake with the synchronizer.
     *
+    * @param lsuHandshakeConfig
+    *   If the handshake is with the successor in the context of an LSU, config for the handshake.
+    *   None for regular handshake.
     * @return
     *   The aggregate information of the sequencers and the updated list of sequencer connections
     *   (with sequencer ids set).
     */
   def pureHandshake(
-      storedConfig: StoredSynchronizerConnectionConfig
+      storedConfig: StoredSynchronizerConnectionConfig,
+      lsuHandshakeConfig: Option[LsuHandshake],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Either[SynchronizerRegistryError, (SequencerAggregatedInfo, SequencerConnections)]
+    Either[SynchronizerRegistryError, SequencerAggregatedInfo]
   ]
 }
 
@@ -218,7 +226,7 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
       final case class Error(override val cause: String)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(cause)
-          with SynchronizerRegistryError {}
+          with SynchronizerRegistryError
     }
 
     @Explanation(
@@ -233,7 +241,7 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
       final case class Error(override val cause: String)(implicit
           val loggingContext: ErrorLoggingContext
       ) extends CantonError.Impl(cause)
-          with SynchronizerRegistryError {}
+          with SynchronizerRegistryError
     }
 
     @Explanation(
@@ -255,7 +263,7 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
       ) extends CantonError.Impl(
             cause = s"Can not auto-issue a synchronizer-trust certificate on this node: $reason"
           )
-          with SynchronizerRegistryError {}
+          with SynchronizerRegistryError
     }
 
     @Explanation(
@@ -470,4 +478,5 @@ trait SynchronizerHandle extends AutoCloseable {
 
   def syncCrypto: SynchronizerCryptoClient
 
+  def connectionPool: SequencerConnectionPool
 }

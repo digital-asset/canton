@@ -4,11 +4,13 @@
 package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
+import com.digitalasset.canton.synchronizer.block.update.BlockProcessingParameters
 import com.digitalasset.canton.synchronizer.block.{
   BlockSequencerStateManager,
   SequencerDriverFactory,
@@ -34,7 +36,7 @@ import org.apache.pekko.stream.Materializer
 import pureconfig.ConfigCursor
 
 import java.util.ServiceLoader
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
+import scala.concurrent.ExecutionContextExecutor
 import scala.jdk.CollectionConverters.*
 
 import BlockSequencerFactory.OrderingTimeFixMode
@@ -107,12 +109,13 @@ class DriverBlockSequencerFactory[C](
       health: Option[SequencerHealthConfig],
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
-      orderingTimeFixMode: OrderingTimeFixMode,
-      synchronizerLoggerFactory: NamedLoggerFactory,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      parallelism: PositiveInt,
+      enablePrevalidation: Boolean,
+      synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
-      ec: ExecutionContext,
+      ec: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
   ): BlockSequencer =
@@ -132,19 +135,16 @@ class DriverBlockSequencerFactory[C](
       health,
       clock,
       rateLimitManager,
-      orderingTimeFixMode,
-      lsuSequencingBounds,
-      drSequencingTimeUpperBound = nodeParameters.drSequencingTimeUpperBound,
-      nodeParameters.processingTimeouts,
-      nodeParameters.loggingConfig.eventDetails,
-      nodeParameters.loggingConfig.api.printer,
+      BlockProcessingParameters(
+        orderingTimeFixMode,
+        lsuSequencingBounds,
+        parallelism = parallelism,
+        enablePrevalidation = enablePrevalidation,
+      ),
+      nodeParameters,
       metrics,
-      nodeParameters.batchingConfig,
-      consistencyChecks = nodeParameters.enableAdditionalConsistencyChecks,
       synchronizerLoggerFactory,
-      exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
-      delayRequestsBeforeLsuTrafficInit = nodeParameters.delayRequestsBeforeLsuTrafficInit,
     )
 }
 

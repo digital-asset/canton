@@ -4,22 +4,26 @@
 package com.digitalasset.daml.lf
 package transaction
 
-import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
-import com.digitalasset.daml.lf.value.Value.{ContractId, VersionedThinContractInstance}
-import com.digitalasset.daml.lf.value._
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.value.*
+import com.digitalasset.daml.lf.value.Value.ContractId
 
 /** Result of an external call made during contract execution.
   *
-  * External calls are deterministic function calls to extension services
-  * that are recorded in the transaction for replay during validation.
+  * External calls are deterministic function calls to extension services that are recorded in the
+  * transaction for replay during validation.
   *
-  * @param extensionId Identifier of the configured extension
-  * @param functionId Function identifier within the extension
-  * @param config Extension configuration (binary)
-  * @param input Input data (binary)
-  * @param output Output data (binary)
+  * @param extensionId
+  *   Identifier of the configured extension
+  * @param functionId
+  *   Function identifier within the extension
+  * @param config
+  *   Extension configuration (binary)
+  * @param input
+  *   Input data (binary)
+  * @param output
+  *   Output data (binary)
   */
 final case class ExternalCallResult(
     extensionId: String,
@@ -33,8 +37,7 @@ object ExternalCallResult {
   val Empty: ImmArray[ExternalCallResult] = ImmArray.Empty
 }
 
-/** Generic transaction node type for both update transactions and the
-  * transaction graph.
+/** Generic transaction node type for both update transactions and the transaction graph.
   */
 sealed abstract class Node extends Product with Serializable with CidContainer[Node] {
 
@@ -81,14 +84,16 @@ object Node {
       */
     def informeesOfNode: Set[Party]
 
-    /** Required authorizers (see ledger model); UNSAFE TO USE on fetch nodes of transaction with versions < 5
+    /** Required authorizers (see ledger model); UNSAFE TO USE on fetch nodes of transaction with
+      * versions < 5
       *
-      * The ledger model defines the fetch node actors as the nodes' required authorizers.
-      * However, the our transaction data structure did not include the actors in versions < 5.
-      * The usage of this method must thus be restricted to:
-      * 1. settings where no fetch nodes appear (for example, the `validate` method of DAMLe, which uses it on root
-      *    nodes, which are guaranteed never to contain a fetch node)
-      * 2. Daml ledger implementations that do not store or process any transactions with version < 5
+      * The ledger model defines the fetch node actors as the nodes' required authorizers. However,
+      * the our transaction data structure did not include the actors in versions < 5. The usage of
+      * this method must thus be restricted to:
+      *   1. settings where no fetch nodes appear (for example, the `validate` method of DAMLe,
+      *      which uses it on root nodes, which are guaranteed never to contain a fetch node) 2.
+      *      Daml ledger implementations that do not store or process any transactions with version
+      *      < 5
       */
     def requiredAuthorizers: Set[Party]
 
@@ -131,40 +136,15 @@ object Node {
 
     def versionedArg: Value.VersionedValue = versioned(arg)
 
-    def coinst: Value.ThinContractInstance =
-      Value.ThinContractInstance(packageName, templateId, arg)
-
-    def versionedCoinst: Value.VersionedThinContractInstance = versioned(coinst)
-
     def versionedKey: Option[Versioned[GlobalKeyWithMaintainers]] = keyOpt.map(versioned(_))
 
     override def informeesOfNode: Set[Party] = stakeholders
     override def requiredAuthorizers: Set[Party] = signatories
   }
 
-  object Create {
-
-    def apply(
-        coid: ContractId,
-        contract: VersionedThinContractInstance,
-        signatories: Set[Party],
-        stakeholders: Set[Party],
-        key: Option[GlobalKeyWithMaintainers],
-    ): Create =
-      Create(
-        coid = coid,
-        packageName = contract.unversioned.packageName,
-        templateId = contract.unversioned.template,
-        arg = contract.unversioned.arg,
-        signatories = signatories,
-        stakeholders = stakeholders,
-        keyOpt = key,
-        version = contract.version,
-      )
-
-  }
-
-  /** Denotes that the contract identifier `coid` needs to be active for the transaction to be valid. */
+  /** Denotes that the contract identifier `coid` needs to be active for the transaction to be
+    * valid.
+    */
   final case class Fetch(
       coid: ContractId,
       override val packageName: PackageName,
@@ -195,10 +175,8 @@ object Node {
     override def requiredAuthorizers: Set[Party] = actingParties
   }
 
-  /** Denotes a transaction node for an exercise.
-    * We remember the `children` of this `NodeExercises`
-    * to allow segregating the graph afterwards into party-specific
-    * ledgers.
+  /** Denotes a transaction node for an exercise. We remember the `children` of this `NodeExercises`
+    * to allow segregating the graph afterwards into party-specific ledgers.
     */
   final case class Exercise(
       targetCoid: ContractId,
@@ -258,18 +236,16 @@ object Node {
   }
 
   /** Denotes a transaction node for a `queryNByKey` operation.
-   *
-   * This node records the results of a key lookup that allows for multiple active
-   * contracts. It stores the `results` found during interpretation, up to a
-   * maximum of 'n' contracts.
-   *
-   * The `exhaustive` flag indicates whether the search for active contracts was
-   * completed:
-   * - If `true`: The number of active contracts found was strictly less than the
-   * limit 'n', meaning all active contracts for this key are included in `results`.
-   * - If `false`: Exactly 'n' contracts were found. In this case, it is unknown
-   * if additional active contracts for this key exist on the ledger.
-   */
+    *
+    * This node records the results of a key lookup that allows for multiple active contracts. It
+    * stores the `results` found during interpretation, up to a maximum of 'n' contracts.
+    *
+    * The `exhaustive` flag indicates whether the search for active contracts was completed:
+    *   - If `true`: The number of active contracts found was strictly less than the limit 'n',
+    *     meaning all active contracts for this key are included in `results`.
+    *   - If `false`: Exactly 'n' contracts were found. In this case, it is unknown if additional
+    *     active contracts for this key exist on the ledger.
+    */
   final case class QueryByKey(
       override val packageName: PackageName,
       override val templateId: TypeConId,
@@ -302,34 +278,6 @@ object Node {
     def requiredAuthorizers: Set[Party] = keyMaintainers
   }
 
-  type LookupByKey = QueryByKey
-
-  object LookupByKey {
-    def apply(
-      packageName: PackageName,
-      templateId: TypeConId,
-      key: GlobalKeyWithMaintainers,
-      result: Option[ContractId],
-      version: SerializationVersion
-    ): LookupByKey = QueryByKey(packageName, templateId, result.isEmpty, key, result.asCidVector, version)
-
-    def unapply(n: QueryByKey): Some[(
-      PackageName,
-        TypeConId,
-        GlobalKeyWithMaintainers,
-        Option[ContractId],
-        SerializationVersion,
-      )] = Some(
-        (
-          n.packageName,
-          n.templateId,
-          n.key,
-          n.result.asCidOption,
-          n.version
-        )
-      )
-  }
-
   @deprecated("use GlobalKey", since = "2.6.0")
   type KeyWithMaintainers = GlobalKey
   @deprecated("use GlobalKey", since = "2.6.0")
@@ -349,7 +297,7 @@ object Node {
   }
 
   private def rehash(gk: GlobalKeyWithMaintainers) =
-    GlobalKeyWithMaintainers.assertBuild(
+    GlobalKeyWithMaintainers(
       gk.globalKey.templateId,
       gk.value,
       gk.globalKey.hash,

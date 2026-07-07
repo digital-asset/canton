@@ -23,19 +23,21 @@ import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChann
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandaloneNetworkConfig,
+  DefaultAvailabilityDisseminationPatience,
   DefaultAvailabilityMaxNonOrderedBatchesPerNode,
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
   DefaultBlockingDbReadTimeout,
   DefaultConsensusBlockCompletionTimeout,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultConsensusNewEpochTopologyWarnTimeout,
   DefaultConsensusQueueMaxSize,
   DefaultConsensusQueuePerNodeQuota,
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
-  DefaultEpochLength,
   DefaultEpochStateTransferTimeout,
-  DefaultLeaderSelectionPolicy,
+  DefaultInitQueryTimeout,
+  DefaultInitTimeout,
   DefaultMaxBatchCreationInterval,
   DefaultMaxBatchesPerProposal,
   DefaultMaxMempoolQueueSize,
@@ -47,13 +49,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultOutputFetchMinimumDelay,
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
-  LeaderSelectionPolicyConfig,
+  DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
+  DefaultSequencerCoreSubscriptionConfig,
   P2PNetworkConfig,
+  SequencerCoreSubscriptionConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.BlacklistStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.util.retry
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
@@ -62,9 +65,6 @@ import scala.concurrent.duration.*
 
 /** Configuration class for the BFT Block Orderer.
   *
-  * @param epochLength
-  *   The total number of blocks in aggregate to be ordered across all leader-driven segments within
-  *   a consensus epoch. Recall that topology changes occur only across epochs (not within).
   * @param maxRequestPayloadBytes
   *   The maximum number of bytes allowed per individual request submitted by clients
   * @param maxMempoolQueueSize
@@ -87,6 +87,9 @@ import scala.concurrent.duration.*
   *   The maximum number of unordered batches that the availability module will accept from each
   *   peer. The purpose of this limit is to prevent malicious peers from consuming memory and
   *   storage by flooding new batches to correct nodes.
+  * @param availabilityDisseminationPatience
+  *   The amount of time that the availability module waits for a dissemination acknowledgement from
+  *   a peer before re-sending the batch. If `None`, re-sending is disabled.
   * @param maxBatchesPerBlockProposal
   *   The maximum number of batches per block proposal (pre-prepare). Needs to be the same across
   *   the network for the BFT time assumptions to hold.
@@ -106,6 +109,11 @@ import scala.concurrent.duration.*
   *   advances at a regular frequency. Note that due to (i), it is recommended that this
   *   consensusEmptyBlockCreationTimeout be substantially less than the
   *   consensusBlockCompletionTimeout to account for latency, retransmissions, etc.
+  * @param consensusNewEpochTopologyWarnTimeout
+  *   The time that nodes will wait at the start of a new epoch for the topology to be activated. If
+  *   the timeout is reached, the node will create a warning log to indicate the reason for delay in
+  *   progress was the topology activation, but the node will continue to wait for the topology to
+  *   be activated.
   * @param delayedInitQueueMaxSize
   *   The maximum size of the delayed init queue. This queue is used by modules to save incoming
   *   events in memory while the module is still initializing. Once startup is complete, the module
@@ -156,27 +164,33 @@ import scala.concurrent.duration.*
   *   useful in deployments with heavy execution context contention between the sequencer and BFT
   *   ordering layer. If set to the default [[scala.None]], the BFT orderer shares the same
   *   execution context as the sequencer.
+  * @param sequencerCoreSubscriptionConfig
+  *   Configuration for the subscription of the sequencer core to the BFT block orderer.
   */
 final case class BftBlockOrdererConfig(
-    // TODO(#24184) make a dynamic sequencing parameter
-    epochLength: Long = DefaultEpochLength,
+    segmentLengthForPv34: Option[Long] = None,
+    leaderSelectionPolicyConfigForPv34: Option[BlacklistLeaderSelectionPolicyConfig] = None,
     maxRequestPayloadBytes: Int = DefaultMaxRequestPayloadBytes,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
-    // TODO(#24184) make a dynamic sequencing parameter
+    // TODO(#24184) make a sequencing parameter
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
     availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int =
       DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
     availabilityMaxNonOrderedBatchesPerNode: Short = DefaultAvailabilityMaxNonOrderedBatchesPerNode,
+    availabilityDisseminationPatience: Option[FiniteDuration] =
+      DefaultAvailabilityDisseminationPatience,
     availabilityMinProposalCreationDelay: FiniteDuration =
       DefaultAvailabilityMinProposalCreationDelay,
-    // TODO(#24184) make a dynamic sequencing parameter
+    // TODO(#24184) make a sequencing parameter
     maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
     consensusQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
     consensusQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
     consensusBlockCompletionTimeout: FiniteDuration = DefaultConsensusBlockCompletionTimeout,
     consensusEmptyBlockCreationTimeout: FiniteDuration = DefaultConsensusEmptyBlockCreationTimeout,
+    consensusNewEpochTopologyWarnTimeout: FiniteDuration =
+      DefaultConsensusNewEpochTopologyWarnTimeout,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
@@ -184,24 +198,33 @@ final case class BftBlockOrdererConfig(
     outputFetchTimeoutCap: FiniteDuration = DefaultOutputFetchTimeoutCap,
     outputEnqueueMaxRetries: Int = DefaultOutputEnqueueMaxRetries,
     outputEnqueueMaxRetryDelay: FiniteDuration = DefaultOutputEnqueueMaxRetryDelay,
+    outputSizeOfChunkOfEpochsToLoadAtStart: Int = DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
     blockingDbReadTimeout: FiniteDuration = DefaultBlockingDbReadTimeout,
     initialNetwork: Option[P2PNetworkConfig] = None,
     standalone: Option[BftBlockOrderingStandaloneNetworkConfig] = None,
-    // TODO(#24184) make a dynamic sequencing parameter
-    leaderSelectionPolicy: LeaderSelectionPolicyConfig = DefaultLeaderSelectionPolicy,
     storage: Option[StorageConfig] = None,
     // We may want to flip the default once we're satisfied with initial performance
     enablePerformanceMetrics: Boolean = true,
     batchAggregator: BatchAggregatorConfig = BatchAggregatorConfig(),
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
+    sequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
+      DefaultSequencerCoreSubscriptionConfig,
+    initTimeout: config.NonNegativeFiniteDuration = DefaultInitTimeout,
+    initQueryTimeout: config.NonNegativeFiniteDuration = DefaultInitQueryTimeout,
 ) {
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
+
   require(
     maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
     s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
       s"$maxBatchesPerBlockProposal maximum batches per block proposal means " +
       s"$maxRequestsPerBlock maximum requests per block, " +
       s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
+  )
+
+  require(
+    initTimeout.underlying >= initQueryTimeout.underlying,
+    s"initTimeout $initTimeout must be >= initQueryTimeout $initQueryTimeout",
   )
 }
 
@@ -218,41 +241,35 @@ object BftBlockOrdererConfig {
   val DefaultMaxBatchesPerProposal: Short = 16
   val DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int = 5
   val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1000
+  val DefaultAvailabilityDisseminationPatience: Option[FiniteDuration] = Some(5.seconds)
   val DefaultAvailabilityMinProposalCreationDelay: FiniteDuration = 250.millis
   val DefaultConsensusQueueMaxSize: Int = 10 * 1024
   val DefaultConsensusQueuePerNodeQuota: Int = 1024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 5.seconds
+  val DefaultConsensusNewEpochTopologyWarnTimeout: FiniteDuration = 2.seconds
   val DefaultDelayedInitQueueMaxSize: Int = 1024
-  val DefaultEpochStateTransferTimeout: FiniteDuration = 10.seconds
+  val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
   val DefaultOutputFetchTimeout: FiniteDuration = 500.milliseconds
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 500.milliseconds
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
+  val DefaultOutputSizeOfChunkOfEpochsToLoadAtStart: Int = 10
   val DefaultBlockingDbReadTimeout: FiniteDuration = 1.minute
 
-  val DefaultHowLongToBlackList: LeaderSelectionPolicyConfig.HowLongToBlacklist =
-    LeaderSelectionPolicyConfig.HowLongToBlacklist.Linear
-  val DefaultHowManyCanWeBlacklist: LeaderSelectionPolicyConfig.HowManyCanWeBlacklist =
-    LeaderSelectionPolicyConfig.HowManyCanWeBlacklist.NumFaultsTolerated
-  val DefaultLeaderSelectionPolicy: LeaderSelectionPolicyConfig =
-    LeaderSelectionPolicyConfig.Blacklisting()
   val DefaultDedicatedExecutionContextDivisor: Option[Int] = None
-
-  /** Trait for configuring the blacklist leader selection policy.
-    *
-    * The leader selection policy must define
-    *   - how many peers can be blacklisted simultaneously
-    *   - how long, in terms of Consensus epochs, a blacklisted peer should remain on the blacklist
-    */
-  trait BlacklistLeaderSelectionPolicyConfig {
-    def howLongToBlackList: LeaderSelectionPolicyConfig.HowLongToBlacklist
-    def howManyCanWeBlacklist: LeaderSelectionPolicyConfig.HowManyCanWeBlacklist
-  }
 
   val DefaultAuthenticationTokenManagerConfig: AuthenticationTokenManagerConfig =
     AuthenticationTokenManagerConfig()
+
+  val DefaultSequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
+    SequencerCoreSubscriptionConfig()
+
+  val DefaultInitTimeout: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(10.minutes)
+  val DefaultInitQueryTimeout: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(5.minutes)
 
   /** Configuration for peer-to-peer network settings
     *
@@ -404,85 +421,11 @@ object BftBlockOrdererConfig {
       tls: Boolean,
   )
 
-  /** Trait that defines the leader selection policy
-    *
-    * The current implementations include:
-    *   - [[LeaderSelectionPolicyConfig.Simple]]
-    *   - [[LeaderSelectionPolicyConfig.Blacklisting]]
-    */
-  sealed trait LeaderSelectionPolicyConfig
-
-  object LeaderSelectionPolicyConfig {
-
-    /** Simple leader selection policy.
-      *
-      * With this policy, no blacklisting of peers actually occurs. All peers in the topology are
-      * assigned Consensus segments to lead in each epoch, regardless of past behavior. While this
-      * approach is straightforward, it can result in delays if a node is down, disconnected, or
-      * actively malicious.
-      */
-    final case object Simple extends LeaderSelectionPolicyConfig
-
-    /** Blacklisting leader selection policy
-      *
-      * With this policy, peers that fail to complete their consensus segment within the allotted
-      * time in an epoch are temporarily banned from leading segments in subsequent epochs.
-      *   - The number of epochs spent on the blacklist before this peer is given another chance to
-      *     lead a segment in a future Epoch. This duration is defined by [[howLongToBlackList]],
-      *     and defaults to a linearly increasing penalty for peers that fail to complete their
-      *     assigned segment across consecutive trials.
-      *   - The number of peers that can be simultaneously blacklisted is defined by
-      *     [[howManyCanWeBlacklist]], and defaults to the number of tolerated faults: f = (N-1)/3.
-      * @note
-      *   [[howManyCanWeBlacklist]] should not exceed 2f, as this could blacklist all correct nodes
-      *   in the network for a consensus, leaving only the f malicious nodes with assigned segments
-      *   and potentially leading to a network-wide halt.
-      */
-    final case class Blacklisting(
-        override val howLongToBlackList: LeaderSelectionPolicyConfig.HowLongToBlacklist =
-          DefaultHowLongToBlackList,
-        override val howManyCanWeBlacklist: LeaderSelectionPolicyConfig.HowManyCanWeBlacklist =
-          DefaultHowManyCanWeBlacklist,
-    ) extends LeaderSelectionPolicyConfig
-        with BlacklistLeaderSelectionPolicyConfig
-
-    sealed trait HowLongToBlacklist {
-      def compute(failedEpochSoFar: Long): BlacklistStatus
-    }
-
-    object HowLongToBlacklist {
-
-      case object Linear extends HowLongToBlacklist {
-        override def compute(failedEpochSoFar: Long): BlacklistStatus =
-          BlacklistStatus.Blacklisted(failedEpochSoFar, failedEpochSoFar)
-      }
-
-      case object NoBlacklisting extends HowLongToBlacklist {
-        override def compute(failedEpochSoFar: Long): BlacklistStatus = BlacklistStatus.Clean
-      }
-    }
-
-    sealed trait HowManyCanWeBlacklist {
-      def howManyCanWeBlacklist(orderingTopology: OrderingTopology): Int
-    }
-
-    object HowManyCanWeBlacklist {
-
-      case object NumFaultsTolerated extends HowManyCanWeBlacklist {
-        override def howManyCanWeBlacklist(orderingTopology: OrderingTopology): Int =
-          orderingTopology.numFaultsTolerated
-      }
-
-      case object NoBlacklisting extends HowManyCanWeBlacklist {
-        override def howManyCanWeBlacklist(orderingTopology: OrderingTopology): Int = 0
-      }
-    }
-  }
-
   final case class BftBlockOrderingStandaloneNetworkConfig(
       thisSequencerId: String,
       signingPrivateKeyProtoFile: File,
       signingPublicKeyProtoFile: File,
+      segmentLength: Long,
       peers: Seq[BftBlockOrderingStandalonePeerConfig],
   )
 
@@ -491,4 +434,29 @@ object BftBlockOrdererConfig {
       signingPublicKeyProtoFile: File,
   )
 
+  /** Configuration for the subscription of the sequencer core to the BFT block orderer. This
+    * includes settings for the Pekko buffer and for the additional backpressure buffering mechanism
+    * between the sequencer core and the orderer, which prevents the sequencer core to be
+    * overwhelmed if the orderer is consistently faster.
+    *
+    * @param pekkoQueueSourceBufferSize
+    *   The buffer size of the Pekko source queue that provides blocks from the orderer to the
+    *   sequencer core.
+    * @param pauseOrdererThresholdBufferSize
+    *   The threshold buffer size after which the sequencer core signals the orderer to pause.
+    * @param resumeOrdererThresholdBufferSize
+    *   The threshold buffer size at or below which the sequencer core signals the orderer to resume
+    *   after a pause.
+    */
+  final case class SequencerCoreSubscriptionConfig(
+      pekkoQueueSourceBufferSize: Int = 5000,
+      pauseOrdererThresholdBufferSize: Int = 5000,
+      resumeOrdererThresholdBufferSize: Int = 1000,
+  ) {
+    require(
+      pauseOrdererThresholdBufferSize >= resumeOrdererThresholdBufferSize,
+      s"The pause threshold buffer size ($pauseOrdererThresholdBufferSize) must be greater than or equal " +
+        s"to the resume threshold buffer size ($resumeOrdererThresholdBufferSize).",
+    )
+  }
 }

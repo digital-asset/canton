@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.service
 
 import cats.implicits.*
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -21,7 +20,6 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
 
-@UnstableTest // TODO(#30535)
 class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   def pid(s: String): Member = {
     val id = UniqueIdentifier.fromProtoPrimitive_(s"$s::default").map(ParticipantId(_)).value
@@ -31,20 +29,22 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
   case class Env(
       clock: SimClock,
       pool: SubscriptionPool[MockSubscription],
+      metrics: SequencerTestMetrics,
   )
 
   object Env {
     def apply(): Env = {
       val clock = new SimClock(loggerFactory = loggerFactory)
+      val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
       val pool = new SubscriptionPool[MockSubscription](
         clock,
-        SequencerTestMetrics,
+        metrics,
         maxSubscriptionsPerMember = PositiveInt.three,
         timeouts,
         loggerFactory,
       )
 
-      Env(clock, pool)
+      Env(clock, pool, metrics)
     }
   }
 
@@ -79,12 +79,12 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
   def createSubscription(name: String): FutureUnlessShutdown[MockSubscription] =
     FutureUnlessShutdown.pure(new MockSubscription(name))
 
-  private def assertNum(expected: Int): Assertion =
-    SequencerTestMetrics.publicApi.subscriptionsGauge.getValue shouldBe expected
+  private def assertNum(expected: Int)(implicit metrics: SequencerTestMetrics): Assertion =
+    metrics.publicApi.subscriptionsGauge.getValue shouldBe expected
 
   "SubscriptionPool" should {
     "only close subscriptions that have not already been closed" in {
-      val Env(_, manager) = Env()
+      implicit val Env(_, manager, metrics) = Env()
       assertNum(0)
 
       // create all in order
@@ -120,7 +120,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "drop excess connections" in {
-      val Env(_, manager) = Env()
+      implicit val Env(_, manager, metrics) = Env()
       val subOther =
         manager.create(() => createSubscription(s"subscriptionOther"), pid(s"other")).futureValue
       assertNum(1)
@@ -137,7 +137,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "close subscription by member" in {
-      val Env(_, manager) = Env()
+      implicit val Env(_, manager, metrics) = Env()
       val subscription1 =
         manager.create(() => createSubscription("subscription1"), pid("p1")).futureValue
       val subscription2 =
@@ -154,7 +154,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "closes expired subscriptions" in {
-      val Env(clock, manager) = Env()
+      implicit val Env(clock, manager, metrics) = Env()
 
       val ts1 = CantonTimestamp.Epoch.plusSeconds(5)
       val ts2 = CantonTimestamp.Epoch.plusSeconds(10)
@@ -188,7 +188,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "return error if already shutdown" in {
-      val Env(_, manager) = Env()
+      val Env(_, manager, _) = Env()
       manager.close()
 
       manager
@@ -200,7 +200,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "immediately closed connection isn't added to pool" in {
-      val Env(_, manager) = Env()
+      implicit val Env(_, manager, metcics) = Env()
 
       manager
         .create(
@@ -215,7 +215,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "cancelled request doesn't add connection to pool and doesn't return response" in {
-      val Env(_, manager) = Env()
+      implicit val Env(_, manager, metrics) = Env()
 
       val subscriptionWithCancelledRequest = new MockSubscription(
         "cancelled",
@@ -238,7 +238,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "close subscriptions for member closes all of their subscriptions" in {
-      val Env(_, manager) = Env()
+      val Env(_, manager, _) = Env()
 
       val participant1 = pid("p1")
       val sub1 = new MockSubscription("sub1")
@@ -259,7 +259,7 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
     }
 
     "prevent deadlocks on many concurrent subscriptions and create being slow" in {
-      val Env(_, manager) = Env()
+      val Env(_, manager, _) = Env()
       val times = 50
       val sleepInterval = 1000L
       val startTime = System.currentTimeMillis()

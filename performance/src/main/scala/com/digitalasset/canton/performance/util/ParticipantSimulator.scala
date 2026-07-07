@@ -6,7 +6,6 @@ package com.digitalasset.canton.performance.util
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, TopologyAdminCommands}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
@@ -16,7 +15,12 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
-import com.digitalasset.canton.crypto.{HashPurpose, SigningKeyUsage, SyncCryptoApi}
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SigningKeyUsage,
+  SyncCryptoApi,
+  SynchronizerCrypto,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -29,7 +33,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
+  LegacyAcsCommitment,
   SignedProtocolMessage,
   UnsignedProtocolMessage,
 }
@@ -51,6 +55,7 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
+  DecompressedSequencedEvent,
   MessageId,
   Recipients,
   SequencedEvent,
@@ -64,6 +69,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.synchronizer.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -103,6 +109,7 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.version.ParticipantProtocolFeatureFlags
 import com.digitalasset.canton.{SynchronizerAlias, config as cfg}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.OptionValues
 import org.slf4j.event.Level
 
@@ -281,8 +288,7 @@ class ParticipantSimulator(
   private val syncCrypto = new FixedSyncCryptoApiForSigning(
     // the specific member doesn't actually matter, since all virtual participants share the same keys
     managingNode.id.member,
-    managingNode.crypto,
-    staticSynchronizerParameters,
+    SynchronizerCrypto(managingNode.crypto, staticSynchronizerParameters),
     signingKey,
     loggerFactory,
   )
@@ -506,10 +512,12 @@ class ParticipantSimulator(
       NamedLoggingContext(loggerFactoryForParticipant, traceContext)
 
     val sequencerTrustThreshold = PositiveInt.tryCreate(sequencersToConnectTo.size)
+    val sequencerLivenessMargin = NonNegativeInt.zero
     val (pool, _) = awaitEU(
       GrpcSequencerConnectionService
         .waitUntilSequencerConnectionIsValidWithPool(
           connectionPoolFactory = connectionPoolFactory,
+          psid = psid,
           tracingConfig = env.environment.config.monitoring.tracing,
           flagCloseable = crypto,
           loadConfig = FutureUnlessShutdown.pure(
@@ -518,9 +526,10 @@ class ParticipantSimulator(
                 sequencersToConnectTo.forgetNE
                   .map(_.sequencerConnection.toInternal),
                 sequencerTrustThreshold = sequencerTrustThreshold,
-                sequencerLivenessMargin = NonNegativeInt.zero,
+                sequencerLivenessMargin = sequencerLivenessMargin,
                 submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
                 sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+                subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
               )
             )
           ),
@@ -555,13 +564,19 @@ class ParticipantSimulator(
       hasSynchronizeWithClosing = this,
       loggerFactory = loggerFactoryForParticipant,
     )
-    val sequencerAggregator = new SequencerAggregator(
+    val sequencerAggregator = SequencerAggregator.create(
+      nodeParameters.sequencerClient.useNewAggregator,
       aggregationHandler,
       crypto.pureCrypto,
       nodeParameters.sequencerClient.eventInboxSize,
+      nodeParameters.sequencerClient.pastEventsCacheSize,
       loggerFactoryForParticipant,
-      MessageAggregationConfig(sequencerTrustThreshold),
-      _ => (),
+      MessageAggregationConfig(
+        sequencerTrustThreshold = sequencerTrustThreshold,
+        maxNbOfContributions = sequencerTrustThreshold + sequencerLivenessMargin,
+      ),
+      updateSendTracker = _ => (),
+      notifyNewEvent = _ => (),
       env.environment.config.parameters.timeouts.processing,
       environment.futureSupervisor,
     )
@@ -580,7 +595,7 @@ class ParticipantSimulator(
       sequencerSubscriptionFactory,
       subscriptionHandlerFactory,
       synchronizerMetrics.sequencerClient.connectionPool,
-      metricsContext = MetricsContext.Empty,
+      metricsContext = pool.metricsContext,
       env.environment.config.parameters.timeouts.processing,
       loggerFactoryForParticipant,
     )
@@ -589,6 +604,8 @@ class ParticipantSimulator(
       SequencerSubscriptionPoolConfig(
         livenessMargin = NonNegativeInt.zero,
         subscriptionRequestDelay = SequencerConnectionPoolDelays.default.subscriptionRequestDelay,
+        maxTimestampDelta = SubscriptionLivenessLimits.default.maxTimestampDelta,
+        maxOrdinalDelta = SubscriptionLivenessLimits.default.maxOrdinalDelta,
       ),
       pool,
       pid,
@@ -612,19 +629,20 @@ class ParticipantSimulator(
     }
   }
   private def respondAcsCommitment(
-      event: SequencedEvent[ClosedEnvelope],
+      event: DecompressedSequencedEvent[ClosedEnvelope],
       pool: SequencerConnectionPool,
       syncCrypto: SyncCryptoApi,
   )(implicit traceContext: TraceContext): Unit =
-    event.envelopes
+    SequencedEvent
+      .envelopesOf(event)
       .flatMap(_.toOpenEnvelope(crypto.pureCrypto, pv).toOption.toList)
       .foreach(cc =>
         cc.protocolMessage match {
           case message: UnsignedProtocolMessage => logger.debug(s"UNSIGNED MESSAGE $message")
           case SignedProtocolMessage(typedMessage, signatures) =>
             typedMessage.content match {
-              case AcsCommitment(psid, sender, counterParticipant, period, commitment) =>
-                val payload = AcsCommitment.create(
+              case LegacyAcsCommitment(psid, sender, counterParticipant, period, commitment) =>
+                val payload = LegacyAcsCommitment.create(
                   synchronizerId = this.psid,
                   sender = counterParticipant,
                   counterParticipant = sender,
@@ -649,8 +667,7 @@ class ParticipantSimulator(
                         // the specific member doesn't actually matter, since all virtual participants
                         // share the same keys
                         managingNode.id.member,
-                        managingNode.crypto,
-                        staticSynchronizerParameters,
+                        SynchronizerCrypto(managingNode.crypto, staticSynchronizerParameters),
                         signingKey,
                         loggerFactory,
                         timestampOverride = period.toInclusive.forgetRefinement,
@@ -683,9 +700,7 @@ class ParticipantSimulator(
                       .leftMap(err => new IllegalArgumentException(err.toString))
                   )
                   _ <- EitherTUtil.toFutureUnlessShutdown(
-                    pool
-                      .getAllConnections()
-                      .headOption
+                    pool.getAllConnections.headOption
                       .map(
                         _.sendAsync(
                           request = signedRequest,

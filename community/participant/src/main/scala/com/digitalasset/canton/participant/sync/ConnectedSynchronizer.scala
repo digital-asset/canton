@@ -9,7 +9,6 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.{Eval, Monad}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -76,13 +75,14 @@ import com.digitalasset.canton.participant.traffic.{
 }
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, Envelope, TrafficState}
+import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, Envelope, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.{TrafficControlProcessor, TrafficStateController}
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
@@ -120,11 +120,12 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.{
-  EngineMode,
+  InterpretationConfig,
   ParticipantProtocolFeatureFlags,
   ProtocolVersion,
 }
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import monocle.macros.syntax.lens.*
@@ -152,6 +153,7 @@ class ConnectedSynchronizer(
     participantId: ParticipantId,
     engine: Engine,
     parameters: ParticipantNodeParameters,
+    synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     private[sync] val persistent: SyncPersistentState,
     val ephemeral: SyncEphemeralState,
@@ -169,6 +171,7 @@ class ConnectedSynchronizer(
     journalGarbageCollector: JournalGarbageCollector,
     val acsCommitmentProcessor: AcsCommitmentProcessor,
     clock: Clock,
+    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
     metrics: ConnectedSynchronizerMetrics,
     futureSupervisor: FutureSupervisor,
@@ -216,6 +219,7 @@ class ConnectedSynchronizer(
       contractHasher,
       seedGenerator,
       parameters.loggingConfig,
+      testingConfig.useLegacyContractIdVersionV11,
       loggerFactory,
     )
 
@@ -246,7 +250,6 @@ class ConnectedSynchronizer(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -256,7 +259,6 @@ class ConnectedSynchronizer(
       transaction,
       transactionMeta,
       submitterInfo,
-      keyResolver,
       disclosedContracts,
       costHints,
     )
@@ -266,7 +268,7 @@ class ConnectedSynchronizer(
       participantId,
       packageResolver,
       engine,
-      EngineMode.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
+      InterpretationConfig.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
       loggerFactory,
     )
 
@@ -291,6 +293,7 @@ class ConnectedSynchronizer(
     testingConfig = testingConfig,
     promiseUSFactory,
     parameters,
+    trafficEnforcementBackendO.map(_.value),
   )
 
   private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(
@@ -389,13 +392,14 @@ class ConnectedSynchronizer(
       promiseFactory = this,
     )
 
-  def addJournalGarageCollectionLock()(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = journalGarbageCollector.addOneLock()
-
-  def removeJournalGarageCollectionLock()(implicit
-      traceContext: TraceContext
-  ): Unit = journalGarbageCollector.removeOneLock()
+  private val sequencerIdsRetriever = new SequencerIdsRetriever(
+    psid,
+    synchronizerHandle.connectionPool,
+    synchronizerConnectionConfigStore,
+    sequencerConnectionListener,
+    parameters,
+    loggerFactory,
+  )
 
   def getTrafficControlState(implicit traceContext: TraceContext): Future[TrafficState] =
     sequencerClient.trafficStateController
@@ -585,15 +589,9 @@ class ConnectedSynchronizer(
       // once the first event is dispatched.
       // however, this is bad for reassignment processing as we need to be able to access the topology state
       // across synchronizers and this requires that the clients are separately initialised on the participants
+
       val resubscriptionTs = ephemeral.startingPoints.processing.lastSequencerTimestamp
       logger.debug(s"Initializing topology client at clean head=$resubscriptionTs")
-      // startup with the resubscription-ts
-      topologyClient.updateHead(
-        SequencedTime(resubscriptionTs),
-        EffectiveTime(resubscriptionTs),
-        ApproximateTime(resubscriptionTs),
-      )
-      // now, compute epsilon at resubscriptionTs and update client
       topologyClient.updateHead(
         SequencedTime(resubscriptionTs),
         EffectiveTime(
@@ -610,7 +608,7 @@ class ConnectedSynchronizer(
     for {
       // Prepare missing key alerter
       _ <- EitherT.right(missingKeysAlerter.init())
-      _ <- EitherT.right(sequencerConnectionListener.init())
+      _ <- EitherT.right(sequencerConnectionListener.checkAndCreateSynchronizerConfig())
 
       // Phase 0: Initialise topology client at current clean head
       _ = initializeClientAtCleanHead()
@@ -712,6 +710,7 @@ class ConnectedSynchronizer(
                 .modify(_ ++ requiredFlagsForPV),
               serial = Some(existingSynchronizerTrustCertificate.serial.increment),
               signingKeys = Seq.empty,
+              namespacesToSignFor = Seq.empty,
               protocolVersion = protocolVersion,
               expectFullAuthorization = false,
               forceChanges = ForceFlags.none,
@@ -785,26 +784,22 @@ class ConnectedSynchronizer(
         )
         messageHandler =
           new UnthrottledApplicationHandler[
-            Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
+            Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[Batch[X]]]]],
             ClosedEnvelope,
           ] {
             override def name: String = s"connected-synchronizer-$psid"
 
             override def subscriptionStartsAt(
-                start: SubscriptionStart,
-                synchronizerTimeTracker: SynchronizerTimeTracker,
+                start: SubscriptionStart
             )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+              // TODO(#33650) – Statically bounded to 2 elements
               Seq(
-                topologyProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)(
-                  traceContext
-                ),
-                trafficProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)(traceContext),
+                topologyProcessor.subscriptionStartsAt(start)(traceContext),
+                trafficProcessor.subscriptionStartsAt(start)(traceContext),
               ).parSequence_
 
             override def apply(
-                tracedEvents: BoxedEnvelope[Lambda[
-                  `+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]
-                ], ClosedEnvelope]
+                tracedEvents: Traced[Seq[PossiblyIgnoredSequencedEvent[Batch[ClosedEnvelope]]]]
             ): HandlerResult =
               tracedEvents.withTraceContext { traceContext => closedEvents =>
                 val openEvents = closedEvents.map { event =>
@@ -835,10 +830,12 @@ class ConnectedSynchronizer(
               cleanProcessingTsO,
               monitor(messageHandler),
               ephemeral.timeTracker,
-              tc =>
-                participantNodePersistentState.value.ledgerApiStore
-                  .cleanSynchronizerIndex(psid.logical)(tc, ec)
-                  .map(_.flatMap(_.sequencerIndex)),
+              _ =>
+                FutureUnlessShutdown.pure(
+                  participantNodePersistentState.value.ledgerApiStore
+                    .cleanSynchronizerIndex(psid.logical)
+                    .flatMap(_.sequencerIndex)
+                ),
             )(initializationTraceContext)
           )
 
@@ -858,6 +855,8 @@ class ConnectedSynchronizer(
             .leftMap[ConnectedSynchronizerInitializationError](
               ParticipantTopologyHandshakeError.apply
             )
+
+        _ = sequencerIdsRetriever.start()
       } yield {
         logger.debug(s"Started synchronizer for $psid")(initializationTraceContext)
         ephemeral.markAsRecovered()
@@ -1045,7 +1044,6 @@ class ConnectedSynchronizer(
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
-      keyResolver: LfGlobalKeyMapping,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
       topologySnapshot: TopologySnapshot,
@@ -1063,7 +1061,6 @@ class ConnectedSynchronizer(
         .submit(
           submitterInfo,
           transactionMeta,
-          keyResolver,
           transaction,
           disclosedContracts,
           topologySnapshot,
@@ -1163,6 +1160,7 @@ class ConnectedSynchronizer(
       SyncCloseable(
         "connected-synchronizer",
         LifeCycle.close(
+          sequencerIdsRetriever,
           journalGarbageCollector,
           acsCommitmentProcessor,
           transactionProcessor,
@@ -1170,6 +1168,7 @@ class ConnectedSynchronizer(
           assignmentProcessor,
           badRootHashMessagesRequestProcessor,
           topologyProcessor,
+          topologyClient,
           topologyManager,
           ephemeral.timeTracker, // need to close time tracker before synchronizer handle, as it might otherwise send messages
           synchronizerHandle,
@@ -1235,6 +1234,7 @@ object ConnectedSynchronizer {
         participantId: ParticipantId,
         engine: Engine,
         parameters: ParticipantNodeParameters,
+        synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncPersistentState,
         ephemeralState: SyncEphemeralState,
@@ -1247,6 +1247,7 @@ object ConnectedSynchronizer {
         reassignmentCoordination: ReassignmentCoordination,
         commandProgressTracker: CommandProgressTracker,
         clock: Clock,
+        trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
         promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
         connectedSynchronizerMetrics: ConnectedSynchronizerMetrics,
         futureSupervisor: FutureSupervisor,
@@ -1261,6 +1262,7 @@ object ConnectedSynchronizer {
         participantId: ParticipantId,
         engine: Engine,
         parameters: ParticipantNodeParameters,
+        synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
         participantNodePersistentState: Eval[ParticipantNodePersistentState],
         persistentState: SyncPersistentState,
         ephemeralState: SyncEphemeralState,
@@ -1273,6 +1275,7 @@ object ConnectedSynchronizer {
         reassignmentCoordination: ReassignmentCoordination,
         commandProgressTracker: CommandProgressTracker,
         clock: Clock,
+        trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
         promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
         connectedSynchronizerMetrics: ConnectedSynchronizerMetrics,
         futureSupervisor: FutureSupervisor,
@@ -1291,9 +1294,9 @@ object ConnectedSynchronizer {
       )
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
-        tc =>
+        () =>
           participantNodePersistentState.value.ledgerApiStore
-            .cleanSynchronizerIndex(synchronizerHandle.psid.logical)(tc, ec),
+            .cleanSynchronizerIndex(synchronizerHandle.psid.logical),
         sortedReconciliationIntervalsProvider,
         persistentState.acsCommitmentStore,
         persistentState.activeContractStore,
@@ -1366,6 +1369,7 @@ object ConnectedSynchronizer {
           participantId,
           engine,
           parameters,
+          synchronizerConnectionConfigStore,
           participantNodePersistentState,
           persistentState,
           ephemeralState,
@@ -1383,6 +1387,7 @@ object ConnectedSynchronizer {
           journalGarbageCollector,
           acsCommitmentProcessor,
           clock,
+          trafficEnforcementBackendO,
           promiseUSFactory,
           connectedSynchronizerMetrics,
           futureSupervisor,

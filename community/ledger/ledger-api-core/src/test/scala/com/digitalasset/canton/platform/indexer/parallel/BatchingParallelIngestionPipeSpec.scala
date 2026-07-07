@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.util.BatchN
 import org.apache.pekko.NotUsed
@@ -19,7 +18,6 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.chaining.*
 
-@UnstableTest // TODO(#19208)
 class BatchingParallelIngestionPipeSpec
     extends AsyncFlatSpec
     with Matchers
@@ -109,8 +107,8 @@ class BatchingParallelIngestionPipeSpec
   it should "form max-sized batches when back-pressured by downstream" in {
     val batchWeights = ArrayBuffer.empty[Long]
     runPipe(
-      // Back-pressure to ensure formation of max batch sizes (of size 5)
-      inputMapperHook = () => Threading.sleep(1),
+      // Back-pressure to ensure formation of batches closer to max batch weight
+      inputMapperHook = () => Threading.sleep(2),
       ingesterHook = batch => {
         blocking(batchWeights.synchronized {
           batchWeights.addOne(batch.map(p => weightFn(p._2.toInt)).sum)
@@ -119,9 +117,11 @@ class BatchingParallelIngestionPipeSpec
       },
       inputSource = Source(Iterator.continually(util.Random.nextInt()).take(1000).toList),
     ).map { case (_, _, err) =>
-      // The first and last batches can be much smaller than `MaxBatchWeight`
-      // so we drop 2 and assert the average batch weight instead of the weight of individual batches
-      val measurementBatchWeights = batchWeights.drop(2)
+      // The first and last batches can be much smaller than `MaxBatchWeight`, also the second round doesn't seem to
+      // have a chance to accumulate full batches.
+      // So we drop 4 (2 rounds) from the front and 2 (1 round) from the back and assert the average batch weight
+      // instead of the weight of individual batches
+      val measurementBatchWeights = batchWeights.drop(4).dropRight(2)
       measurementBatchWeights.sum.toDouble / measurementBatchWeights.size should be > (MaxBatchSize.toDouble * 0.7)
       err shouldBe empty
     }

@@ -159,21 +159,14 @@ private[reassignment] object UnassignmentValidation {
 
     private def checkAssignmentExclusivity(
         fullTree: FullUnassignmentTree,
-        targetTopologyO: Option[Target[TopologySnapshot]],
+        targetTopology: Target[TopologySnapshot],
     ): ValidationErrorOr[Option[Target[CantonTimestamp]]] =
-      targetTopologyO match {
-        case Some(targetTopology) =>
-          ProcessingSteps
-            .getAssignmentExclusivity(targetTopology, fullTree.targetTimestamp)
-            .map(Option(_))
-            .leftMap[ReassignmentProcessorError](
-              ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
-            )
-        case None =>
-          EitherT.right(
-            FutureUnlessShutdown.pure[Option[Target[CantonTimestamp]]](None)
-          )
-      }
+      ProcessingSteps
+        .getAssignmentExclusivity(targetTopology, fullTree.targetTimestamp)
+        .map(Option(_))
+        .leftMap[ReassignmentProcessorError](
+          ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
+        )
 
     private def checkPackagesVetted(
         stakeholders: Stakeholders,
@@ -245,50 +238,42 @@ private[reassignment] object UnassignmentValidation {
 
     private def computeReassigningParticipantValidationResult(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree],
-        targetTopologyO: Option[Target[TopologySnapshot]],
+        targetTopology: Target[TopologySnapshot],
     ): ValidationErrorOr[ReassigningParticipantValidationResult] =
-      targetTopologyO match {
-        case Some(targetTopology) =>
-          for {
-            participantsErrors <- checkReassigningParticipants(parsedRequest, targetTopology)
-            vettingErrors <- checkTargetPackagesVetted(parsedRequest.fullViewTree, targetTopology)
-            // check multi-synchronizer flag is enabled on the target synchronizer
-            multiSynchronizerCheckResult <- EitherT.right(
-              ReassignmentValidation
-                .checkMultiSynchronizerEnabled(
-                  topologySnapshot = targetTopology.unwrap,
-                  stakeholders = parsedRequest.fullViewTree.stakeholders,
-                  psid = parsedRequest.fullViewTree.targetSynchronizer.unwrap,
-                )
-                .value
-                .map(_.swap.toOption)
+      for {
+        participantsErrors <- checkReassigningParticipants(parsedRequest, targetTopology)
+        vettingErrors <- checkTargetPackagesVetted(parsedRequest.fullViewTree, targetTopology)
+        // check multi-synchronizer flag is enabled on the target synchronizer
+        multiSynchronizerCheckResult <- EitherT.right(
+          ReassignmentValidation
+            .checkMultiSynchronizerEnabled(
+              topologySnapshot = targetTopology.unwrap,
+              stakeholders = parsedRequest.fullViewTree.stakeholders,
+              psid = parsedRequest.fullViewTree.targetSynchronizer.unwrap,
             )
-          } yield {
-            ReassigningParticipantValidationResult(
-              participantsErrors.toList ++ vettingErrors.toList ++ multiSynchronizerCheckResult.toList
-            )
-          }
-        case None =>
-          EitherT.rightT(ReassigningParticipantValidationResult.TargetTimestampTooFarInFuture)
-      }
+            .value
+            .map(_.swap.toOption)
+        )
+      } yield ReassigningParticipantValidationResult(
+        participantsErrors.toList ++ vettingErrors.toList ++ multiSynchronizerCheckResult.toList
+      )
 
     def performValidations(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree]
     ): ValidationErrorOr[ReassigningParticipantValidation] =
       for {
-        targetTopologyO <- getTopologyAtTs.maybeAwaitTopologySnapshot(
-          parsedRequest.fullViewTree.targetSynchronizer,
-          parsedRequest.fullViewTree.targetTimestamp,
+        targetTopology <- getTopologyAtTs.getTargetApproximateSnapshot(
+          parsedRequest.fullViewTree.targetSynchronizer
         )
 
         hostedConfirmingReassigningParties <- checkHostedConfirmingReassigningParties(parsedRequest)
         assignmentExclusivity <- checkAssignmentExclusivity(
           parsedRequest.fullViewTree,
-          targetTopologyO,
+          targetTopology,
         )
         reassigningParticipantValidationResult <- computeReassigningParticipantValidationResult(
           parsedRequest,
-          targetTopologyO,
+          targetTopology,
         )
       } yield ReassigningParticipantValidation(
         hostedConfirmingReassigningParties,

@@ -5,35 +5,39 @@ package com.digitalasset.canton.synchronizer.block
 
 import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState, HealthComponent}
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
+  HasRunOnClosing,
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.InstrumentedGraph.BufferedFlow
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumed
 import com.digitalasset.canton.synchronizer.block
 import com.digitalasset.canton.synchronizer.block.AsyncWriter.AsyncAppendWorkHandle
-import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager.HeadState
+import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager.AccumulatedStatePersistingBlocks
 import com.digitalasset.canton.synchronizer.block.data.{
   BlockEphemeralState,
   BlockInfo,
   SequencerBlockStore,
 }
 import com.digitalasset.canton.synchronizer.block.update.*
-import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGenerator.BlockChunk
+import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGenerator.{
+  AccumulatedStateProcessingBlocks,
+  BlockChunk,
+}
 import com.digitalasset.canton.synchronizer.metrics.BlockMetrics
 import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerStreamInstrumentationConfig,
@@ -53,6 +57,7 @@ import com.digitalasset.canton.util.{
   LoggerUtil,
   MonadUtil,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Flow
 
@@ -75,7 +80,11 @@ class SequencerUnexpectedStateChange(message: String = "Sequencer state has unex
   */
 trait BlockSequencerStateManagerBase extends FlagCloseable {
 
-  def getHeadState: HeadState
+  /** Head state of the persistence step */
+  def getPersistenceHeadState: AccumulatedStatePersistingBlocks
+
+  /** Head state of the processing step */
+  def getProcessingHeadState: AccumulatedStateProcessingBlocks
 
   /** Flow to turn [[BlockEvents]] of one block into a series of [[update.OrderedBlockUpdate]]s that
     * are to be persisted subsequently using [[applyBlockUpdate]].
@@ -94,6 +103,11 @@ trait BlockSequencerStateManagerBase extends FlagCloseable {
   def waitForAcknowledgementToComplete(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit]
+
+  /** Health of the background writer. Reports a fatal state when a background write fails and the
+    * writer can no longer make progress.
+    */
+  def asyncWriterHealth: HealthComponent
 }
 
 /** Async block sequencer writer control parameters
@@ -333,6 +347,16 @@ private class BlockSequencerStateAsyncWriter(
 )(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends NamedLogging {
 
+  /** Health of the writer. It transitions to a fatal state whenever a write fails, which never
+    * recovers as further writes are blocked to avoid an inconsistent store.
+    */
+  val health: AtomicHealthComponent =
+    new BlockSequencerStateAsyncWriter.WriterHealth(
+      BlockSequencerStateAsyncWriter.healthName,
+      closeContext.context,
+      logger,
+    )
+
   private def mkWriter[Q <: Iterable[?]](
       addToQueue: (Q, Q) => Q,
       writeQueue: Q => FutureUnlessShutdown[Unit],
@@ -358,6 +382,7 @@ private class BlockSequencerStateAsyncWriter(
           ).initCause(exception)
         )
       )
+      health.fatalOccurred(s"Write $name failed - no further writes to avoid inconsistent store")
     }
   }
   private def mkPromise[A](description: String) =
@@ -482,23 +507,49 @@ private class BlockSequencerStateAsyncWriter(
 
 }
 
+private object BlockSequencerStateAsyncWriter {
+  val healthName: String = "block-sequencer-async-writer"
+
+  /** Atomic health component reporting the state of the writer. */
+  class WriterHealth(
+      override val name: String,
+      override protected val associatedHasRunOnClosing: HasRunOnClosing,
+      override protected val logger: TracedLogger,
+  ) extends AtomicHealthComponent {
+    override protected def initialHealthState: ComponentHealthState = ComponentHealthState.Ok()
+  }
+}
+
 class BlockSequencerStateManager(
     val store: SequencerBlockStore,
     val trafficConsumedStore: TrafficConsumedStore,
+    initialHeadBlockO: Option[BlockEphemeralState],
     asyncWriterParameters: AsyncWriterParameters,
     enableInvariantCheck: Boolean,
+    streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
+    enablePrevalidation: Boolean,
+    prevalidationParallelism: PositiveInt,
+    blockMetrics: BlockMetrics,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
-    headState: AtomicReference[HeadState],
-    streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
-    blockMetrics: BlockMetrics,
 )(implicit executionContext: ExecutionContext)
     extends BlockSequencerStateManagerBase
     with NamedLogging
     with HasCloseContext {
 
   import BlockSequencerStateManager.*
+
+  private val initialHeadBlock = initialHeadBlockO.getOrElse(BlockEphemeralState.empty)
+
+  private val persistenceHeadState = new AtomicReference[AccumulatedStatePersistingBlocks](
+    AccumulatedStatePersistingBlocks.fullyProcessed(initialHeadBlock)
+  )
+  private val processingHeadState = new AtomicReference[AccumulatedStateProcessingBlocks](
+    BlockUpdateGenerator.AccumulatedStateProcessingBlocks.fromEphemeralState(
+      initialHeadBlock
+    )
+  )
 
   private val asyncWriter =
     new BlockSequencerStateAsyncWriter(
@@ -509,19 +560,21 @@ class BlockSequencerStateManager(
       loggerFactory,
     )
 
+  override def asyncWriterHealth: HealthComponent = asyncWriter.health
+
   private val memberAcknowledgementPromises =
     TrieMap[Member, NonEmpty[SortedMap[CantonTimestamp, Traced[Promise[Unit]]]]]()
 
-  override def getHeadState: HeadState = headState.get()
+  override def getPersistenceHeadState: AccumulatedStatePersistingBlocks =
+    persistenceHeadState.get()
+
+  override def getProcessingHeadState: AccumulatedStateProcessingBlocks = processingHeadState.get()
 
   override def processBlock(
       bug: BlockUpdateGenerator
   ): Flow[Traced[BlockEvents], Traced[OrderedBlockUpdate], NotUsed] = {
-    val head = getHeadState
-    val bugState = {
-      import TraceContext.Implicits.Empty.*
-      bug.internalStateFor(head.blockEphemeralState)
-    }
+
+    val bugState = processingHeadState.get()
 
     def finalFlow[In, Out, Mat](
         original: Flow[In, Out, Mat],
@@ -534,16 +587,67 @@ class BlockSequencerStateManager(
         )(MetricsContext("element" -> flowName))
       else original
 
-    Flow[Traced[BlockEvents]]
+    val stage1 = Flow[Traced[BlockEvents]]
       .via(
-        finalFlow(checkBlockHeight(head.block.height), "check_block_height")
+        finalFlow(checkBlockHeight(initialHeadBlock.latestBlock.height), "check_block_height")
       )
       .via(
         finalFlow(chunkBlock(bug), "chunk_block")
       )
-      .via(
-        finalFlow(processChunk(bug)(bugState), "process_chunk")
-      )
+
+    val stage2 =
+      if (enablePrevalidation)
+        stage1.via(
+          finalFlow(
+            prevalidateSignatures(
+              bug
+            ),
+            "prevalidate_signatures",
+          )
+        )
+      else stage1
+
+    stage2.via(
+      finalFlow(processChunk(bug)(bugState), "process_chunk")
+    )
+  }
+
+  /** Prevalidate signatures in parallel
+    *
+    * Signature checking is relatively expensive. We therefore want to avoid doing this within a
+    * sequential stage. At the same time, we need to check not only the correctness of the
+    * signature, but also that the key used to sign was valid at the time of signing. The key check
+    * needs to be done using a consistent and correct topology snapshot, which in the current
+    * pipeline is only really known in the sequential stage.
+    *
+    * We therefore split and perform the expensive validation in parallel before the sequential
+    * stage, which makes sense as keys normally don't change often. In the sequential stage we then
+    * just check the key validity.
+    *
+    * We only deal with the happy path here. Any failure scenario will be handled consistently in
+    * the sequential step.
+    *
+    * This has two issues:
+    *   - the unhappy path is less efficient and can therefore be used as an attack vector.
+    *   - we perform the signature check before further validation, which means that an attacker
+    *     might be able to cause more expensive work before failing the signature check.
+    *
+    * However, both of these issues are only an issue if considered in isolation:
+    *   - an honest sequencer will filter out any malicious transaction submitted by a member before
+    *     ordering
+    *   - a dishonest sequencer can use its bandwidth to waste resources by submitting bad
+    *     transactions that will pass all checks and then fail in the signature check anyway.
+    *     Generally we deal with non-compliant sequencers through non-repudiability and
+    *     reporting/alerting/blacklisting.
+    */
+  private def prevalidateSignatures(
+      bug: BlockUpdateGenerator
+  ): Flow[Traced[BlockChunk], Traced[BlockChunk], NotUsed] = {
+    implicit val traceContext: TraceContext = TraceContext.empty
+    Flow[Traced[BlockChunk]].mapAsyncAndDrainUS(prevalidationParallelism.value)(_.withTraceContext {
+      implicit traceContext => chunk =>
+        bug.prevalidateSignatures(chunk, prevalidationParallelism).map(Traced(_))
+    })
   }
 
   private def checkBlockHeight(
@@ -599,12 +703,19 @@ class BlockSequencerStateManager(
     })
 
   private def processChunk(bug: BlockUpdateGenerator)(
-      initialState: bug.InternalState
+      initialState: BlockUpdateGenerator.AccumulatedStateProcessingBlocks
   ): Flow[Traced[BlockChunk], Traced[OrderedBlockUpdate], NotUsed] = {
     implicit val traceContext: TraceContext = TraceContext.empty
     Flow[Traced[BlockChunk]].statefulMapAsyncUSAndDrain(initialState) { (state, tracedChunk) =>
       implicit val traceContext: TraceContext = tracedChunk.traceContext
-      tracedChunk.traverse(blockChunk => Nested(bug.processBlockChunk(state, blockChunk))).value
+      tracedChunk
+        .traverse(blockChunk =>
+          Nested(bug.processBlockChunk(state, blockChunk).map { case (state, update) =>
+            processingHeadState.set(state)
+            (state, update)
+          })
+        )
+        .value
     }
   }
 
@@ -612,26 +723,27 @@ class BlockSequencerStateManager(
       dbSequencerIntegration: SequencerIntegration
   ): Flow[Traced[BlockUpdate], Traced[CantonTimestamp], NotUsed] = {
     implicit val traceContext = TraceContext.empty
-    Flow[Traced[BlockUpdate]].statefulMapAsyncUSAndDrain(getHeadState) { (priorHead, update) =>
-      implicit val traceContext = update.traceContext
-      val currentBlockNumber = priorHead.block.height + 1
-      val fut = update.value match {
-        case chunk: ChunkUpdate =>
-          val chunkNumber = priorHead.chunk.chunkNumber + 1
-          LoggerUtil.clueUSF(
-            s"Adding block updates for chunk $chunkNumber for block $currentBlockNumber. " +
-              s"Contains ${chunk.acknowledgements.size} acks, " +
-              s"and ${chunk.inFlightAggregationUpdates.size} in-flight aggregation updates"
-          )(handleChunkUpdate(priorHead, chunk, dbSequencerIntegration)(traceContext))
-        case complete: CompleteBlockUpdate =>
-          // TODO(#18401): Consider: wait for the DBS watermark to be updated to the blocks last timestamp
-          //  in a supervisory manner, to detect things not functioning properly
-          LoggerUtil.clueUSF(
-            s"Storing completion of block $currentBlockNumber"
-          )(handleComplete(priorHead, complete.block)(traceContext))
-      }
-      fut
-        .map(newHead => newHead -> Traced(newHead.block.lastTs))
+    Flow[Traced[BlockUpdate]].statefulMapAsyncUSAndDrain(getPersistenceHeadState) {
+      (priorHead, update) =>
+        implicit val traceContext = update.traceContext
+        val currentBlockNumber = priorHead.block.height + 1
+        val fut = update.value match {
+          case chunk: ChunkUpdate =>
+            val chunkNumber = priorHead.chunk.chunkNumber + 1
+            LoggerUtil.clueUSF(
+              s"Adding block updates for chunk $chunkNumber for block $currentBlockNumber. " +
+                s"Contains ${chunk.acknowledgements.size} acks, " +
+                s"and ${chunk.inFlightAggregationUpdates.size} in-flight aggregation updates"
+            )(handleChunkUpdate(priorHead, chunk, dbSequencerIntegration)(traceContext))
+          case complete: CompleteBlockUpdate =>
+            // TODO(#18401): Consider: wait for the DBS watermark to be updated to the blocks last timestamp
+            //  in a supervisory manner, to detect things not functioning properly
+            LoggerUtil.clueUSF(
+              s"Storing completion of block $currentBlockNumber"
+            )(handleComplete(priorHead, complete.block)(traceContext))
+        }
+        fut
+          .map(newHead => newHead -> Traced(newHead.block.lastTs))
     }
   }
 
@@ -658,12 +770,12 @@ class BlockSequencerStateManager(
       .future
 
   private def handleChunkUpdate(
-      priorHead: HeadState,
+      priorHead: AccumulatedStatePersistingBlocks,
       update: ChunkUpdate,
       dbSequencerIntegration: SequencerIntegration,
   )(implicit
       batchTraceContext: TraceContext
-  ): FutureUnlessShutdown[HeadState] = {
+  ): FutureUnlessShutdown[AccumulatedStatePersistingBlocks] = {
     val priorState = priorHead.chunk
     val chunkNumber = priorState.chunkNumber + 1
     val currentBlockNumber = priorHead.block.height + 1
@@ -678,7 +790,6 @@ class BlockSequencerStateManager(
 
     val newState = ChunkState(
       chunkNumber,
-      update.inFlightAggregations,
       lastTs,
       update.lastSequencerEventTimestamp.orElse(priorState.latestSequencerEventTimestamp),
     )
@@ -724,9 +835,9 @@ class BlockSequencerStateManager(
       )
   }
 
-  private def handleComplete(priorHead: HeadState, newBlock: BlockInfo)(implicit
-      blockTraceContext: TraceContext
-  ): FutureUnlessShutdown[HeadState] = {
+  private def handleComplete(priorHead: AccumulatedStatePersistingBlocks, newBlock: BlockInfo)(
+      implicit blockTraceContext: TraceContext
+  ): FutureUnlessShutdown[AccumulatedStatePersistingBlocks] = {
     val chunkState = priorHead.chunk
     assert(
       chunkState.lastTs <= newBlock.lastTs,
@@ -739,11 +850,10 @@ class BlockSequencerStateManager(
 
     val newState = BlockEphemeralState(
       newBlock,
-      chunkState.inFlightAggregations,
+      InFlightAggregations.empty,
     )
     checkInvariantIfEnabled(newState)
-    val newHead = HeadState.fullyProcessed(newState)
-
+    val newHead = AccumulatedStatePersistingBlocks.fullyProcessed(newState)
     // write is async. future only forwarded to inject future failed in case we are unable to write
     asyncWriter
       .finalizeBlockUpdate(newBlock)
@@ -754,10 +864,13 @@ class BlockSequencerStateManager(
 
   }
 
-  private def updateHeadState(prior: HeadState, next: HeadState)(implicit
+  private def updateHeadState(
+      prior: AccumulatedStatePersistingBlocks,
+      next: AccumulatedStatePersistingBlocks,
+  )(implicit
       traceContext: TraceContext
   ): Unit =
-    if (!headState.compareAndSet(prior, next)) {
+    if (!persistenceHeadState.compareAndSet(prior, next)) {
       // The write flow should not call this method concurrently so this situation should never happen.
       // If it does, this means that the ephemeral state has been updated since this update was generated,
       // and that the persisted state is now likely inconsistent.
@@ -851,36 +964,38 @@ object BlockSequencerStateManager {
       store: SequencerBlockStore,
       trafficConsumedStore: TrafficConsumedStore,
       asyncWriterParameters: AsyncWriterParameters,
+      streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
       enableInvariantCheck: Boolean,
+      enablePrevalidation: Boolean,
+      prevalidationParallelism: PositiveInt,
+      blockMetrics: BlockMetrics,
       timeouts: ProcessingTimeout,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
-      streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
-      blockMetrics: BlockMetrics,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): BlockSequencerStateManager = {
-    val logger = loggerFactory.getTracedLogger(getClass)
-
     val headBlock = initialHeadBlockO.getOrElse(BlockEphemeralState.empty)
-    val headState = new AtomicReference[HeadState]({
-      logger.debug(
+    loggerFactory
+      .getTracedLogger(getClass)
+      .info(
         s"Initialized the block sequencer with head block ${headBlock.latestBlock}"
       )
-      HeadState.fullyProcessed(headBlock)
-    })
+
     new BlockSequencerStateManager(
       store = store,
       trafficConsumedStore = trafficConsumedStore,
+      initialHeadBlockO = initialHeadBlockO,
       asyncWriterParameters = asyncWriterParameters,
       enableInvariantCheck = enableInvariantCheck,
+      streamInstrumentationConfig = streamInstrumentationConfig,
+      enablePrevalidation = enablePrevalidation,
+      prevalidationParallelism = prevalidationParallelism,
+      blockMetrics = blockMetrics,
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory = loggerFactory,
-      headState = headState,
-      streamInstrumentationConfig = streamInstrumentationConfig,
-      blockMetrics = blockMetrics,
     )
   }
 
@@ -891,7 +1006,6 @@ object BlockSequencerStateManager {
     */
   final case class ChunkState(
       chunkNumber: Long,
-      inFlightAggregations: InFlightAggregations,
       lastTs: CantonTimestamp,
       latestSequencerEventTimestamp: Option[CantonTimestamp],
   )
@@ -902,7 +1016,6 @@ object BlockSequencerStateManager {
     def initial(block: BlockEphemeralState): ChunkState =
       ChunkState(
         initialChunkCounter,
-        block.inFlightAggregations,
         block.latestBlock.lastTs,
         block.latestBlock.latestSequencerEventTimestamp,
       )
@@ -914,27 +1027,14 @@ object BlockSequencerStateManager {
     *   Describes the state after the latest block that was fully processed.
     * @param chunk
     *   Describes the state after the last chunk of the block that is currently being processed.
-    *   When the latest block is fully processed, but no chunks of the next block, then this is
-    *   `ChunkState.initial` based on the last block's
-    *   [[com.digitalasset.canton.synchronizer.block.data.BlockEphemeralState]].
     */
-  final case class HeadState(
+  final case class AccumulatedStatePersistingBlocks(
       block: BlockInfo,
       chunk: ChunkState,
-  ) {
-    def blockEphemeralState(implicit
-        loggingContext: ErrorLoggingContext
-    ): BlockEphemeralState = {
-      ErrorUtil.requireState(
-        chunk.chunkNumber == ChunkState.initialChunkCounter,
-        s"Cannot construct a BlockEphemeralState if there are partial block updates from ${chunk.chunkNumber} chunks.",
-      )
-      BlockEphemeralState(block, chunk.inFlightAggregations)
-    }
-  }
+  )
 
-  object HeadState {
-    def fullyProcessed(block: BlockEphemeralState): HeadState =
-      HeadState(block.latestBlock, ChunkState.initial(block))
+  object AccumulatedStatePersistingBlocks {
+    def fullyProcessed(block: BlockEphemeralState): AccumulatedStatePersistingBlocks =
+      AccumulatedStatePersistingBlocks(block.latestBlock, ChunkState.initial(block))
   }
 }

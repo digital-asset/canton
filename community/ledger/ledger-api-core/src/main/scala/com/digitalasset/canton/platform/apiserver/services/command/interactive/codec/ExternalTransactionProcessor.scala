@@ -204,7 +204,6 @@ class ExternalTransactionProcessor(
         submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
         transactionMeta = commandExecutionResult.commandInterpretationResult.transactionMeta,
         transaction = SubmittedTransaction(enrichedTransaction),
-        globalKeyMapping = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
         inputContracts = inputContracts,
         synchronizer = psid.forExternalTransactionHashing,
         mediatorGroup = 0,
@@ -305,10 +304,10 @@ class ExternalTransactionProcessor(
           }
           .toLeft(())
       )
-      _ <- decoded
+      hash <- decoded
         .verifySignature(routingSynchronizerState, logger)
         .leftMap(err => InteractiveSubmissionExecuteError.Reject(err))
-      commandInterpretationResult = decoded.impoverish
+      commandInterpretationResult = decoded.withTransactionHash(hash).impoverish
       selectRoutingSynchronizer <- EitherT.liftF(
         syncService
           .selectRoutingSynchronizer(

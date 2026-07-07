@@ -106,7 +106,7 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       TopologyTransaction.type
     ],
-    override val deserializedFrom: Option[ByteString] = None,
+    override val deserializedFrom: Option[ByteString],
 ) extends TopologyTransactionLike[Op, M]
     with ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
@@ -155,13 +155,6 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
     mapping = Some(mapping.toProtoV30),
   )
 
-  def asVersion(
-      protocolVersion: ProtocolVersion
-  ): TopologyTransaction[Op, M] =
-    TopologyTransaction[Op, M](operation, serial, mapping)(
-      TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
-    )
-
   /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
     * implement this method.
     */
@@ -182,7 +175,7 @@ object TopologyTransaction
       TopologyTransaction[TopologyChangeOp, TopologyMapping]
     ] {
 
-  final case class TxHash(hash: Hash) extends AnyVal {}
+  final case class TxHash(hash: Hash) extends AnyVal
 
   override val name: String = "TopologyTransaction"
 

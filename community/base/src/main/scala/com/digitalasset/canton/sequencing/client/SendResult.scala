@@ -7,6 +7,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   Deliver,
   DeliverError,
   Envelope,
@@ -21,11 +22,12 @@ object SendResult {
 
   /** Send caused a deliver event to be successfully sequenced. For aggregatable submission
     * requests, success means that the aggregatable submission was assigned a timestamp. It does not
-    * mean that the [[com.digitalasset.canton.sequencing.protocol.AggregationRule.threshold]] was
-    * reached and the envelopes are delivered. Accordingly, the
-    * [[com.digitalasset.canton.sequencing.protocol.Deliver]] event may contain an empty batch.
+    * mean that the threshold represented by
+    * [[com.digitalasset.canton.sequencing.protocol.AggregationRule]] was reached and the envelopes
+    * are delivered. Accordingly, the [[com.digitalasset.canton.sequencing.protocol.Deliver]] event
+    * may contain an empty batch.
     */
-  final case class Success(deliver: Deliver[Envelope[?]]) extends SendResult
+  final case class Success(deliver: Deliver[Batch[Envelope[?]]]) extends SendResult
 
   /** Send caused an event that indicates that the submission was not and never will be sequenced */
   sealed trait NotSequenced extends SendResult

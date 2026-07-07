@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.submission
 
-import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.PrepareSubmissionResponse
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.crypto.InteractiveSubmission.TransactionMetadataForHashing
 import com.digitalasset.canton.crypto.{
@@ -18,18 +16,9 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.damltests.java.statictimetest.Pass
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationOffset
 import com.digitalasset.canton.examples.java.cycle as M
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
-import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  HasCycleUtils,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
-import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -45,11 +34,11 @@ import com.digitalasset.canton.sequencing.protocol.MemberRecipient
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
-import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{HasExecutionContext, LfTimestamp}
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
@@ -57,7 +46,6 @@ import org.slf4j.event.Level
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
-import scala.collection.immutable.Seq
 import scala.concurrent.{Await, Future, Promise}
 import scala.util.Failure
 
@@ -341,59 +329,6 @@ final class InteractiveSubmissionConfirmationIntegrationTest
       completion.status.value.code shouldBe Status.Code.INVALID_ARGUMENT.value()
     }
 
-    "fail if the wrong synchronizer ID format is used" in { implicit env =>
-      import env.*
-
-      val maliciousCpn = MaliciousParticipantNode(
-        cpn,
-        daId,
-        testedProtocolVersion,
-        timeouts,
-        loggerFactory,
-      )
-
-      val cycle =
-        new M.Cycle(
-          UUID.randomUUID().toString,
-          aliceE.toProtoPrimitive,
-        ).create.commands.loneElement
-
-      val (signature, _) =
-        prepareTransactionsWithIncorrectSynchronizerIdFormat(cycle, aliceE)
-
-      val cmd = CommandsWithMetadata(
-        Seq(cycle).map(c => Command.fromJavaProto(c.toProtoCommand)),
-        Seq(aliceE),
-        ledgerTime = environment.now.toLf,
-      )
-
-      loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(Level.WARN))(
-        maliciousCpn
-          .submitCommand(
-            cmd,
-            submitterInfoInterceptor = _.copy(
-              externallySignedSubmission = Some(
-                ExternallySignedSubmission(
-                  version = testedHashingSchemeVersion,
-                  signatures = Map(aliceE.partyId -> Seq(signature)),
-                  transactionUUID = cmd.transactionUuid,
-                  mediatorGroup = NonNegativeInt.zero,
-                  maxRecordTime = None,
-                )
-              )
-            ),
-          )
-          .futureValueUS,
-        LogEntry.assertLogSeq(
-          malformedRequestLogAssertion ++ invalidSignaturesLogAssertion(
-            valid = 0,
-            invalid = 1,
-            expectedValid = 2,
-          )
-        ),
-      )
-    }
-
     "fail with missing input contracts" in { implicit env =>
       import env.*
       import monocle.syntax.all.*
@@ -509,7 +444,6 @@ final class InteractiveSubmissionConfirmationIntegrationTest
               submitterInfo,
               deserialized.transactionMeta,
               _estimatedInterpretationCost = 0L,
-              deserialized.globalKeyMapping,
               ImmArray.empty,
             )
             .futureValue

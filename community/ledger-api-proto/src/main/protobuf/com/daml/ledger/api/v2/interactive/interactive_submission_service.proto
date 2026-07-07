@@ -32,15 +32,12 @@ service InteractiveSubmissionService {
   // Requires `readAs` scope for the submitting party when LAPI User authorization is enabled
   rpc PrepareSubmission(PrepareSubmissionRequest) returns (PrepareSubmissionResponse);
   // Execute a prepared submission _asynchronously_ on the ledger.
+  // Requires `actAs` or `executeAs` scope for the submitting party when LAPI User authorization is enabled
   // Requires a signature of the transaction from the submitting external party.
   rpc ExecuteSubmission(ExecuteSubmissionRequest) returns (ExecuteSubmissionResponse);
   // Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
-  // IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-  // A malicious node could make a successfully committed request appeared failed and vice versa
   rpc ExecuteSubmissionAndWait(ExecuteSubmissionAndWaitRequest) returns (ExecuteSubmissionAndWaitResponse);
   // Similar to ExecuteSubmissionAndWait but additionally returns the transaction
-  // IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-  // A malicious node could make a successfully committed request appear as failed and vice versa
   rpc ExecuteSubmissionAndWaitForTransaction(ExecuteSubmissionAndWaitForTransactionRequest) returns (ExecuteSubmissionAndWaitForTransactionResponse);
 
   // A preferred package is the highest-versioned package for a provided package-name
@@ -223,6 +220,8 @@ message PrepareSubmissionRequest {
 
   // The hashing scheme version to be used when building the hash.
   // Defaults to HASHING_SCHEME_VERSION_V2.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Optional
   optional HashingSchemeVersion hashing_scheme_version = 17;
@@ -243,6 +242,9 @@ enum HashingSchemeVersion {
   reserved 1; // Hashing Scheme V1 - unsupported
   HASHING_SCHEME_VERSION_V2 = 2;
   HASHING_SCHEME_VERSION_V3 = 3;
+  // Development-protocol-only hashing scheme for LF development-version prepared transactions.
+  // V4 includes exercise external_call_results in the prepared transaction hash.
+  HASHING_SCHEME_VERSION_V4 = 4;
 }
 // [docs-entry-end: HashingSchemeVersion]
 
@@ -259,7 +261,9 @@ message PrepareSubmissionResponse {
   // Required: must be non-empty
   bytes prepared_transaction_hash = 2;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 3;
@@ -341,7 +345,9 @@ message ExecuteSubmissionRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -399,7 +405,9 @@ message ExecuteSubmissionAndWaitRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -468,7 +476,9 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   // Optional
   string user_id = 6;
 
-  // The hashing scheme version used when building the hash
+  // The hashing scheme version used when building the hash.
+  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+  // for stable synchronizers.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -543,11 +553,12 @@ message Metadata {
     string command_id = 2;
   }
 
+  // This message is deprecated and may be removed in future releases
   message GlobalKeyMappingEntry {
     // Required
-    interactive.GlobalKey key = 1;
+    interactive.GlobalKey key = 1 [deprecated = true];
     // Optional
-    optional Value value = 2;
+    optional Value value = 2 [deprecated = true];
   }
 
   message InputContract {
@@ -598,25 +609,23 @@ message Metadata {
   // Optional
   optional uint64 max_ledger_effective_time = 10;
 
-  /* ********************************************************** */
-  /* ** Metadata information that does NOT need to be signed ** */
-  /* ********************************************************** */
-
-  // Contextual information needed to process the transaction but not signed, either because it's already indirectly
-  // signed by signing the transaction, or because it doesn't impact the ledger state
-  //
-  // Optional: can be empty
-  repeated GlobalKeyMappingEntry global_key_mapping = 8;
-
   // Maximum timestamp at which the transaction can be recorded onto the ledger via the synchronizer `synchronizer_id`.
   // If submitted after it will be rejected even if otherwise valid, in which case it needs to be prepared and signed again
   // with a new valid max_record_time.
-  // Unsigned in 3.3 to avoid a breaking protocol change
-  // Will be signed in 3.4+
   // Set max_record_time in the PreparedTransactionRequest to get this field set accordingly
   //
   // Optional
   optional uint64 max_record_time = 11;
+
+  /* ********************************************************** */
+  /* ** Metadata information that does NOT need to be signed ** */
+  /* ********************************************************** */
+
+  // This fields is deprecated and will always be empty.
+  // Keys and associated contracts are already present and signed within the transaction nodes where they're used
+  //
+  // Optional: can be empty
+  repeated GlobalKeyMappingEntry global_key_mapping = 8 [deprecated = true];
 }
 
 /*

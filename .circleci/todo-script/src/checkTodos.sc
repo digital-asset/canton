@@ -4,8 +4,10 @@ import scala.collection.mutable.ListBuffer
 import scala.collection.{Map, SortedMap}
 import scala.sys.process._
 import scala.util.matching.Regex
+import scala.util.Try
 
-/**  This script depends on `gh` (github cli) and awk
+/**  This script depends on `gh` (github cli), awk, and python3 (for the shared
+  *  exclude set in scripts/ci/todo_refs.py)
   *
   *  Current limitations of the TODO checker:
   *    - For `.rst` files, TODO blocks are considered to be the range from each instance of `todo::` to the next blank
@@ -113,6 +115,18 @@ final case class IssueBucket(number: Int) extends Bucket {
   override val withinClassPosition = number
 }
 
+final case class OssIssueBucket(number: Int) extends Bucket {
+  override val name = "OSS Issue " + number.toString
+  override val classPosition = 6 // after TagBucket(1), MilestoneBucket(2), IssueBucket(3), UnknownBucket(4), UnassignedBucket(5)
+  override val withinClassPosition = number
+}
+
+final case class DamlIssueBucket(number: Int) extends Bucket {
+  override val name = "Daml Issue " + number.toString
+  override val classPosition = 7 // after TagBucket(1), MilestoneBucket(2), IssueBucket(3), UnknownBucket(4), UnassignedBucket(5), OssIssueBucket(6)
+  override val withinClassPosition = number
+}
+
 object UnknownBucket extends Bucket {
   override val name = "Unknown category"
   override val classPosition = 4
@@ -141,10 +155,16 @@ final case class Tag(tags: List[String]) extends RegexCategory {
   override def getBucket(name: String) = TagBucket(tags.head)
 }
 
+def extractIssueNumber(str: String): Int =
+  "[0-9]+".r.findFirstMatchIn(str) match {
+    case None => throw new RuntimeException("The given string isn't an issue")
+    case Some(m) => m.matched.toInt
+  }
+
 object Issue extends RegexCategory {
   override val regex = "[i#][0-9]+".r
 
-  override def getBucket(str: String) = numsToIssue(str)
+  override def getBucket(str: String) = IssueBucket(extractIssueNumber(str))
 }
 
 object Milestone extends RegexCategory {
@@ -155,16 +175,21 @@ object Milestone extends RegexCategory {
 }
 
 object GithubIssueLink extends RegexCategory {
-  override val regex: Regex = "canton/issues/[0-9]+".r
+  override val regex: Regex = "(https://github\\.com/DACH-NY/)?canton/issues/[0-9]+".r
 
-  override def getBucket(str: String): Bucket = numsToIssue(str)
+  override def getBucket(str: String): Bucket = IssueBucket(extractIssueNumber(str))
 }
 
-def numsToIssue(str: String): IssueBucket = {
-  "[0-9]+".r.findFirstMatchIn(str) match {
-    case None => throw new RuntimeException("The given string isn't an issue")
-    case Some(m) => IssueBucket(m.matched.toInt)
-  }
+object OssGithubIssueLink extends RegexCategory {
+  override val regex: Regex = "(https://github\\.com/)?digital-asset/canton/issues/[0-9]+".r
+
+  override def getBucket(str: String): Bucket = OssIssueBucket(extractIssueNumber(str))
+}
+
+object DamlGithubIssueLink extends RegexCategory {
+  override val regex: Regex = "(https://github\\.com/)?digital-asset/daml/issues/[0-9]+".r
+
+  override def getBucket(str: String): Bucket = DamlIssueBucket(extractIssueNumber(str))
 }
 
 val tags: List[RegexCategory] = List(
@@ -172,7 +197,7 @@ val tags: List[RegexCategory] = List(
   Tag(List("GA", "1.0.0", "1.0")),
 )
 
-val allRegexps: List[RegexCategory] = tags ++ List(Issue, Milestone)
+val allRegexps: List[RegexCategory] = tags ++ List(Issue, Milestone, OssGithubIssueLink, DamlGithubIssueLink)
 
 val todoPatterns = Seq("TODO", "XXX", "FIXME")
 val todoPatternRegexpStr = todoPatterns.map(str => s"($str)").mkString("|")
@@ -253,49 +278,74 @@ if (!sys.env.contains("GITHUB_TOKEN")) {
   )
 }
 
-val openIssues: Set[Int] = "gh issue list --limit 2500 --json number --jq '.[].number'".!!.split("\n")
-  .map(_.toInt)
-  .toSet
+@annotation.tailrec
+def retry[T](times: Int, delaySeconds: Int)(block: => T): T =
+  Try(block) match {
+    case scala.util.Success(v) => v
+    case scala.util.Failure(e) if times > 1 =>
+      println(s"Command failed: ${e.getMessage}. Retrying in ${delaySeconds}s (${times - 1} attempts left)...")
+      Thread.sleep(delaySeconds * 1000L)
+      retry(times - 1, delaySeconds)(block)
+    case scala.util.Failure(e) => throw e
+  }
+
+def fetchOpenIssues(repo: Option[String] = None, limit: Int = 2500): Set[Int] = {
+  val repoName = repo.getOrElse("gh repo view --json nameWithOwner --jq '.nameWithOwner'".!!.trim)
+  val repoFlag = repo.map(r => s" --repo $r").getOrElse("")
+  val totalCount = retry(3, 5) {
+    s"gh api 'search/issues?q=repo:$repoName+is:issue+is:open&per_page=1' --jq '.total_count'".!!.trim.toInt
+  }
+  if (totalCount >= limit) {
+    Console.err.println(s"ERROR: $repoName has $totalCount open issues, which meets or exceeds the fetch limit of $limit. Some TODOs may be missed. Increase the limit in fetchOpenIssues.")
+    sys.exit(1)
+  }
+  retry(3, 5) {
+    s"gh issue list$repoFlag --limit $limit --json number --jq '.[].number'".!!.split("\n")
+      .map(_.toInt)
+      .toSet
+  }
+}
+
+val openIssues: Set[Int] = fetchOpenIssues()
+val openOssIssues: Set[Int] = fetchOpenIssues(repo = Some("digital-asset/canton"))
+val openDamlIssues: Set[Int] = fetchOpenIssues(repo = Some("digital-asset/daml"))
 
 // Issues that have dangling TODOs (e.g., in sql files)
 val ignoredIssues: Set[Int] = Set(282923)
 
 println(s"Found ${openIssues.size} open issues: ${openIssues.mkString(", ")}")
+println(s"Found ${openOssIssues.size} open OSS issues: ${openOssIssues.mkString(", ")}")
+println(s"Found ${openDamlIssues.size} open Daml issues: ${openDamlIssues.mkString(", ")}")
 
 val projectRoot = "." // CI scripts are called from the project root
 
-val scalaStyleExcludeDirectories =
-  Seq(
-    "TODO-script",
-    "lib",
-    "log",
-    "todo-out",
-    "theory",
-    "docs",
-    "docs-open",
-    ".git",
-    ".idea",
-    "target",
-    "3rdparty",
-    "build",
-    "contributing",
-    "daml",
+// The exclude set (directories and file globs) is owned by the shared
+// scripts/ci/todo_refs.py, so this todo checker, the issue-close workflow, and
+// the stale-flake closer cannot drift apart. `--format=grep` emits the
+// --exclude-dir/--exclude flags this grep call needs.
+val sharedExcludeArgs: Seq[String] =
+  Try("python3 scripts/ci/todo_refs.py excludes --format=grep".!!).fold(
+    err => {
+      System.err.println(
+        "Failed to obtain the shared TODO exclude set. This checker now requires python3 on " +
+          "PATH (provided by the nix shell); run it via '.ci/nix-exec amm ...'. Underlying error: " +
+          err.getMessage
+      )
+      sys.exit(1)
+    },
+    _.linesIterator.filter(_.nonEmpty).toSeq,
   )
+
+// Gate-only excludes: .github and .direnv are deliberately NOT in the shared exclude set (the
+// issue-close workflow and stale-flake closer scan .github to catch workflow TODOs). The PR gate
+// excludes them because .github/actions/build/todo_checker/action.yml has descriptive "TODO/FIXME"
+// text with no issue reference that would otherwise be flagged here as an ownerless TODO.
+val gateOnlyExcludeArgs = Seq("--exclude-dir=.github", "--exclude-dir=.direnv")
 
 // Different versions of grep (e.g. on Mac and Ubuntu) behave differently. This grep call should be tested for both
 // platforms if it is to be run locally. Right now it's only tested for Ubuntu because the CI uses Ubuntu.
-def grepForPattern(pattern: String): Seq[String] = {
-  val excludeDirectories = scalaStyleExcludeDirectories ++ Seq("release-notes")
-
-  Seq("grep", "-r") ++ excludeDirectories.map(dir => s"--exclude-dir=$dir") ++ Seq(
-    "-I", // Ignore binary files
-    "--exclude=*.png",
-    "--exclude=*checkTodos.sc",
-    "--exclude=*UNRELEASED.md",
-    pattern,
-    projectRoot,
-  )
-}
+def grepForPattern(pattern: String): Seq[String] =
+  Seq("grep", "-r", "-I") ++ sharedExcludeArgs ++ gateOnlyExcludeArgs ++ Seq(pattern, projectRoot) // -I ignores binary files
 
 object ErrorCollector extends ProcessLogger {
   private val allErrors = ListBuffer[String]()
@@ -354,6 +404,10 @@ val table = pairsToMap(scalaStyleIssuesTable ++ rstStyleIssuesTable)
 
 val issuesNotOpen = table.filter {
   case (IssueBucket(i), _) => ((!openIssues.contains(i)) || fixedIssuesCurrentPR.contains(i)) && !ignoredIssues.contains(i)
+  // fixedIssuesCurrentPR is not checked for OSS/Daml issues: it parses "fixes #<n>" from the internal PR body,
+  // which never references OSS or Daml issue numbers.
+  case (OssIssueBucket(i), _) => !openOssIssues.contains(i)
+  case (DamlIssueBucket(i), _) => !openDamlIssues.contains(i)
   case _ => false
 }
 

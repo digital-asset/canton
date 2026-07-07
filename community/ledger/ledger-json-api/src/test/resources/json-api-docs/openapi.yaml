@@ -214,6 +214,7 @@ paths:
       description: |-
         Query completions list (blocking call)
 
+        Deprecated: please use ``GetCompletions`` instead.
         Subscribe to command completion events.
         Notice: This endpoint should be used for small results set.
         When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
@@ -243,6 +244,67 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CompletionStreamRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CompletionStreamResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body, Invalid value for:
+            query parameter limit, Invalid value for: query parameter stream_idle_timeout_ms'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/commands/command-completions:
+    post:
+      description: |-
+        Query completions list (blocking call)
+
+        Subscribe to command completion events.
+        This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
+        Notice: This endpoint should be used for small results set.
+        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        there will be an error (`413 Content Too Large`) returned.
+        Increasing this limit may lead to performance issues and high memory consumption.
+        Consider using websockets (asyncapi) for better efficiency with larger results.
+      operationId: postV2CommandsCommand-completions
+      parameters:
+      - name: limit
+        in: query
+        description: maximum number of elements to return, this param is ignored if
+          is bigger than server setting
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: stream_idle_timeout_ms
+        in: query
+        description: timeout to complete and send result if no new elements are received
+          (for open ended streams)
+        required: false
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetCompletionsRequest'
         required: true
       responses:
         '200':
@@ -561,75 +623,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
-  /v2/package-vetting:
-    get:
-      description: |-
-        Lists which participant node vetted what packages on which synchronizer.
-        This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.
-      operationId: getV2Package-vetting
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ListVettedPackagesRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListVettedPackagesResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: body'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
-    post:
-      description: |-
-        Update the vetted packages of this participant
-        This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.
-      operationId: postV2Package-vetting
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateVettedPackagesRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpdateVettedPackagesResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: body'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -1274,203 +1267,6 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
-  /v2/updates/flats:
-    post:
-      description: |-
-        Query flat transactions update list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead.
-        Notice: This endpoint should be used for small results set.
-        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
-        there will be an error (`413 Content Too Large`) returned.
-        Increasing this limit may lead to performance issues and high memory consumption.
-        Consider using websockets (asyncapi) for better efficiency with larger results.
-      operationId: postV2UpdatesFlats
-      parameters:
-      - name: limit
-        in: query
-        description: maximum number of elements to return, this param is ignored if
-          is bigger than server setting
-        required: false
-        schema:
-          type: integer
-          format: int64
-      - name: stream_idle_timeout_ms
-        in: query
-        description: timeout to complete and send result if no new elements are received
-          (for open ended streams)
-        required: false
-        schema:
-          type: integer
-          format: int64
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetUpdatesRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/JsGetUpdatesResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: body, Invalid value for:
-            query parameter limit, Invalid value for: query parameter stream_idle_timeout_ms'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
-  /v2/updates/trees:
-    post:
-      description: |-
-        Query update transactions tree list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead.
-        Notice: This endpoint should be used for small results set.
-        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
-        there will be an error (`413 Content Too Large`) returned.
-        Increasing this limit may lead to performance issues and high memory consumption.
-        Consider using websockets (asyncapi) for better efficiency with larger results.
-      operationId: postV2UpdatesTrees
-      parameters:
-      - name: limit
-        in: query
-        description: maximum number of elements to return, this param is ignored if
-          is bigger than server setting
-        required: false
-        schema:
-          type: integer
-          format: int64
-      - name: stream_idle_timeout_ms
-        in: query
-        description: timeout to complete and send result if no new elements are received
-          (for open ended streams)
-        required: false
-        schema:
-          type: integer
-          format: int64
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetUpdatesRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/JsGetUpdateTreesResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: body, Invalid value for:
-            query parameter limit, Invalid value for: query parameter stream_idle_timeout_ms'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
-  /v2/updates/transaction-tree-by-offset/{offset}:
-    get:
-      description: Get transaction tree by offset. Provided for backwards compatibility,
-        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset
-        instead.
-      operationId: getV2UpdatesTransaction-tree-by-offsetOffset
-      parameters:
-      - name: offset
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      - name: parties
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsGetTransactionTreeResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: path parameter offset, Invalid
-            value for: query parameter parties'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
-  /v2/updates/transaction-by-offset:
-    post:
-      description: Get transaction by offset. Provided for backwards compatibility,
-        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset
-        instead.
-      operationId: postV2UpdatesTransaction-by-offset
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetTransactionByOffsetRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsGetTransactionResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: body'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
   /v2/updates/update-by-offset:
     post:
       description: |-
@@ -1502,40 +1298,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
-  /v2/updates/transaction-by-id:
-    post:
-      description: Get transaction by id. Provided for backwards compatibility, it
-        will be removed in the Canton version 3.5.0, use v2/updates/update-by-id instead.
-      operationId: postV2UpdatesTransaction-by-id
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GetTransactionByIdRequest'
-        required: true
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsGetTransactionResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: body'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -1573,34 +1335,29 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
-  /v2/updates/transaction-tree-by-id/{update-id}:
-    get:
-      description: Get transaction tree by id. Provided for backwards compatibility,
-        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-id
-        instead.
-      operationId: getV2UpdatesTransaction-tree-by-idUpdate-id
-      parameters:
-      - name: update-id
-        in: path
+  /v2/updates/update-by-hash:
+    post:
+      description: |-
+        Look up an update by its transaction hash.
+        This is only available for updates received after upgrading to Canton version 3.6.
+        If there is no update with this transaction hash, or all the events are filtered,
+        or the update was populated before upgrading to Canton version 3.6, an UPDATE_NOT_FOUND error will be raised.
+      operationId: postV2UpdatesUpdate-by-hash
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetUpdateByHashRequest'
         required: true
-        schema:
-          type: string
-      - name: parties
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
       responses:
         '200':
           description: ''
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JsGetTransactionTreeResponse'
+                $ref: '#/components/schemas/JsGetUpdateResponse'
         '400':
-          description: 'Invalid value, Invalid value for: query parameter parties'
+          description: 'Invalid value, Invalid value for: body'
           content:
             text/plain:
               schema:
@@ -1611,7 +1368,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
-      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -2211,6 +1967,7 @@ paths:
     post:
       description: |-
         Execute a prepared submission _asynchronously_ on the ledger.
+        Requires `actAs` or `executeAs` scope for the submitting party when LAPI User authorization is enabled
         Requires a signature of the transaction from the submitting external party.
       operationId: postV2Interactive-submissionExecute
       requestBody:
@@ -2243,10 +2000,8 @@ paths:
       - apiKeyAuth: []
   /v2/interactive-submission/executeAndWait:
     post:
-      description: |-
-        Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
-        IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-        A malicious node could make a successfully committed request appeared failed and vice versa
+      description: Similar to ExecuteSubmission but _synchronously_ wait for the completion
+        of the transaction
       operationId: postV2Interactive-submissionExecuteandwait
       requestBody:
         content:
@@ -2278,10 +2033,8 @@ paths:
       - apiKeyAuth: []
   /v2/interactive-submission/executeAndWaitForTransaction:
     post:
-      description: |-
-        Similar to ExecuteSubmissionAndWait but additionally returns the transaction
-        IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-        A malicious node could make a successfully committed request appear as failed and vice versa
+      description: Similar to ExecuteSubmissionAndWait but additionally returns the
+        transaction
       operationId: postV2Interactive-submissionExecuteandwaitfortransaction
       requestBody:
         content:
@@ -2783,6 +2536,23 @@ components:
 
             Required
           type: string
+    CanActAsAnyParty:
+      title: CanActAsAnyParty
+      description: |-
+        The right of a user to authorize commands as any party on a participant.
+        Its utility is predominantly for users that act on behalf of many parties.
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          $ref: '#/components/schemas/CanActAsAnyParty1'
+    CanActAsAnyParty1:
+      title: CanActAsAnyParty
+      description: |-
+        The right of a user to authorize commands as any party on a participant.
+        Its utility is predominantly for users that act on behalf of many parties.
+      type: object
     CanExecuteAs:
       title: CanExecuteAs
       type: object
@@ -3050,6 +2820,22 @@ components:
             Optional
           type: integer
           format: int64
+        transactionHash:
+          description: |-
+            The transaction hash signed by the external party for prepared transactions
+            that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+            or one of its variants.
+
+            Use this to correlate prepared transactions with their execution result
+            on the *same participant* that executed the transaction.
+
+            Not available for:
+
+            - transactions executed on Canton versions prior to 3.5
+            - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+            Optional: can be empty
+          type: string
     CompletionResponse:
       title: CompletionResponse
       description: Required
@@ -3217,6 +3003,7 @@ components:
             - SIGNING_ALGORITHM_SPEC_ED25519
             - SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_256
             - SIGNING_ALGORITHM_SPEC_EC_DSA_SHA_384
+            - SIGNING_ALGORITHM_SPEC_ML_DSA_65
     CreateAndExerciseCommand:
       title: CreateAndExerciseCommand
       description: Create a contract and exercise a choice on it in the same transaction.
@@ -4404,6 +4191,32 @@ components:
 
             Optional: can be empty
           type: string
+    GetCompletionsRequest:
+      title: GetCompletionsRequest
+      type: object
+      properties:
+        parties:
+          description: |-
+            If specified, only completions of commands are included, which have at least one of the ``act_as`` parties
+            in the given set of parties.
+            Only Ledger API users with CanReadAsAnyParty permission allowed to provide no ``parties``.
+            Must be a valid PartyIdString (as described in ``value.proto``).
+
+            Optional: can be empty
+          type: array
+          items:
+            type: string
+        beginExclusive:
+          description: |-
+            This optional field indicates the minimum offset for completions. This can be used to resume an earlier completion stream.
+            If not set the ledger uses the ledger begin offset instead.
+            If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset).
+            If the ledger has been pruned, this parameter must be specified and greater than the pruning offset. (the pruning
+            offset is accessible on the StateService.GetLatestPrunedOffsets endpoint)
+
+            Optional
+          type: integer
+          format: int64
     GetConnectedSynchronizersResponse:
       title: GetConnectedSynchronizersResponse
       type: object
@@ -4552,6 +4365,15 @@ components:
             Optional
           type: integer
           format: int64
+        synchronizerTimes:
+          description: |-
+            Final record times observed by this participant for each of the sequencers that were ever connected.
+            If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
+
+            Optional: can be empty
+          type: array
+          items:
+            $ref: '#/components/schemas/SynchronizerTime'
     GetPackageStatusResponse:
       title: GetPackageStatusResponse
       type: object
@@ -4666,75 +4488,25 @@ components:
 
             Required
           type: string
-    GetTransactionByIdRequest:
-      title: GetTransactionByIdRequest
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+    GetUpdateByHashRequest:
+      title: GetUpdateByHashRequest
       type: object
       required:
-      - updateId
+      - transactionHash
+      - updateFormat
       properties:
-        updateId:
+        transactionHash:
           description: |-
-            The ID of a particular transaction.
-            Must be a valid LedgerString (as described in ``value.proto``).
-            Required
+            The transaction hash to look up.
+
+            Required: must be non-empty
           type: string
-        requestingParties:
+        updateFormat:
+          $ref: '#/components/schemas/UpdateFormat'
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
-            The parties whose events the client expects to see.
-            Events that are not visible for the parties in this collection will not be present in the response.
-            Each element must be a valid PartyIdString (as described in ``value.proto``).
-            Optional for backwards compatibility for GetTransactionById request: if defined transaction_format must be
-            unset (falling back to defaults).
-          type: array
-          items:
-            type: string
-        transactionFormat:
-          $ref: '#/components/schemas/TransactionFormat'
-          description: |-
-            Optional for GetTransactionById request for backwards compatibility: defaults to a transaction_format, where:
+            The format for the update.
 
-            - event_format.filters_by_party will have template-wildcard filters for all the requesting_parties
-            - event_format.filters_for_any_party is unset
-            - event_format.verbose = true
-            - transaction_shape = TRANSACTION_SHAPE_ACS_DELTA
-    GetTransactionByOffsetRequest:
-      title: GetTransactionByOffsetRequest
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
-      type: object
-      required:
-      - offset
-      properties:
-        offset:
-          description: |-
-            The offset of the transaction being looked up.
-            Must be a valid absolute offset (positive integer).
             Required
-          type: integer
-          format: int64
-        requestingParties:
-          description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
-            The parties whose events the client expects to see.
-            Events that are not visible for the parties in this collection will not be present in the response.
-            Each element must be a valid PartyIdString (as described in ``value.proto``).
-            Optional for backwards compatibility for GetTransactionByOffset request: if defined transaction_format must be
-            unset (falling back to defaults).
-          type: array
-          items:
-            type: string
-        transactionFormat:
-          $ref: '#/components/schemas/TransactionFormat'
-          description: |-
-            Optional for GetTransactionByOffset request for backwards compatibility: defaults to a TransactionFormat, where:
-
-            - event_format.filters_by_party will have template-wildcard filters for all the requesting_parties
-            - event_format.filters_for_any_party is unset
-            - event_format.verbose = true
-            - transaction_shape = TRANSACTION_SHAPE_ACS_DELTA
     GetUpdateByIdRequest:
       title: GetUpdateByIdRequest
       type: object
@@ -4826,7 +4598,7 @@ components:
             ``next_page_token`` of the last ``GetUpdatesPageResponse``.
             To achieve correct paging: subsequent requests must
 
-            - be executed on the same participant with the same version of canton,
+            - be executed on the same participant,
             - have the same begin_offset_exclusive,
             - have the same end_offset_inclusive,
             - have the same update_format and
@@ -5383,8 +5155,10 @@ components:
         prefetchContractKeys:
           description: |-
             Fetches the contract keys into the caches to speed up the command processing.
-            Should only contain contract keys that are expected to be resolved during interpretation of the commands.
-            Keys of disclosed contracts do not need prefetching.
+            Each entry specifies a key and a limit on how many contracts to prefetch for that key.
+            The limit does not count disclosed contracts, and should reflect the number of
+            additional contracts expected to be resolved during interpretation of the commands.
+            If a key appears multiple times, the last entry's limit wins.
 
             Optional: can be empty
           type: array
@@ -5504,7 +5278,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -5512,6 +5288,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5587,7 +5364,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -5595,6 +5374,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5647,7 +5427,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -5655,6 +5437,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5731,42 +5514,12 @@ components:
             provided such an archive event exists and it has not yet been pruned.
 
             Optional
-    JsGetTransactionResponse:
-      title: JsGetTransactionResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
-      type: object
-      required:
-      - transaction
-      properties:
-        transaction:
-          $ref: '#/components/schemas/JsTransaction'
-          description: Required
-    JsGetTransactionTreeResponse:
-      title: JsGetTransactionTreeResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
-      type: object
-      required:
-      - transaction
-      properties:
-        transaction:
-          $ref: '#/components/schemas/JsTransactionTree'
-          description: Required
     JsGetUpdateResponse:
       title: JsGetUpdateResponse
       type: object
       properties:
         update:
           $ref: '#/components/schemas/Update'
-    JsGetUpdateTreesResponse:
-      title: JsGetUpdateTreesResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
-      type: object
-      properties:
-        update:
-          $ref: '#/components/schemas/Update1'
     JsGetUpdatesPageResponse:
       title: JsGetUpdatesPageResponse
       type: object
@@ -6031,6 +5784,8 @@ components:
           description: |-
             The hashing scheme version to be used when building the hash.
             Defaults to HASHING_SCHEME_VERSION_V2.
+            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Optional
           type: string
@@ -6038,6 +5793,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'
@@ -6064,7 +5820,9 @@ components:
           type: string
         hashingSchemeVersion:
           description: |-
-            The hashing scheme version used when building the hash
+            The hashing scheme version used when building the hash.
+            HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+            for stable synchronizers.
 
             Required
           type: string
@@ -6072,6 +5830,7 @@ components:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
+          - HASHING_SCHEME_VERSION_V4
         hashingDetails:
           description: |-
             Optional additional details on how the transaction was encoded and hashed. Only set if verbose_hashing = true in the request
@@ -6413,6 +6172,7 @@ components:
           type: string
         externalTransactionHash:
           description: |-
+            Deprecated: please use ``transaction_hash`` which has the same value.
             For transaction externally signed, contains the external transaction hash
             signed by the external party. Can be used to correlate an external submission with a committed transaction.
 
@@ -6432,6 +6192,22 @@ components:
             Optional
           type: integer
           format: int64
+        transactionHash:
+          description: |-
+            The transaction hash signed by the external party for prepared transactions
+            that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+            or one of its variants.
+
+            Use this to correlate prepared transactions with their execution result
+            on the *same participant* that executed the transaction.
+
+            Not available for:
+
+            - transactions executed on Canton versions prior to 3.6
+            - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+            Optional: can be empty
+          type: string
     JsTransactionTree:
       title: JsTransactionTree
       description: |-
@@ -6525,6 +6301,12 @@ components:
         properties:
           CanActAs:
             $ref: '#/components/schemas/CanActAs'
+      - type: object
+        required:
+        - CanActAsAnyParty
+        properties:
+          CanActAsAnyParty:
+            $ref: '#/components/schemas/CanActAsAnyParty'
       - type: object
         required:
         - CanExecuteAs
@@ -6856,19 +6638,6 @@ components:
           items:
             $ref: '#/components/schemas/SynchronizerTime'
     OffsetCheckpoint2:
-      title: OffsetCheckpoint
-      description: |-
-        OffsetCheckpoints may be used to:
-
-        - detect time out of commands.
-        - provide an offset which can be used to restart consumption.
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/OffsetCheckpoint1'
-    OffsetCheckpoint3:
       title: OffsetCheckpoint
       description: |-
         OffsetCheckpoints may be used to:
@@ -7244,6 +7013,17 @@ components:
             The key of the contract the client wants to prefetch.
 
             Required
+        limit:
+          description: |-
+            The number of contracts to prefetch for this key, if available.
+            This is in addition to disclosed contracts.
+            - for backward compatibility reason, absence is interpreted as 1
+            - 0 is forbidden
+            - capped at 2^31 - 1. The system may impose further limits.
+
+            Optional
+          type: integer
+          format: int32
     Prior:
       title: Prior
       type: object
@@ -7279,15 +7059,6 @@ components:
         valueDecoded:
           type: string
     Reassignment:
-      title: Reassignment
-      description: Complete view of an on-ledger reassignment.
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/JsReassignment'
-    Reassignment1:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
       type: object
@@ -7835,17 +7606,6 @@ components:
           - TRANSACTION_SHAPE_UNSPECIFIED
           - TRANSACTION_SHAPE_ACS_DELTA
           - TRANSACTION_SHAPE_LEDGER_EFFECTS
-    TransactionTree:
-      title: TransactionTree
-      description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
-        Complete view of an on-ledger transaction.
-      type: object
-      required:
-      - value
-      properties:
-        value:
-          $ref: '#/components/schemas/JsTransactionTree'
     TreeEvent:
       title: TreeEvent
       description: |-
@@ -8089,27 +7849,6 @@ components:
         properties:
           Transaction:
             $ref: '#/components/schemas/Transaction'
-    Update1:
-      title: Update
-      oneOf:
-      - type: object
-        required:
-        - OffsetCheckpoint
-        properties:
-          OffsetCheckpoint:
-            $ref: '#/components/schemas/OffsetCheckpoint3'
-      - type: object
-        required:
-        - Reassignment
-        properties:
-          Reassignment:
-            $ref: '#/components/schemas/Reassignment1'
-      - type: object
-        required:
-        - TransactionTree
-        properties:
-          TransactionTree:
-            $ref: '#/components/schemas/TransactionTree'
     UpdateFormat:
       title: UpdateFormat
       description: A format specifying what updates to include and how to render them.

@@ -160,8 +160,10 @@ message ActionDescription {
     ActionDescription.CreateActionDescription create = 1;
     ExerciseActionDescription exercise = 2;
     ActionDescription.FetchActionDescription fetch = 3;
-    ActionDescription.LookupByKeyActionDescription lookup_by_key = 4;
   }
+
+  reserved 4;
+  reserved "lookup_by_key";
 
   message CreateActionDescription {
     string contract_id = 1;
@@ -187,10 +189,6 @@ message ActionDescription {
     bool by_key = 3;
     string template_id = 4;
     optional string interface_id = 5;
-  }
-
-  message LookupByKeyActionDescription {
-    v30.GlobalKey key = 1;
   }
 }
 

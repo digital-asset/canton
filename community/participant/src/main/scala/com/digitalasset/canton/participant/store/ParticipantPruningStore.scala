@@ -60,7 +60,7 @@ object ParticipantPruningStore {
 
     }
 
-  private val dbStoreName = String36.tryCreate("DbParticipantPruningStore")
+  private[canton] val dbStoreName = String36.tryCreate("DbParticipantPruningStore")
 
   final case class ParticipantPruningStatus(
       startedO: Option[Offset],

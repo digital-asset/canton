@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.config
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{
   EncryptionAlgorithmSpec,
   EncryptionKeySpec,
@@ -13,6 +12,7 @@ import com.digitalasset.canton.crypto.{
   SigningKeySpec,
   SymmetricKeyScheme,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 final case class CryptoProviderScheme[S](default: S, supported: NonEmpty[Set[S]]) {
   require(supported.contains(default))
@@ -77,6 +77,9 @@ final case class EncryptionSchemeConfig(
   * @param parallelism
   *   Maximum number of cryptographic operations (e.g., signature verifications) that can be
   *   performed in parallel.
+  * @param enableExperimental
+  *   Whether to enable experimental cryptographic schemes. Should not be used in production
+  *   environments.
   */
 final case class CryptoConfig(
     provider: CryptoProvider = CryptoProvider.Jce,
@@ -89,4 +92,5 @@ final case class CryptoConfig(
     sessionSigningKeys: SessionSigningKeysConfig = SessionSigningKeysConfig.disabled,
     privateKeyStore: PrivateKeyStoreConfig = PrivateKeyStoreConfig(),
     parallelism: CryptoParallelismConfig = CryptoParallelismConfig(),
+    enableExperimental: Boolean = false,
 )

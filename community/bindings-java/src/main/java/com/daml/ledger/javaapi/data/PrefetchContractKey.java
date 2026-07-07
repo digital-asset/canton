@@ -10,16 +10,23 @@ import java.util.Objects;
 public final class PrefetchContractKey {
   public final Identifier templateId;
   public final Value contractKey;
+  public final int limit;
 
   public PrefetchContractKey(Identifier templateId, Value contractKey) {
+    this(templateId, contractKey, 1);
+  }
+
+  public PrefetchContractKey(Identifier templateId, Value contractKey, int limit) {
     this.templateId = templateId;
     this.contractKey = contractKey;
+    this.limit = limit;
   }
 
   public CommandsOuterClass.PrefetchContractKey toProto() {
     return CommandsOuterClass.PrefetchContractKey.newBuilder()
         .setTemplateId(this.templateId.toProto())
         .setContractKey(this.contractKey.toProto())
+        .setLimit(this.limit)
         .build();
   }
 
@@ -27,7 +34,15 @@ public final class PrefetchContractKey {
       CommandsOuterClass.PrefetchContractKey prefetchContractKey) {
     Identifier templateId = Identifier.fromProto(prefetchContractKey.getTemplateId());
     Value contractKey = Value.fromProto(prefetchContractKey.getContractKey());
-    return new PrefetchContractKey(templateId, contractKey);
+    int limit = prefetchContractKey.getLimit();
+    if (limit <= 0) {
+      if (limit == 0) {
+        limit = 1;
+      } else {
+        limit = Integer.MAX_VALUE;
+      }
+    }
+    return new PrefetchContractKey(templateId, contractKey, limit);
   }
 
   @Override
@@ -37,6 +52,8 @@ public final class PrefetchContractKey {
         + templateId
         + ", contractKey='"
         + contractKey
+        + "', limit="
+        + limit
         + "'}";
   }
 
@@ -45,12 +62,13 @@ public final class PrefetchContractKey {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     PrefetchContractKey that = (PrefetchContractKey) o;
-    return Objects.equals(templateId, that.templateId)
+    return limit == that.limit
+        && Objects.equals(templateId, that.templateId)
         && Objects.equals(contractKey, that.contractKey);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(templateId, contractKey);
+    return Objects.hash(templateId, contractKey, limit);
   }
 }

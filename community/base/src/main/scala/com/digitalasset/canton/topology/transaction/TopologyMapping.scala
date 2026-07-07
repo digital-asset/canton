@@ -9,7 +9,6 @@ import cats.syntax.apply.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   InvariantViolation,
@@ -27,11 +26,7 @@ import com.digitalasset.canton.protocol.v30.Enums
 import com.digitalasset.canton.protocol.v30.Enums.ParticipantFeatureFlag
 import com.digitalasset.canton.protocol.v30.NamespaceDelegation.Restriction
 import com.digitalasset.canton.protocol.v30.TopologyMapping.Mapping
-import com.digitalasset.canton.protocol.{
-  DynamicSequencingParameters,
-  DynamicSynchronizerParameters,
-  v30,
-}
+import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SequencingParameters, v30}
 import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -54,6 +49,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.{
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.version.ProtoVersion
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
@@ -189,8 +185,7 @@ object TopologyMapping {
         extends Code("mds", v30Code.TOPOLOGY_MAPPING_CODE_MEDIATOR_SYNCHRONIZER_STATE)
     case object SequencerSynchronizerState
         extends Code("sds", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCER_SYNCHRONIZER_STATE)
-
-    case object SequencingDynamicParametersState
+    case object SequencingParametersState
         extends Code("sep", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCING_DYNAMIC_PARAMETERS_STATE)
     case object PartyToKeyMapping
         extends Code("ptk", v30Code.TOPOLOGY_MAPPING_CODE_PARTY_TO_KEY_MAPPING)
@@ -209,9 +204,10 @@ object TopologyMapping {
       VettedPackages,
       PartyToParticipant,
       SynchronizerParametersState,
+      SequencingParametersState,
       MediatorSynchronizerState,
       SequencerSynchronizerState,
-      SequencingDynamicParametersState,
+      SequencingParametersState,
       PartyToKeyMapping,
       LsuAnnouncement,
       LsuSequencerConnectionSuccessor,
@@ -240,7 +236,7 @@ object TopologyMapping {
 
   }
 
-  // Small wrapper to not have to work with a tuple3 (Set[Namespace], Set[Uid], Set[Fingerprint])
+  // Small wrapper to not have to work with a 2-tuple (Set[Namespace], Set[Fingerprint])
   final case class ReferencedAuthorizations(
       namespaces: Set[Namespace] = Set.empty,
       extraKeys: Set[Fingerprint] = Set.empty,
@@ -393,7 +389,7 @@ object TopologyMapping {
       case Mapping.SynchronizerParametersState(value) =>
         SynchronizerParametersState.fromProtoV30(value)
       case Mapping.SequencingDynamicParametersState(value) =>
-        DynamicSequencingParametersState.fromProtoV30(value)
+        SequencingParametersState.fromProtoV30(value)
       case Mapping.MediatorSynchronizerState(value) => MediatorSynchronizerState.fromProtoV30(value)
       case Mapping.SequencerSynchronizerState(value) =>
         SequencerSynchronizerState.fromProtoV30(value)
@@ -557,8 +553,8 @@ final case class NamespaceDelegation private (
 
   override def referencedUids: Set[UniqueIdentifier] = Set.empty
 
-  def canSign(mappingsToSign: Code): Boolean =
-    restriction.canSign(mappingsToSign)
+  def canSign(mappingCodeToSign: Code): Boolean =
+    restriction.canSign(mappingCodeToSign)
 
   override def toProtoV30: v30.TopologyMapping =
     v30.TopologyMapping(
@@ -644,7 +640,7 @@ object NamespaceDelegation extends TopologyMappingCompanion {
           // explicitly checking for nonEmpty to guard against refactorings away from NonEmpty[Set[...]].
           sit.signatures.nonEmpty &&
           ns.canSign(Code.NamespaceDelegation) &&
-          ns.target.fingerprint == ns.namespace.fingerprint
+          ns.target.fingerprint == ns.namespace.fingerprint // root check
       )
 
   @nowarn("cat=deprecation")
@@ -1171,17 +1167,16 @@ object SynchronizerTrustCertificate extends TopologyMappingCompanion {
       )(Some("ExternalSigningLocalContractsInSubview"))
 
     /** When this feature flag is enabled, the participant will allow to reassign contracts between
-      * synchronizers. Note that this feature is still under development and thus unsafe. Should not
-      * be used in production.
+      * synchronizers. This feature is in alpha and should not be used in production.
       */
-    val EnableUnsafeMultiSynchronizer: ParticipantTopologyFeatureFlag =
+    val EnableMultiSynchronizer: ParticipantTopologyFeatureFlag =
       ParticipantTopologyFeatureFlag(
-        v30.Enums.ParticipantFeatureFlag.PARTICIPANT_FEATURE_FLAG_ENABLE_UNSAFE_MULTI_SYNCHRONIZER.value
-      )(Some("EnableUnsafeMultiSynchronizer"))
+        v30.Enums.ParticipantFeatureFlag.PARTICIPANT_FEATURE_FLAG_ENABLE_MULTI_SYNCHRONIZER.value
+      )(Some("EnableMultiSynchronizer"))
 
     val knownTopologyFeatureFlags: Seq[ParticipantTopologyFeatureFlag] = Seq(
       ExternalSigningLocalContractsInSubview,
-      EnableUnsafeMultiSynchronizer,
+      EnableMultiSynchronizer,
     )
 
     def fromProtoV30(
@@ -1886,6 +1881,7 @@ object PartyToParticipant extends TopologyMappingCompanion {
 
     // If a participant is listed several times with different permissions, take the one with the higher
     // Needed for backwards compatibility with existing topologies
+    // TODO(#33949) this is not a good idea: let's not try to fix user mistakes. Reject bad stuff!
     val deduplicateParticipantsWithDifferentPermissionsMap =
       participants
         .groupMapReduce(_.participantId)(identity) { case (first, second) =>
@@ -1915,6 +1911,19 @@ object PartyToParticipant extends TopologyMappingCompanion {
       partySigningKeysWithThreshold,
     )
   }
+
+  @VisibleForTesting
+  def uncheckedCreate(
+      partyId: PartyId,
+      threshold: PositiveInt,
+      participants: Seq[HostingParticipant],
+      partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
+  ): PartyToParticipant = PartyToParticipant(
+    partyId,
+    threshold,
+    participants,
+    partySigningKeysWithThreshold,
+  )
 
   def tryCreate(
       partyId: PartyId,
@@ -2010,19 +2019,19 @@ object SynchronizerParametersState extends TopologyMappingCompanion {
   }
 }
 
-/** Dynamic sequencing parameter settings for the synchronizer
+/** Sequencing parameter settings for the synchronizer
   *
   * Each synchronizer has a set of sequencing parameters that can be changed at runtime. These
   * changes are authorized by the owner of the synchronizer and distributed to all nodes
   * accordingly.
   */
-final case class DynamicSequencingParametersState(
+final case class SequencingParametersState(
     synchronizerId: SynchronizerId,
-    parameters: DynamicSequencingParameters,
+    parameters: SequencingParameters,
 ) extends TopologyMapping {
 
-  override def companion: DynamicSequencingParametersState.type = DynamicSequencingParametersState
-  override protected def pretty: Pretty[DynamicSequencingParametersState] = prettyOfClass(
+  override def companion: SequencingParametersState.type = SequencingParametersState
+  override protected def pretty: Pretty[SequencingParametersState] = prettyOfClass(
     param("synchronizerId", _.synchronizerId),
     param("parameters", _.parameters),
   )
@@ -2046,29 +2055,29 @@ final case class DynamicSequencingParametersState(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
   ): RequiredAuth = RequiredNamespaces(synchronizerId)
 
-  override def uniqueKey: MappingHash = SynchronizerParametersState.uniqueKey(synchronizerId)
+  override def uniqueKey: MappingHash = SequencingParametersState.uniqueKey(synchronizerId)
 }
 
-object DynamicSequencingParametersState extends TopologyMappingCompanion {
+object SequencingParametersState extends TopologyMappingCompanion {
 
   def uniqueKey(synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
 
-  override def code: TopologyMapping.Code = Code.SequencingDynamicParametersState
+  override def code: TopologyMapping.Code = Code.SequencingParametersState
 
   def fromProtoV30(
       value: v30.DynamicSequencingParametersState
-  ): ParsingResult[DynamicSequencingParametersState] = {
+  ): ParsingResult[SequencingParametersState] = {
     val v30.DynamicSequencingParametersState(synchronizerIdP, sequencingParametersP) = value
     for {
       synchronizerId <- SynchronizerId.fromProtoPrimitive(synchronizerIdP, "synchronizer_id")
-      representativeProtocolVersion <- DynamicSequencingParameters.protocolVersionRepresentativeFor(
+      representativeProtocolVersion <- SequencingParameters.protocolVersionRepresentativeFor(
         ProtoVersion(30)
       )
       parameters <- sequencingParametersP
-        .map(DynamicSequencingParameters.fromProtoV30)
-        .getOrElse(Right(DynamicSequencingParameters.default(representativeProtocolVersion)))
-    } yield DynamicSequencingParametersState(synchronizerId, parameters)
+        .map(SequencingParameters.fromProtoV30)
+        .getOrElse(Right(SequencingParameters.default(representativeProtocolVersion)))
+    } yield SequencingParametersState(synchronizerId, parameters)
   }
 }
 
@@ -2142,6 +2151,10 @@ object MediatorSynchronizerState extends TopologyMappingCompanion {
       active: Seq[MediatorId],
       observers: Seq[MediatorId],
   ): Either[String, MediatorSynchronizerState] = for {
+    // TODO(#33949): this is bad as we check the threshold on the non-deduped active length
+    //   Unclear if fixing this without making the parser pv dependent is dangerous or not.
+    //   As of PV36, we check this in the mapping state which means that once pv35 is gone,
+    //   we can fix these things here and align them
     _ <- Either.cond(
       threshold.unwrap <= active.length,
       (),
@@ -2155,9 +2168,30 @@ object MediatorSynchronizerState extends TopologyMappingCompanion {
           .mkString(", ")}",
     )
     activeNE <- NonEmpty
+      // TODO(#33949) reject, instead of fixing user mistakes
       .from(active.distinct)
       .toRight("mediator synchronizer state requires at least one active mediator")
+    // TODO(#33949) reject, instead of fixing user mistakes
   } yield MediatorSynchronizerState(synchronizerId, group, threshold, activeNE, observers.distinct)
+
+  /** Create a potentially invalid mediator sync state
+    *
+    * This is only visible for testing to check that the mapping checks work.
+    */
+  @VisibleForTesting
+  def uncheckedCreate(
+      synchronizerId: SynchronizerId,
+      group: MediatorGroupIndex,
+      threshold: PositiveInt,
+      active: NonEmpty[Seq[MediatorId]],
+      observers: Seq[MediatorId],
+  ): MediatorSynchronizerState = MediatorSynchronizerState(
+    synchronizerId = synchronizerId,
+    group = group,
+    threshold = threshold,
+    active = active,
+    observers = observers,
+  )
 
   def fromProtoV30(
       value: v30.MediatorSynchronizerState
@@ -2249,6 +2283,10 @@ object SequencerSynchronizerState extends TopologyMappingCompanion {
       active: Seq[SequencerId],
       observers: Seq[SequencerId],
   ): Either[String, SequencerSynchronizerState] = for {
+    // TODO(#33949): this is bad as we check the threshold on the non-deduped active length
+    //   Unclear if fixing this without making the parser pv dependent is dangerous or not.
+    //   As of PV36, we check this in the mapping state which means that once pv35 is gone,
+    //   we can fix these things here and align them
     _ <- Either.cond(
       threshold.unwrap <= active.length,
       (),
@@ -2262,9 +2300,28 @@ object SequencerSynchronizerState extends TopologyMappingCompanion {
           .mkString(", ")}",
     )
     activeNE <- NonEmpty
+      // TODO(#33949) reject, instead of fixing user mistakes
       .from(active.distinct)
       .toRight("sequencer synchronizer state requires at least one active sequencer")
+    // TODO(#33949) reject, instead of fixing user mistakes
   } yield SequencerSynchronizerState(synchronizerId, threshold, activeNE, observers.distinct)
+
+  /** Create a potentially invalid sequencer sync state
+    *
+    * This is only visible for testing to check that the mapping checks work.
+    */
+  @VisibleForTesting
+  def uncheckedCreate(
+      synchronizerId: SynchronizerId,
+      threshold: PositiveInt,
+      active: NonEmpty[Seq[SequencerId]],
+      observers: Seq[SequencerId],
+  ): SequencerSynchronizerState = SequencerSynchronizerState(
+    synchronizerId = synchronizerId,
+    threshold = threshold,
+    active = active,
+    observers = observers,
+  )
 
   def fromProtoV30(
       value: v30.SequencerSynchronizerState

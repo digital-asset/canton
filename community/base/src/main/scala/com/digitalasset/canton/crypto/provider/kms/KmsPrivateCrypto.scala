@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.provider.kms
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.{
@@ -18,15 +17,18 @@ import com.digitalasset.canton.crypto.kms.{
 import com.digitalasset.canton.crypto.store.KmsMetadataStore.KmsMetadata
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, KmsCryptoPrivateStore}
 import com.digitalasset.canton.health.{
+  CloseableHealthComponent,
   ComponentHealthState,
   CompositeHealthElement,
   HealthQuasiComponent,
 }
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{CryptoMetrics, DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteString256, ByteString4096}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
@@ -37,15 +39,15 @@ class KmsPrivateCrypto(
     private[kms] val publicStore: CryptoPublicStore,
     override val signingSchemes: SigningCryptoSchemes,
     override val encryptionSchemes: EncryptionCryptoSchemes,
+    override val signingMetrics: SigningMetrics,
+    override val decryptionMetrics: DecryptionMetrics,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CryptoPrivateApi
+    with CloseableHealthComponent
     with NamedLogging
-    with FlagCloseable
     with CompositeHealthElement[String, HealthQuasiComponent] {
-
-  override private[crypto] def getInitialHealthState: ComponentHealthState = this.initialHealthState
 
   override def name: String = "kms-private-crypto"
 
@@ -137,7 +139,7 @@ class KmsPrivateCrypto(
       )
     } yield publicKey
 
-  def signBytes(
+  override private[crypto] def signBytesInternal(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -268,7 +270,7 @@ class KmsPrivateCrypto(
       _ = privateStore.storeKeyMetadata(KmsMetadata(publicKey.id, keyId, KeyPurpose.Encryption))
     } yield publicKey
 
-  override def decrypt[M](encrypted: AsymmetricEncrypted[M])(
+  override private[crypto] def decryptInternal[M](encrypted: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, DecryptionError, M] =
     for {
@@ -324,6 +326,7 @@ object KmsPrivateCrypto {
       encryptionSchemes: EncryptionCryptoSchemes,
       cryptoPublicStore: CryptoPublicStore,
       kmsCryptoPrivateStore: KmsCryptoPrivateStore,
+      cryptoMetrics: CryptoMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): KmsPrivateCrypto =
@@ -333,6 +336,8 @@ object KmsPrivateCrypto {
       cryptoPublicStore,
       signingSchemes,
       encryptionSchemes,
+      cryptoMetrics.signingMetrics,
+      cryptoMetrics.decryptionMetrics,
       timeouts,
       loggerFactory,
     )

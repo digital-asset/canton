@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.store.TimeQuery
@@ -196,6 +197,8 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
         participant1.synchronizers.is_connected(fixture.currentPsid) shouldBe false
         participant1.synchronizers.is_connected(fixture.newPsid) shouldBe true
       }
+
+      waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
 
       // fetching the topology state after the upgrade should contain exactly the same state
       // as the upgrade state before the migration

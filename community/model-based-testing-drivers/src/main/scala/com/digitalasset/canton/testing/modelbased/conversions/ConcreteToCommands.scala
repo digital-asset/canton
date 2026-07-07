@@ -8,9 +8,12 @@ import cats.instances.all.*
 import com.daml.ledger.api.v2.commands as proto
 import com.digitalasset.canton.ledger.api.util.LfEngineToApi
 import com.digitalasset.canton.testing.modelbased.ast.Concrete.*
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.value.Value as V
+
+import scala.language.implicitConversions
 
 object ConcreteToCommands {
   sealed trait SomeContractId {
@@ -20,7 +23,13 @@ object ConcreteToCommands {
   final case class UniversalWithKeyContractId(contractId: V.ContractId) extends SomeContractId
 
   type PartyIdMapping = Map[PartyId, Ref.Party]
+  type CantonPartyIdMapping = Map[PartyId, Party]
   type ContractIdMapping = Map[ContractId, SomeContractId]
+
+  implicit def cantonMappingToLfMapping(
+      cantonPartyIdMapping: CantonPartyIdMapping
+  ): PartyIdMapping =
+    cantonPartyIdMapping.view.mapValues(_.toLf).toMap
 
   sealed trait TranslationError
   final case class PartyIdNotFound(partyId: PartyId) extends TranslationError
@@ -202,19 +211,6 @@ class ConcreteToCommands(universalTemplatePkgId: Ref.PackageId) {
             "expectedContractId" -> V.ValueInt64(contractId.longValue),
           ),
         )
-      case LookupByKey(contractId, keyId, maintainers) =>
-        for {
-          concreteMaintainers <- partySetToValue(partyIds, maintainers)
-        } yield mkVariant(
-          "Universal:TxAction",
-          "LookupByKey",
-          mkRecord(
-            "Universal:TxAction.LookupByKey",
-            "keyId" -> V.ValueInt64(keyId.longValue),
-            "maintainers" -> concreteMaintainers,
-            "expectedSuccess" -> V.ValueBool(contractId.isDefined),
-          ),
-        )
       case QueryByKey(contractIds, keyId, maintainers, exhaustive) =>
         for {
           concreteMaintainers <- partySetToValue(partyIds, maintainers)
@@ -373,8 +369,6 @@ class ConcreteToCommands(universalTemplatePkgId: Ref.PackageId) {
       case Fetch(_) => throw new RuntimeException("Fetch not supported at command level")
       case FetchByKey(_, _, _) =>
         throw new RuntimeException("FetchByKey not supported at command level")
-      case LookupByKey(_, _, _) =>
-        throw new RuntimeException("LookupByKey not supported at command level")
       case QueryByKey(_, _, _, _) =>
         throw new RuntimeException("QueryByKey not supported at command level")
       case Rollback(_) => throw new RuntimeException("Rollback not supported at command level")

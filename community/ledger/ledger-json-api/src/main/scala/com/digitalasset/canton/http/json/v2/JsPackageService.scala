@@ -89,14 +89,6 @@ class JsPackageService(
         status,
       ),
       withServerLogic(
-        JsPackageService.listVettedPackagesEndpoint_deprecated,
-        listVettedPackages,
-      ),
-      withServerLogic(
-        JsPackageService.updateVettedPackagesEndpoint_deprecated,
-        updateVettedPackages,
-      ),
-      withServerLogic(
         JsPackageService.listVettedPackagesEndpoint,
         listVettedPackages,
       ),
@@ -109,32 +101,38 @@ class JsPackageService(
   private def list(
       caller: CallerContext
   ): TracedInput[Unit] => Future[Either[JsCantonError, package_service.ListPackagesResponse]] = {
-    _ =>
-      packageClient.listPackages(caller.token())(caller.traceContext()).resultToRight
+    implicit val traceContext: TraceContext = caller.traceContext()
+    _ => packageClient.listPackages(caller.token()).resultToRight
   }
 
   private def status(
       @unused caller: CallerContext
   ): TracedInput[String] => Future[
     Either[JsCantonError, package_service.GetPackageStatusResponse]
-  ] = req =>
-    packageClient.getPackageStatus(req.in, caller.token())(caller.traceContext()).resultToRight
+  ] = { req =>
+    implicit val traceContext: TraceContext = caller.traceContext()
+    packageClient.getPackageStatus(req.in, caller.token()).resultToRight
+  }
 
   private def listVettedPackages(
       @unused caller: CallerContext
   ): TracedInput[package_service.ListVettedPackagesRequest] => Future[
     Either[JsCantonError, package_service.ListVettedPackagesResponse]
-  ] = req =>
-    packageClient.listVettedPackages(req.in, caller.token())(caller.traceContext()).resultToRight
+  ] = { req =>
+    implicit val traceContext: TraceContext = caller.traceContext()
+    packageClient.listVettedPackages(req.in, caller.token()).resultToRight
+  }
 
   private def updateVettedPackages(
       @unused caller: CallerContext
   ): TracedInput[package_management_service.UpdateVettedPackagesRequest] => Future[
     Either[JsCantonError, package_management_service.UpdateVettedPackagesResponse]
-  ] = req =>
+  ] = { req =>
+    implicit val traceContext: TraceContext = caller.traceContext()
     packageManagementClient
-      .updateVettedPackages(req.in, caller.token())(caller.traceContext())
+      .updateVettedPackages(req.in, caller.token())
       .resultToRight
+  }
 
   private def validateDar(caller: CallerContext) = {
     (tracedInput: TracedInput[(Source[util.ByteString, Any], Option[String])]) =>
@@ -171,8 +169,9 @@ class JsPackageService(
   }
 
   private def getPackage(caller: CallerContext) = { (tracedInput: TracedInput[String]) =>
+    implicit val traceContext: TraceContext = caller.traceContext()
     packageClient
-      .getPackage(tracedInput.in, caller.token())(caller.traceContext())
+      .getPackage(tracedInput.in, caller.token())
       .map(response =>
         (
           Source.fromIterator(() =>
@@ -245,32 +244,6 @@ object JsPackageService extends DocumentationEndpoints {
       .out(jsonBody[package_service.GetPackageStatusResponse])
       .protoRef(package_service.PackageServiceGrpc.METHOD_GET_PACKAGE_STATUS)
 
-  private val listVettedPackagesEndpoint_deprecated =
-    packageVetting.get
-      .in(jsonBody[package_service.ListVettedPackagesRequest])
-      .out(jsonBody[package_service.ListVettedPackagesResponse])
-      .protoRef(
-        package_service.PackageServiceGrpc.METHOD_LIST_VETTED_PACKAGES
-      )
-      .deprecated()
-      .description(
-        """Lists which participant node vetted what packages on which synchronizer.
-        |This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.""".stripMargin
-      )
-
-  private val updateVettedPackagesEndpoint_deprecated =
-    packageVetting.post
-      .in(jsonBody[package_management_service.UpdateVettedPackagesRequest])
-      .out(jsonBody[package_management_service.UpdateVettedPackagesResponse])
-      .protoRef(
-        package_management_service.PackageManagementServiceGrpc.METHOD_UPDATE_VETTED_PACKAGES
-      )
-      .deprecated()
-      .description(
-        """Update the vetted packages of this participant
-        |This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.""".stripMargin
-      )
-
   val listVettedPackagesEndpoint =
     packageVetting
       .in(sttp.tapir.stringToPath("list"))
@@ -299,8 +272,6 @@ object JsPackageService extends DocumentationEndpoints {
       listPackagesEndpoint,
       downloadPackageEndpoint,
       packageStatusEndpoint,
-      listVettedPackagesEndpoint_deprecated,
-      updateVettedPackagesEndpoint_deprecated,
       listVettedPackagesEndpoint,
       updateVettedPackagesEndpoint,
     )

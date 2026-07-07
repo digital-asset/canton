@@ -4,24 +4,25 @@
 package com.digitalasset.daml.lf
 package script
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Bytes, Time}
-import com.digitalasset.daml.lf.ledger._
+import com.digitalasset.daml.lf.ledger.*
 import com.digitalasset.daml.lf.transaction.{
   BlindingInfo,
   CommittedTransaction,
-  NextGenContractStateMachine => ContractStateMachine,
   CreationTime,
   FatContractInstance,
   GlobalKey,
+  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
-  Transaction => Tx,
+  Transaction as Tx,
 }
 import com.digitalasset.daml.lf.value.Value
-import Value._
 
 import scala.collection.immutable
+
+import Value.*
 
 /** An in-memory representation of a ledger for scripts */
 object IdeLedger {
@@ -48,25 +49,25 @@ object IdeLedger {
 
   /** A transaction as it is committed to the ledger.
     *
-    * NOTE (SM): This should correspond quite closely to a core
-    * transaction. I'm purposely calling it differently to facilitate
-    * the discussion when comparing this code to legacy-code for
+    * NOTE (SM): This should correspond quite closely to a core transaction. I'm purposely calling
+    * it differently to facilitate the discussion when comparing this code to legacy-code for
     * building core transactions.
     *
-    * @param committer   The committer
-    * @param effectiveAt The time at which this transaction is effective.
-    * @param roots       The root nodes of the resulting transaction.
-    * @param nodes       All nodes that are part of this transaction.
-    * @param disclosures Transaction nodes that must be disclosed to
-    *                    individual parties to make this transaction
-    *                    valid.
+    * @param committer
+    *   The committer
+    * @param effectiveAt
+    *   The time at which this transaction is effective.
+    * @param roots
+    *   The root nodes of the resulting transaction.
+    * @param nodes
+    *   All nodes that are part of this transaction.
+    * @param disclosures
+    *   Transaction nodes that must be disclosed to individual parties to make this transaction
+    *   valid.
     *
-    *                    NOTE (SM): I'm explicitly using the term
-    *                    'disclosure' here, as it is more neutral than
-    *                    divulgence. I think we can also adapt our
-    *                    vocabulary such that we call the disclosures
-    *                    happening due to post-commit validation
-    *                    'implicit disclosures'.
+    * NOTE (SM): I'm explicitly using the term 'disclosure' here, as it is more neutral than
+    * divulgence. I think we can also adapt our vocabulary such that we call the disclosures
+    * happening due to post-commit validation 'implicit disclosures'.
     */
   final case class RichTransaction(
       actAs: Set[Party],
@@ -80,10 +81,10 @@ object IdeLedger {
   object RichTransaction {
 
     /** Translate an EnrichedTransaction to a RichTransaction. EnrichedTransaction's contain local
-      * node id's and contain additional information in the most detailed form suitable for different
-      * consumers. The RichTransaction is the transaction that we serialize in the sandbox to compare
-      * different ledgers. All relative and absolute node id's are translated to absolute node id's of
-      * the package format.
+      * node id's and contain additional information in the most detailed form suitable for
+      * different consumers. The RichTransaction is the transaction that we serialize in the sandbox
+      * to compare different ledgers. All relative and absolute node id's are translated to absolute
+      * node id's of the package format.
       */
     private[lf] def apply(
         actAs: Set[Party],
@@ -142,29 +143,27 @@ object IdeLedger {
   // Node information
   // ----------------------------------------------------------------
 
-  /** Node information that we cache to support the efficient
-    * consumption of the data stored in the ledger.
+  /** Node information that we cache to support the efficient consumption of the data stored in the
+    * ledger.
     *
-    * @param node           The node itself. Repeated here to avoid having to
-    *                       look it up
-    * @param transaction    The transaction that inserted this node.
-    * @param effectiveAt    The time at which this node is effective.
+    * @param node
+    *   The node itself. Repeated here to avoid having to look it up
+    * @param transaction
+    *   The transaction that inserted this node.
+    * @param effectiveAt
+    *   The time at which this node is effective.
     *
-    *                       NOTE (SM): we denormalize this for speed, as
-    *                       otherwise we'd have to lookup that
-    *                       information on the transaction every time we
-    *                       need to check for whether a contract is
-    *                       active.
-    * @param observingSince A mapping from parties that can see this
-    *                       node to the transaction in which the node
-    *                       became first visible.
-    * @param referencedBy   All nodes referencing this node, which are
-    *                       either 'NodeExercises' or 'NodeEnsureActive'
-    *                       nodes.
-    * @param consumedBy     The node consuming this node, provided such a
-    *                       node exists. Consumption under a rollback
-    *                       is not included here even for contracts created
-    *                       under a rollback node.
+    * NOTE (SM): we denormalize this for speed, as otherwise we'd have to lookup that information on
+    * the transaction every time we need to check for whether a contract is active.
+    * @param observingSince
+    *   A mapping from parties that can see this node to the transaction in which the node became
+    *   first visible.
+    * @param referencedBy
+    *   All nodes referencing this node, which are either 'NodeExercises' or 'NodeEnsureActive'
+    *   nodes.
+    * @param consumedBy
+    *   The node consuming this node, provided such a node exists. Consumption under a rollback is
+    *   not included here even for contracts created under a rollback node.
     */
   final case class LedgerNodeInfo(
       node: Node,
@@ -176,10 +175,9 @@ object IdeLedger {
       consumedBy: Option[EventId],
   ) {
 
-    def addDisclosures(newDisclosures: Map[Party, Disclosure]): LedgerNodeInfo = {
+    def addDisclosures(newDisclosures: Map[Party, Disclosure]): LedgerNodeInfo =
       // NOTE(MH): Earlier disclosures take precedence (`++` is right biased).
       copy(disclosures = newDisclosures ++ disclosures)
-    }
 
     def toFatContractInstance: Option[FatContractInstance] =
       node match {
@@ -226,9 +224,8 @@ object IdeLedger {
       stakeholders: Set[Party],
   ) extends LookupResult
 
-  /** Updates the ledger to reflect that `committer` committed the
-    * transaction `tr` resulting from running the
-    * update-expression at time `effectiveAt`.
+  /** Updates the ledger to reflect that `committer` committed the transaction `tr` resulting from
+    * running the update-expression at time `effectiveAt`.
     */
   def commitTransaction(
       actAs: Set[Party],
@@ -244,23 +241,26 @@ object IdeLedger {
     val transactionOffset = l.scriptStepId.index.toLong
     val richTr = RichTransaction(actAs, readAs, effectiveAt, transactionOffset, tx)
     val updatedCache = processTransaction(l.scriptStepId, richTr, locationInfo, l.ledgerData)
-          CommitResult(
-            l.copy(
-              scriptSteps = l.scriptSteps + (l.scriptStepId.index -> Commit(
-                l.scriptStepId,
-                richTr,
-                optLocation,
-              )),
-              scriptStepId = l.scriptStepId.next,
-              ledgerData = updatedCache,
-            ),
-            l.scriptStepId,
-            richTr,
-          )
+    CommitResult(
+      l.copy(
+        scriptSteps = l.scriptSteps + (l.scriptStepId.index -> Commit(
+          l.scriptStepId,
+          richTr,
+          optLocation,
+        )),
+        scriptStepId = l.scriptStepId.next,
+        ledgerData = updatedCache,
+      ),
+      l.scriptStepId,
+      richTr,
+    )
   }
 
   /** The initial ledger */
-  def initialLedger(t0: Time.Timestamp, csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NUCK): IdeLedger =
+  def initialLedger(
+      t0: Time.Timestamp,
+      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NUCK,
+  ): IdeLedger =
     IdeLedger(
       currentTime = t0,
       scriptStepId = TransactionId(0),
@@ -269,8 +269,7 @@ object IdeLedger {
       csmMode = csmMode,
     )
 
-  /** Result of committing a transaction is the new ledger,
-    * and the enriched transaction.
+  /** Result of committing a transaction is the new ledger, and the enriched transaction.
     */
   final case class CommitResult(
       newLedger: IdeLedger,
@@ -323,10 +322,10 @@ object IdeLedger {
     lazy val empty = LedgerData(Set.empty, Map.empty, Map.empty, Map.empty)
   }
 
-  /** @param activeContracts The contracts that are active in the
-    *                        current state of the ledger.
-    * @param nodeInfos       Node information used to efficiently navigate
-    *                        the transaction graph
+  /** @param activeContracts
+    *   The contracts that are active in the current state of the ledger.
+    * @param nodeInfos
+    *   Node information used to efficiently navigate the transaction graph
     */
   final case class LedgerData(
       activeContracts: Set[ContractId],
@@ -353,11 +352,15 @@ object IdeLedger {
       copy(coidToNodeId = coidToNodeId + (coid -> nodeId))
 
   }
+
   /** Functions for updating the ledger with new transactional information.
     *
-    * @param trId transaction identity
-    * @param richTr (enriched) transaction
-    * @param locationInfo location map
+    * @param trId
+    *   transaction identity
+    * @param richTr
+    *   (enriched) transaction
+    * @param locationInfo
+    *   location map
     */
   class TransactionProcessor(
       trId: TransactionId,
@@ -403,7 +406,7 @@ object IdeLedger {
           )
 
         case (ledgerData, (nodeId, queryByKeyNode: Node.QueryByKey)) =>
-          queryByKeyNode.result.foldLeft(ledgerData){ case (ledgerData, referencedCoid) =>
+          queryByKeyNode.result.foldLeft(ledgerData) { case (ledgerData, referencedCoid) =>
             ledgerData.updateLedgerNodeInfo(referencedCoid)(ledgerNodeInfo =>
               ledgerNodeInfo.copy(referencedBy =
                 ledgerNodeInfo.referencedBy + EventId(trId.index.toLong, nodeId)
@@ -427,23 +430,22 @@ object IdeLedger {
       ledgerDataResult
     }
 
-    def activeContractAndKeyUpdates(ledgerData: LedgerData): LedgerData = {
+    def activeContractAndKeyUpdates(ledgerData: LedgerData): LedgerData =
       ledgerData.copy(
         activeContracts =
           ledgerData.activeContracts ++ richTr.transaction.localContractIds -- richTr.transaction.inactiveContracts,
-        activeKeys =
-          richTr.transaction.updatedContractKeys
-            .foldLeft(ledgerData.activeKeys) {
-              case (activeKeys, (key, Tx.ContractKeyUpdate(created, consumed))) =>
-                activeKeys.updatedWith(key){ oCids =>
-                  val newCids = created ++ oCids.fold(Vector.empty[Value.ContractId])(_.filterNot(consumed(_)))
-                  if (newCids.isEmpty) None else Some(newCids)
-                }
-            },
+        activeKeys = richTr.transaction.updatedContractKeys
+          .foldLeft(ledgerData.activeKeys) {
+            case (activeKeys, (key, Tx.ContractKeyUpdate(created, consumed))) =>
+              activeKeys.updatedWith(key) { oCids =>
+                val newCids =
+                  created ++ oCids.fold(Vector.empty[Value.ContractId])(_.filterNot(consumed(_)))
+                if (newCids.isEmpty) None else Some(newCids)
+              }
+          },
       )
-    }
 
-    def disclosureUpdates(ledgerData: LedgerData): LedgerData = {
+    def disclosureUpdates(ledgerData: LedgerData): LedgerData =
       // NOTE(MH): Since `addDisclosures` is biased towards existing
       // disclosures, we need to add the "stronger" explicit ones first.
       richTr.blindingInfo.disclosure.foldLeft(ledgerData) { case (cacheP, (nodeId, witnesses)) =>
@@ -451,24 +453,28 @@ object IdeLedger {
           _.addDisclosures(witnesses.map(_ -> Disclosure(since = trId, explicit = true)).toMap)
         )
       }
-    }
 
-    def divulgenceUpdates(ledgerData: LedgerData): LedgerData = {
+    def divulgenceUpdates(ledgerData: LedgerData): LedgerData =
       richTr.blindingInfo.divulgence.foldLeft(ledgerData) { case (cacheP, (coid, divulgees)) =>
         cacheP.updateLedgerNodeInfo(ledgerData.coidToNodeId(coid))(
           _.addDisclosures(divulgees.map(_ -> Disclosure(since = trId, explicit = false)).toMap)
         )
       }
-    }
   }
 
-  /** Update the ledger (which records information on all historical transactions) with new transaction information.
+  /** Update the ledger (which records information on all historical transactions) with new
+    * transaction information.
     *
-    * @param trId transaction identity
-    * @param richTr (enriched) transaction
-    * @param locationInfo location map
-    * @param ledgerData ledger recording all historical transaction that have been processed
-    * @return updated ledger with new transaction information
+    * @param trId
+    *   transaction identity
+    * @param richTr
+    *   (enriched) transaction
+    * @param locationInfo
+    *   location map
+    * @param ledgerData
+    *   ledger recording all historical transaction that have been processed
+    * @return
+    *   updated ledger with new transaction information
     */
   private[this] def processTransaction(
       trId: TransactionId,
@@ -500,20 +506,20 @@ object IdeLedger {
 // The ledger
 // ----------------------------------------------------------------
 
-/** @param currentTime        The current time of the ledger.
+/** @param currentTime
+  *   The current time of the ledger.
   *
-  *                           NOTE (SM): transactions can be added with any
-  *                           ledger-effective time, as the code for
-  *                           checking whether a contract instance is
-  *                           active always nexplicitly checks that the
-  *                           ledger-effective time ordering is maintained.
+  * NOTE (SM): transactions can be added with any ledger-effective time, as the code for checking
+  * whether a contract instance is active always nexplicitly checks that the ledger-effective time
+  * ordering is maintained.
   *
-  * @param scriptStepId The identitity for the next
-  *                           transaction to be inserted. These
-  *                           identities are allocated consecutively
-  *                           from 1 to 'maxBound :: Int'.
-  * @param scriptSteps      Script steps that were executed.
-  * @param ledgerData              Cache for the ledger.
+  * @param scriptStepId
+  *   The identitity for the next transaction to be inserted. These identities are allocated
+  *   consecutively from 1 to 'maxBound :: Int'.
+  * @param scriptSteps
+  *   Script steps that were executed.
+  * @param ledgerData
+  *   Cache for the ledger.
   */
 final case class IdeLedger(
     currentTime: Time.Timestamp,
@@ -523,7 +529,7 @@ final case class IdeLedger(
     csmMode: ContractStateMachine.Mode,
 ) {
 
-  import IdeLedger._
+  import IdeLedger.*
 
   /** moves the current time of the ledger by the relative time `dt`. */
   def passTime(dtMicros: Long): IdeLedger = copy(
@@ -565,21 +571,20 @@ final case class IdeLedger(
       actAs: Set[Party],
       readAs: Set[Party],
       effectiveAt: Time.Timestamp,
-  ): Seq[LookupOk] = {
+  ): Seq[LookupOk] =
     ledgerData.activeContracts.toList
       .map(cid => lookupGlobalContract(actAs, readAs, effectiveAt, cid))
       .collect { case l @ LookupOk(_) => l }
-  }
 
-  /** Focusing on a specific view of the ledger, lookup the
-    * contract-instance associated to a specific contract-id.
+  /** Focusing on a specific view of the ledger, lookup the contract-instance associated to a
+    * specific contract-id.
     */
   def lookupGlobalContract(
       actAs: Set[Party],
       readAs: Set[Party],
       effectiveAt: Time.Timestamp,
       coid: ContractId,
-  ): LookupResult = {
+  ): LookupResult =
     ledgerData.coidToNodeId.get(coid).flatMap(ledgerData.nodeInfos.get) match {
       case None => LookupContractNotFound(coid)
       case Some(info) =>
@@ -612,7 +617,6 @@ final case class IdeLedger(
             LookupContractNotFound(coid)
         }
     }
-  }
 
   // Given a ledger and the node index of a node in a partial transaction
   // turn it into a event id that can be used in script error messages.

@@ -237,6 +237,7 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
         "ANY_EXCEPTION_MESSAGE" -> BAnyExceptionMessage,
         "TYPE_REP_TYCON_NAME" -> BTypeRepTyConName,
         "FAIL_WITH_STATUS" -> BFailWithStatus,
+        "EXTERNAL_CALL" -> BExternalCall,
       )
 
       forEvery(testCases)((stringToParse, expectedBuiltin) =>
@@ -492,8 +493,6 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
           UpdateExerciseByKey(T.tycon, n"Choice", e"key", e"arg"),
         "fetch_by_key @Mod:T" ->
           UpdateFetchByKey(T.tycon),
-        "lookup_by_key @Mod:T" ->
-          UpdateLookupByKey(T.tycon),
         "query_n_by_key @Mod:T" ->
           UpdateQueryNByKey(T.tycon),
         "uget_time" ->

@@ -4,10 +4,9 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -25,10 +24,9 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 class BlacklistLeaderSelectionInitializer[E <: Env[E]](
     thisNode: BftNodeId,
-    blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
     protocolVersion: ProtocolVersion,
     store: OutputMetadataStore[E],
-    timeouts: ProcessingTimeout,
+    initQueryTimeout: config.NonNegativeFiniteDuration,
     failBootstrap: String => TraceContext => Nothing,
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
@@ -49,21 +47,30 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
         stateFromStore(moduleSystem, epochNumber)
     }
 
-  def leaderFromState(
+  def leadersFromState(
       state: BlacklistLeaderSelectionPolicyState,
       orderingTopology: OrderingTopology,
   ): Seq[BftNodeId] =
-    BlacklistLeaderSelectionPolicyStateWithTopology(state, orderingTopology).computeLeaders(
-      blacklistLeaderSelectionPolicyConfig
-    )
+    BlacklistLeaderSelectionPolicyStateWithTopology(state, orderingTopology, protocolVersion)
+      .computeLeaders()
+
+  def blacklistedNodesFromState(
+      state: BlacklistLeaderSelectionPolicyState,
+      orderingTopology: OrderingTopology,
+  ): Seq[BftNodeId] =
+    BlacklistLeaderSelectionPolicyStateWithTopology(
+      state,
+      orderingTopology,
+      protocolVersion,
+    ).computeBlacklistedNodes()
 
   def leaderSelectionPolicy(
       blacklistLeaderSelectionPolicyState: BlacklistLeaderSelectionPolicyState,
       orderingTopology: OrderingTopology,
   ): LeaderSelectionPolicy[E] = BlacklistLeaderSelectionPolicy.create(
     blacklistLeaderSelectionPolicyState,
-    blacklistLeaderSelectionPolicyConfig,
     orderingTopology,
+    protocolVersion,
     store,
     metrics,
     loggerFactory,
@@ -127,8 +134,7 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
     logger.debug(description)
     moduleSystem.rootActorContext.blockingAwait(
       future,
-      timeouts.default.asFiniteApproximation,
+      initQueryTimeout.underlying,
     )
   }
-
 }

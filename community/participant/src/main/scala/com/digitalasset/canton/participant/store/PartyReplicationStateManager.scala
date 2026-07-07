@@ -29,8 +29,10 @@ import scala.concurrent.ExecutionContext
 import scala.util.chaining.scalaUtilChainingOps
 
 /** ACS replication progress specific read and write methods.
+  *
+  * Note: Non-sealed for testing.
   */
-sealed trait AcsReplicationProgress {
+private[canton] trait AcsReplicationProgress {
   def getAcsReplicationProgress(requestId: AddPartyRequestId)(implicit
       traceContext: TraceContext
   ): Option[PartyReplicationStatus.AcsReplicationProgress]

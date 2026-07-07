@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.NeedsNewLfContractIds
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.{KeyPurpose, SigningPublicKey}
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
@@ -17,7 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SendPolicy.processTimeProo
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.Promise
 
 abstract class ReassignmentBackdatingIntegrationTest
     extends SynchronizerChangeIntegrationTest(
@@ -28,7 +29,7 @@ abstract class ReassignmentBackdatingIntegrationTest
     )
     with NeedsNewLfContractIds {
 
-  "An unassignment succeeds even if a stakeholder is no longer hosted on the target synchronizer" in {
+  "An unassignment is rejected if a stakeholder is no longer hosted on the target synchronizer" in {
     implicit env =>
       import env.*
 
@@ -72,9 +73,10 @@ abstract class ReassignmentBackdatingIntegrationTest
         val painterDisabledP = Promise[Unit]()
 
         val P5id = P5.id
-        // When P5 tries to sent the unassignment request (for moving the paint offer to the IouSynchronizer),
+        // When P5 tries to send the unassignment request (for moving the paint offer to the IouSynchronizer),
         // disable the Painter on P4 for the IouSynchronizer and
-        // advance the sim clock to simulate that a very old time-proof has been used.
+        // hold back the unassignment request until the painter is disabled,
+        // so that the topology at the submitter target timestamp still have the Painter hosted on the target synchronizer.
         sequencerPaint.setPolicy_("advance time before unassignment request is sequenced") {
           processTimeProofs_ { submissionRequest =>
             if (
@@ -87,18 +89,8 @@ abstract class ReassignmentBackdatingIntegrationTest
           }
         }
 
-        val unassignedEventF = Future {
-          // TODO(#4009) This should fail because P4 does not host the painter on the target synchronizer
-          //  when the unassignment is sequenced.
-          P5.ledger_api.commands
-            .submit_unassign(
-              alice,
-              Seq(paintOfferId),
-              paintSynchronizerId,
-              iouSynchronizerId,
-            )
-        }
-
+        // Disable the Painter on P4 (target synchronizer) while the unassignment request is held back,
+        // so that by the time it is sequenced the Painter is no longer hosted on any reassigning participant.
         val disableF = unassignmentP.future.map { _ =>
           logger.info("Disabling the Painter on P4")
           sequencer1.topology.party_to_participant_mappings.propose_delta(
@@ -127,24 +119,37 @@ abstract class ReassignmentBackdatingIntegrationTest
           painterDisabledP.success(())
         }
 
-        val unassignedEvent = unassignedEventF.futureValue
+        // TODO(i33545): change this comment when M2 is implemented.
+        //  The unassignment is now validated against each participant's localTargetTs, at which the Painter
+        // is no longer hosted on the target synchronizer. The reassigning participants therefore abstain and
+        // the request is rejected.
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          P5.ledger_api.commands
+            .submit_unassign(
+              alice,
+              Seq(paintOfferId),
+              paintSynchronizerId,
+              iouSynchronizerId,
+            ),
+          _.commandFailureMessage should (include("CANNOT_PERFORM_ALL_VALIDATIONS") and
+            include("not hosted on any reassigning participants")),
+        )
+
         disableF.futureValue
 
+        // The paint offer is still active on the source synchronizer and there is no incomplete unassignment.
+        searchAcsSync(
+          Seq(P4, P5),
+          paintSynchronizerAlias.unwrap,
+          PaintModule,
+          OfferToPaintHouseByOwnerTemplate,
+        )
         for (participantRef <- Seq(P4, P5)) {
           withClue(s"For participant ${participantRef.name}") {
-            eventually() {
-              participantRef.ledger_api.state.acs
-                .incomplete_unassigned_of_party(alice)
-                .filter(
-                  _.reassignmentId == unassignedEvent.reassignmentId
-                ) should have size 1
-            }
+            participantRef.ledger_api.state.acs
+              .incomplete_unassigned_of_party(alice) shouldBe empty
           }
         }
-
-      // We could now try to submit the assignment request and fail,
-      // but since we're running with a sim clock,
-      // this would be stuck until some GRPc time limit elapses.
       }
   }
 }

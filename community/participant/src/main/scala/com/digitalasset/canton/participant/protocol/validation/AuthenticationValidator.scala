@@ -6,8 +6,6 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.either.*
-import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{
   Hash,
@@ -42,7 +40,9 @@ import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -119,34 +119,35 @@ private[protocol] object AuthenticationValidator {
 
     // Verify participant and external party signatures on all root views
     def verifyRootViewSignatures =
-      parsedRequest.rootViewTreesWithSignatures.forgetNE.parTraverse {
-        case (rootView, signatureO) =>
-          rootView.submitterMetadataO match {
-            // RootHash -> is a blinded tree
-            case None => FutureUnlessShutdown.pure(Right(None))
-            case Some(submitterMetadata) =>
-              for {
-                participantSignatureError <- verifyParticipantSignatureForRootView(
-                  rootView,
-                  signatureO,
-                  submitterMetadata.submittingParticipant,
-                )
-                externalSignatureValidation <- verifyExternalPartySignatureForRootView(
-                  rootView,
-                  submitterMetadata,
-                )
-              } yield {
-                participantSignatureError match {
-                  case Some(error) => error.asLeft[Option[(ViewPosition, Hash)]]
-                  case None =>
-                    // Attach the corresponding view position both in case of error and external hash
-                    externalSignatureValidation.bimap(
-                      rootView.viewPosition -> _,
-                      _.map(rootView.viewPosition -> _),
-                    )
-                }
+      MonadUtil.parTraverseWithLimit(
+        parsedRequest.snapshot.pureCrypto.signatureVerificationParallelism
+      )(parsedRequest.rootViewTreesWithSignatures.toSeq) { case (rootView, signatureO) =>
+        rootView.submitterMetadataO match {
+          // RootHash -> is a blinded tree
+          case None => FutureUnlessShutdown.pure(Right(None))
+          case Some(submitterMetadata) =>
+            for {
+              participantSignatureError <- verifyParticipantSignatureForRootView(
+                rootView,
+                signatureO,
+                submitterMetadata.submittingParticipant,
+              )
+              externalSignatureValidation <- verifyExternalPartySignatureForRootView(
+                rootView,
+                submitterMetadata,
+              )
+            } yield {
+              participantSignatureError match {
+                case Some(error) => error.asLeft[Option[(ViewPosition, Hash)]]
+                case None =>
+                  // Attach the corresponding view position both in case of error and external hash
+                  externalSignatureValidation.bimap(
+                    rootView.viewPosition -> _,
+                    _.map(rootView.viewPosition -> _),
+                  )
               }
-          }
+            }
+        }
       }
 
     for {
@@ -310,51 +311,36 @@ private[protocol] object AuthenticationValidator {
               contractEnricher = createNodeEnricher,
               hashTracer = hashTracer.getOrElse[HashTracer](HashTracer.NoOp),
             )
+            .leftMap[AuthenticationError](error =>
+              FailedToComputeExternallySignedHash(requestId, error)
+            )
             // If Hash computation is successful, verify the signature is valid
             .flatMap { hash =>
-              EitherT.liftF[FutureUnlessShutdown, String, Either[String, Option[Hash]]](
-                verifyExternalSignaturesForActAs(
-                  hash,
-                  externalAuthorization,
-                  submitterMetadata.actAs,
-                ).map {
-                  case error @ Some(_) =>
-                    hashTracer.map(_.result).foreach { trace =>
-                      logger.debug("Transaction hash computation trace:\n" + trace)
-                    }
-                    error
-                  case None => None
-                }.map(_.toLeft(Some(hash)))
-              )
-            }
-            .map(res =>
-              res.leftMap[AuthenticationError](signatureError =>
+              verifyExternalSignaturesForActAs(
+                hash,
+                externalAuthorization,
+                submitterMetadata.actAs,
+              ).leftMap[AuthenticationError] { error =>
+                hashTracer.map(_.result).foreach { trace =>
+                  logger.debug("Transaction hash computation trace:\n" + trace)
+                }
                 InvalidSignature(
                   requestId,
                   viewTree.viewPosition,
-                  signatureError,
-                )
-              )
-            )
-            // If we couldn't compute the hash, fail
-            .valueOr(error =>
-              Left(
-                FailedToComputeExternallySignedHash(
-                  requestId,
                   error,
                 )
-              )
-            )
+              }.map(_ => Some(hash))
+            }
+            .value
       }
 
     // Verify the signatures provided by the act as parties are valid.
     // This proves the request really comes from the actAs parties.
-    // Returns signature validation errors in the form of Some(errorString)
     def verifyExternalSignaturesForActAs(
         hash: Hash,
         externalAuthorization: ExternalAuthorization,
         actAs: NonEmpty[Set[LfPartyId]],
-    ): FutureUnlessShutdown[Option[String]] =
+    ): EitherT[FutureUnlessShutdown, String, Unit] =
       InteractiveSubmission
         .verifySignatures(
           hash,
@@ -363,14 +349,8 @@ private[protocol] object AuthenticationValidator {
           topology.ipsSnapshot,
           actAs.forgetNE,
           logger,
+          physicalSynchronizerId.protocolVersion,
         )
-        .value
-        .map {
-          // Convert signature validation errors to a Some, as this is how we indicate failures
-          case Left(error) => Some(error)
-          // A valid signature verification translates to a None (absence of error)
-          case Right(_) => None
-        }
 
     submitterMetadata.externalAuthorization match {
       case Some(externalAuthorization) =>

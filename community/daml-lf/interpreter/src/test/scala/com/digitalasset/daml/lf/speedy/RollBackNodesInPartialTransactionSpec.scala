@@ -4,16 +4,16 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.interpretation.Error as IError
 import com.digitalasset.daml.lf.speedy.Speedy.ContractInfo
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
+  NextGenContractStateMachine as ContractStateMachine,
   Node,
   SerializationVersion,
 }
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
-import org.scalatest._
+import org.scalatest.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -38,21 +38,24 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
     committers,
   )
 
-  private[this] def contractIdsInOrder(ptx: PartialTransaction): List[Value.ContractId] = {
+  private[this] def contractIdsInOrder(ptx: PartialTransaction): List[Value.ContractId] =
     ptx.finish.toOption.get._1
       .fold(List.empty[Value.ContractId]) {
         case (acc, (_, create: Node.Create)) => acc :+ create.coid
         case (acc, _) => acc
       }
-  }
 
   private[this] implicit class PartialTransactionExtra(val ptx: PartialTransaction) {
+
+    val createArg = SValue.SRecord(templateId, ImmArray.empty, ArraySeq.empty)
 
     val contract = ContractInfo(
       version = txVersion,
       packageName = pkgName,
       templateId = templateId,
-      value = SValue.SRecord(templateId, ImmArray.empty, ArraySeq.empty),
+      createArg = createArg.toNormalizedValue,
+      hash =
+        crypto.SValueHash.assertHashContractInstance(pkgName, templateId.qualifiedName, createArg),
       signatories = Set(party),
       observers = Set.empty,
       keyOpt = None,
@@ -230,7 +233,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
     committers,
   )
 
-  private[this] val outputCidsWithPure = {
+  private[this] val outputCidsWithPure =
     contractIdsInOrder {
       val (cid, txIntermediate) =
         initialStateEffectfulRollbacksDisallowed //
@@ -243,7 +246,6 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
         .endExercises_ // close the exercise context normally
         .insertCreate_ // create the contract cid_2
     }
-  }
 
   val Seq(_, with_pure_cid_1_0, _, _, _) = outputCidsWithPure
 

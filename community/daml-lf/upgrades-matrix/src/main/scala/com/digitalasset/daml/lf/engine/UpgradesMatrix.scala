@@ -21,7 +21,7 @@ import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.Assertion
 
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, unused}
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -200,8 +200,9 @@ class UpgradesMatrixCases(
       languageVersion = langVersion,
     )
 
-  def ifLookupByKeys[A](ifTrue: => A, ifFalse: => A): A =
-    if (LanguageVersion.featureLookupBykey.enabledIn(langVersion)) ifTrue else ifFalse
+  // TODO[#32409] delete dead code or adapt to NUCK since legacy lookup by key is no longer supported
+  def ifLookupByKeys[A](@unused ifTrue: => A, ifFalse: => A): A =
+    ifFalse
   def whenLookupByKeysOtherwiseEmpty[A](a: => A)(implicit m: Monoid[A]) = ifLookupByKeys(a, m.empty)
 
   val serializationVersion =
@@ -643,12 +644,12 @@ class UpgradesMatrixCases(
 
       val byKeyChoices = s"""
          |  choice @nonConsuming LookupByKeyNoCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
-         |        : Option (ContractId $v2TplQualifiedName)
+         |        : Option (List ($tuple2TyCon (ContractId $v2TplQualifiedName) $v2TplQualifiedName))
          |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
          |    , observers (Nil @Party)
-         |    to lookup_by_key
-         |         @$v2TplQualifiedName
-         |         key;
+         |    to case query_n_by_key @$v2TplQualifiedName 1 key of
+         |         Cons h t -> Some ($tuple2TyCon @(ContractId $v2TplQualifiedName) @$v2TplQualifiedName {_2} h)
+         |         | _ -> None;
          |
          |  choice @nonConsuming LookupByKeyAttemptCatchGlobal$templateName (self) (key: $v2KeyTypeQualifiedName)
          |        : Text
@@ -892,13 +893,13 @@ class UpgradesMatrixCases(
 
       val byKeyChoices =
         s"""
-           |  choice @nonConsuming LookupByKeyNoCatchLocal$templateName (self) (u: Unit): Option (ContractId $v2TplQualifiedName)
+           |  choice @nonConsuming LookupByKeyNoCatchLocal$templateName (self) (u: Unit): Option (List ($tuple2TyCon (ContractId $v2TplQualifiedName) $v2TplQualifiedName))
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
            |    , observers (Nil @Party)
            |    to ubind cid: ContractId $v1TplQualifiedName <- $createV1ContractExpr
-           |       in lookup_by_key
-           |            @$v2TplQualifiedName
-           |            $v2KeyExpr;
+           |       in case query_n_by_key @$v2TplQualifiedName 1 $v2KeyExpr of
+           |            Cons h t -> Some ($tuple2TyCon @(ContractId $v2TplQualifiedName) @$v2TplQualifiedName {_2} h)
+           |            | _ -> None;
            |
            |  choice @nonConsuming LookupByKeyAttemptCatchLocal$templateName (self) (u: Unit): Text
            |    , controllers (Cons @Party [Mod:Client {alice} this] (Nil @Party))
@@ -2066,7 +2067,7 @@ class UpgradesMatrixCases(
 
   val engineConfig: EngineConfig =
     EngineConfig(
-      allowedLanguageVersions = language.LanguageVersion.allUpToVersion(langVersion)
+      allowedLanguageVersions = language.LanguageVersion.allLfVersions.filter(_ <= langVersion)
     )
 
   val contractIdVersion: ContractIdVersion = ContractIdVersion.V1
@@ -2192,7 +2193,7 @@ class UpgradesMatrixCases(
     ): Option[GlobalKeyWithMaintainers] =
       Some {
         val keySValue = globalContractv1KeySValue(setupData)
-        GlobalKeyWithMaintainers.assertBuild(
+        GlobalKeyWithMaintainers(
           v1TplId,
           keySValue.toNormalizedValue,
           SValueHash.assertHashContractKey(
@@ -2210,7 +2211,7 @@ class UpgradesMatrixCases(
     ): Option[GlobalKeyWithMaintainers] =
       Some {
         val keySValue = globalContractv2KeySValue(setupData)
-        GlobalKeyWithMaintainers.assertBuild(
+        GlobalKeyWithMaintainers(
           v2TplId,
           keySValue.toNormalizedValue,
           SValueHash.assertHashContractKey(

@@ -6,7 +6,6 @@ package com.digitalasset.canton.http.json
 import cats.implicits.toFunctorOps
 import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.value.{Identifier, Record, Value}
-import com.daml.nonempty.NonEmpty
 import com.daml.scalatest.Equalz.convertToAnyShouldWrapper
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.GetUpdateTreesResponse.Update
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.TreeEvent.Kind
@@ -28,6 +27,7 @@ import com.digitalasset.canton.{
   LfPartyId,
 }
 import com.digitalasset.daml.lf.data.Ref.IdString
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.google.rpc.Code
 import magnolify.scalacheck.semiauto.ArbitraryDerivation
@@ -116,6 +116,10 @@ object Arbitraries {
   val defaultLapiValue: com.daml.ledger.api.v2.value.Value =
     Value(sum = Value.Sum.Record(value = defaultLapiRecord))
 
+  val defaultKeyJsValue: ujson.Value = ujson.Obj("key" -> ujson.Str("contract-key-marker"))
+  val defaultKeyLapiValue: com.daml.ledger.api.v2.value.Value =
+    Value(sum = Value.Sum.Text("contract-key-marker"))
+
   def smallSeqArbitrary[T](implicit arbT: Arbitrary[T]): Arbitrary[Seq[T]] =
     Arbitrary(Gen.choose(0, 5).flatMap(n => Gen.listOfN(n, arbT.arbitrary)))
 
@@ -154,6 +158,13 @@ object Arbitraries {
       arb.arbitrary.retryUntil(_.isDefined)
     }
 
+  implicit val arbExerciseByKeyCommand: Arbitrary[lapi.commands.ExerciseByKeyCommand] = {
+    val arb = ArbitraryDerivation[lapi.commands.ExerciseByKeyCommand]
+    Arbitrary {
+      arb.arbitrary.map(_.copy(contractKey = Some(defaultKeyLapiValue)))
+    }
+  }
+
   implicit val arbCommand: Arbitrary[com.daml.ledger.api.v2.commands.Command.Command] =
     nonEmptyScalaPbOneOf[com.daml.ledger.api.v2.commands.Command.Command](
       ArbitraryDerivation[com.daml.ledger.api.v2.commands.Command.Command]
@@ -181,7 +192,9 @@ object Arbitraries {
   implicit val arbPrefetchContractKey: Arbitrary[lapi.commands.PrefetchContractKey] = {
     val arb = ArbitraryDerivation[lapi.commands.PrefetchContractKey]
     Arbitrary {
-      arb.arbitrary.retryUntil(pk => pk.contractKey.zip(pk.templateId).isDefined)
+      arb.arbitrary
+        .retryUntil(pk => pk.contractKey.zip(pk.templateId).isDefined)
+        .map(_.copy(contractKey = Some(defaultKeyLapiValue)))
     }
   }
 
@@ -189,9 +202,12 @@ object Arbitraries {
     val arb = ArbitraryDerivation[lapi.transaction.Transaction]
     Arbitrary {
       arb.arbitrary.retryUntil(v => v.effectiveAt.isDefined && v.recordTime.isDefined).map { tx =>
-        val hash32Bytes =
-          ByteString.copyFrom(Array.fill(32)(scala.util.Random.nextInt(256).toByte))
-        tx.copy(externalTransactionHash = Some(hash32Bytes))
+        val transactionHash32Bytes = ByteString.copyFrom(scala.util.Random.nextBytes(32))
+        val externalTransactionHash32Bytes = ByteString.copyFrom(scala.util.Random.nextBytes(32))
+        tx.copy(
+          externalTransactionHash = Some(externalTransactionHash32Bytes),
+          transactionHash = Some(transactionHash32Bytes),
+        )
       }
     }
   }
@@ -291,7 +307,9 @@ object Arbitraries {
   implicit val arbCreatedEvent: Arbitrary[lapi.event.CreatedEvent] = {
     val arb = ArbitraryDerivation[lapi.event.CreatedEvent]
     Arbitrary {
-      arb.arbitrary.retryUntil(v => v.createdAt.isDefined)
+      arb.arbitrary
+        .retryUntil(v => v.createdAt.isDefined)
+        .map(_.copy(contractKey = Some(defaultKeyLapiValue)))
     }
   }
 
@@ -344,6 +362,9 @@ class MockSchemaProcessor()(implicit val executionContext: ExecutionContext)
   val simpleLapiValue =
     Future.successful(Arbitraries.defaultLapiValue)
 
+  val contractKeyJsValue: Future[ujson.Value] = Future.successful(Arbitraries.defaultKeyJsValue)
+  val contractKeyLapiValue: Future[Value] = Future.successful(Arbitraries.defaultKeyLapiValue)
+
   override def contractArgFromJsonToProto(template: Identifier, jsonArgsValue: ujson.Value)(implicit
       traceContext: TraceContext
   ): Future[Value] = simpleLapiValue
@@ -366,11 +387,11 @@ class MockSchemaProcessor()(implicit val executionContext: ExecutionContext)
 
   override def keyArgFromProtoToJson(template: Identifier, protoArgs: Value)(implicit
       traceContext: TraceContext
-  ): Future[ujson.Value] = simpleJsValue
+  ): Future[ujson.Value] = contractKeyJsValue
 
-  override def keyArgFromJsonToProto(template: Identifier, protoArgs: ujson.Value)(implicit
+  override def keyArgFromJsonToProto(template: Identifier, jsonArgsValue: ujson.Value)(implicit
       traceContext: TraceContext
-  ): Future[Value] = simpleLapiValue
+  ): Future[Value] = contractKeyLapiValue
 
   override def exerciseResultFromProtoToJson(
       template: Identifier,

@@ -41,3 +41,23 @@ template WithList
       do
         create this with
           items = items ++ newItems
+
+template Tree
+  with
+    owner : Party
+  where
+    signatory owner
+
+    nonconsuming choice Build : Int
+      with
+        depth: Int
+        branching: Int
+      controller owner
+      do
+        subtrees <- if depth <= 0 then
+            pure []
+          else
+            forA [1..branching] $ \_ ->
+              exercise self (Build (depth - 1) branching)
+        pure (1 + sum subtrees)
+

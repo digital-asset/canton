@@ -9,7 +9,6 @@ import cats.instances.order.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.UnassignmentData.ReassignmentGlobalOffset
@@ -28,6 +27,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.Monocle.toAppliedFocusOps
 
 import java.util.ConcurrentModificationException
@@ -241,13 +241,10 @@ class InMemoryReassignmentStore(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
     val newEntry = ReassignmentEntry(
-      assignmentData.reassignmentId,
-      assignmentData.sourceSynchronizer,
-      assignmentData.contracts.contracts.map(_.contract),
-      None,
-      None,
-      CantonTimestamp.Epoch,
-      None,
+      assignmentData,
+      reassignmentGlobalOffset = None,
+      unassignmentTs = CantonTimestamp.Epoch,
+      tsCompletion = None,
     )
 
     val result: Either[ReassignmentStoreError, Unit] = MapsUtil
@@ -309,7 +306,7 @@ class InMemoryReassignmentStore(
     def filter(entry: ReassignmentEntry): Boolean =
       sourceSynchronizer.forall(_ == entry.sourceSynchronizer) &&
         incompleteReassignment(entry) && {
-          val entryStakeholders = entry.contracts.forgetNE.flatMap(_.metadata.stakeholders)
+          val entryStakeholders = entry.stakeholders
           stakeholders.forall(_.exists(entryStakeholders.contains(_)))
         }
 

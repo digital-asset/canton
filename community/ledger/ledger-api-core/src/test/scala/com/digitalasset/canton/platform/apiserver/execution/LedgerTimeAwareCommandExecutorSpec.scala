@@ -103,6 +103,7 @@ class LedgerTimeAwareCommandExecutorSpec
           DeduplicationDuration(Duration.ofMinutes(1)),
           None,
           None,
+          transactionHash = None,
         ),
         TransactionMeta(
           let,
@@ -117,7 +118,6 @@ class LedgerTimeAwareCommandExecutorSpec
         transaction,
         dependsOnLedgerTime,
         5L,
-        Map.empty,
         processedDisclosedContracts,
         None,
       ),
@@ -202,6 +202,7 @@ class LedgerTimeAwareCommandExecutorSpec
                 DeduplicationDuration(Duration.ofMinutes(1)),
                 None,
                 None,
+                transactionHash = None,
               ),
               TransactionMeta(
                 let,
@@ -216,7 +217,6 @@ class LedgerTimeAwareCommandExecutorSpec
               transaction,
               dependsOnLedgerTime,
               5L,
-              Map.empty,
               processedDisclosedContracts,
               None,
             ),

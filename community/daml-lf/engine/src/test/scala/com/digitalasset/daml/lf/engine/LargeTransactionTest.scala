@@ -4,23 +4,30 @@
 package com.digitalasset.daml.lf
 package engine
 
-import java.util.zip.ZipInputStream
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.command.*
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.script.IdeLedger
-import com.digitalasset.daml.lf.transaction.{CommittedTransaction, NextGenContractStateMachine => ContractStateMachine, FatContractInstance, Node, SubmittedTransaction, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  CommittedTransaction,
+  FatContractInstance,
+  Node,
+  SubmittedTransaction,
+  VersionedTransaction,
+}
+import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
-import com.digitalasset.daml.lf.value.Value._
-import com.digitalasset.daml.lf.command._
 import org.scalameter
 import org.scalameter.Quantity
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.zip.ZipInputStream
 import scala.language.implicitConversions
 
 class LargeTransactionTestV2_V1
@@ -37,12 +44,11 @@ class LargeTransactionTest(
 
   private val verbose = false
 
-  /** Tiny wrapper around IdeLedger that provides
-    * a mutable API for ease of use in tests.
+  /** Tiny wrapper around IdeLedger that provides a mutable API for ease of use in tests.
     */
   class MutableLedger {
 
-    import IdeLedger.{initialLedger => _, _}
+    import IdeLedger.{initialLedger as _, *}
 
     private var ledger: IdeLedger = initialLedger()
 
@@ -63,8 +69,8 @@ class LargeTransactionTest(
           locationInfo = Map.empty,
           l = ledger,
         )
-            ledger = result.newLedger
-            result.richTransaction.transaction
+      ledger = result.newLedger
+      result.richTransaction.transaction
     }
 
     def get(
@@ -109,7 +115,6 @@ class LargeTransactionTest(
 
   private def report(name: String, quantity: Quantity[Double]): Unit =
     if (verbose) println(s"$name: $quantity")
-
 
   private val engine = Engine.DevEngine(loggerFactory)
 
@@ -279,7 +284,7 @@ class LargeTransactionTest(
   ): VersionedTransaction = {
     val effectiveAt = Time.Timestamp.now()
     def enrich(tx: SubmittedTransaction): CommittedTransaction = {
-      val enricher = new Enricher(engine, forbidLocalContractIds = false)
+      val enricher = Enricher(engine, forbidLocalContractIds = false)
       val suffix = Bytes.fromByteArray(Array(0, 0))
       val suffixedTx = data.assertRight(tx.suffixCid(_ => suffix, _ => suffix))
       def consume[V](res: Result[V]): V =
@@ -297,7 +302,7 @@ class LargeTransactionTest(
         participantId = participant,
         submissionSeed = seed,
         contractIdVersion = contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.devDefault,
+        interpretationConfig = InterpretationConfig.Default,
         prefetchKeys = Seq.empty,
       )
       .consume(
@@ -388,7 +393,7 @@ class LargeTransactionTest(
 
     val fields: ImmArray[(Option[String], Value)] =
       arg match {
-        case ValueRecord(_, x: ImmArray[_]) => x
+        case ValueRecord(_, x: ImmArray[?]) => x
         case v @ _ => fail(s"Unexpected match: $v")
       }
 

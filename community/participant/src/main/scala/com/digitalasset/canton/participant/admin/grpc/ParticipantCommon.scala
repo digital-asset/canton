@@ -20,7 +20,7 @@ import scala.util.{Failure, Success}
 
 private[participant] object ParticipantCommon {
 
-  private[grpc] def findLedgerEnd(sync: CantonSyncService): Either[String, Offset] =
+  private[admin] def findLedgerEnd(sync: CantonSyncService): Either[String, Offset] =
     sync.participantNodePersistentState.value.ledgerApiStore.ledgerEndCache
       .apply()
       .map(_.lastOffset)
@@ -47,7 +47,7 @@ private[participant] object ParticipantCommon {
     *   A future that completes with `Right(())` on success, or a `Left` with an error message on
     *   failure.
     */
-  private[grpc] def writeAcsSnapshot(
+  private[admin] def writeAcsSnapshot(
       indexService: InternalIndexService,
       parties: Set[PartyId],
       atOffset: Offset,

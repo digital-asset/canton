@@ -7,8 +7,12 @@ package interpretation
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, Party, TypeConId}
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers, NodeId}
-import com.digitalasset.daml.lf.transaction.{Node => TxNode}
+import com.digitalasset.daml.lf.transaction.{
+  GlobalKey,
+  GlobalKeyWithMaintainers,
+  Node as TxNode,
+  NodeId,
+}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -28,11 +32,13 @@ object Error {
 
   final case class ContractNotFound(cid: Value.ContractId) extends Error
 
+  final case class UnsupportedContractId(cid: Value.ContractId) extends Error
+
   final case class UnresolvedPackageName(packageName: Ref.PackageName) extends Error
 
-  /** Template pre-condition (ensure) evaluated to false and the transaction
-    * was aborted. Note that the compiler will throw instead of returning False
-    * for code in LF >= 1.14 so this will never be thrown for newer versions.
+  /** Template pre-condition (ensure) evaluated to false and the transaction was aborted. Note that
+    * the compiler will throw instead of returning False for code in LF >= 1.14 so this will never
+    * be thrown for newer versions.
     */
   final case class TemplatePreconditionViolated(
       templateId: TypeConId,
@@ -40,8 +46,7 @@ object Error {
       arg: Value,
   ) extends Error
 
-  /** A fetch or an exercise on a transaction-local contract that has already
-    * been consumed.
+  /** A fetch or an exercise on a transaction-local contract that has already been consumed.
     */
   final case class ContractNotActive(
       coid: ContractId,
@@ -70,17 +75,15 @@ object Error {
       key: GlobalKey
   ) extends Error
 
-  /** Two contracts with the same key were active at the same time.
-    * See com.digitalasset.daml.lf.transaction.Transaction.DuplicateContractKey
-    * for more details.
+  /** Two contracts with the same key were active at the same time. See
+    * com.digitalasset.daml.lf.transaction.Transaction.DuplicateContractKey for more details.
     */
   final case class DuplicateContractKey(
       key: GlobalKey
   ) extends Error
 
-  /** The ledger provided an inconsistent view of a contract key.
-    * See com.digitalasset.daml.lf.transaction.Transaction.DuplicateContractKey
-    * for more details.
+  /** The ledger provided an inconsistent view of a contract key. See
+    * com.digitalasset.daml.lf.transaction.Transaction.DuplicateContractKey for more details.
     */
   final case class InconsistentContractKey(
       key: GlobalKey
@@ -100,8 +103,8 @@ object Error {
       packageName: Ref.PackageName,
   ) extends Error
 
-  /** We tried to fetch / exercise a contract of the wrong type --
-    * see <https://github.com/digital-asset/daml/issues/1005>.
+  /** We tried to fetch / exercise a contract of the wrong type -- see
+    * <https://github.com/digital-asset/daml/issues/1005>.
     */
   final case class WronglyTypedContract(
       coid: ContractId,
@@ -109,8 +112,8 @@ object Error {
       actual: TypeConId,
   ) extends Error
 
-  /** We tried to fetch / exercise a contract by interface, but
-    * the contract does not implement this interface.
+  /** We tried to fetch / exercise a contract by interface, but the contract does not implement this
+    * interface.
     */
   final case class ContractDoesNotImplementInterface(
       interfaceId: TypeConId,
@@ -118,8 +121,8 @@ object Error {
       templateId: TypeConId,
   ) extends Error
 
-  /** We tried to exercise a contract by required interface, but
-    * the contract does not implement the requiring interface.
+  /** We tried to exercise a contract by required interface, but the contract does not implement the
+    * requiring interface.
     */
   final case class ContractDoesNotImplementRequiringInterface(
       requiringInterfaceId: TypeConId,
@@ -145,7 +148,12 @@ object Error {
         Exercise(n.targetCoid, n.templateId, n.choiceId, n.byKey)
     }
     final case class Create(override val coid: ContractId, templateId: TypeConId) extends Node(coid)
-    final case class Exercise(override val coid: ContractId, templateId: TypeConId, choiceId: ChoiceName, byKey: Boolean) extends Node(coid)
+    final case class Exercise(
+        override val coid: ContractId,
+        templateId: TypeConId,
+        choiceId: ChoiceName,
+        byKey: Boolean,
+    ) extends Node(coid)
   }
 
   // We do not include the culprit value in the NonComparableValues Error
@@ -162,16 +170,23 @@ object Error {
 
   /** A value has been nested beyond a given depth limit
     *
-    * @param limit nesting limit that was exceeded
+    * @param limit
+    *   nesting limit that was exceeded
     */
   final case class ValueNesting(limit: Int) extends Error
 
   /** User thrown failure with grpc status/metadata
     *
-    * @param errorId Defines the errorId metadata value in the ErrorInfoDetail metadata of the resulting GrpcStatus
-    * @param failureCategory Canton error category ID, defines the GrpcStatusCode and retry metadata of the resulting GrpcStatus
-    * @param errorMessage Message placed in the top level GrpcStatus message field (with prefixes)
-    * @param metadata Key value metadata placed in the ErrorInfoDetail of the resulting GrpcStatus
+    * @param errorId
+    *   Defines the errorId metadata value in the ErrorInfoDetail metadata of the resulting
+    *   GrpcStatus
+    * @param failureCategory
+    *   Canton error category ID, defines the GrpcStatusCode and retry metadata of the resulting
+    *   GrpcStatus
+    * @param errorMessage
+    *   Message placed in the top level GrpcStatus message field (with prefixes)
+    * @param metadata
+    *   Key value metadata placed in the ErrorInfoDetail of the resulting GrpcStatus
     */
   final case class FailureStatus(
       errorId: String,
@@ -179,6 +194,34 @@ object Error {
       errorMessage: String,
       metadata: Map[String, String],
   ) extends Error
+
+  sealed case class ExternalCall(error: ExternalCall.Error) extends Error
+
+  object ExternalCall {
+    sealed abstract class Error extends Serializable with Product
+
+    final case class PreparationFailed(
+        extensionId: String,
+        functionId: String,
+        message: String,
+    ) extends Error
+
+    final case class ExecutionFailed(
+        extensionId: String,
+        functionId: String,
+        error: ExecutionFailed.Error,
+    ) extends Error
+
+    object ExecutionFailed {
+      sealed abstract class Error extends Serializable with Product {
+        def message: String
+      }
+
+      final case class CallFailed(message: String) extends Error
+
+      final case class InvalidOutput(message: String) extends Error
+    }
+  }
 
   sealed case class Upgrade(error: Upgrade.Error) extends Error
 

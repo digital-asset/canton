@@ -13,7 +13,8 @@ import scala.concurrent.Future
 final class PrepareSubmissionAuthIT
     extends ReadOnlyServiceCallAuthTests
     with SubmitDummyPreparedSubmission
-    with ExecuteAsAuthTests {
+    with ExecuteAsAuthTests
+    with ActAsAnyPartyAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 

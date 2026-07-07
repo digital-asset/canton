@@ -14,20 +14,13 @@ import com.daml.ledger.api.v2.admin.user_management_service.{
 }
 import com.daml.platform.v1.page_tokens.ListUsersPageTokenPayload
 import com.digitalasset.base.error.ErrorResource
+import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValueValidator}
-import com.digitalasset.canton.ledger.api.{
-  IdentityProviderId,
-  ObjectMeta,
-  SubmissionIdGenerator,
-  User,
-  UserRight,
-}
 import com.digitalasset.canton.ledger.error.groups.{
   RequestValidationErrors,
   UserManagementServiceErrors,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.withEnrichedLoggingContext
 import com.digitalasset.canton.logging.{
@@ -39,6 +32,8 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.UserUpdateMapper
 import com.digitalasset.canton.tracing.TraceContextGrpc
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import scalaz.std.either.*
@@ -570,6 +565,9 @@ private[apiserver] final class ApiUserManagementService(
       case proto.Right(_: proto.Right.Kind.CanExecuteAsAnyParty) =>
         Right(UserRight.CanExecuteAsAnyParty)
 
+      case proto.Right(_: proto.Right.Kind.CanActAsAnyParty) =>
+        Right(UserRight.CanActAsAnyParty)
+
       case proto.Right(proto.Right.Kind.Empty) =>
         Left(
           RequestValidationErrors.InvalidArgument
@@ -627,6 +625,8 @@ object ApiUserManagementService {
       proto.Right(proto.Right.Kind.CanExecuteAs(proto.Right.CanExecuteAs(party)))
     case UserRight.CanExecuteAsAnyParty =>
       proto.Right(proto.Right.Kind.CanExecuteAsAnyParty(proto.Right.CanExecuteAsAnyParty()))
+    case UserRight.CanActAsAnyParty =>
+      proto.Right(proto.Right.Kind.CanActAsAnyParty(proto.Right.CanActAsAnyParty()))
   }
 
   def encodeNextPageToken(token: Option[Ref.UserId]): String =

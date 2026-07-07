@@ -28,9 +28,9 @@ object LanguageVersion
     with LegacyLanguageFeatures {
   // ranges hardcoded (for now)
   lazy val allLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_dev)
-  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_2)
+  lazy val stableLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_3)
   lazy val earlyAccessLfVersionsRange: VersionRange.Inclusive[LanguageVersion] =
-    VersionRange(v2_1, v2_2)
+    VersionRange(v2_1, v2_3)
 
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 
@@ -44,7 +44,7 @@ object LanguageVersion
   // TODO: remove after https://github.com/digital-asset/daml/issues/22403
   def supportsPackageUpgrades(lv: LanguageVersion): Boolean =
     lv.major match {
-      case Major.V2 => featurePackageUpgrades.enabledIn(lv)
+      case Major.V2 => true
       case Major.V1 => lv >= LegacyFeatures.packageUpgrades
     }
 

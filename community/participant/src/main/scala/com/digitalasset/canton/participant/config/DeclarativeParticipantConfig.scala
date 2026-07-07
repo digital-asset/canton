@@ -6,11 +6,9 @@ package com.digitalasset.canton.participant.config
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.daml.jwt.JwksUrl
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ConfidentialConfigWriter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.ledger.api.IdentityProviderId
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.{
@@ -18,11 +16,14 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Namespace, PartyId, UniqueIdentifier}
+import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import pureconfig.error.CannotConvert
 
@@ -147,6 +148,7 @@ final case class DeclarativeUserRightsConfig(
     executeAs: Set[String] = Set(),
     readAsAnyParty: Boolean = false,
     executeAsAnyParty: Boolean = false,
+    actAsAnyParty: Boolean = false,
     participantAdmin: Boolean = false,
     identityProviderAdmin: Boolean = false,
 )
@@ -320,6 +322,7 @@ final case class DeclarativeConnectionConfig(
         sequencerLivenessMargin = livenessMargin,
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
       )
 
     sequencerConnectionsE.map { sequencerConnections =>
@@ -354,7 +357,7 @@ object DeclarativeConnectionConfig {
 object DeclarativeParticipantConfig {
 
   object Readers {
-    import com.daml.nonempty.NonEmptyUtil.instances.*
+    import com.digitalasset.nonempty.NonEmptyUtil.instances.*
     import pureconfig.ConfigReader
     import pureconfig.generic.semiauto.*
     // import canton config to include the implicit that prevents unknown keys
@@ -402,7 +405,7 @@ object DeclarativeParticipantConfig {
   }
 
   class ConfigWriters(confidential: Boolean) {
-    import com.daml.nonempty.NonEmptyUtil.instances.*
+    import com.digitalasset.nonempty.NonEmptyUtil.instances.*
     import pureconfig.ConfigWriter
     import pureconfig.generic.semiauto.*
 

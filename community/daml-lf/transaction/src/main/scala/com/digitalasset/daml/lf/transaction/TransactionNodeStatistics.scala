@@ -12,14 +12,22 @@ object TransactionNodeStatistics {
 
   /** Container for transaction statistics.
     *
-    * @param creates number of creates nodes,
-    * @param consumingExercisesByCid number of consuming exercises by contract ID nodes,
-    * @param nonconsumingExercisesByCid number of non-consuming Exercises by contract ID nodes,
-    * @param consumingExercisesByKey number of consuming exercise by contract key nodes,
-    * @param nonconsumingExercisesByKey number of non-consuming exercise by key nodes,
-    * @param fetchesByCid number of fetch by contract ID nodes,
-    * @param fetchesByKey number of fetch by key nodes,
-    * @param lookupsByKey number of lookup by key nodes,
+    * @param creates
+    *   number of creates nodes,
+    * @param consumingExercisesByCid
+    *   number of consuming exercises by contract ID nodes,
+    * @param nonconsumingExercisesByCid
+    *   number of non-consuming Exercises by contract ID nodes,
+    * @param consumingExercisesByKey
+    *   number of consuming exercise by contract key nodes,
+    * @param nonconsumingExercisesByKey
+    *   number of non-consuming exercise by key nodes,
+    * @param fetchesByCid
+    *   number of fetch by contract ID nodes,
+    * @param fetchesByKey
+    *   number of fetch by key nodes,
+    * @param lookupsByKey
+    *   number of lookup by key nodes,
     */
   final case class Actions(
       creates: Int,
@@ -88,10 +96,9 @@ object TransactionNodeStatistics {
       lookupsByKey = stats(lookupsByKeyIdx),
     )
 
-  /** This function produces statistics about the committed nodes (those nodes
-    *  that do not appear under a rollback node) on the one hand and
-    *  rolled back nodes (those nodes that do appear under a rollback node) on
-    *  the other hand within a given transaction `tx`.
+  /** This function produces statistics about the committed nodes (those nodes that do not appear
+    * under a rollback node) on the one hand and rolled back nodes (those nodes that do appear under
+    * a rollback node) on the other hand within a given transaction `tx`.
     */
   def apply(
       tx: VersionedTransaction,
@@ -99,15 +106,15 @@ object TransactionNodeStatistics {
   ): TransactionNodeStatistics =
     apply(tx.transaction, excludedPackages)
 
-  /** Calculate the node statistics unless all actions in the transaction use infrastructure packages in
-    * which case return Empty.
+  /** Calculate the node statistics unless all actions in the transaction use infrastructure
+    * packages in which case return Empty.
     */
   def apply(
       tx: Transaction,
       excludedPackages: Set[PackageId],
   ): TransactionNodeStatistics = {
     val excluded = tx.nodes.values
-      .collect({ case a: Node.Action => a })
+      .collect { case a: Node.Action => a }
       .forall(_.packageIds.forall(excludedPackages.contains))
     if (!excluded) {
       build(tx)
@@ -152,7 +159,7 @@ object TransactionNodeStatistics {
               fetchesByKeyIdx
             else
               fetchesIdx
-          case _: Node.LookupByKey =>
+          case _: Node.QueryByKey =>
             lookupsByKeyIdx
         }
         incr(idx)
@@ -170,7 +177,6 @@ final case class TransactionNodeStatistics(
     committed: TransactionNodeStatistics.Actions,
     rolledBack: TransactionNodeStatistics.Actions,
 ) {
-  def +(that: TransactionNodeStatistics) = {
+  def +(that: TransactionNodeStatistics) =
     TransactionNodeStatistics(this.committed + that.committed, this.rolledBack + that.rolledBack)
-  }
 }

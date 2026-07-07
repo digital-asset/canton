@@ -4,8 +4,6 @@
 package com.digitalasset.daml.lf
 package transaction
 
-import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
-import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey.NoKey
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.Transaction.{
@@ -15,19 +13,21 @@ import com.digitalasset.daml.lf.transaction.Transaction.{
   NotWellFormedError,
   OrphanedNode,
 }
-import com.digitalasset.daml.lf.transaction.TransactionError._
+import com.digitalasset.daml.lf.transaction.TransactionError.*
+import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
+import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey.NoKey
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
   TransactionBuilder,
 }
-import com.digitalasset.daml.lf.value.{Value => V}
+import com.digitalasset.daml.lf.value.Value as V
 import com.digitalasset.daml.lf.value.test.ValueGenerators.danglingRefGenNode
 import org.scalacheck.Gen
-import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 import org.scalatest.Inside
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
 import scala.collection.immutable.HashMap
 import scala.util.Random
@@ -38,8 +38,8 @@ class TransactionSpec
     with Inside
     with ScalaCheckDrivenPropertyChecks {
 
-  import TransactionSpec._
-  import TransactionBuilder.Implicits._
+  import TransactionSpec.*
+  import TransactionBuilder.Implicits.*
 
   "isWellFormed" - {
     "detects dangling references in roots" in {
@@ -398,16 +398,15 @@ class TransactionSpec
           "RolledBackFetchByKey",
           "RolledBackSuccessfulLookup",
           "RolledBackUnsuccessfulLookup",
-        ).map(s => {
+        ).map { s =>
           val node = create(cid(s))
-          GlobalKey
-            .assertBuild(
-              node.templateId,
-              node.packageName,
-              V.ValueText(cid(s).coid),
-              crypto.Hash.hashPrivateKey(cid(s).coid),
-            )
-        }).toSet
+          GlobalKey(
+            node.templateId,
+            node.packageName,
+            V.ValueText(cid(s).coid),
+            crypto.Hash.hashPrivateKey(cid(s).coid),
+          )
+        }.toSet
 
       builder.build().contractKeys shouldBe expectedResults
     }
@@ -419,7 +418,7 @@ class TransactionSpec
     val keyPkgName = Ref.PackageName.assertFromString("key-package-name")
     def keyValue(s: String) = V.ValueText(s)
     def keyHash(s: String) = crypto.Hash.hashPrivateKey(s)
-    def globalKey(k: String) = GlobalKey.assertBuild(
+    def globalKey(k: String) = GlobalKey(
       "Mod:T",
       keyPkgName,
       keyValue(k),
@@ -467,7 +466,7 @@ class TransactionSpec
       builder.add(fetchNode1)
       builder.build().contractKeyInputs shouldBe Right(
         Map(
-          globalKey("k1") -> KeyMapping(Vector(cid("#1")), false),
+          globalKey("k1") -> KeyMapping(Vector(cid("#1")), false)
         )
       )
     }
@@ -558,7 +557,7 @@ class TransactionSpec
       val builder = new TxBuilder()
       builder.add(create(cid("#0"), "k0"))
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe  Right(Map.empty)
+      builder.build().contractKeyInputs shouldBe Right(Map.empty)
     }
     "two creates do not conflict if interleaved with archive" in {
       val builder = new TxBuilder()
@@ -720,7 +719,7 @@ class TransactionSpec
   }
 
   "updatedContractKeys" - {
-    import Transaction._
+    import Transaction.*
     "return all the updated contract keys" in {
       val builder = new TxBuilder()
       val parties = Seq("Alice")
@@ -752,7 +751,7 @@ class TransactionSpec
       builder.add(create4, rollback)
       builder.add(exercise(builder, create6, parties, true))
 
-      def key(s: String) = GlobalKey.assertBuild(
+      def key(s: String) = GlobalKey(
         "Mod:T",
         create0.packageName,
         V.ValueText(s),
@@ -762,7 +761,7 @@ class TransactionSpec
         Map(
           key("key0") -> ContractKeyUpdate(Vector(cid0), Set.empty),
           key("key2") -> ContractKeyUpdate(Vector(cid3), Set.empty),
-          key("key4") -> ContractKeyUpdate(Vector.empty, Set(cid6))
+          key("key4") -> ContractKeyUpdate(Vector.empty, Set(cid6)),
         )
     }
   }
@@ -1130,7 +1129,7 @@ class TransactionSpec
 
 object TransactionSpec {
 
-  import TransactionBuilder.Implicits._
+  import TransactionBuilder.Implicits.*
 
   class TxBuilder extends NodeIdTransactionBuilder with TestNodeBuilder
 

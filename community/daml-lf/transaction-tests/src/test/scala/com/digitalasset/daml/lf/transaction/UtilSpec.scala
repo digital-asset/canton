@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package transaction
 
 import com.digitalasset.daml.lf.value.ValueCoder
-import com.digitalasset.daml.lf.value.test.ValueGenerators._
+import com.digitalasset.daml.lf.value.test.ValueGenerators.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks

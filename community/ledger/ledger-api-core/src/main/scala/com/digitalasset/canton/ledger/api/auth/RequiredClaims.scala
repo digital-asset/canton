@@ -32,6 +32,12 @@ object RequiredClaims {
   def readAsForAllParties[Req](parties: Iterable[String]): List[RequiredClaim[Req]] =
     parties.view.map(RequiredClaim.ReadAs[Req]).toList
 
+  def readAsForAllPartiesOrAnyPartyIfEmpty[Req](
+      parties: Iterable[String]
+  ): List[RequiredClaim[Req]] =
+    if (parties.isEmpty) List(RequiredClaim.ReadAsAnyParty[Req]())
+    else readAsForAllParties[Req](parties)
+
   def transactionFormatClaims[Req](transactionFormat: TransactionFormat): List[RequiredClaim[Req]] =
     transactionFormat.eventFormat.toList.flatMap(RequiredClaims.eventFormatClaims[Req])
 
@@ -48,11 +54,7 @@ object RequiredClaims {
       updateFormat.includeTopologyEvents
         .flatMap(_.includeParticipantAuthorizationEvents)
         .toList
-        .map(_.parties)
-        .flatMap {
-          case empty if empty.isEmpty => List(RequiredClaim.ReadAsAnyParty[Req]())
-          case nonEmpty => readAsForAllParties[Req](nonEmpty)
-        },
+        .flatMap(t => readAsForAllPartiesOrAnyPartyIfEmpty[Req](t.parties)),
     ).flatten.distinct
 
   def idpAdminClaimsAndMatchingRequestIdpId[Req](

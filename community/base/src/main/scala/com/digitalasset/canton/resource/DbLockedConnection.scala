@@ -346,7 +346,11 @@ class DbLockedConnection private (
     logger.trace(s"At $now schedule next health check for $checkAt")(TraceContext.empty)
 
     clock
-      .scheduleAt(runLockedConnectionCheck, checkAt)
+      .scheduleAtCancelledOnShutdown(
+        runLockedConnectionCheck,
+        s"${getClass.getName}: checking connection",
+        checkAt,
+      )
       .discard
   }
 
@@ -506,6 +510,10 @@ class DbLockedConnection private (
 
     TraceContext.withNewTraceContext("close_locked_connection") { implicit traceContext =>
       logger.debug(s"Closing DB-locked connection")
+
+      // Close the execution queue first so that no health check or set-passive task runs
+      // concurrently with (or after) the connection teardown below.
+      LifeCycle.close(execQueue)(logger)
 
       transitionEither[Unit, State.Recovering.type, State.Connected](
         getConnectedOrRecovering(_),

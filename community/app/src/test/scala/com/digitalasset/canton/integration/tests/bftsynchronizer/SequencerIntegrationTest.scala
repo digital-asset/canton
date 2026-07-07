@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -31,6 +30,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{Namespace, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.slf4j.event.Level
 
@@ -61,8 +61,10 @@ trait SequencerIntegrationTest
       mediator1.start()
     }
 
-    staticParameters =
-      StaticSynchronizerParameters.defaults(sequencer1.config.crypto, testedProtocolVersion)
+    staticParameters = StaticSynchronizerParameters.defaults(
+      cryptoConfig = sequencer1.config.crypto,
+      protocolVersion = testedProtocolVersion,
+    )
 
     synchronizerOwners = Seq[InstanceReference](sequencer1, mediator1)
     synchronizerId = clue("bootstrapping the synchronizer") {

@@ -24,6 +24,7 @@ sealed trait SendAsyncError extends PrettyPrinting {
 
   /** The max sequencing time has elapsed and the request was refused */
   def hasMaxSequencingTimeElapsed: Boolean
+
 }
 
 object SendAsyncError {
@@ -56,6 +57,7 @@ object SendAsyncError {
         }
       case _ => false
     }
+
   }
 
   /** Implementation of [[SendAsyncError]]s for direct transports */
@@ -67,5 +69,6 @@ object SendAsyncError {
 
     // Only used for amplification, but direct sequencer transport doesn't use amplification
     override def isMaxSequencingTimeTooFar: Boolean = false
+
   }
 }

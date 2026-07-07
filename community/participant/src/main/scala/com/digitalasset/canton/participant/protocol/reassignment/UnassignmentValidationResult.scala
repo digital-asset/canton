@@ -118,6 +118,7 @@ final case class UnassignmentValidationResult(
                 assignmentExclusivity = assignmentExclusivity.map(_.unwrap.toLf),
                 reassignmentCounter = reassign.counter.unwrap,
                 nodeId = idx,
+                keyOpt = reassign.contract.contractKeyWithMaintainers,
               )
             }),
           recordTime = recordTime,
@@ -148,16 +149,8 @@ object UnassignmentValidationResult {
   final case class ReassigningParticipantValidationResult(
       errors: Seq[ReassignmentValidationError]
   ) extends ReassignmentValidationResult.ReassigningParticipantValidationResult {
-    def isTargetTsValidatable: Boolean = !errors.exists {
-      case UnassignmentValidationError.TargetTimestampTooFarInFuture => true
-      case _ => false
-    }
-  }
-
-  object ReassigningParticipantValidationResult {
-    val TargetTimestampTooFarInFuture: ReassigningParticipantValidationResult =
-      ReassigningParticipantValidationResult(
-        Seq(UnassignmentValidationError.TargetTimestampTooFarInFuture)
-      )
+    // These validations read the target topology at this participant's localTargetTs, which may not
+    // yet reflect recent topology changes, so we abstain on any failure.
+    override def isAbstain: Boolean = true
   }
 }

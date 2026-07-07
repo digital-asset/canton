@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.traffic
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, SessionSigningKeysConfig}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
@@ -34,7 +33,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
+import com.digitalasset.canton.data.{CantonTimestamp, RollbackContextFactory, ViewPosition}
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
@@ -82,7 +81,8 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HashingSchemeVersion.V2
-import com.digitalasset.canton.{LedgerSubmissionId, LfGlobalKeyMapping, WorkflowId}
+import com.digitalasset.canton.{LedgerSubmissionId, WorkflowId}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import java.security.{GeneralSecurityException, KeyPairGenerator}
@@ -117,7 +117,6 @@ class TrafficCostEstimator(
       transaction: LfVersionedTransaction,
       transactionMeta: TransactionMeta,
       submitterInfo: SubmitterInfo,
-      keyResolver: LfGlobalKeyMapping,
       disclosedContracts: Map[LfContractId, LfFatContractInst],
       costHints: CostEstimationHints,
   )(implicit
@@ -152,7 +151,12 @@ class TrafficCostEstimator(
         )
       )
       wfTransaction <- EitherT.fromEither[FutureUnlessShutdown](
-        WellFormedTransaction.check(transaction, transactionMetadata, WithoutSuffixes)
+        WellFormedTransaction.check(
+          transaction,
+          transactionMetadata,
+          WithoutSuffixes,
+          RollbackContextFactory(psid.protocolVersion),
+        )
       )
       disclosedContractInstances <- EitherT.fromEither[FutureUnlessShutdown](
         disclosedContracts.toList
@@ -167,7 +171,6 @@ class TrafficCostEstimator(
         client,
         snapshot,
         wfTransaction,
-        keyResolver,
         costHints,
         disclosedContractInstances,
       )
@@ -215,7 +218,6 @@ class TrafficCostEstimator(
       client: SynchronizerSnapshotSyncCryptoApi,
       snapshot: TopologySnapshot,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      keyResolver: LfGlobalKeyMapping,
       costHints: CostEstimationHints,
       disclosedContracts: Map[LfContractId, ContractInstance],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] = {
@@ -276,7 +278,6 @@ class TrafficCostEstimator(
           Option.when(!hasExternalSignatures)(
             WorkflowId.assertFromString(UUID.randomUUID().toString)
           ),
-          keyResolver,
           mediatorGroupRecipient,
           client,
           now,

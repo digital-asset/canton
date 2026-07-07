@@ -131,7 +131,7 @@ class BufferedUpdatePointwiseReaderSpec extends AsyncFlatSpec with MockitoSugar 
       completionStreamResponseO = None,
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Timestamp.Epoch,
-      externalTransactionHash = None,
+      transactionHash = None,
     )
 
   protected implicit def toLedgerString(s: String): Ref.LedgerString =

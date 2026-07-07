@@ -4,16 +4,18 @@
 package com.digitalasset.daml.lf
 package crypto
 
+import com.digitalasset.daml.lf.crypto.Hash.{Purpose, noCid2String}
+import com.digitalasset.daml.lf.data.Ref.PackageName
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Numeric, Ref, SortedLookupList, Time}
-import com.digitalasset.daml.lf.value.test.TypedValueGenerators.{ValueAddend => VA}
-import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.*
+import com.digitalasset.daml.lf.value.test.TypedValueGenerators.ValueAddend as VA
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import shapeless.record.{Record => HRecord}
-import shapeless.syntax.singleton._
-import shapeless.{HNil, Coproduct => HSum}
+import shapeless.record.Record as HRecord
+import shapeless.syntax.singleton.*
+import shapeless.{Coproduct as HSum, HNil}
 
 import scala.language.implicitConversions
 
@@ -22,8 +24,18 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
   private val packageId0 = Ref.PackageId.assertFromString("package")
   private val packageName0 = Ref.PackageName.assertFromString("package-name-0")
 
-  def assertHashContractKey(templateId: Ref.Identifier, key: Value): Hash = {
-    Hash.assertHashContractKey(templateId, packageName0, key)
+  def mkUpgradeFriendlyHash(
+      templateId: Ref.Identifier,
+      value: Value,
+      packageName: PackageName = packageName0,
+  ): Hash = {
+    val hashBuilder =
+      Hash.builder(Purpose.LegacyContractKey, noCid2String, upgradeFriendlyUnsafe = true)
+    hashBuilder
+      .addQualifiedName(templateId.qualifiedName)
+      .addString(packageName)
+      .addTypedValue(value)
+      .build
   }
 
   private val complexRecordT =
@@ -52,17 +64,15 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
           .variant(
             defRef(name = "Variant"),
             HRecord(Variant = VA.int64),
-          )
-          ._2,
+          ),
         fRecord = VA
           .record(
             defRef(name = "Record"),
             HRecord(field1 = VA.text, field2 = VA.text),
-          )
-          ._2,
+          ),
         fTextMap = VA.map(VA.text),
       ),
-    )._2
+    )
 
   private val complexRecordV: complexRecordT.Inj =
     HRecord(
@@ -86,7 +96,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       fList = Vector("A", "B", "C"),
       fVariant = HSum(Symbol("Variant") ->> 0L),
       fRecord = HRecord(field1 = "field1", field2 = "field2"),
-      fTextMap = SortedLookupList(Map("keyA" -> "valueA", "keyB" -> "valueB")),
+      fTextMap = SortedLookupList.from(Map("keyA" -> "valueA", "keyB" -> "valueB")),
     )
 
   "KeyHasher" should {
@@ -95,7 +105,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       val hash = "02e0bc59349374de68d5ea3be65d17cd728aabfc95a65e35ac21a354c38144ce"
       val value = complexRecordT.inj(complexRecordV)
       val name = defRef("module", "name")
-      assertHashContractKey(name, value).toHexString shouldBe hash
+      mkUpgradeFriendlyHash(name, value).toHexString shouldBe hash
     }
 
     "be deterministic and thread safe" in {
@@ -103,7 +113,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       // Note: intentionally does not reuse value instances
       val hashes = Vector
         .fill(1000)(defRef("module", "name") -> complexRecordT.inj(complexRecordV))
-        .map(Function.tupled(assertHashContractKey))
+        .map(Function.tupled(mkUpgradeFriendlyHash(_, _)))
 
       hashes.toSet.size shouldBe 1
     }
@@ -112,8 +122,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       // Same value but different template ID should produce a different hash
       val value = VA.text.inj("A")
 
-      val hash1 = assertHashContractKey(defRef("AA", "A"), value)
-      val hash2 = assertHashContractKey(defRef("A", "AA"), value)
+      val hash1 = mkUpgradeFriendlyHash(defRef("AA", "A"), value)
+      val hash2 = mkUpgradeFriendlyHash(defRef("A", "AA"), value)
 
       hash1 should !==(hash2)
     }
@@ -126,8 +136,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -142,8 +152,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -156,8 +166,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -170,22 +180,22 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         )
       val value1 = ValueList(
         FrontStack(
-          recordT._2.inj(HRecord(_1 = "A", _2 = "B")),
-          recordT._2.inj(HRecord(_1 = "", _2 = "")),
+          recordT.inj(HRecord(_1 = "A", _2 = "B")),
+          recordT.inj(HRecord(_1 = "", _2 = "")),
         )
       )
 
       val value2 = ValueList(
         FrontStack(
-          recordT._2.inj(HRecord(_1 = "A", _2 = "")),
-          recordT._2.inj(HRecord(_1 = "", _2 = "B")),
+          recordT.inj(HRecord(_1 = "A", _2 = "")),
+          recordT.inj(HRecord(_1 = "", _2 = "B")),
         )
       )
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -196,8 +206,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       val value1 = ValueList(FrontStack(emptyRecord, nonEmptyRecord))
       val value2 = ValueList(FrontStack(nonEmptyRecord, emptyRecord))
       val tid = defRef("module", "name")
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
       hash1 should !==(hash2)
     }
 
@@ -206,61 +216,61 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         VA.variant(
           defRef(name = "Variant"),
           HRecord(A = VA.unit, B = VA.unit),
-        )._2
+        )
       val value1 = variantT.inj(HSum[variantT.Inj](Symbol("A") ->> (())))
       val value2 = variantT.inj(HSum[variantT.Inj](Symbol("B") ->> (())))
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
 
     "not produce collision in Variant value" in {
-      val variantT = VA.variant(defRef(name = "Variant"), HRecord(A = VA.int64))._2
+      val variantT = VA.variant(defRef(name = "Variant"), HRecord(A = VA.int64))
       val value1 = variantT.inj(HSum(Symbol("A") ->> 0L))
       val value2 = variantT.inj(HSum(Symbol("A") ->> 1L))
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
 
     "not produce collision in TextMap keys" in {
       def textMap(elements: (String, Long)*) =
-        VA.map(VA.int64).inj(SortedLookupList(elements.toMap))
+        VA.map(VA.int64).inj(SortedLookupList.from(elements))
       val value1 = textMap("A" -> 0, "B" -> 0)
       val value2 = textMap("A" -> 0, "C" -> 0)
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
 
     "not produce collision in TextMap values" in {
       def textMap(elements: (String, Long)*) =
-        VA.map(VA.int64).inj(SortedLookupList(elements.toMap[String, Long]))
+        VA.map(VA.int64).inj(SortedLookupList.from(elements))
       val value1 = textMap("A" -> 0, "B" -> 0)
       val value2 = textMap("A" -> 0, "B" -> 1)
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
 
     "not produce collision in Map of records" in {
-      def ref8(x8: Long) = {
+      def ref8(x8: Long) =
         ValueRecord(
           None,
           ImmArray(
@@ -275,7 +285,6 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
             None -> ValueInt64(x8),
           ),
         )
-      }
 
       def genmap(elements: (String, Value)*) =
         ValueGenMap(ImmArray.from(elements.map { case (k, v) => ValueText(k) -> v }))
@@ -296,8 +305,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
       hash1 should !==(hash2)
     }
 
@@ -309,8 +318,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -323,8 +332,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -335,8 +344,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -347,8 +356,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -359,8 +368,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -371,8 +380,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -383,8 +392,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -395,8 +404,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -406,14 +415,14 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         VA.record(
           defRef(name = "Tuple2"),
           HRecord(_1 = VA.text, _2 = VA.text),
-        )._2
+        )
       val value1 = recordT.inj(HRecord(_1 = "A", _2 = "B"))
       val value2 = recordT.inj(HRecord(_1 = "A", _2 = "C"))
 
       val tid = defRef("module", "name")
 
-      val hash1 = assertHashContractKey(tid, value1)
-      val hash2 = assertHashContractKey(tid, value2)
+      val hash1 = mkUpgradeFriendlyHash(tid, value1)
+      val hash2 = mkUpgradeFriendlyHash(tid, value2)
 
       hash1 should !==(hash2)
     }
@@ -463,8 +472,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
         import org.scalacheck.{Arbitrary, Gen}
         VA.contractId(Arbitrary(Gen.fail)).inj(ContractId.V1 assertFromString str)
       }
-    val enumT1 = VA.enumeration("Color", List("Red", "Green"))._2
-    val enumT2 = VA.enumeration("ColorBis", List("Red", "Green"))._2
+    val enumT1 = VA.enumeration("Color", List("Red", "Green"))
+    val enumT2 = VA.enumeration("ColorBis", List("Red", "Green"))
 
     val enums = List(
       enumT1.inj(enumT1.get("Red").get),
@@ -472,8 +481,8 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       enumT2.inj(enumT2.get("Green").get),
     )
 
-    val record0T1 = VA.record("Unit", HNil)._2
-    val record0T2 = VA.record("UnitBis", HNil)._2
+    val record0T1 = VA.record("Unit", HNil)
+    val record0T2 = VA.record("UnitBis", HNil)
 
     val records0 =
       List(
@@ -482,9 +491,9 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       )
 
     val record2T1 =
-      VA.record("Tuple", HRecord(_1 = VA.bool, _2 = VA.bool))._2
+      VA.record("Tuple", HRecord(_1 = VA.bool, _2 = VA.bool))
     val record2T2 =
-      VA.record("TupleBis", HRecord(_1 = VA.bool, _2 = VA.bool))._2
+      VA.record("TupleBis", HRecord(_1 = VA.bool, _2 = VA.bool))
 
     val records2 =
       List(
@@ -495,10 +504,9 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       )
 
     val variantT1 =
-      VA.variant("Either", HRecord(Left = VA.bool, Right = VA.bool))._2
+      VA.variant("Either", HRecord(Left = VA.bool, Right = VA.bool))
     val variantT2 = VA
       .variant("EitherBis", HRecord(Left = VA.bool, Right = VA.bool))
-      ._2
 
     val variants = List(
       variantT1.inj(HSum[variantT1.Inj](Symbol("Left") ->> false)),
@@ -519,7 +527,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
     )
 
     def textMap(entries: (String, Boolean)*) =
-      VA.map(VA.bool).inj(SortedLookupList(entries.toMap))
+      VA.map(VA.bool).inj(SortedLookupList.from(entries))
 
     val textMaps = List[Value](
       textMap(),
@@ -694,7 +702,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
       val actualOutput = stabilityTestCases
         .map { value =>
           val hash = Hash
-            .builder(Hash.Purpose.Testing, Hash.aCid2Bytes, upgradeFriendly = false)
+            .builder(Hash.Purpose.Testing, Hash.aCid2Bytes, upgradeFriendlyUnsafe = false)
             .addTypedValue(value)
             .build
             .toHexString
@@ -709,7 +717,7 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
   "addTypeValue upgradable values" should {
 
     def hash(x: Value) = Hash
-      .builder(Hash.Purpose.Testing, Hash.aCid2Bytes, upgradeFriendly = true)
+      .builder(Hash.Purpose.Testing, Hash.aCid2Bytes, upgradeFriendlyUnsafe = true)
       .addTypedValue(x)
       .build
 
@@ -1083,28 +1091,26 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
     val templateId = defRef(name = "upgradable")
 
     "produce a different hash for different package Names" in {
-      val h1 = Hash.assertHashContractKey(
+      val h1 = mkUpgradeFriendlyHash(
         templateId,
+        ValueTrue,
         Ref.PackageName.assertFromString("package-name-1"),
-        ValueTrue,
       )
-      val h2 = Hash.assertHashContractKey(
+      val h2 = mkUpgradeFriendlyHash(
         templateId,
-        Ref.PackageName.assertFromString("package-name-2"),
         ValueTrue,
+        Ref.PackageName.assertFromString("package-name-2"),
       )
       h1 shouldNot be(h2)
     }
 
     "produce an identical hash to the same template in a different package" in {
-      val h1 = Hash.assertHashContractKey(
+      val h1 = mkUpgradeFriendlyHash(
         templateId.copy(pkg = Ref.PackageId.assertFromString("package-1")),
-        packageName0,
         ValueTrue,
       )
-      val h2 = Hash.assertHashContractKey(
+      val h2 = mkUpgradeFriendlyHash(
         templateId.copy(pkg = Ref.PackageId.assertFromString("package-2")),
-        packageName0,
         ValueTrue,
       )
       h1 shouldBe h2

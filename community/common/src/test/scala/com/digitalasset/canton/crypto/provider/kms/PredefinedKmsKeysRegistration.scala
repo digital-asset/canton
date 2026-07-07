@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.provider.kms
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.kms.KmsKeyId
 import com.digitalasset.canton.crypto.{
   Crypto,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.crypto.{
   SigningPublicKey,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
 
 /** Defines the necessary methods to register predefined KMS keys in Canton.

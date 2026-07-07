@@ -24,6 +24,7 @@ import SequencerBftAdminData.{
   WriteReadiness,
   endpointFromProto,
   endpointIdFromProto,
+  endpointToProto,
 }
 
 final class BftOrderingSequencerAdminService(
@@ -36,6 +37,7 @@ final class BftOrderingSequencerAdminService(
     createNetworkStatusPromise: () => Promise[PeerNetworkStatus] = () => Promise(),
     createOrderingTopologyPromise: () => Promise[Consensus.Admin.GetOrderingTopologyResponse] =
       () => Promise(),
+    createPeerEndpointSeqPromise: () => Promise[Seq[P2PEndpoint]] = () => Promise(),
 )(implicit executionContext: ExecutionContext, metricsContext: MetricsContext)
     extends SequencerBftAdministrationService
     with NamedLogging {
@@ -78,6 +80,18 @@ final class BftOrderingSequencerAdminService(
       )
     )
     resultPromise.future.map(RemovePeerEndpointResponse(_))
+  }
+
+  override def listConfiguredEndpoints(
+      request: ListConfiguredEndpointsRequest
+  ): Future[ListConfiguredEndpointsResponse] = {
+    val resultPromise = createPeerEndpointSeqPromise()
+    p2pNetworkOutAdminRef.asyncSend(
+      P2PNetworkOut.Admin.ListConfiguredEndpoints(resultPromise.success)
+    )
+    resultPromise.future.map(endpointSeq =>
+      ListConfiguredEndpointsResponse(endpointSeq.map(endpointToProto))
+    )
   }
 
   override def getPeerNetworkStatus(
@@ -130,7 +144,10 @@ final class BftOrderingSequencerAdminService(
       GetOrderingTopologyResponse(
         response.epochNumber,
         response.nodes.toSeq.sorted,
-        Option(response.sequencingParameters.toProto),
+        GetOrderingTopologyResponse.DynamicSequencingParameters
+          .DynamicSequencingParametersPayload31(response.sequencingParameters.toProto31),
+        response.leaders,
+        response.blacklisted,
       )
     }
   }

@@ -6,20 +6,16 @@ package com.digitalasset.canton.testing.modelbased.generators
 import com.digitalasset.canton.testing.modelbased.ast.{Concrete, Skeleton}
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
-import com.digitalasset.daml.lf.language.LanguageVersion
 
 class ConcreteGenerators(
-    languageVersion: LanguageVersion,
+    contractKeys: Boolean,
     readOnlyRollbacks: Boolean,
-    generateQueryByKey: Boolean = false,
-    keyMode: KeyMode = SymbolicSolver.KeyMode.NonUniqueContractKeys,
 ) {
 
   import ConcreteGenerators.*
 
   private val skeletonEnumerator =
-    new SkeletonEnumerator(languageVersion, readOnlyRollbacks, generateQueryByKey)
+    new SkeletonEnumerator(contractKeys, readOnlyRollbacks)
 
   @scala.annotation.tailrec
   private def randomBigIntLessThan(n: BigInt): BigInt = {
@@ -34,14 +30,10 @@ class ConcreteGenerators(
       numPackages: Int,
       numParticipants: Int,
       numCommands: Option[Int] = None,
+      singletonCommands: Boolean = false,
   ): Generator[Concrete.Scenario] = {
     val scenarioSpace: Spaces.Space[Skeleton.Scenario] =
-      numCommands match {
-        case Some(n) =>
-          skeletonEnumerator.scenarios(numParticipants, n)
-        case None =>
-          skeletonEnumerator.scenarios(numParticipants)
-      }
+      skeletonEnumerator.scenarios(numParticipants, numCommands, singletonCommands)
     new Generator[Concrete.Scenario]() {
       def generate(size: Int, distinctKeyToContractRatio: Double): Concrete.Scenario = {
         val scenarios = scenarioSpace(size)
@@ -50,7 +42,7 @@ class ConcreteGenerators(
           .map(i => scenarios(i))
           .filter(s => s.ledger.nonEmpty)
           .flatMap(s =>
-            SymbolicSolver.solve(s, numPackages, numParties, distinctKeyToContractRatio, keyMode)
+            SymbolicSolver.solve(s, numPackages, numParties, distinctKeyToContractRatio)
           )
           .headOption
           .getOrElse(throw new IllegalStateException("failed to generate a valid scenario"))

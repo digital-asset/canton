@@ -12,7 +12,6 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   AuthInterceptorSuppressionRule,
   AuthServiceJWTSuppressionRule,
-  IDPAndJWTSuppressionRule,
 }
 import com.google.protobuf.field_mask.FieldMask
 
@@ -81,7 +80,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
       .setAttack(attackPermissionDenied(threat = "Present a JWT with a missing audience")) in {
       implicit env =>
         import env.*
-        loggerFactory.suppress(IDPAndJWTSuppressionRule) {
+        loggerFactory.suppress(AuthInterceptorSuppressionRule) {
           expectUnauthenticated {
             val userId = UUID.randomUUID().toString
             for {
@@ -200,7 +199,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
       .setAttack(attackPermissionDenied(threat = "Present a JWT signed by wrong private key")) in {
       implicit env =>
         import env.*
-        loggerFactory.suppress(IDPAndJWTSuppressionRule) {
+        loggerFactory.suppress(AuthInterceptorSuppressionRule) {
           expectUnauthenticated {
             for {
               idpConfig <- createConfig(canBeAnAdmin)
@@ -224,7 +223,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
         )
       ) in { implicit env =>
       import env.*
-      loggerFactory.suppress(IDPAndJWTSuppressionRule) {
+      loggerFactory.suppress(AuthInterceptorSuppressionRule) {
         expectUnauthenticated {
           for {
             idpConfig <- createConfig(
@@ -253,11 +252,11 @@ trait AdminOrIDPAdminServiceCallAuthTests
     Some(
       toHeaderRSA(
         keyId,
-        standardToken(userId, issuer = Some(identityProviderConfig.issuer))
-          .copy(
-            audiences = audience,
-            format = StandardJWTTokenFormat.Audience,
-          ),
+        audienceToken(
+          userId,
+          audience = audience,
+          issuer = Some(identityProviderConfig.issuer),
+        ),
         privateKey = privateKey,
         enforceFormat = Some(StandardJWTTokenFormat.Audience),
       )

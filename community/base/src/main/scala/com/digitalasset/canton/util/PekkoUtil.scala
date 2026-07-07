@@ -5,7 +5,7 @@ package com.digitalasset.canton.util
 
 import cats.Id
 import com.daml.grpc.adapter.{ExecutionSequencerFactory, PekkoExecutionSequencerPool}
-import com.daml.metrics.api.noop.NoOpMeter
+import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{
   MetricHandle,
   MetricInfo,
@@ -13,7 +13,6 @@ import com.daml.metrics.api.{
   MetricQualification,
   MetricsContext,
 }
-import com.daml.nonempty.NonEmpty
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -33,6 +32,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SingletonTraverse.syntax.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.TryUtil.*
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.Logger
 import org.apache.pekko.actor.ActorSystem
@@ -145,7 +145,7 @@ object PekkoUtil extends HasLoggerName {
 
   /** Remembers the last `memory` many elements that have already been emitted previously. Passes
     * those remembered elements downstream with each new element. The current element is the
-    * [[com.daml.nonempty.NonEmptyCollInstances.NEPreservingOps.last1]] of the sequence.
+    * [[com.digitalasset.nonempty.NonEmptyCollInstances.NEPreservingOps.last1]] of the sequence.
     *
     * [[remember]] differs from [[org.apache.pekko.stream.scaladsl.FlowOps.sliding]] in that
     * [[remember]] emits elements immediately when the given source emits, whereas
@@ -1144,6 +1144,8 @@ object PekkoUtil extends HasLoggerName {
     def apply(index: Long): Unit
   }
 
+  type ShutdownInProgress = () => Boolean
+
   final case class FutureQueueConsumer[T](
       futureQueue: FutureQueue[(Long, T)],
       fromExclusive: Long,
@@ -1193,7 +1195,7 @@ object PekkoUtil extends HasLoggerName {
       retryAttemptErrorThreshold: Int,
       uncommittedWarnTreshold: Int,
       recoveringQueueMetrics: RecoveringQueueMetrics,
-      consumerFactory: Commit => Future[FutureQueueConsumer[T]],
+      consumerFactory: Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[T]]],
   ) extends RecoveringFutureQueue[T] {
     assert(maxBlockedOffer > 0)
     assert(retryAttemptWarnThreshold > 0)
@@ -1214,7 +1216,7 @@ object PekkoUtil extends HasLoggerName {
     )
     private val lock = new Mutex()
     private val timer: Timer = new Timer()
-    private var shuttingDown: Boolean = false
+    private val shuttingDown: AtomicBoolean = new AtomicBoolean(false)
     private var shuttingDownTimerCancelled: Boolean = false
     private val donePromise: Promise[Done] = Promise()
     private val firstSuccessfulConsumerInitializationPromise: Promise[Unit] = Promise()
@@ -1228,7 +1230,7 @@ object PekkoUtil extends HasLoggerName {
       firstSuccessfulConsumerInitializationPromise.future
 
     override def offer(elem: T): Future[Done] = blockingSynchronized {
-      if (shuttingDown) {
+      if (shuttingDown.get()) {
         Future.failed(
           new IllegalStateException(
             "Cannot offer new elements to the queue, after shutdown is initiated"
@@ -1242,7 +1244,7 @@ object PekkoUtil extends HasLoggerName {
     }
 
     override def shutdown(): Unit = blockingSynchronized {
-      if (shuttingDown || shuttingDownTimerCancelled) {
+      if (shuttingDown.get() || shuttingDownTimerCancelled) {
         logger.debug("Already shutting down, nothing to do")
       } else {
         shuttingDownTimerCancelled = true
@@ -1266,7 +1268,7 @@ object PekkoUtil extends HasLoggerName {
 
     private def shutdownStepTwo(): Unit = blockingSynchronized {
       logger.info("Shutdown initiated")
-      shuttingDown = true
+      shuttingDown.set(true)
       recoveringQueue.shutdown()
       consumer match {
         case Consumer.Initialized(c) =>
@@ -1274,7 +1276,9 @@ object PekkoUtil extends HasLoggerName {
           c.shutdown()
 
         case Consumer.InitializationInProgress =>
-          logger.debug("Consumer initialization is in progress, delaying shutdown...")
+          logger.debug(
+            "Consumer initialization is in progress, shutdown signal will be propagated to consumer..."
+          )
 
         case Consumer.WaitingForRetry =>
           logger.info("Interrupting wait for initialization retry, shutdown complete")
@@ -1285,7 +1289,11 @@ object PekkoUtil extends HasLoggerName {
     private def initializeConsumer(attempt: Int = 1): Unit = blockingSynchronized {
       logger.info("Initializing consumer...")
       consumer = Consumer.InitializationInProgress
-      consumerFactory(recoveringQueue.commit)
+      consumerFactory(recoveringQueue.commit)(() => shuttingDown.get())
+        .flatMap { innerFuture =>
+          firstSuccessfulConsumerInitializationPromise.trySuccess(()).discard
+          innerFuture
+        }(directEC)
         .onComplete(consumerInitialized(_, attempt))(directEC)
     }
 
@@ -1302,14 +1310,13 @@ object PekkoUtil extends HasLoggerName {
               logger.error(s"Exception caught while recovering: ${t.getMessage}. Shutting down.", t)
               shutdown()
           }
-          if (shuttingDown) {
+          if (shuttingDown.get()) {
             logger.info(
               "Consumer initialized, but since shutdown already in progress, consumer shutdown initiated"
             )
             queueConsumer.futureQueue.shutdown()
             queueConsumer.futureQueue.done.onComplete(consumerTerminated)(directEC)
           } else {
-            firstSuccessfulConsumerInitializationPromise.trySuccess(()).discard
             logger.info("Consumer initialized")
             consumer = Consumer.Initialized(
               new FutureQueuePullProxy(
@@ -1325,7 +1332,7 @@ object PekkoUtil extends HasLoggerName {
           }
 
         case Failure(failure) =>
-          if (shuttingDown) {
+          if (shuttingDown.get()) {
             logger.info(
               "Consumer initialization failed, but not retrying anymore since already shutting down",
               failure,
@@ -1359,7 +1366,7 @@ object PekkoUtil extends HasLoggerName {
         case Failure(failure) =>
           logger.info("Consumer terminated with a failure", failure)
       }
-      if (shuttingDown) {
+      if (shuttingDown.get()) {
         logger.info("Terminated (consumer terminated), shutdown complete")
         discard(donePromise.trySuccess(Done))
       } else {
@@ -1463,27 +1470,28 @@ object PekkoUtil extends HasLoggerName {
   }
 
   trait RecoveringQueueMetrics {
-    def blocked: MetricHandle.Meter
-    def buffered: MetricHandle.Meter
-    def uncommitted: MetricHandle.Meter
+    def blocked: MetricHandle.Gauge[Int]
+    def buffered: MetricHandle.Gauge[Int]
+    def uncommitted: MetricHandle.Gauge[Int]
   }
 
   object RecoveringQueueMetrics {
     def apply(
-        blockedMeter: MetricHandle.Meter,
-        bufferedMeter: MetricHandle.Meter,
-        uncommittedMeter: MetricHandle.Meter,
+        blockedGauge: MetricHandle.Gauge[Int],
+        bufferedGauge: MetricHandle.Gauge[Int],
+        uncommittedGauge: MetricHandle.Gauge[Int],
     ): RecoveringQueueMetrics = new RecoveringQueueMetrics {
-      override val blocked: MetricHandle.Meter = blockedMeter
-      override val buffered: MetricHandle.Meter = bufferedMeter
-      override val uncommitted: MetricHandle.Meter = uncommittedMeter
+      override val blocked: MetricHandle.Gauge[Int] = blockedGauge
+      override val buffered: MetricHandle.Gauge[Int] = bufferedGauge
+      override val uncommitted: MetricHandle.Gauge[Int] = uncommittedGauge
     }
 
     val NoOp: RecoveringQueueMetrics = {
-      val noOpMeter = NoOpMeter(
-        MetricInfo(MetricName.Daml, "", MetricQualification.Debug)
+      val noOpGauge = NoOpGauge(
+        MetricInfo(MetricName.Daml, "", MetricQualification.Debug),
+        0,
       )
-      apply(noOpMeter, noOpMeter, noOpMeter)
+      apply(noOpGauge, noOpGauge, noOpGauge)
     }
   }
 
@@ -1598,9 +1606,9 @@ object PekkoUtil extends HasLoggerName {
       (lock.exclusive(u))
 
     private def updateMetrics(): Unit = {
-      metrics.buffered.mark(buffered.size.toLong)(MetricsContext.Empty)
-      metrics.blocked.mark(blocked.size.toLong)(MetricsContext.Empty)
-      metrics.uncommitted.mark(uncommitted.size.toLong)(MetricsContext.Empty)
+      metrics.buffered.updateValue(buffered.size)(MetricsContext.Empty)
+      metrics.blocked.updateValue(blocked.size)(MetricsContext.Empty)
+      metrics.uncommitted.updateValue(uncommitted.size)(MetricsContext.Empty)
     }
   }
 

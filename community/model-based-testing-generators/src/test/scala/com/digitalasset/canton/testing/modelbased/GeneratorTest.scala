@@ -10,42 +10,34 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 }
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.ValidityResult.*
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
-import com.digitalasset.daml.lf.language.LanguageVersion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger
 
-class GeneratorTestPVDev
+class GeneratorTestPV35
     extends GeneratorTest(
-      languageVersion = LanguageVersion.v2_dev,
+      contractKeys = true,
       readOnlyRollbacks = true,
-      generateQueryByKey = true,
-      keyMode = KeyMode.NonUniqueContractKeys,
     )
 
 class GeneratorTestPV34
     extends GeneratorTest(
-      languageVersion = LanguageVersion.v2_2,
+      contractKeys = false,
       readOnlyRollbacks = false,
-      generateQueryByKey = false,
-      keyMode = KeyMode.UniqueContractKeys,
     )
 
 abstract class GeneratorTest(
-    languageVersion: LanguageVersion,
+    contractKeys: Boolean,
     readOnlyRollbacks: Boolean,
-    generateQueryByKey: Boolean,
-    keyMode: KeyMode,
 ) extends AnyWordSpec
     with Matchers
     with PropertyCheckerResultAssertions {
 
   private val generators =
-    new ConcreteGenerators(languageVersion, readOnlyRollbacks, generateQueryByKey, keyMode)
+    new ConcreteGenerators(contractKeys, readOnlyRollbacks)
 
   "The symbolic solver" should {
     "synthesize valid scenarios" in {

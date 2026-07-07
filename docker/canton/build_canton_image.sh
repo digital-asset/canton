@@ -24,31 +24,36 @@ oci_release_path="${OCI_REGISTRY:-"local"}/da-images/public/docker/"
 image_types=(base participant sequencer mediator)
 nightly_release="${IS_NIGHTLY_RELEASE:-$1}" # CircleCI parameter nightly_release
 
-if [[ "$release_suffix" == *"-SNAPSHOT" || ( "$nightly_release" == "true" && $(date +"%u") -ne 2 ) ]]; then
-    echo "Skip publishing of unnamed snapshot release or a nightly release not on Tuesdays"
-    exit 0
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+  if [[ "$release_suffix" == *"-SNAPSHOT" || ( "$nightly_release" == "true" && $(date +"%u") -ne 2 ) ]]; then
+      echo "Skip publishing of unnamed snapshot release or a nightly release not on Tuesdays"
+      exit 0
+  fi
 fi
 
-if [[ "$release_suffix" == *"snapshot"* || "$release_suffix" == *"ad-hoc"* ]]; then
+if [[ "$release_suffix" == *"-SNAPSHOT" || "$release_suffix" == *"snapshot"* || "$release_suffix" == *"ad-hoc"* ]]; then
     oci_path="${oci_snapshot_path}"
-    echo "Publishing named snapshot release to ${oci_path}"
-
 else
     oci_path="${oci_release_path}"
-    echo "Publishing full release to ${oci_path}"
+fi
+
+staging_suffix="${release_suffix}-pre"
+
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+  echo "▶️ Publishing images to ${oci_path}"
 fi
 
 for image_type in "${image_types[@]}"; do
-  short_tag="canton-${image_type}:${release_suffix}"
+  short_tag="canton-${image_type}:${staging_suffix}"
 
-  echo "⏳ Building ${image_type} → (alias ${short_tag})"
+  echo "⏳ Building ${image_type} → (staging alias ${short_tag})"
 
   dockerfile="images/canton-${image_type}/Dockerfile"
   context="images/canton-${image_type}"
 
-  release_target="--tag ${oci_path}${short_tag} --tag ${oci_path}canton-${image_type}:$(get_major_minor ${release_suffix})"
+  stage_target="--tag ${oci_path}${short_tag}"
 
-  if [ "${CIRCLECI:-}" = "true" ]; then
+  if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
     build_flags="--platform linux/amd64,linux/arm64 --push"
   else
     build_flags="--load"
@@ -56,25 +61,59 @@ for image_type in "${image_types[@]}"; do
 
   docker buildx build \
     --progress=plain \
-    --build-arg "base_version=${release_suffix}" \
+    --build-arg "base_version=${staging_suffix}" \
     --build-arg "oci_path=${oci_path}" \
-    ${release_target} \
+    ${stage_target} \
     -f "${dockerfile}" \
     ${build_flags} \
     "${context}"
 
-
   echo "✅ Finished ${image_type} image"
 done
 
+delete_staging_tags() {
+  echo "🧹 Deleting staging tags..."
+  for image_type in "${image_types[@]}"; do
+    gcloud artifacts docker tags delete "${oci_path}canton-${image_type}:${staging_suffix}" --quiet || true
+    echo "✅ Deleted staging tag canton-${image_type}:${staging_suffix}"
+  done
+}
+
 echo "▶️ Running ping test for images (from ./tests/ping)..."
+set +e
 (
-  cd ./tests/ping && OCI_PATH=$oci_path ./run_test.sh $release_suffix
+  cd ./tests/ping && OCI_PATH=$oci_path ./run_test.sh "$staging_suffix"
 )
 exit_code=$?
+set -e
 if [[ $exit_code -ne 0 ]]; then
   echo "❌ Ping test failed for images (exit code $exit_code). Aborting."
+  if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+    delete_staging_tags
+  fi
   exit $exit_code
 fi
 echo "✅ Ping test passed for images!"
+
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+  echo "▶️ Promoting staging images to release tags..."
+  for image_type in "${image_types[@]}"; do
+    docker buildx imagetools create \
+      --tag "${oci_path}canton-${image_type}:${release_suffix}" \
+      --tag "${oci_path}canton-${image_type}:$(get_major_minor "${release_suffix}")" \
+      "${oci_path}canton-${image_type}:${staging_suffix}"
+    echo "✅ Published canton-${image_type}:${release_suffix}"
+  done
+  delete_staging_tags
+else
+  echo "▶️ Tagging staging images with release tags (local)..."
+  for image_type in "${image_types[@]}"; do
+    docker tag "${oci_path}canton-${image_type}:${staging_suffix}" "${oci_path}canton-${image_type}:${release_suffix}"
+    docker tag "${oci_path}canton-${image_type}:${staging_suffix}" "${oci_path}canton-${image_type}:$(get_major_minor "${release_suffix}")"
+    # Removes the local -pre staging tag only; the image layers remain in the
+    # local daemon under the release tags assigned above. Nothing is deleted from the registry.
+    docker rmi "${oci_path}canton-${image_type}:${staging_suffix}"
+    echo "✅ Tagged canton-${image_type}:${release_suffix}"
+  done
+fi
 

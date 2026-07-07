@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.nightly.bftordering
 
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.PartitionSymmetry.{
   ASymmetric,
@@ -17,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SimulationTestStageSettings,
   TopologySettings,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 import scala.collection.immutable.TreeMap
@@ -39,7 +40,14 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         "but it cannot be verified in the currently known dissemination topology"
       )
       logEntry.loggerName should include("AvailabilityModule")
-    }
+    },
+    // We might get messages about waiting for new topology after epoch completion, don't count these as errors.
+    { logEntry =>
+      logEntry.message should include(
+        "Waiting for new topology after epoch completion"
+      )
+      logEntry.loggerName should include("IssConsensusModule")
+    },
   )
 
   private val zeroProbability: Probability = Probability(0)
@@ -74,11 +82,15 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   private val shortTime: PowerDistribution = PowerDistribution(0.milliseconds, 100.milliseconds)
   private val longTime: PowerDistribution = PowerDistribution(1.second, 5.seconds)
 
-  private def generateStage(epochLength: EpochLength): SimulationTestStageSettings = {
+  private def generateStage(
+      segmentLength: SegmentLength,
+      numberInitialNodes: Int,
+  ): SimulationTestStageSettings = {
     val numberOfNodesToOnboard = randomWeightedOneOf(
       10 -> 0,
       3 -> 1,
     )
+    val numberOfNodes = numberInitialNodes + numberOfNodesToOnboard
     SimulationTestStageSettings(
       simulationSettings = SimulationSettings(
         LocalSettings(
@@ -114,12 +126,14 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         ),
         phaseDurations = PhaseDurations(
           faulty = durationOfFirstPhaseWithFaults,
-          recovery =
+          recovery = (10 seconds).plus(
             if (numberOfNodesToOnboard > 0)
-              (epochLength / 2) seconds
+              // We add some extra times if a node was onboarded
+              (segmentLength.length.value * numberOfNodes * 4) seconds
             else {
               0 seconds
-            },
+            }
+          ),
         ),
       ),
       TopologySettings(
@@ -137,21 +151,24 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
   }
 
   override def generateSettings: SimulationTestSettings = {
-    val epochLength = EpochLength(
-      randomWeightedOneOf[Long](
-        10 -> 16L,
-        5 -> 128L,
-        1 -> 1L,
-        2 -> randomSourceToCreateSettings.between(2L, 128L),
+    val segmentLength = SegmentLength(
+      PositiveLong.tryCreate(
+        randomWeightedOneOf[Long](
+          10 -> 10L,
+          5 -> 64L,
+          2 -> 1L,
+          2 -> randomSourceToCreateSettings.between(1L, 64L),
+        )
       )
     )
+    val numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5)
     SimulationTestSettings(
-      numberOfInitialNodes = randomEquallyWeightedOneOf(2, 4, 5),
-      epochLength = epochLength,
+      numberOfInitialNodes = numberOfInitialNodes,
+      segmentLength = segmentLength,
       stages = NonEmpty(
         Seq,
-        generateStage(epochLength),
-        generateStage(epochLength),
+        generateStage(segmentLength, numberOfInitialNodes),
+        generateStage(segmentLength, numberOfInitialNodes),
       ),
     )
   }

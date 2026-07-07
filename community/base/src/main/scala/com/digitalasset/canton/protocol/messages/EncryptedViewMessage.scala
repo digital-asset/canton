@@ -6,7 +6,6 @@ package com.digitalasset.canton.protocol.messages
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
@@ -150,7 +150,7 @@ final case class EncryptedMultipleViews[+VT <: ViewType](
 }
 
 object EncryptedMultipleViews {
-  def compressed[VT <: ViewType](
+  def compressAndEncryptViews[VT <: ViewType](
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       viewType: VT,
@@ -329,6 +329,11 @@ final case class EncryptedSingleViewMessage[+VT <: ViewType](
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     throw new UnsupportedOperationException(
       "Cannot serialize an EncryptedSingleViewMessage to proto version 31"
+    )
+
+  override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+    throw new UnsupportedOperationException(
+      "Cannot serialize an EncryptedSingleViewMessage to proto version 32"
     )
 
   /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
@@ -777,6 +782,9 @@ final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
 
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
+
+  override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+    v32.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
 
   /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
     * provided that the argument is the same as [[viewType]]

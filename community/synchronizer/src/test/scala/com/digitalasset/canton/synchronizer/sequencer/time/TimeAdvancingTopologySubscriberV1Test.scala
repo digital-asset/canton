@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.time
 
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.testedProtocolVersion
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.Fingerprint
@@ -16,6 +15,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   TopologyTransactionsBroadcast,
 }
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -47,12 +47,15 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Duration
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
+@nowarn("cat=deprecation")
 class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
 
   import TimeAdvancingTopologySubscriberV1Test.*
@@ -104,6 +107,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = any[Option[AggregationRule]],
           callback = eqTo(SendCallback.empty),
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -148,7 +152,8 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         NonEmpty
           .from(sequencerGroup.active)
           .map(sequencerGroup =>
-            AggregationRule(sequencerGroup, threshold = PositiveInt.one, testedProtocolVersion)
+            AggregationRule
+              .sequencerTimeAdvancingRequest(sequencerGroup, testedProtocolVersion)
           )
 
       // when
@@ -172,6 +177,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
           messageId = any[MessageId],
           aggregationRule = eqTo(expectedAggregationRule),
           callback = eqTo(SendCallback.empty),
+          trafficCostValidator = any[TrafficCostValidator],
           amplify = eqTo(false),
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -258,6 +264,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
+          any[TrafficCostValidator],
           amplify = any[Boolean],
           useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
@@ -321,6 +328,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])

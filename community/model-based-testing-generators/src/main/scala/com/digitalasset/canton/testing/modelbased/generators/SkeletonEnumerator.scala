@@ -9,23 +9,21 @@ import com.digitalasset.canton.testing.modelbased.ast.Skeleton.*
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces.Space
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces.Space as S
 import com.digitalasset.canton.testing.modelbased.genlib.Spaces.Space.Instances.*
-import com.digitalasset.daml.lf.language.LanguageVersion
 
 class SkeletonEnumerator(
-    languageVersion: LanguageVersion,
+    contractKeys: Boolean,
     readOnlyRollbacks: Boolean,
-    generateQueryByKey: Boolean = false,
 ) {
 
   // Commands := Commands Parties [TopLevelAction]
   // TopLevelAction := Create | Exercise EKind Action*
-  // Action := Create | Exercise EKind Action* | Fetch | Lookup | QueryByKey | Rollback ActionUnderRollback+
+  // Action := Create | Exercise EKind Action* | Fetch | QueryByKey | Rollback ActionUnderRollback+
   // EKind := Consuming | NonConsuming
   //
   // For PV=dev:
-  //   ActionUnderRollback := Exercise NonConsuming ActionUnderRollback* | Fetch | Lookup | QueryByKey
+  //   ActionUnderRollback := Exercise NonConsuming ActionUnderRollback* | Fetch | QueryByKey
   // For other PVs:
-  //   ActionUnderRollback := Create | Exercise EActionUnderRollback* | Fetch | Lookup | QueryByKey
+  //   ActionUnderRollback := Create | Exercise EActionUnderRollback* | Fetch | QueryByKey
   //
   // The ByKey variants are only available in PV=dev
 
@@ -34,9 +32,6 @@ class SkeletonEnumerator(
   def when[A](condition: Boolean)(s: => Space[A]): Space[A] =
     if (condition) s
     else Space.empty[A]
-
-  def withFeature[A](feature: LanguageVersion.Feature)(s: Space[A]): Space[A] =
-    when(feature.versionRange.contains(languageVersion))(s)
 
   lazy val bools: Space[Boolean] = S.singleton(true) + S.singleton(false)
 
@@ -53,7 +48,7 @@ class SkeletonEnumerator(
 
   lazy val creates: Space[Action] = S.singleton(Create())
 
-  lazy val createsWithKey: Space[Action] = withFeature(LanguageVersion.featureContractKeys) {
+  lazy val createsWithKey: Space[Action] = when(contractKeys) {
     S.singleton(CreateWithKey())
   }
 
@@ -63,7 +58,7 @@ class SkeletonEnumerator(
       listsOf(actions),
     )(Exercise.apply)
 
-  lazy val exercisesByKey: Space[Action] = withFeature(LanguageVersion.featureContractKeys) {
+  lazy val exercisesByKey: Space[Action] = when(contractKeys) {
     AS.map2(
       exerciceKinds,
       listsOf(actions),
@@ -76,7 +71,7 @@ class SkeletonEnumerator(
     )(Exercise(NonConsuming, _))
 
   lazy val nonEffectfulExercisesByKey: Space[Action] =
-    withFeature(LanguageVersion.featureContractKeys) {
+    when(contractKeys) {
       AS.map(
         listsOf(nonEffectfulActions)
       )(ExerciseByKey(NonConsuming, _))
@@ -85,19 +80,13 @@ class SkeletonEnumerator(
   lazy val fetches: Space[Action] =
     S.singleton(Fetch())
 
-  lazy val fetchesByKey: Space[Action] = withFeature(LanguageVersion.featureContractKeys) {
+  lazy val fetchesByKey: Space[Action] = when(contractKeys) {
     S.singleton(FetchByKey())
   }
 
-  lazy val lookupsByKey: Space[Action] = withFeature(LanguageVersion.featureContractKeys) {
-    bools.map(LookupByKey.apply)
-  }
-
   lazy val queriesByKey: Space[Action] =
-    when(generateQueryByKey) {
-      withFeature(LanguageVersion.featureContractKeys) {
-        bools.map(QueryByKey.apply)
-      }
+    when(contractKeys) {
+      bools.map(QueryByKey.apply)
     }
 
   lazy val rollbacks: Space[Action] =
@@ -105,12 +94,12 @@ class SkeletonEnumerator(
 
   lazy val actions: Space[Action] =
     S.pay(
-      creates + createsWithKey + exercises + exercisesByKey + fetches + fetchesByKey + lookupsByKey + queriesByKey + rollbacks
+      creates + createsWithKey + exercises + exercisesByKey + fetches + fetchesByKey + queriesByKey + rollbacks
     )
 
   lazy val nonEffectfulActions: Space[Action] =
     S.pay(
-      nonEffectfulExercises + nonEffectfulExercisesByKey + fetches + fetchesByKey + lookupsByKey + queriesByKey + rollbacks
+      nonEffectfulExercises + nonEffectfulExercisesByKey + fetches + fetchesByKey + queriesByKey + rollbacks
     )
 
   lazy val topLevelActions: Space[Action] =
@@ -119,19 +108,22 @@ class SkeletonEnumerator(
   lazy val command: Space[Command] =
     AS.map2(bools, topLevelActions)(Command.apply)
 
-  lazy val commands: Space[Commands] =
-    AS.map(nonEmptyListOf(command))(Commands.apply)
+  def commands(singletonCommands: Boolean): Space[Commands] =
+    if (singletonCommands) AS.map(command)(c => Commands(List(c)))
+    else AS.map(nonEmptyListOf(command))(Commands.apply)
 
-  lazy val ledgers: Space[Ledger] =
-    listsOf(commands)
+  def ledgers(numCommands: Option[Int] = None, singletonCommands: Boolean): Space[Ledger] =
+    numCommands match {
+      case Some(n) => List.fill(n)(commands(singletonCommands)).sequence
+      case None => listsOf(commands(singletonCommands))
+    }
 
-  def scenarios(numParticipants: Int): Space[Scenario] = {
+  def scenarios(
+      numParticipants: Int,
+      numCommands: Option[Int] = None,
+      singletonCommands: Boolean = false,
+  ): Space[Scenario] = {
     val topology = Seq.fill(numParticipants)(Participant())
-    ledgers.map(Scenario(topology, _))
-  }
-
-  def scenarios(numParticipants: Int, numCommands: Int): Space[Scenario] = {
-    val topology = Seq.fill(numParticipants)(Participant())
-    List.fill(numCommands)(commands).sequence.map(Scenario(topology, _))
+    ledgers(numCommands, singletonCommands).map(Scenario(topology, _))
   }
 }

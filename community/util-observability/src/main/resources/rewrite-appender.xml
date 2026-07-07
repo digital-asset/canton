@@ -102,13 +102,6 @@
         </rewrite>
 
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>org.flywaydb.core.Flyway</logger>
-            <maxLevel>INFO</maxLevel>
-            <contains>cleanOnValidationError is deprecated and will be removed in a later release</contains>
-            <testing>true</testing>
-        </rewrite>
-
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.auth.AuthInterceptor</logger>
             <maxLevel>INFO</maxLevel>
             <contains>The command is missing a (valid) JWT token </contains>
@@ -340,12 +333,30 @@
             <testing>true</testing>
         </rewrite>
 
-        <!-- TODO(#31008) remove this rule, once the cache metrics are properly closed again -->
+        <!-- Warnings emitted by caffeine when refreshAfterWrite triggers and the reload fails -->
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>io.opentelemetry.sdk.metrics.internal.state.AsynchronousMetricStorage</logger>
+            <logger>
+                com.github.benmanes.caffeine.cache.BoundedLocalCache
+            </logger>
+            <contains>Exception thrown during refresh</contains>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>
 
-   </appender>
+        <!-- Need to silence this in tests, as it cannot be intercepted.
+        -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.daml.lf</logger>
+            <contains>LF internal error in</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.daml.lf</logger>
+            <contains>root cause:</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+    </appender>
 </included>

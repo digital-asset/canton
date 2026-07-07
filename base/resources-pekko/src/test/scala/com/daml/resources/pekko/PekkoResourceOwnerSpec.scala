@@ -5,7 +5,6 @@ package com.daml.resources.pekko
 
 import com.daml.resources.{HasExecutionContext, ResourceOwnerFactories, TestContext}
 import com.daml.scalautil.Statement.discard
-import com.daml.timer.Delayed
 import org.apache.pekko.actor.{Actor, ActorSystem, Cancellable, Props}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.stream.{Materializer, QueueOfferResult}
@@ -15,7 +14,6 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
 import scala.jdk.CollectionConverters.*
 
@@ -138,6 +136,7 @@ final class PekkoResourceOwnerSpec extends AsyncWordSpec with Matchers {
     "wait for the queue to drain" in {
       val input = 1 to 100
       val numbers = new CopyOnWriteArrayList[Int]
+      val timer = new java.util.Timer("resources-pekki-test");
       val resourceOwner = for {
         actorSystem <- Factories
           .forActorSystem(() => ActorSystem("TestActorSystem"))
@@ -146,7 +145,13 @@ final class PekkoResourceOwnerSpec extends AsyncWordSpec with Matchers {
           .forBoundedSourceQueue(
             Source
               .queue[Int](input.size)
-              .mapAsync(1)(Delayed.by(100.millis)(_))
+              .mapAsync(1) { i =>
+                // Cannot use DelayUtil or Delayed here as base is bottom of stack. Use simplified imitation implementation
+                val prom = Promise[Int]()
+                val task = new java.util.TimerTask() { def run(): Unit = prom.success(i) }
+                timer.schedule(task, 100)
+                prom.future
+              }
               .toMat(Sink.foreach(value => discard(numbers.add(value))))(Keep.both)
           )(materializer)
           .map(_._1)

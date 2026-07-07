@@ -57,10 +57,4 @@ object ReplayCommand {
       templateId: Identifier,
       key: Value,
   ) extends ReplayCommand
-
-  final case class LookupByKey(
-      templateId: Identifier,
-      contractKey: Value,
-  ) extends ReplayCommand
-
 }

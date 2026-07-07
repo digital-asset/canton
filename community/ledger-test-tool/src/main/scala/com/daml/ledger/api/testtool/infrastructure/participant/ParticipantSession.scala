@@ -8,6 +8,7 @@ import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoi
 import com.daml.ledger.api.testtool.infrastructure.{
   ChannelEndpoint,
   Errors,
+  Eventually,
   LedgerServices,
   PartyAllocationConfiguration,
   RetryingGetConnectedSynchronizersForParty,
@@ -15,7 +16,6 @@ import com.daml.ledger.api.testtool.infrastructure.{
 import com.daml.ledger.api.v2.admin.party_management_service.GetParticipantIdRequest
 import com.daml.ledger.api.v2.state_service.GetLedgerEndRequest
 import com.daml.ledger.api.v2.version_service.GetLedgerApiVersionRequest
-import com.daml.timer.RetryStrategy
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import io.grpc.ClientInterceptor
 import org.slf4j.LoggerFactory
@@ -101,14 +101,18 @@ object ParticipantSession {
       case (endpoint: Either[JsonApiEndpoint, ChannelEndpoint], adminEndpoint) =>
         val services = LedgerServices(endpoint.map(_.channel), commandInterceptors, dars)
         for {
-          features <- RetryStrategy
-            .exponentialBackoff(attempts = maxConnectionAttempts, 100.millis) { (attempt, wait) =>
+          features <- Eventually
+            .eventually(
+              "GetLedgerFeatures",
+              attempts = maxConnectionAttempts,
+              firstWaitTime = 100.millis,
+            ) {
               services.version
                 .getLedgerApiVersion(new GetLedgerApiVersionRequest())
                 .map(Features.fromApiVersionResponse)
                 .thereafterP { case Failure(_) =>
                   logger.info(
-                    s"Could not connect to the participant (attempt #$attempt). Trying again in $wait..."
+                    s"Could not connect to the participant. Trying again..."
                   )
                 }
             }

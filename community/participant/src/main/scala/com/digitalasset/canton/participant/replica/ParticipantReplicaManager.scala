@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.replica
 
+import cats.implicits.toTraverseOps
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -71,10 +72,32 @@ class ParticipantReplicaManager(
           )
           _ <- participantServices.ledgerApiIndexerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Indexer started")
+
           _ <- participantServices.cantonSyncService.refreshCaches()
+          _ = logger.info(
+            "Participant replica is becoming active: CantonSyncService caches refreshed"
+          )
+          _ <- participantServices.partyReplicatorContainerO.traverse(_.initializeNext())
           // Start up the Ledger API server
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
+
+          // Start up the traffic enforcement in-process app and backend (if enabled)
+          _ <- participantServices.trafficEnforcementAppContainerO.traverse(
+            _.initializeNext().map(_ =>
+              logger.info(
+                "Participant replica is becoming active: Traffic enforcement app started"
+              )
+            )
+          )
+          _ <- participantServices.trafficEnforcementBackendContainerO.traverse(
+            _.initializeNext().map(_ =>
+              logger.info(
+                "Participant replica is becoming active: Traffic enforcement backend started"
+              )
+            )
+          )
+
           // Start up the Ledger API-dependent Canton services
           _ = participantServices.startableStoppableLedgerApiDependentServices.start()
           _ = logger.info(
@@ -120,8 +143,26 @@ class ParticipantReplicaManager(
         logger.info(
           "Participant replica is becoming passive: Ledger API dependent services stopped"
         )
+
+        // Stop the traffic enforcement in-process app and backend (if enabled)
+        participantServices.trafficEnforcementBackendContainerO.foreach {
+          trafficEnforcementBackend =>
+            trafficEnforcementBackend.closeCurrent()
+            logger.info(
+              "Participant replica is becoming passive: Traffic enforcement backend stopped"
+            )
+        }
+        participantServices.trafficEnforcementAppContainerO.foreach { trafficEnforcementApp =>
+          trafficEnforcementApp.closeCurrent()
+          logger.info(
+            "Participant replica is becoming passive: Traffic enforcement app stopped"
+          )
+        }
+
+        // Stop the Ledger API server
         participantServices.ledgerApiServerContainer.closeCurrent()
         logger.info("Participant replica is becoming passive: Ledger API Server stopped")
+        participantServices.partyReplicatorContainerO.foreach(_.closeCurrent())
         for {
           // Explicitly disconnect from synchronizers
           _ <- EitherTUtil
@@ -137,6 +178,10 @@ class ParticipantReplicaManager(
           _ = logger.info("Participant replica is becoming passive: Ledger API Indexer stopped")
           _ = participantServices.persistentStateContainer.closeCurrent()
           _ = logger.info("Participant replica is becoming passive: PersistentState stopped")
+          _ = participantServices.cantonSyncService.clearCaches()
+          _ = logger.info(
+            "Participant replica is becoming passive: CantonSyncService caches cleared"
+          )
         } yield ()
 
       case None =>

@@ -8,10 +8,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.{ArchiveDecoder, DarDecoder}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
-import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error}
+import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, TransactionCoder as TxCoder}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.Speedy
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot.SubmissionEntry.EntryCase
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.{
@@ -21,7 +22,6 @@ import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine as ContractStateMachine,
   Node,
   SubmittedTransaction as SubmittedTx,
-  TransactionCoder as TxCoder,
   TransactionOuterClass as TxOuterClass,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -58,7 +58,11 @@ final case class TransactionSnapshot(
     )
 
   private[this] lazy val metricPlugins =
-    Seq(new StepCount(engine.config.iterationsBetweenInterruptions), new TxNodeCount)
+    Seq(
+      new FetchNodeCount,
+      new StepCount(engine.config.iterationsBetweenInterruptions),
+      new TxNodeCount,
+    )
 
   def replay(): Either[Error, Speedy.Metrics] =
     engine
@@ -70,7 +74,8 @@ final case class TransactionSnapshot(
         preparationTime,
         submissionSeed,
         contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.default,
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
         metricPlugins = metricPlugins,
       )
       .consume(contracts, pkgs, contractKeys)
@@ -86,7 +91,8 @@ final case class TransactionSnapshot(
         preparationTime,
         submissionSeed,
         contractIdVersion,
-        contractStateMode = ContractStateMachine.Mode.default,
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
         metricPlugins = metricPlugins,
       )
       .consume(contracts, pkgs, contractKeys)
@@ -113,7 +119,7 @@ private[snapshot] object TransactionSnapshot {
     println(s"%%% compile ${pkgs.size} packages ...")
     val engine = new Engine(
       EngineConfig(
-        allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+        allowedLanguageVersions = LanguageVersion.allLfVersions,
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         gasBudget = gasBudget,
@@ -129,7 +135,13 @@ private[snapshot] object TransactionSnapshot {
     engine
   }
 
-  def getAllTopLevelChoiceNames(dumpFile: Path): Set[String] = {
+  def getAllTopLevelChoiceNames(
+      dumpFile: Path,
+      stepCountFilter: Option[Long] = None,
+      txNodeCountFilter: Option[Long] = None,
+      fetchNodeCountFilter: Option[Long] = None,
+      debug: Boolean = false,
+  ): Set[String] = {
     val inputStream = new BufferedInputStream(Files.newInputStream(dumpFile))
 
     val entries = new Iterator[Snapshot.SubmissionEntry] {
@@ -151,10 +163,65 @@ private[snapshot] object TransactionSnapshot {
         )
     }
 
-    def updateWithChoicesFromTx(tx: SubmittedTx): Unit =
+    def filterLabel(
+        pluginCount: Option[Long],
+        filterCount: Option[Long],
+        label: String,
+    ): Option[String] =
+      (filterCount, pluginCount) match {
+        case (Some(minCount), Some(count)) if count < minCount =>
+          Some(s"$label = $count < $minCount")
+        case (Some(_), None) =>
+          Some(s"no $label metric plugin enabled")
+        case _ =>
+          None
+      }
+
+    def filterEnabled(pluginCount: Option[Long], filterCount: Option[Long]): Boolean =
+      (filterCount, pluginCount) match {
+        case (Some(minCount), Some(count)) => count < minCount
+        case _ => false
+      }
+
+    def updateWithChoicesFromTx(txEntry: Snapshot.TransactionEntry, tx: SubmittedTx): Unit = {
+      val stepCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
+        case plugin if plugin.getName == "StepCount" =>
+          plugin.getTotal
+      }
+      val txNodeCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
+        case plugin if plugin.getName == "TxNodeCount" =>
+          plugin.getTotal
+      }
+      val fetchNodeCount: Option[Long] = txEntry.getMetricPluginsList.asScala.collectFirst {
+        case plugin if plugin.getName == "FetchNodeCount" =>
+          plugin.getTotal
+      }
       tx.foreachInExecutionOrder(
         exerciseBegin = { (_, exe) =>
-          result = result + s"${exe.templateId}:${exe.choiceId}"
+          val filteringLabels = (
+            filterLabel(stepCount, stepCountFilter, "step count")
+              ++ filterLabel(txNodeCount, txNodeCountFilter, "tx node count")
+              ++ filterLabel(fetchNodeCount, fetchNodeCountFilter, "fetch node count")
+          ).mkString(" and ")
+          val noFilterDefined =
+            stepCountFilter.isEmpty
+              && txNodeCountFilter.isEmpty
+              && fetchNodeCountFilter.isEmpty
+          val someFilterEnabled =
+            filterEnabled(stepCount, stepCountFilter)
+              || filterEnabled(txNodeCount, txNodeCountFilter)
+              || filterEnabled(fetchNodeCount, fetchNodeCountFilter)
+
+          if (someFilterEnabled && debug) {
+            println(
+              s"Filtering out ${exe.templateId}:${exe.choiceId} as $filteringLabels"
+            )
+          }
+
+          if (noFilterDefined || !someFilterEnabled) {
+            result = result + s"${exe.templateId}:${exe.choiceId}"
+          }
+
           ChildrenRecursion.DoNotRecurse
         },
         rollbackBegin = (_, _) => ChildrenRecursion.DoNotRecurse,
@@ -162,6 +229,7 @@ private[snapshot] object TransactionSnapshot {
         exerciseEnd = (_, _) => (),
         rollbackEnd = (_, _) => (),
       )
+    }
 
     try {
       while (entries.hasNext) {
@@ -169,7 +237,7 @@ private[snapshot] object TransactionSnapshot {
         entry.getEntryCase match {
           case EntryCase.TRANSACTION =>
             val tx = decodeTx(entry.getTransaction)
-            updateWithChoicesFromTx(tx)
+            updateWithChoicesFromTx(entry.getTransaction, tx)
 
           case EntryCase.ARCHIVES =>
           // No work to do

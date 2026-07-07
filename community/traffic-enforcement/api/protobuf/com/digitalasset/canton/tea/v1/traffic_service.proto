@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.tea.v1;
+
+// Service used for book-keeping and managing of traffic accounts for Ledger API users.
+service TrafficService {
+  // Get account state for a given account ID.
+  // Permissioned only to users having ActAs or ExecuteAs rights for the party ID associated with the account ID.
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+
+  // Update account state for a given account ID.
+  // Permissioned only to Ledger API admin users.
+  rpc UpdateAccount(UpdateAccountRequest) returns (UpdateAccountResponse);
+}
+
+message GetAccountRequest {
+  // Required
+  string account_id = 1;
+}
+
+message GetAccountResponse {
+  // Required
+  string account_id = 1;
+
+  // Required
+  int64 balance = 2;
+}
+
+message UpdateAccountRequest {
+  // The account ID whose account to update.
+  //
+  // NOTE: Currently, the account ID is tied to and identified by a party ID.
+  // This constraint is expected to be removed in a future release, allowing for user-defined
+  // account IDs that are not necessarily tied to a specific party.
+  //
+  // Required
+  string account_id = 1;
+
+  // Balance DELTA to apply to the current balance.
+  // Negative values will decrease the balance, positive values will increase the balance.
+  // If unset, the balance will not be updated
+  //
+  // Optional
+  optional int64 balance_delta = 2;
+
+  // Unique identifier to this update request.
+  // This is used to de-duplicate requests. Caller MUST ensure that this is unique per
+  // request. The same request with the same deduplication_id will be ignored if it has already been processed.
+  //
+  // Required
+  string deduplication_id = 3;
+}
+
+message UpdateAccountResponse {
+  // The account state after the update
+  //
+  // Required
+  GetAccountResponse response = 1;
+}

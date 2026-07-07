@@ -418,6 +418,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     "BIGNUMERIC_TO_TEXT" -> BBigNumericToText,
     "TYPE_REP_TYCON_NAME" -> BTypeRepTyConName,
     "FAIL_WITH_STATUS" -> BFailWithStatus,
+    "EXTERNAL_CALL" -> BExternalCall,
   )
 
   private lazy val eCallInterface: Parser[ECallInterface] =
@@ -487,9 +488,6 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
   private lazy val updateFetchByKey =
     Id("fetch_by_key") ~! `@` ~> fullIdentifier ^^ UpdateFetchByKey.apply
 
-  private lazy val updateLookupByKey =
-    Id("lookup_by_key") ~! `@` ~> fullIdentifier ^^ UpdateLookupByKey.apply
-
   private lazy val updateQueryNByKey =
     Id("query_n_by_key") ~! `@` ~> fullIdentifier ^^ UpdateQueryNByKey.apply
 
@@ -523,7 +521,6 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       updateExerciseInterfaceWithGuard |
       updateExerciseByKey |
       updateFetchByKey |
-      updateLookupByKey |
       updateQueryNByKey |
       updateGetTime |
       updateLedgerTimeLT |

@@ -3,18 +3,20 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import anorm.SqlStringInterpolation
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
+import com.digitalasset.canton.platform.store.backend.DbDto.StringInterningDto
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
   AchsState,
-  LedgerEnd,
 }
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Inside, OptionValues}
+
+import scala.concurrent.duration.DurationInt
 
 private[backend] trait StorageBackendTestsParameters
     extends Matchers
@@ -22,7 +24,6 @@ private[backend] trait StorageBackendTestsParameters
     with OptionValues
     with StorageBackendSpec
     with HasExecutionContext { this: AnyFlatSpec =>
-
   behavior of "StorageBackend Parameters"
 
   import StorageBackendTestValues.*
@@ -39,9 +40,6 @@ private[backend] trait StorageBackendTestsParameters
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(backend.parameter.ledgerEnd) shouldBe LedgerEnd.beforeBegin
-    executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId)
-    ) shouldBe None
     val someSynchronizerIdInterned =
       backend.stringInterningSupport.synchronizerId.internalize(
         StorageBackendTestValues.someSynchronizerId
@@ -57,9 +55,6 @@ private[backend] trait StorageBackendTestsParameters
         connection,
       )
     )
-    executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId2)
-    ) shouldBe None
     val someSynchronizerIdInterned2 =
       backend.stringInterningSupport.synchronizerId.internalize(
         StorageBackendTestValues.someSynchronizerId2
@@ -84,10 +79,10 @@ private[backend] trait StorageBackendTestsParameters
           lastEventSeqId = 1,
           lastStringInterningId = 1,
           lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(10),
-        ),
-        lastSynchronizerIndex = Map(
-          StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndex
-        ),
+          synchronizerIndices = Map(
+            StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndex
+          ),
+        )
       )
     )
     executeSql(backend.parameter.ledgerEnd) shouldBe Some(
@@ -96,14 +91,9 @@ private[backend] trait StorageBackendTestsParameters
         lastEventSeqId = 1,
         lastStringInterningId = 1,
         lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(10),
+        Map(StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndex),
       )
     )
-    val resultSynchronizerIndex = executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId)
-    )
-    resultSynchronizerIndex.value.repairIndex shouldBe someSynchronizerIndex.repairIndex
-    resultSynchronizerIndex.value.sequencerIndex shouldBe someSynchronizerIndex.sequencerIndex
-    resultSynchronizerIndex.value.recordTime shouldBe someSynchronizerIndex.recordTime
 
     // updating ledger end and inserting two synchronizer index (one is updating just the request index part, the other is inserting just a sequencer index)
     val someSynchronizerIndexSecond = SynchronizerIndex.forRepairUpdate(
@@ -122,11 +112,11 @@ private[backend] trait StorageBackendTestsParameters
           lastEventSeqId = 100,
           lastStringInterningId = 100,
           lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(100),
-        ),
-        lastSynchronizerIndex = Map(
-          StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndexSecond,
-          StorageBackendTestValues.someSynchronizerId2 -> someSynchronizerIndex2,
-        ),
+          synchronizerIndices = Map(
+            StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndexSecond,
+            StorageBackendTestValues.someSynchronizerId2 -> someSynchronizerIndex2,
+          ),
+        )
       )
     )
     executeSql(backend.parameter.ledgerEnd) shouldBe Some(
@@ -135,20 +125,12 @@ private[backend] trait StorageBackendTestsParameters
         lastEventSeqId = 100,
         lastStringInterningId = 100,
         lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(100),
+        Map(
+          StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndexSecond,
+          StorageBackendTestValues.someSynchronizerId2 -> someSynchronizerIndex2,
+        ),
       )
     )
-    val resultSynchronizerIndexSecond = executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId)
-    )
-    resultSynchronizerIndexSecond.value.repairIndex shouldBe someSynchronizerIndexSecond.repairIndex
-    resultSynchronizerIndexSecond.value.sequencerIndex shouldBe someSynchronizerIndex.sequencerIndex
-    resultSynchronizerIndexSecond.value.recordTime shouldBe someSynchronizerIndexSecond.recordTime
-    val resultSynchronizerIndexSecond2 = executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId2)
-    )
-    resultSynchronizerIndexSecond2.value.repairIndex shouldBe None
-    resultSynchronizerIndexSecond2.value.sequencerIndex shouldBe someSynchronizerIndex2.sequencerIndex
-    resultSynchronizerIndexSecond2.value.recordTime shouldBe someSynchronizerIndex2.recordTime
 
     // updating ledger end and inserting one synchronizer index only overriding the record time
     val someSynchronizerIndexThird =
@@ -160,10 +142,10 @@ private[backend] trait StorageBackendTestsParameters
           lastEventSeqId = 200,
           lastStringInterningId = 200,
           lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(200),
-        ),
-        lastSynchronizerIndex = Map(
-          StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndexThird
-        ),
+          synchronizerIndices = Map(
+            StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndexThird
+          ),
+        )
       )
     )
     executeSql(backend.parameter.ledgerEnd) shouldBe Some(
@@ -172,47 +154,14 @@ private[backend] trait StorageBackendTestsParameters
         lastEventSeqId = 200,
         lastStringInterningId = 200,
         lastPublicationTime = CantonTimestamp.MinValue.plusSeconds(200),
+        Map(
+          StorageBackendTestValues.someSynchronizerId -> someSynchronizerIndex
+            .max(someSynchronizerIndexSecond)
+            .max(someSynchronizerIndexThird),
+          StorageBackendTestValues.someSynchronizerId2 -> someSynchronizerIndex2,
+        ),
       )
     )
-    val resultSynchronizerIndexThird = executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId)
-    )
-    resultSynchronizerIndexThird.value.repairIndex shouldBe someSynchronizerIndexSecond.repairIndex
-    resultSynchronizerIndexThird.value.sequencerIndex shouldBe someSynchronizerIndex.sequencerIndex
-    resultSynchronizerIndexThird.value.recordTime shouldBe someSequencerTime.plusSeconds(20)
-
-    // resetting and disabling interning
-    backend.stringInterningSupport.reset()
-    backend.stringInterningSupport.setAutoIntern(false)
-
-    // ensuring that auto-interning indeed does not work
-    backend.stringInterningSupport.synchronizerId.tryInternalize(
-      StorageBackendTestValues.someSynchronizerId
-    ) shouldBe None
-    backend.stringInterningSupport.synchronizerId.tryInternalize(
-      StorageBackendTestValues.someSynchronizerId2
-    ) shouldBe None
-
-    // ensuring the same results
-    executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId)
-    ) shouldBe resultSynchronizerIndexThird
-    executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId2)
-    ) shouldBe resultSynchronizerIndexSecond2
-
-    // and if string interning table is wiped
-    executeSql { c =>
-      SQL"delete from lapi_string_interning".executeUpdate()(c) shouldBe 2
-    }
-
-    // cleanSynchronizerIndex returns empty
-    executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId)
-    ) shouldBe None
-    executeSql(
-      backend.parameter.cleanSynchronizerIndex(StorageBackendTestValues.someSynchronizerId2)
-    ) shouldBe None
   }
 
   it should "store and retrieve post processing end correctly" in {
@@ -227,7 +176,7 @@ private[backend] trait StorageBackendTestsParameters
   }
 
   it should "fetch and update AchsState correctly" in {
-    executeSql(backend.parameter.fetchACHSState) shouldBe None
+    executeSql(backend.parameter.fetchAchsState) shouldBe None
 
     val achsState0 = AchsState(
       validAt = 1000L,
@@ -237,38 +186,102 @@ private[backend] trait StorageBackendTestsParameters
       ),
     )
     // check insertion to empty state
-    executeSql(backend.parameter.insertACHSState(achsState0))
-    executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState0)
+    executeSql(backend.parameter.insertAchsState(achsState0))
+    executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState0)
 
     // check updates of validAt
-    executeSql(backend.parameter.updateACHSValidAt(validAt = 2000L))
+    executeSql(backend.parameter.updateAchsValidAt(validAt = 2000L))
     val achsState1 = achsState0.copy(validAt = 2000L)
-    executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState1)
+    executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState1)
 
     // check updates of lastRemoved and lastPopulated
     executeSql(
-      backend.parameter.updateACHSLastPointers(
+      backend.parameter.updateAchsLastPointers(
         AchsLastPointers(lastRemoved = 200L, lastPopulated = 20L)
       )
     )
     val achsState2 =
       achsState1.copy(lastPointers = AchsLastPointers(lastRemoved = 200L, lastPopulated = 20L))
-    executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState2)
+    executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState2)
 
     // clear the state
-    executeSql(backend.parameter.clearACHSState)
-    executeSql(backend.parameter.fetchACHSState) shouldBe None
+    executeSql(backend.parameter.clearAchsStateAndData)
+    executeSql(backend.parameter.fetchAchsState) shouldBe None
 
     // updating a non-existing state with validAt fails
     an[IllegalStateException] should be thrownBy executeSql(
-      backend.parameter.updateACHSValidAt(validAt = 3000L)
+      backend.parameter.updateAchsValidAt(validAt = 3000L)
     )
 
     // updating a non-existing state with lastRemoved and lastPopulated fails
     an[IllegalStateException] should be thrownBy executeSql(
-      backend.parameter.updateACHSLastPointers(
+      backend.parameter.updateAchsLastPointers(
         AchsLastPointers(lastRemoved = 300L, lastPopulated = 30L)
       )
+    )
+  }
+
+  it should "fail if there is no corresponding string interning entry for persited clean synchronizer index" in {
+    executeSql(
+      backend.parameter
+        .initializeParameters(StorageBackendTestValues.someIdentityParams, loggerFactory)
+    )
+    val ledgerEnd = LedgerEnd(
+      lastOffset = offset(10),
+      lastEventSeqId = 10,
+      lastStringInterningId = 100,
+      lastPublicationTime = CantonTimestamp.Epoch.add(1.second),
+      synchronizerIndices = Map(
+        SynchronizerId.tryFromString("u::unknownSynchronizerId") -> SynchronizerIndex(
+          None,
+          None,
+          CantonTimestamp.Epoch,
+        )
+      ),
+    )
+
+    executeSql(
+      backend.parameter.updateLedgerEnd(ledgerEnd)
+    )
+
+    val exception = intercept[IllegalStateException](executeSql(backend.parameter.ledgerEnd))
+    exception
+      .getMessage() should fullyMatch regex ("""String interning entry for internalized synchornizer id=\d+ missing""")
+  }
+
+  it should "fail if  corresponding string interning entry for persited clean synchronizer index has party prefix" in {
+    executeSql(
+      backend.parameter
+        .initializeParameters(StorageBackendTestValues.someIdentityParams, loggerFactory)
+    )
+    val ledgerEnd = LedgerEnd(
+      lastOffset = offset(10),
+      lastEventSeqId = 10,
+      lastStringInterningId = 100,
+      lastPublicationTime = CantonTimestamp.Epoch.add(1.second),
+      synchronizerIndices = Map(
+        SynchronizerId.tryFromString("u::unknownSynchronizerId") -> SynchronizerIndex(
+          None,
+          None,
+          CantonTimestamp.Epoch,
+        )
+      ),
+    )
+
+    executeSql(
+      backend.parameter.updateLedgerEnd(ledgerEnd)
+    )
+
+    val dto = StringInterningDto(
+      backend.stringInterningSupport.synchronizerId
+        .internalize(SynchronizerId.tryFromString("u::unknownSynchronizerId")),
+      "p|x::participant1",
+    )
+    executeSql(ingest(Vector(dto), _))
+
+    val exception = intercept[IllegalStateException](executeSql(backend.parameter.ledgerEnd))
+    exception.getMessage() should equal(
+      "Externalized string p|x::participant1 does not have the expected synchronizer id prefix d|"
     )
   }
 

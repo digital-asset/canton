@@ -56,6 +56,11 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 }
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.transaction.{
+  LsuSequencerConnectionSuccessor,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
@@ -126,6 +131,7 @@ object DatabaseSequencer {
       lsuSequencingBounds = lsuSequencingBounds,
       drSequencingTimeUpperBound = drSequencingTimeUpperBound,
       rateLimitManagerO = None,
+      disableSubmissionChecksForTesting = false,
     )
   }
 }
@@ -152,6 +158,7 @@ class DatabaseSequencer(
     lsuSequencingBounds: Option[LsuSequencingBounds],
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
     rateLimitManagerO: Option[SequencerRateLimitManager],
+    disableSubmissionChecksForTesting: Boolean,
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(
       loggerFactory,
@@ -159,6 +166,8 @@ class DatabaseSequencer(
       clock,
       SignatureVerifier(cryptoApi),
       cryptoApi.psid.protocolVersion,
+      lsuSequencingBounds,
+      disableSubmissionChecksForTesting,
     )
     with FlagCloseable {
 
@@ -556,10 +565,11 @@ class DatabaseSequencer(
     )
 
   override private[sequencer] def updateLsuSuccessor(
-      successorO: Option[SynchronizerSuccessor],
+      successor: SynchronizerSuccessor,
       announcementEffectiveTime: EffectiveTime,
+      isReplace: Boolean,
   )(implicit traceContext: TraceContext): Unit =
-    reader.updateLsuSuccessor(successorO, announcementEffectiveTime)
+    reader.updateLsuSuccessor(Option.when(isReplace)(successor), announcementEffectiveTime)
 
   // TODO(#27919): provide a proper implementation
   override def sequencingTime(implicit
@@ -583,10 +593,21 @@ class DatabaseSequencer(
       "Traffic control is not supported by the database sequencer"
     )
 
+  // TODO(#26430) Make LSU work with DB sequencer
   override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
     throw new UnsupportedOperationException(
       "LSU sanity check is not supported by the database sequencer"
+    )
+
+  // TODO(#26430) Make LSU work with DB sequencer
+  override def handleLsuSequencerConnectionSuccessor(
+      successor: TopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor]
+  )(implicit
+      traceContext: TraceContext
+  ): Unit =
+    throw new UnsupportedOperationException(
+      "LSU operations are not supported by the DB sequencer"
     )
 }

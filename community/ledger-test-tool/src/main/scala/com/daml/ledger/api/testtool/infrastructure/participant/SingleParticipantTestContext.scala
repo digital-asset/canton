@@ -37,6 +37,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
   SubmitAndWaitForTransactionRequest,
@@ -85,7 +86,6 @@ import com.daml.ledger.api.v2.{crypto as lapicrypto, value as v1}
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, ExerciseByKeyCommand, Identifier, Template, Value}
 import com.daml.logging.LoggingContext
-import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.TransactionShape
@@ -93,7 +93,7 @@ import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffe
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.digitalasset.canton.util.{DelayUtil, MonadUtil, OptionUtil}
 import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse}
@@ -160,6 +160,9 @@ final class SingleParticipantTestContext private[participant] (
     services.state
       .getLedgerEnd(new GetLedgerEndRequest())
       .map(_.offset)
+
+  override def getLedgerEnd(): Future[GetLedgerEndResponse] =
+    services.state.getLedgerEnd(new GetLedgerEndRequest())
 
   override def latestPrunedOffsets(): Future[(Long, Long)] =
     services.state
@@ -1132,6 +1135,35 @@ final class SingleParticipantTestContext private[participant] (
   override def updateById(request: GetUpdateByIdRequest): Future[GetUpdateResponse] =
     services.update.getUpdateById(request)
 
+  override def updateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+    services.update.getUpdateByHash(request)
+
+  override def transactionByHash(
+      hash: ByteString,
+      parties: Seq[Party],
+      transactionShape: TransactionShape = AcsDelta,
+      templateIds: Seq[Identifier] = Seq.empty,
+  ): Future[Transaction] =
+    updateByHash(
+      GetUpdateByHashRequest(
+        transactionHash = hash,
+        updateFormat = Some(
+          UpdateFormat(
+            includeTransactions = Some(
+              transactionFormat(
+                parties = Some(parties),
+                templateIds = templateIds,
+                transactionShape = transactionShape,
+                verbose = true,
+              )
+            ),
+            includeReassignments = None,
+            includeTopologyEvents = None,
+          )
+        ),
+      )
+    ).map(_.getTransaction)
+
   override def transactionById(
       updateId: String,
       parties: Seq[Party],
@@ -1616,7 +1648,7 @@ final class SingleParticipantTestContext private[participant] (
       }
       .flatMap {
         case Left(_) => // If we are retrying a single time, back off first for one second.
-          Delayed.Future.by(1.second)(submitAndWaitGeneric(this))
+          DelayUtil.delay(1.second).flatMap(_ => submitAndWaitGeneric(this))
         case Right(firstCallResult) => firstCallResult.fold(Future.failed, Future.successful)
       }
 
@@ -1680,6 +1712,43 @@ final class SingleParticipantTestContext private[participant] (
       p: Completion => Boolean
   ): Future[Option[Completion]] =
     findCompletion(completionStreamRequest()(parties*))(p)
+
+  // GetCompletions helpers. Intentionally not sharing plumbing with the completionStream helpers
+  // above, which are deprecated and slated for removal.
+  override def getCompletionsRequest(from: Long = referenceOffset)(
+      parties: Party*
+  ): GetCompletionsRequest =
+    new GetCompletionsRequest(
+      parties = parties.map(_.getValue),
+      beginExclusive = from,
+    )
+
+  override def completions(
+      within: NonNegativeFiniteDuration,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.getCompletions(request, _)
+    )
+      .within(within.toScala)
+      .map(_.map(_.completionResponse))
+
+  override def completions(
+      take: Int,
+      request: GetCompletionsRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.getCompletions(request, _)
+    ).filterTake(_.completionResponse.isCompletion)(take)
+      .map(_.map(_.completionResponse))
+
+  override def findCompletion(
+      request: GetCompletionsRequest
+  )(p: Completion => Boolean): Future[Option[Completion]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.getCompletions(request, _)
+    ).find(_.completionResponse.completion.exists(p))
+      .map(_.completionResponse.completion.filter(p))
 
   override def offsets(n: Int, request: CompletionStreamRequest): Future[Vector[Long]] =
     new StreamConsumer[CompletionStreamResponse](

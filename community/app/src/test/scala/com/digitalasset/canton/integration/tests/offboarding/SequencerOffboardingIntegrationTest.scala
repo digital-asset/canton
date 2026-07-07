@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.offboarding
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
@@ -22,6 +21,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.nonempty.NonEmpty
 
 class SequencerOffboardingIntegrationTest
     extends CommunityIntegrationTest
@@ -59,8 +59,10 @@ class SequencerOffboardingIntegrationTest
       mediator1.start()
     }
 
-    staticParameters =
-      StaticSynchronizerParameters.defaults(sequencer1.config.crypto, testedProtocolVersion)
+    staticParameters = StaticSynchronizerParameters.defaults(
+      cryptoConfig = sequencer1.config.crypto,
+      protocolVersion = testedProtocolVersion,
+    )
 
     synchronizerOwners = Seq[InstanceReference](sequencer1, mediator1)
     synchronizerId = clue("bootstrapping the synchronizer") {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.operations
 
 import com.digitalasset.canton.HasExecutionContext
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.integration.plugins.UsePostgres
@@ -70,8 +71,10 @@ sealed trait ViewConsistencyTest
               table_schema in ('public', 'debug') and
               -- no views for flyway or blocks tables
               table_name not in ('flyway_schema_history', 'blocks') and
-              -- DEV version adds a column, but it doesn't have any significance, so let's ignore it
-              not (table_name = 'common_node_id' and column_name = 'test_column')
+              -- DEV version adds a table, but it doesn't have any significance, so let's ignore it
+              not (table_name = 'dev_migration_test') and
+              -- exclude partition tables
+              table_name !~ '_p[0-9]+$$'
             group by table_name, column_name
             having count(column_name) != 2""".as[(String, String, String)],
           "select",
@@ -99,6 +102,7 @@ sealed trait ViewConsistencyTest
   }
 }
 
+@AcsCommitmentTest
 final class ViewConsistencyTestPostgres extends ViewConsistencyTest {
   registerPlugin(new UsePostgres(loggerFactory))
 }

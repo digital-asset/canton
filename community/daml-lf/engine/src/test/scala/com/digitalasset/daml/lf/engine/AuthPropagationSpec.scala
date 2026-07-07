@@ -7,22 +7,42 @@ package engine
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
+import com.digitalasset.daml.lf.data.Ref.{
+  Identifier,
+  Name,
+  PackageId,
+  ParticipantId,
+  Party,
+  QualifiedName,
+}
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Time}
-import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, PackageId, ParticipantId, Party, QualifiedName}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.Package
-import com.digitalasset.daml.lf.ledger.FailedAuthorization.{CreateMissingAuthorization, ExerciseMissingAuthorization}
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, FatContractInstance, SerializationVersion, SubmittedTransaction}
-import com.digitalasset.daml.lf.transaction.Transaction.Metadata
-import com.digitalasset.daml.lf.value.Value.{ContractId, ValueContractId, ValueList, ValueParty, ValueRecord}
 import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.ledger.FailedAuthorization.{
+  CreateMissingAuthorization,
+  ExerciseMissingAuthorization,
+}
+import com.digitalasset.daml.lf.transaction.Transaction.Metadata
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  SerializationVersion,
+  SubmittedTransaction,
+}
 import com.digitalasset.daml.lf.value.ContractIdVersion
-
-import java.util.zip.ZipInputStream
+import com.digitalasset.daml.lf.value.Value.{
+  ContractId,
+  ValueContractId,
+  ValueList,
+  ValueParty,
+  ValueRecord,
+}
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.util.zip.ZipInputStream
 import scala.language.implicitConversions
 
 class AuthPropagationSpecV2 extends AuthPropagationSpec(LanguageVersion.Major.V2)
@@ -92,9 +112,8 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
   private val participant: ParticipantId = ParticipantId.assertFromString("participant")
   private val submissionSeed: crypto.Hash = crypto.Hash.hashPrivateKey("submissionSeed")
   private val contractIdVersion = ContractIdVersion.V1
-  private val contractStateMode = ContractStateMachine.Mode.devDefault
-
-private val testEngine: Engine = Engine.DevEngine(loggerFactory)
+  private val testEngine: Engine = Engine.DevEngine(loggerFactory)
+  private val interpretConfig: InterpretationConfig = InterpretationConfig.Default
 
   private def go(
       submitters: Set[Party],
@@ -110,7 +129,7 @@ private val testEngine: Engine = Engine.DevEngine(loggerFactory)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          contractStateMode = contractStateMode,
+          interpretationConfig = interpretConfig,
           prefetchKeys = Seq.empty,
         )
         .consume(pcs = defaultContracts, pkgs = allPackages)
@@ -134,7 +153,7 @@ private val testEngine: Engine = Engine.DevEngine(loggerFactory)
         submitters = Set("Alice"),
         command = command,
       )
-      interpretResult shouldBe a[Right[_, _]]
+      interpretResult shouldBe a[Right[?, ?]]
     }
     "fail" in {
       val interpretResult = go(
@@ -173,7 +192,7 @@ private val testEngine: Engine = Engine.DevEngine(loggerFactory)
         submitters = Set("Alice", "Bob"),
         command = command,
       )
-      interpretResult shouldBe a[Right[_, _]]
+      interpretResult shouldBe a[Right[?, ?]]
     }
     "fail" in {
       val interpretResult = go(
@@ -218,7 +237,7 @@ private val testEngine: Engine = Engine.DevEngine(loggerFactory)
         submitters = Set("Bob"),
         command = command,
       )
-      interpretResult shouldBe a[Right[_, _]]
+      interpretResult shouldBe a[Right[?, ?]]
     }
 
     // TEST_EVIDENCE: Authorization: badly-authorized exercise/create (exercise is unauthorized) is rejected
@@ -303,7 +322,7 @@ private val testEngine: Engine = Engine.DevEngine(loggerFactory)
         submitters = Set("Alice"),
         command = command,
       )
-      interpretResult shouldBe a[Right[_, _]]
+      interpretResult shouldBe a[Right[?, ?]]
     }
   }
 
@@ -387,7 +406,7 @@ private val testEngine: Engine = Engine.DevEngine(loggerFactory)
         submitters = Set("Alice"),
         command = command,
       )
-      interpretResult shouldBe a[Right[_, _]]
+      interpretResult shouldBe a[Right[?, ?]]
     }
   }
 }

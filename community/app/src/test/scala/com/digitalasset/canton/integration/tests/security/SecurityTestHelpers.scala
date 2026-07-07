@@ -13,7 +13,6 @@ import com.daml.ledger.api.v2.transaction.Transaction.toJavaProto
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
   AssignedWrapper,
   ReassignmentWrapper,
@@ -54,6 +53,7 @@ import com.digitalasset.canton.topology.{Member, ParticipantId, PartyId, Physica
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code
 import io.grpc.stub.StreamObserver
 import monocle.macros.GenLens
@@ -445,6 +445,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
   def withMediatorVerdict(
       verdict: Verdict,
       senderRef: LocalInstanceReference,
+      dropAggregationRule: Boolean = false,
   )(implicit
       executionContext: ExecutionContext
   ): SignedMessageTransform[ConfirmationResultMessage] =
@@ -453,6 +454,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         .andThen(GenLens[ConfirmationResultMessage](_.verdict))
         .replace(verdict)(_),
       senderRef,
+      dropAggregationRule = dropAggregationRule,
     )
 
   /** Convenience method to create a [[SignedMessageTransform]] from a [[MessageTransform]], signing
@@ -490,18 +492,23 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       senderRef: LocalInstanceReference,
       useCurrentSnapshot: Boolean = false,
       approximateTimestampForSigning: Option[CantonTimestamp] = None,
+      dropAggregationRule: Boolean = false,
   )(implicit
       executionContext: ExecutionContext
   ): SignedMessageTransform[A] =
     (_, submissionRequest, synchronizerId) => {
       val (sender, syncCrypto) = senderAndCryptoFromRef(senderRef, synchronizerId)
-
-      (transform(updateSignatureUsing(syncCrypto, useCurrentSnapshot), _))
+      val modifiedMessage = (transform(updateSignatureUsing(syncCrypto, useCurrentSnapshot), _))
         .andThen(_.focus(_.sender).replace(sender))
-        // TODO(i16512): See if we should pass `useCurrentSnapshot` to sign the submission request
-        .andThen(signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampForSigning))(
-          submissionRequest
-        )
+      val modifiedMessage2 = if (dropAggregationRule) {
+        modifiedMessage.andThen(_.focus(_.aggregationRule).replace(None))
+      } else modifiedMessage
+      // TODO(i16512): See if we should pass `useCurrentSnapshot` to sign the submission request
+      modifiedMessage2.andThen(
+        signModifiedSubmissionRequest(_, syncCrypto, approximateTimestampForSigning)
+      )(
+        submissionRequest
+      )
     }
 
   private def senderAndCryptoFromRef(
@@ -699,6 +706,16 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         withClue(s"for $participant")(transactions shouldBe empty)
     }
 
+    lazy val awaitUnassignments: Map[ParticipantReference, Seq[UnassignedWrapper]] =
+      unassignments.map { case (participant, unassignmentF) =>
+        participant -> withClue(s"for $participant")(unassignmentF.futureValue)
+      }
+
+    lazy val awaitAssignments: Map[ParticipantReference, Seq[AssignedWrapper]] =
+      assignments.map { case (participant, assignmentF) =>
+        participant -> withClue(s"for $participant")(assignmentF.futureValue)
+      }
+
     def allCreated[TC](
         companion: ContractCompanion[TC, ?, ?]
     )(
@@ -720,6 +737,12 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
           javaapi.data.Transaction.fromProto(toJavaProto(tx))
         )
       )
+
+    def allUnassigned(participant: ParticipantReference): Seq[String] =
+      awaitUnassignments(participant).flatMap(_.events).map(_.contractId)
+
+    def allAssigned(participant: ParticipantReference): Seq[String] =
+      awaitAssignments(participant).flatMap(_.events).map(_.createdEvent.value.contractId)
   }
 }
 

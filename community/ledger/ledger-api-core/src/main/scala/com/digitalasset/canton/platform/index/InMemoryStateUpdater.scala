@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetail
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
@@ -22,12 +23,11 @@ import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResul
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
-import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent.ReassignmentAccepted
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
-import com.digitalasset.canton.platform.{InMemoryState, Key}
+import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.KeyInfo
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Ref
@@ -56,7 +56,7 @@ private[platform] object InMemoryStateUpdaterFlow {
       metrics: LedgerApiServerMetrics,
   )(
       inMemoryState: InMemoryState,
-      prepare: (Vector[(Offset, Update)], LedgerEnd, TraceContext) => PrepareResult,
+      prepare: Batch[?] => PrepareResult,
       update: (PrepareResult, Boolean) => Unit,
   ): UpdaterFlow = { repairMode =>
     Flow[Batch[?]]
@@ -64,18 +64,14 @@ private[platform] object InMemoryStateUpdaterFlow {
       .via(updateOffsetCheckpointCacheFlow(inMemoryState, offsetCheckpointCacheUpdateInterval))
       .mapAsync(prepareUpdatesParallelism) { batch =>
         Future {
-          batch -> prepare(
-            batch.offsetsUpdates,
-            batch.ledgerEnd,
-            batch.batchTraceContext,
-          )
+          batch -> prepare(batch)
         }(prepareUpdatesExecutionContext)
       }
       .async
       .mapAsync(1) { case (batch, result) =>
         Future {
           update(result, repairMode)
-          metrics.index.ledgerEndSequentialId.updateValue(result.ledgerEnd.lastEventSeqId)
+          metrics.index.ledgerEndSequentialId.updateValue(result.ledgerEndUpdate.lastEventSeqId)
           batch
         }(updateCachesExecutionContext)
       }
@@ -147,6 +143,7 @@ private[platform] object InMemoryStateUpdaterFlow {
                   case _: Update.EmptyAcsPublicationRequired => None
                   case _: Update.LsuTimeReached => None
                   case _: Update.CommitRepair => None
+                  case u: Update.ReceivedAcsCommitment => Some((u.synchronizerId, u.recordTime))
                 }
 
                 val lastSynchronizerTimes =
@@ -181,9 +178,10 @@ private[platform] object InMemoryStateUpdaterFlow {
 private[platform] object InMemoryStateUpdater {
   final case class PrepareResult(
       updates: Vector[TransactionLogUpdate],
-      ledgerEnd: LedgerEnd,
+      ledgerEndUpdate: LedgerEnd,
       lastTraceContext: TraceContext,
       batchTraceContext: TraceContext,
+      contractStateEvents: Vector[ContractStateEvent],
   )
   type UpdaterFlow =
     Boolean => Flow[Batch[?], Batch[?], NotUsed]
@@ -220,15 +218,14 @@ private[platform] object InMemoryStateUpdater {
   )
 
   private[index] def prepare(
-      batch: Vector[(Offset, Update)],
-      ledgerEnd: LedgerEnd,
-      batchTraceContext: TraceContext,
+      batch: Batch[?]
   ): PrepareResult = {
-    val traceContext = batch.lastOption.fold(
+    val offsetUpdates = batch.offsetsUpdates
+    val traceContext = offsetUpdates.lastOption.fold(
       throw new NoSuchElementException("empty batch")
     )(_._2.traceContext)
     PrepareResult(
-      updates = batch.collect {
+      updates = offsetUpdates.collect {
         case (offset, u: Update.TransactionAccepted) =>
           convertTransactionAccepted(offset, u)
         case (offset, u: Update.CommandRejected) =>
@@ -237,10 +234,13 @@ private[platform] object InMemoryStateUpdater {
           convertReassignmentAccepted(offset, u)
         case (offset, u: Update.TopologyTransactionEffective) =>
           convertTopologyTransactionEffective(offset, u)
+        case (offset, u: Update.ReceivedAcsCommitment) =>
+          convertReceivedAcsCommitment(offset, u)
       },
-      ledgerEnd = ledgerEnd,
+      ledgerEndUpdate = batch.ledgerEnd,
       lastTraceContext = traceContext,
-      batchTraceContext = batchTraceContext,
+      batchTraceContext = batch.batchTraceContext,
+      contractStateEvents = batch.contractStateEvents,
     )
   }
 
@@ -248,14 +248,20 @@ private[platform] object InMemoryStateUpdater {
       inMemoryState: InMemoryState,
       logger: TracedLogger,
   )(result: PrepareResult, repairMode: Boolean): Unit = {
-    updateCaches(inMemoryState, result.updates, result.ledgerEnd, result.batchTraceContext)
+    updateCaches(
+      inMemoryState = inMemoryState,
+      updates = result.updates,
+      ledgerEndUpdate = result.ledgerEndUpdate,
+      batchTraceContext = result.batchTraceContext,
+      contractStateEvents = result.contractStateEvents,
+    )
     // must be the last update: see the comment inside the method for more details
     // must be after cache updates: see the comment inside the method for more details
     // in case of Repair Mode we will update directly, at the end from the indexer queue
     if (!repairMode) {
       updateLedgerEnd(
         inMemoryState,
-        result.ledgerEnd,
+        result.ledgerEndUpdate,
         logger,
       )(
         result.lastTraceContext
@@ -331,94 +337,36 @@ private[platform] object InMemoryStateUpdater {
   private[index] def updateCaches(
       inMemoryState: InMemoryState,
       updates: Vector[TransactionLogUpdate],
-      ledgerEnd: LedgerEnd,
+      ledgerEndUpdate: LedgerEnd,
       batchTraceContext: TraceContext,
+      contractStateEvents: Vector[ContractStateEvent],
   ): Unit = {
     inMemoryState.cachesUpdatedUpto.set(None) // mark caches as being updated
     updates.foreach(inMemoryState.inMemoryFanoutBuffer.push)
     NonEmptyVector
-      .fromVector(
-        updates.iterator
-          .flatMap(convertToContractStateEvents)
-          .toVector
-      )
+      .fromVector(contractStateEvents)
       .foreach(
-        inMemoryState.contractStateCaches.push(_, ledgerEnd.lastEventSeqId)(batchTraceContext)
+        inMemoryState.contractStateCaches.push(_, ledgerEndUpdate.lastEventSeqId)(batchTraceContext)
       )
-    inMemoryState.cachesUpdatedUpto.set(Some(ledgerEnd.lastOffset))
+    inMemoryState.cachesUpdatedUpto.set(Some(ledgerEndUpdate.lastOffset))
   }
 
   def updateLedgerEnd(
       inMemoryState: InMemoryState,
-      ledgerEnd: LedgerEnd,
+      ledgerEndUpdate: LedgerEnd,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
   ): Unit = {
-    inMemoryState.ledgerEndCache.set(Some(ledgerEnd))
+    inMemoryState.ledgerEndCache.update(ledgerEndUpdate)
     // the order here is very important: first we need to make data available for point-wise lookups
     // and SQL queries, and only then we can make it available on the streams.
     // (consider example: completion arrived on a stream, but the transaction cannot be looked up)
-    inMemoryState.dispatcherState.getDispatcher.signalNewHead(ledgerEnd.lastOffset)
-    logger.debug(s"Updated ledger end $ledgerEnd")
+    inMemoryState.dispatcherState.getDispatcher.signalNewHead(ledgerEndUpdate.lastOffset)
+    logger.debug(
+      s"Updated ledger end properties: $ledgerEndUpdate"
+    )
   }
-
-  private[index] def convertLogToStateEvent
-      : PartialFunction[TransactionLogUpdate.Event, ContractStateEvent] = {
-    case createdEvent: TransactionLogUpdate.CreatedEvent
-        // no state updates for participant divulged events and transient events as these events
-        // cannot lead to successful contract lookup and usage in interpretation anyway
-        if createdEvent.flatEventWitnesses.nonEmpty =>
-      if (createdEvent.contractKey.isDefined != createdEvent.createKeyHash.isDefined) {
-        throw new IllegalStateException(
-          s"Invalid TransactionLogUpdate.CreatedEvent: contractKey and createKeyHash must be both defined or both empty, but was: $createdEvent"
-        )
-      }
-      ContractStateEvent.Created(
-        contractId = createdEvent.contractId,
-        globalKey = createdEvent.contractKey.zip(createdEvent.createKeyHash).map { case (k, kh) =>
-          Key.assertBuild(
-            createdEvent.templateId,
-            createdEvent.packageName,
-            k.unversioned,
-            kh,
-          )
-        },
-      )
-    case exercisedEvent: TransactionLogUpdate.ExercisedEvent
-        // no state updates for participant divulged events and transient events as these events
-        // cannot lead to successful contract lookup and usage in interpretation anyway
-        if exercisedEvent.consuming && exercisedEvent.flatEventWitnesses.nonEmpty =>
-      if (exercisedEvent.contractKey.isDefined != exercisedEvent.contractKeyHash.isDefined) {
-        throw new IllegalStateException(
-          s"Invalid TransactionLogUpdate.ExercisedEvent: contractKey and contractKeyHash must be both defined or both empty, but was: $exercisedEvent"
-        )
-      }
-      ContractStateEvent.Archived(
-        contractId = exercisedEvent.contractId,
-        globalKey = exercisedEvent.contractKey.flatMap(k =>
-          exercisedEvent.contractKeyHash.map(hash =>
-            Key.assertBuild(
-              exercisedEvent.templateId,
-              exercisedEvent.packageName,
-              k.unversioned,
-              hash,
-            )
-          )
-        ),
-      )
-  }
-
-  private def convertToContractStateEvents(
-      tx: TransactionLogUpdate
-  ): Vector[ContractStateEvent] =
-    tx match {
-      case tx: TransactionLogUpdate.TransactionAccepted =>
-        tx.events.iterator.collect(convertLogToStateEvent).toVector
-      case _: TransactionLogUpdate.ReassignmentAccepted =>
-        Vector(ReassignmentAccepted)
-      case _ => Vector.empty
-    }
 
   private def convertTransactionAccepted(
       offset: Offset,
@@ -447,8 +395,12 @@ private[platform] object InMemoryStateUpdater {
           packageVersion = None,
           commandId = txAccepted.completionInfoO.map(_.commandId).getOrElse(""),
           workflowId = txAccepted.transactionMeta.workflowId.getOrElse(""),
-          contractKey = create.keyOpt.map(k =>
-            com.digitalasset.daml.lf.transaction.Versioned(create.version, k.value)
+          keyInfo = create.keyOpt.map(k =>
+            KeyInfo(
+              value = com.digitalasset.daml.lf.transaction.Versioned(create.version, k.value),
+              hash = k.globalKey.hash,
+              maintainers = k.maintainers,
+            )
           ),
           treeEventWitnesses = blinding.disclosure.getOrElse(nodeId, Set.empty),
           flatEventWitnesses =
@@ -460,8 +412,6 @@ private[platform] object InMemoryStateUpdater {
             com.digitalasset.daml.lf.transaction.Versioned(create.version, create.arg),
           createSignatories = create.signatories,
           createObservers = create.stakeholders.diff(create.signatories),
-          createKeyHash = create.keyOpt.map(_.globalKey.hash),
-          createKeyMaintainers = create.keyOpt.map(_.maintainers),
           authenticationData = contractInfo.contractAuthenticationData,
           representativePackageId = contractInfo.representativePackageId match {
             case RepresentativePackageId.SameAsContractPackageId => create.templateId.packageId
@@ -483,10 +433,13 @@ private[platform] object InMemoryStateUpdater {
           packageName = exercise.packageName,
           commandId = txAccepted.completionInfoO.map(_.commandId).getOrElse(""),
           workflowId = txAccepted.transactionMeta.workflowId.getOrElse(""),
-          contractKey = exercise.keyOpt.map(k =>
-            com.digitalasset.daml.lf.transaction.Versioned(exercise.version, k.value)
+          keyInfo = exercise.keyOpt.map(k =>
+            TransactionLogUpdate.KeyInfo(
+              value = com.digitalasset.daml.lf.transaction.Versioned(exercise.version, k.value),
+              hash = k.globalKey.hash,
+              maintainers = k.maintainers,
+            )
           ),
-          contractKeyHash = exercise.keyOpt.map(_.globalKey.hash),
           treeEventWitnesses = blinding.disclosure.getOrElse(nodeId, Set.empty),
           flatEventWitnesses =
             if (exercise.consuming && txAccepted.isAcsDelta(exercise.targetCoid))
@@ -525,6 +478,7 @@ private[platform] object InMemoryStateUpdater {
               synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
               traceContext = SerializableTraceContext(txAccepted.traceContext).toDamlProto,
               trafficCost = completionInfo.paidTrafficCost.value,
+              transactionHash = txAccepted.transactionHash.map(_.unwrap),
             ),
           updateId = txAccepted.updateId,
         )
@@ -540,7 +494,7 @@ private[platform] object InMemoryStateUpdater {
       completionStreamResponseO = completionStreamResponse,
       synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
       recordTime = txAccepted.recordTime.toLf,
-      externalTransactionHash = txAccepted.externalTransactionHash,
+      transactionHash = txAccepted.transactionHash,
     )(txAccepted.traceContext)
   }
 
@@ -554,20 +508,22 @@ private[platform] object InMemoryStateUpdater {
     TransactionLogUpdate.TransactionRejected(
       offset = offset,
       completionStreamResponse = CompletionFromTransaction.rejectedCompletion(
-        CompletionFromTransaction.CommonCompletionProperties.createFromRecordTimeAndSynchronizerId(
-          submitters = u.completionInfo.actAs.toSet,
-          recordTime = u.recordTime.toLf,
-          completionOffset = offset,
-          commandId = u.completionInfo.commandId,
-          userId = u.completionInfo.userId,
-          submissionId = u.completionInfo.submissionId,
-          deduplicationOffset = deduplicationOffset,
-          deduplicationDurationSeconds = deduplicationDurationSeconds,
-          deduplicationDurationNanos = deduplicationDurationNanos,
-          synchronizerId = u.synchronizerId.toProtoPrimitive,
-          traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
-          trafficCost = u.completionInfo.paidTrafficCost.value,
-        ),
+        CompletionFromTransaction.CommonCompletionProperties
+          .createFromRecordTimeAndSynchronizerId(
+            submitters = u.completionInfo.actAs.toSet,
+            recordTime = u.recordTime.toLf,
+            completionOffset = offset,
+            commandId = u.completionInfo.commandId,
+            userId = u.completionInfo.userId,
+            submissionId = u.completionInfo.submissionId,
+            deduplicationOffset = deduplicationOffset,
+            deduplicationDurationSeconds = deduplicationDurationSeconds,
+            deduplicationDurationNanos = deduplicationDurationNanos,
+            synchronizerId = u.synchronizerId.toProtoPrimitive,
+            traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
+            trafficCost = u.completionInfo.paidTrafficCost.value,
+            transactionHash = u.transactionHash.map(_.unwrap),
+          ),
         status = u.reasonTemplate.status,
       ),
     )(u.traceContext)
@@ -597,6 +553,7 @@ private[platform] object InMemoryStateUpdater {
               synchronizerId = u.synchronizerId.toProtoPrimitive,
               traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
               trafficCost = completionInfo.paidTrafficCost.value,
+              transactionHash = None,
             ),
           updateId = u.updateId,
         )
@@ -635,6 +592,15 @@ private[platform] object InMemoryStateUpdater {
         }
         .toVector,
     )(u.traceContext)
+
+  private def convertReceivedAcsCommitment(
+      offset: Offset,
+      u: Update.ReceivedAcsCommitment,
+  ) =
+    TransactionLogUpdate.ReceivedAcsCommitment(
+      offset = offset,
+      update = u,
+    )
 
   private def deduplicationInfo(
       completionInfo: CompletionInfo

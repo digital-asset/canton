@@ -35,7 +35,6 @@ import com.digitalasset.canton.platform.store.{
   DbType,
   FlywayMigrations,
   LedgerApiContractStoreImpl,
-  PruningOffsetService,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
@@ -125,7 +124,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
       )
     } yield {
       val engine = Some(
-        new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
+        new Engine(EngineConfig(LanguageVersion.stableLfVersions), loggerFactory)
       )
       new JdbcLedgerWriteDao(
         dbDispatcher = dbSupport.dbDispatcher,
@@ -172,7 +171,6 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
           loadPackage = (packageId, _) => loadPackage(packageId),
           loggerFactory = loggerFactory,
         ),
-        pruningOffsetService = pruningOffsetService,
         contractStore = contractStore,
         achsStateCache = new AchsStateCache(loggerFactory),
         scheduler = system.scheduler,
@@ -186,9 +184,6 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
   protected var ledgerEndCache: MutableLedgerEndCache = _
   protected var contractStore: LedgerApiContractStoreImpl = _
   protected var stringInterningView: StringInterningView = _
-  protected val pruningOffsetService: PruningOffsetService = mock[PruningOffsetService]
-  when(pruningOffsetService.pruningOffset(any[TraceContext]))
-    .thenReturn(Future.successful(None))
 
   // `dbDispatcher` and `ledgerDao` depend on the `postgresFixture` which is in turn initialized `beforeAll`
   private var resource: Resource[LedgerDao] = _

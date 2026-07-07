@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, config}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level.{INFO, WARN}
@@ -540,7 +540,8 @@ class SequencerConnectionPoolImplTest
         val createdConfigs = (0 to 5).map(createdConnections.apply).map(_.config)
 
         clue("one connection per sequencer") {
-          val received = pool.getConnections("test", PositiveInt.three, exclusions = Set.empty)
+          val received =
+            pool.getConnections("test", PositiveInt.three, excluded = Set.empty, acceptableO = None)
 
           received.map(_.attributes.sequencerId) shouldBe Set(
             testSequencerId(1),
@@ -557,26 +558,73 @@ class SequencerConnectionPoolImplTest
 
         clue("round robin") {
           val exclusions = Set(testSequencerId(2), testSequencerId(3))
-          val received1 = pool.getConnections("test", PositiveInt.one, exclusions)
-          val received2 = pool.getConnections("test", PositiveInt.one, exclusions)
-          val received3 = pool.getConnections("test", PositiveInt.one, exclusions)
+          val received1 =
+            pool.getConnections("test", PositiveInt.one, exclusions, acceptableO = None)
+          val received2 =
+            pool.getConnections("test", PositiveInt.one, exclusions, acceptableO = None)
+          val received3 =
+            pool.getConnections("test", PositiveInt.one, exclusions, acceptableO = None)
 
           Set(received1, received2, received3).map(_.loneElement.config) shouldBe
             Set(createdConfigs(0), createdConfigs(1), createdConfigs(2))
 
-          pool.getConnections("test", PositiveInt.one, exclusions) shouldBe received1
+          pool.getConnections(
+            "test",
+            PositiveInt.one,
+            exclusions,
+            acceptableO = None,
+          ) shouldBe received1
         }
 
         clue("request too many") {
           val received =
-            pool.getConnections("test", PositiveInt.tryCreate(5), exclusions = Set.empty)
+            pool.getConnections(
+              "test",
+              PositiveInt.tryCreate(5),
+              excluded = Set.empty,
+              acceptableO = None,
+            )
           received should have size 3
+        }
+
+        clue("request with set of acceptable sequencer IDs") {
+          val received =
+            pool.getConnections(
+              "test",
+              PositiveInt.three,
+              excluded = Set.empty,
+              acceptableO = Some(Set(testSequencerId(1), testSequencerId(2))),
+            )
+          received should have size 2
+          received.map(_.attributes.sequencerId) shouldBe Set(
+            testSequencerId(1),
+            testSequencerId(2),
+          )
+        }
+
+        clue("request with both exclusions and set of acceptable sequencer IDs") {
+          val received =
+            pool.getConnections(
+              "test",
+              PositiveInt.three,
+              excluded = Set(testSequencerId(1)),
+              acceptableO = Some(Set(testSequencerId(1), testSequencerId(2))),
+            )
+          received should have size 1
+          received.map(_.attributes.sequencerId) shouldBe Set(
+            testSequencerId(2)
+          )
         }
 
         clue("stop and start") {
           val exclusions = Set(testSequencerId(1), testSequencerId(3))
 
-          pool.getConnections("test", PositiveInt.three, exclusions) should have size 1
+          pool.getConnections(
+            "test",
+            PositiveInt.three,
+            exclusions,
+            acceptableO = None,
+          ) should have size 1
 
           val connectionsOnSeq2 = Set(createdConnections(3), createdConnections(4))
           connectionsOnSeq2.foreach(_.fail(reason = "test"))
@@ -584,7 +632,9 @@ class SequencerConnectionPoolImplTest
           eventually() {
             // Both connections have been restarted and can be obtained
             val received =
-              connectionsOnSeq2.map(_ => pool.getConnections("test", PositiveInt.three, exclusions))
+              connectionsOnSeq2.map(_ =>
+                pool.getConnections("test", PositiveInt.three, exclusions, acceptableO = None)
+              )
             forAll(received)(_ should have size 1)
             received.flatten.map(_.config) shouldBe connectionsOnSeq2.map(_.config)
           }
@@ -592,7 +642,12 @@ class SequencerConnectionPoolImplTest
           connectionsOnSeq2.foreach(_.fatal(reason = "test"))
           eventuallyForever() {
             // Connections don't get restarted
-            pool.getConnections("test", PositiveInt.three, exclusions) should have size 0
+            pool.getConnections(
+              "test",
+              PositiveInt.three,
+              exclusions,
+              acceptableO = None,
+            ) should have size 0
           }
         }
       }
@@ -663,7 +718,14 @@ class SequencerConnectionPoolImplTest
 
         // remove a connection and add a new one
         val connections =
-          pool.getConnections("test", nb = PositiveInt.three, exclusions = Set.empty).toSeq
+          pool
+            .getConnections(
+              "test",
+              nb = PositiveInt.three,
+              excluded = Set.empty,
+              acceptableO = None,
+            )
+            .toSeq
         val toRemove = connections.take(1).loneElement
         val toKeep = connections.drop(1)
 
@@ -687,6 +749,9 @@ class SequencerConnectionPoolImplTest
         }
       }
 
+      // Closing the pool closes all the metrics
+      poolMetrics.connectionHealthMetrics shouldBe empty
+
       withConnectionPool(
         nbConnections = PositiveInt.three,
         trustThreshold = PositiveInt.two,
@@ -694,15 +759,6 @@ class SequencerConnectionPoolImplTest
         metrics = poolMetrics, // reuse the same metrics
         namePrefix = "second-config",
       ) { (pool, _, _, _) =>
-        // when creating a new pool for the same synchronizer, the same metrics are reused and
-        // the connections from the first connect are still in there.
-        // this means, disconnecting from a synchronizer keeps the metric in fatal state
-        poolMetrics.connectionHealthMetrics should not be empty
-        forAll(currentMetrics) { case (name, value) =>
-          name should startWith("first-config")
-          value shouldBe 0 // fatal
-        }
-
         pool.start().futureValueUS.value
 
         // the pool startup removes all previous (lingering) metrics and creates new ones
@@ -714,6 +770,51 @@ class SequencerConnectionPoolImplTest
           }
         }
       }
+    }
+
+    "clean up only the metrics associated to a pool" in {
+      val poolMetrics = new SequencerClientMetrics(
+        new SequencerClientHistograms(MetricName("test"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(MetricsContext.Empty).connectionPool
+
+      def currentMetricsPsids =
+        poolMetrics.connectionHealthMetrics.map { case (mc, _gauge) => mc.labels.get("psid") }.toSet
+      def currentMetricsSize = poolMetrics.connectionHealthMetrics.size
+
+      withConnectionPool(
+        nbConnections = PositiveInt.three,
+        trustThreshold = PositiveInt.three,
+        i => mkConnectionAttributes(synchronizerIndex = 1, sequencerIndex = i + 1),
+        metrics = poolMetrics, // reuse the same metrics
+        metricsContext = MetricsContext("psid" -> "psid1"),
+        namePrefix = "first-config",
+      ) { (pool1, _, _, _) =>
+        pool1.start().futureValueUS.value
+
+        currentMetricsSize shouldBe 3
+        currentMetricsPsids shouldBe Set(Some("psid1"))
+
+        withConnectionPool(
+          nbConnections = PositiveInt.two,
+          trustThreshold = PositiveInt.two,
+          i => mkConnectionAttributes(synchronizerIndex = 1, sequencerIndex = i + 1),
+          metrics = poolMetrics, // reuse the same metrics
+          metricsContext = MetricsContext("psid" -> "psid2"),
+          namePrefix = "second-config",
+        ) { (pool2, _, _, _) =>
+          pool2.start().futureValueUS.value
+
+          currentMetricsSize shouldBe 5
+          currentMetricsPsids shouldBe Set(Some("psid1"), Some("psid2"))
+        }
+
+        currentMetricsSize shouldBe 3
+        currentMetricsPsids shouldBe Set(Some("psid1"))
+      }
+
+      currentMetricsSize shouldBe 0
+      currentMetricsPsids shouldBe Set()
     }
   }
 

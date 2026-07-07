@@ -69,6 +69,10 @@ abstract class P2PGrpcStreamingReceiver(
       updateTimer(
         metrics.p2p.send.grpcLatency,
         Duration.between(sendInstant.asJavaInstant, Instant.now),
+      )(
+        metricsContext.withExtraLabels(
+          metrics.p2p.send.labels.SourceSequencer -> message.sentBy
+        )
       )
     )
     if (!sequencerIdPromiseUS.isCompleted) {

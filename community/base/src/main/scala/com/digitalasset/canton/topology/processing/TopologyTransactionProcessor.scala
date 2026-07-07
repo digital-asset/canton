@@ -7,10 +7,8 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.metrics.CacheMetrics
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.SynchronizerCryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,7 +29,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.{AllMembersOfSynchronizer, Deliver, DeliverError}
-import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.cache.TopologyStateWriteThroughCache
 import com.digitalasset.canton.topology.client.*
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor.subscriptionTimestamp
@@ -45,7 +43,9 @@ import com.digitalasset.canton.topology.transaction.checks.RequiredTopologyMappi
 import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyChangeOp}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}
@@ -84,7 +84,12 @@ class TopologyTransactionProcessor(
       store,
       cache,
       lookup =>
-        RequiredTopologyMappingChecks(Some(staticSynchronizerParameters), lookup, loggerFactory),
+        RequiredTopologyMappingChecks(
+          Some(staticSynchronizerParameters),
+          staticSynchronizerParameters.protocolVersion,
+          lookup,
+          loggerFactory,
+        ),
       pureCrypto,
       loggerFactory,
     )
@@ -121,108 +126,6 @@ class TopologyTransactionProcessor(
       )
       .discard
 
-  private def initialise(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-
-    ErrorUtil.requireState(
-      !initialised.getAndSet(true),
-      "topology processor is already initialised",
-    )
-
-    def initClientFromSequencedTs(
-        sequencedTs: SequencedTime
-    ): FutureUnlessShutdown[NonEmpty[Seq[(EffectiveTime, ApproximateTime)]]] = for {
-      // we need to figure out any future effective time. if we had been running, there would be a clock
-      // scheduled to poke the synchronizer client at the given time in order to adjust the approximate timestamp up to the
-      // effective time at the given point in time. we need to recover these as otherwise, we might be using outdated
-      // topology snapshots on startup. (wouldn't be tragic as by getting the rejects, we'd be updating the timestamps
-      // anyway).
-      upcoming <- synchronizeWithClosing(functionFullName)(
-        store.findUpcomingEffectiveChanges(sequencedTs.value)
-        // find effective time of sequenced Ts (directly from store)
-        // merge times
-      )
-    } yield {
-      // we have (ts+e, ts) and quite a few te in the future, so we create list of upcoming changes and sort them
-
-      val head = (
-        EffectiveTime(
-          sequencedTs.value.plus(pureCrypto.staticSynchronizerParameters.topologyChangeDelay.unwrap)
-        ),
-        ApproximateTime(sequencedTs.value),
-      )
-      val tail = upcoming.map(x => (x.validFrom, x.validFrom.toApproximate))
-
-      NonEmpty(Seq, head, tail*).sortBy { case (effectiveTime, _) => effectiveTime.value }
-    }
-
-    for {
-      stateStoreTsO <- synchronizeWithClosing(functionFullName)(maxTimestampFromStore())
-      clientTs = subscriptionTimestamp(
-        start,
-        stateStoreTsO.map { case (_, effective) => effective },
-      )
-
-      sequencedAndClientInitTimes <- clientTs match {
-        case Left(sequencedTs) =>
-          // approximate time is sequencedTs
-          initClientFromSequencedTs(sequencedTs).map(sequencedTs -> _)
-        case Right(effective) =>
-          // effective and approximate time are effective time
-          FutureUnlessShutdown.pure(
-            stateStoreTsO
-              .map { case (sequenced, _) => sequenced }
-              .getOrElse(SequencedTime(CantonTimestamp.MinValue)) ->
-              NonEmpty(
-                Seq,
-                (effective, effective.toApproximate),
-              )
-          )
-      }
-      (sequencedTs, clientInitTimes) = sequencedAndClientInitTimes
-    } yield {
-      logger.debug(
-        s"Initializing topology processing for start=$start with effective ts ${clientInitTimes.map(_._1)}"
-      )
-
-      // let our client know about the latest known information right now, but schedule the updating
-      // of the approximate time subsequently
-      val maxEffective = clientInitTimes.map { case (effective, _) => effective }.max1
-      listenersUpdateHeadWithoutTopologyChanges(
-        sequencedTs,
-        maxEffective,
-        sequencedTs.toApproximate,
-      )
-
-      val directExecutionContext = DirectExecutionContext(noTracingLogger)
-      clientInitTimes.foreach { case (effective, _approximate) =>
-        // if the effective time is in the future, schedule a clock to update the time accordingly
-        synchronizerTimeTracker.awaitTick(effective.value) match {
-          case None =>
-            // The effective time is in the past. Directly advance our approximate time to the respective effective time
-            listenersUpdateHeadWithoutTopologyChanges(
-              sequencedTs,
-              effective,
-              effective.toApproximate,
-            )
-          case Some(tickF) =>
-            FutureUtil.doNotAwait(
-              tickF.map(_ =>
-                listenersUpdateHeadWithoutTopologyChanges(
-                  sequencedTs,
-                  effective,
-                  effective.toApproximate,
-                )
-              )(directExecutionContext),
-              "Notifying listeners to the topology processor's head",
-            )
-        }
-      }
-    }
-  }
-
   private def listenersUpdateHeadWithoutTopologyChanges(
       sequenced: SequencedTime,
       effective: EffectiveTime,
@@ -241,11 +144,25 @@ class TopologyTransactionProcessor(
     * rather than [[createHandler]]
     */
   def subscriptionStartsAt(
-      start: SubscriptionStart,
-      synchronizerTimeTracker: SynchronizerTimeTracker,
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = initialise(start, synchronizerTimeTracker)
+      start: SubscriptionStart
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    ErrorUtil.requireState(
+      !initialised.getAndSet(true),
+      "topology processor is already initialised",
+    )
+    subscriptionTimestamp(start).foreach { sequenced =>
+      // Push the known topology time forward with the subscription time. This closes the gap
+      // between the known timestamps in the topology store and the timestamp this node
+      // uses as the subscription starting point.
+      listenersUpdateHeadWithoutTopologyChanges(
+        sequenced,
+        EffectiveTime(sequenced.value + staticSynchronizerParameters.topologyChangeDelay),
+        sequenced.toApproximate,
+      )
+    }
+
+    FutureUnlessShutdown.unit
+  }
 
   /** process envelopes mostly asynchronously (used by participant)
     *
@@ -361,11 +278,9 @@ class TopologyTransactionProcessor(
           }
         }
 
-      override def subscriptionStartsAt(
-          start: SubscriptionStart,
-          synchronizerTimeTracker: SynchronizerTimeTracker,
-      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        TopologyTransactionProcessor.this.subscriptionStartsAt(start, synchronizerTimeTracker)
+      override def subscriptionStartsAt(start: SubscriptionStart)(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Unit] = TopologyTransactionProcessor.this.subscriptionStartsAt(start)
     }
 
   /** Checks that topology broadcast envelopes satisfy the following conditions:
@@ -541,6 +456,7 @@ object TopologyTransactionProcessor {
   def createProcessorAndClientForSynchronizer(
       topologyStore: TopologyStore[TopologyStoreId.SynchronizerStore],
       upgradeTimeFromPredecessor: Option[CantonTimestamp],
+      sequencerSnapshotTimestamp: Option[SequencedTime],
       pureCrypto: SynchronizerCryptoPureApi,
       parameters: CantonNodeParameters,
       topologyConfig: TopologyConfig,
@@ -549,8 +465,6 @@ object TopologyTransactionProcessor {
       topologyCacheMetrics: CacheMetrics,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
-  )(
-      sequencerSnapshotTimestamp: Option[EffectiveTime] = None
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -585,7 +499,8 @@ object TopologyTransactionProcessor {
       staticSynchronizerParameters,
       topologyStore,
       cache,
-      upgradeTimeFromPredecessor,
+      synchronizerUpgradeTime = upgradeTimeFromPredecessor,
+      sequencerSnapshotTimestamp = sequencerSnapshotTimestamp,
       NoPackageDependencies,
       parameters.cachingConfigs,
       parameters.enableAdditionalConsistencyChecks,
@@ -593,7 +508,7 @@ object TopologyTransactionProcessor {
       parameters.processingTimeouts,
       futureSupervisor,
       loggerFactory,
-    )(sequencerSnapshotTimestamp)
+    )
 
     topologyClientF.map { client =>
       // Subscribe the new client object to updates from the subscriber
@@ -605,32 +520,21 @@ object TopologyTransactionProcessor {
 
   /** Returns the timestamps for initializing the client for a restarted or fresh subscription. */
   def subscriptionTimestamp(
-      start: SubscriptionStart,
-      maxStoredEffectiveTimeO: Option[EffectiveTime],
-  ): Either[SequencedTime, EffectiveTime] = {
+      start: SubscriptionStart
+  ): Option[SequencedTime] = {
     import SubscriptionStart.*
     start match {
       case restart: ResubscriptionStart =>
-        resubscriptionTimestamp(restart)
+        Some(resubscriptionTimestamp(restart))
       case FreshSubscription =>
-        maxStoredEffectiveTimeO.fold(
-          // Fresh subscription with an empty synchronizer topology store
-          // client: init at ts = min
-          Right(EffectiveTime(CantonTimestamp.MinValue))
-        ) { effective =>
-          // Fresh subscription with a bootstrapping timestamp
-          // NOTE: we assume that the bootstrapping topology snapshot does not contain the first message
-          // that we are going to receive from the synchronizer
-          // client: init at max(effective-time) of bootstrapping transactions
-          Right(effective)
-        }
+        None
     }
   }
 
   /** Returns the timestamps for initializing the client for a restarted subscription. */
   def resubscriptionTimestamp(
       start: ResubscriptionStart
-  ): Either[SequencedTime, EffectiveTime] = {
+  ): SequencedTime = {
     import SubscriptionStart.*
     start match {
       // clean-head subscription. this means that the first event we are going to get is > cleanPrehead
@@ -639,15 +543,15 @@ object TopologyTransactionProcessor {
       //         plus, there might be "effective times" > cleanPrehead, so we need to schedule the adjustment
       //         of the approximate time to the effective time
       case CleanHeadResubscriptionStart(cleanPrehead) =>
-        Left(SequencedTime(cleanPrehead))
+        SequencedTime(cleanPrehead)
       // dirty or replay subscription.
       // client: same as clean-head resubscription
       case ReplayResubscriptionStart(_, Some(cleanPrehead)) =>
-        Left(SequencedTime(cleanPrehead))
+        SequencedTime(cleanPrehead)
       // dirty re-subscription of a node that crashed before fully processing the first event
       // client: initialise client with firstReplayed (careful: firstReplayed is known, but firstReplayed.immediateSuccessor not)
       case ReplayResubscriptionStart(firstReplayed, None) =>
-        Right(EffectiveTime(firstReplayed.immediatePredecessor))
+        SequencedTime(firstReplayed.immediatePredecessor)
     }
   }
 }

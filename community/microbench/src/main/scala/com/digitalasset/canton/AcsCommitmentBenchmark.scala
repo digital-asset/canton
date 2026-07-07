@@ -12,14 +12,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
-import com.digitalasset.canton.config.{
-  BatchingConfig,
-  CommitmentSendDelay,
-  DefaultProcessingTimeouts,
-  NonNegativeDuration,
-  PositiveDurationSeconds,
-  TestingConfigInternal,
-}
+import com.digitalasset.canton.config.{BatchingConfig, CommitmentSendDelay, DefaultProcessingTimeouts, NonNegativeDuration, PositiveDurationSeconds, TestingConfigInternal}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{LtHash16, SyncCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -33,7 +26,9 @@ import com.digitalasset.canton.participant.store.{AcsCommitmentStore, AcsCounter
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.{LegacyAcsCommitment, LegacyCommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
 import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId, OpenEnvelope, Recipients}
@@ -393,6 +388,7 @@ class AcsCommitmentBenchmark
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
+        any[TrafficCostValidator],
         any[Boolean],
       )(any[TraceContext], any[MetricsContext])
     ).thenReturn(EitherT.pure(())): Unit
@@ -566,7 +562,7 @@ class AcsCommitmentBenchmark
           CantonTimestamp,
           CantonTimestamp,
       )
-  ): FutureUnlessShutdown[Set[SignedProtocolMessage[AcsCommitment]]] = {
+  ): FutureUnlessShutdown[Set[SignedProtocolMessage[LegacyAcsCommitment]]] = {
     val (contractDefinition, fromExclusive, toInclusive) = params
     FutureUnlessShutdown.sequence(
       contractDefinition.counterParticipants.map { participant =>
@@ -600,7 +596,7 @@ class AcsCommitmentBenchmark
         val cmt = commitmentsFromStkhdCmts(Seq(stakeholderCommitment(stakeholderCommitments)))
         val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
         val period =
-          CommitmentPeriod
+          LegacyCommitmentPeriod
             .create(
               fromExclusive,
               toInclusive,
@@ -608,7 +604,7 @@ class AcsCommitmentBenchmark
             )
             .getOrElse(throw new Exception("missing commitment period"))
         val payload =
-          AcsCommitment
+          LegacyAcsCommitment
             .create(synchronizerId, participant, localId, period, cmt, testedProtocolVersion)
         snapshotF.flatMap { snapshot =>
           SignedProtocolMessage
@@ -623,7 +619,7 @@ class AcsCommitmentBenchmark
   }
   private def stakeholderCommitment(
       contracts: Map[LfContractId, ReassignmentCounter]
-  ): AcsCommitment.CommitmentType = {
+  ): LegacyAcsCommitment.CommitmentType = {
     val h = LtHash16()
     contracts.keySet.foreach { cid =>
       h.add(
@@ -657,7 +653,7 @@ final case class StakeholderGroup(
     passiveContractIds: Seq[LfContractId],
 )
 
-sealed class StakeholderGroupType {}
+sealed class StakeholderGroupType
 object StakeholderGroupType {
 
   def parse(string: String): StakeholderGroupType = string match {

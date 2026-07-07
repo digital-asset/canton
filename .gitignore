@@ -77,3 +77,6 @@ target/
 *.hprof
 *.log
 *.clog
+
+# Local tmp dir
+.citmp/

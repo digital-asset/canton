@@ -28,7 +28,6 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   UpdatePartyIdentityProviderIdResponse,
 }
 import com.daml.logging.LoggingContext
-import com.daml.nonempty.NonEmpty
 import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.auth.AuthorizationChecksErrors
@@ -36,31 +35,22 @@ import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.v30.{SigningKeyScheme, SigningKeyUsage}
 import com.digitalasset.canton.crypto.{Signature, SigningKeysWithThreshold, SigningPublicKey, v30}
+import com.digitalasset.canton.ledger.api.PartyDetails
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.validation.FieldValidator.{requireParty, *}
+import com.digitalasset.canton.ledger.api.validation.FieldValidator.*
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
 import com.digitalasset.canton.ledger.api.validation.{CryptoValidator, ValidationErrors}
-import com.digitalasset.canton.ledger.api.{
-  IdentityProviderId,
-  ObjectMeta,
-  PartyDetails,
-  User,
-  UserRight,
-}
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.error.groups.{
   PartyManagementServiceErrors,
   RequestValidationErrors,
 }
-import com.digitalasset.canton.ledger.localstore.api.UserManagementStore.UserInfo
 import com.digitalasset.canton.ledger.localstore.api.{
-  ObjectMetaUpdate,
   PartyDetailsUpdate,
   PartyRecord,
   PartyRecordStore,
   PartyRecordUpdate,
-  UserManagementStore,
 }
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.Observation
@@ -91,8 +81,18 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.PositiveTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.user.store.UserManagementStore
+import com.digitalasset.canton.user.store.UserManagementStore.UserInfo
+import com.digitalasset.canton.user.{
+  IdentityProviderId,
+  ObjectMeta,
+  ObjectMetaUpdate,
+  User,
+  UserRight,
+}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code.ALREADY_EXISTS
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer

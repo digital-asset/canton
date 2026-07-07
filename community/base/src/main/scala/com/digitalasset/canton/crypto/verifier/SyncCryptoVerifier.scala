@@ -6,7 +6,8 @@ package com.digitalasset.canton.crypto.verifier
 import cats.data.EitherT
 import cats.implicits.{catsSyntaxAlternativeSeparate, catsSyntaxValidatedId}
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.config.CacheConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.RsaOaepSha256
@@ -33,12 +34,19 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.{
+  DecryptionHistograms,
+  DecryptionMetrics,
+  SigningHistograms,
+  SigningMetrics,
+}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 
 import scala.concurrent.ExecutionContext
@@ -88,6 +96,15 @@ class SyncCryptoVerifier(
       // with a public signing key, and the private key conversion cache is never used.
       privateKeyConversionCacheTtl = None,
       signatureVerificationParallelism = signatureVerificationParallelism,
+      encryptionParallelism = PositiveInt.one, // not used
+      signingMetrics = new SigningMetrics(
+        new SigningHistograms(MetricName("signing"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(MetricsContext.Empty), // not used
+      decryptionMetrics = new DecryptionMetrics(
+        new DecryptionHistograms(MetricName("decryption"))(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(MetricsContext.Empty), // not used
       loggerFactory = loggerFactory,
     )
 
@@ -170,7 +187,7 @@ class SyncCryptoVerifier(
       signerStr: String,
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, SigningPublicKey] =
     (for {
-      _ <- Either.cond(
+      _ <- Either.cond[SignatureCheckError, Unit](
         validKeys.nonEmpty,
         (),
         SignerHasNoValidKeys(

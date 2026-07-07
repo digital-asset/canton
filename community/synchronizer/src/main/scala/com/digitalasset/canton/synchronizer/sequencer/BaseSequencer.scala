@@ -24,9 +24,11 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.{
   SequencerAdministrationError,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.PayloadId
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -35,6 +37,10 @@ import scala.concurrent.ExecutionContext
 
 /** Implements parts of [[Sequencer]] interface, common to all sequencers. Adds `*Internal` methods
   * without implementation for variance among specific sequencer subclasses.
+  *
+  * @param disableSubmissionChecksForTesting
+  *   if true, then the write path side checks are disabled. This should only be used for testing
+  *   purposes.
   */
 abstract class BaseSequencer(
     protected val loggerFactory: NamedLoggerFactory,
@@ -42,6 +48,8 @@ abstract class BaseSequencer(
     clock: Clock,
     signatureVerifier: SignatureVerifier,
     protocolVersion: ProtocolVersion,
+    lsuSequencingBounds: Option[LsuSequencingBounds],
+    protected val disableSubmissionChecksForTesting: Boolean,
 )(implicit executionContext: ExecutionContext, trace: Tracer)
     extends Sequencer
     with NamedLogging
@@ -63,46 +71,69 @@ abstract class BaseSequencer(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
     withSpan("Sequencer.sendAsyncSigned") { implicit traceContext => span =>
+      // TODO(#32317) - reorganize validations into deterministic and snapshot dependent.
+      //   all validations other than authentication and stuff related to proto deserialization
+      //   need to go into BaseSequencer instead. Also, we should have the same validation
+      //   logic on the write as well as the read path.
       val submission = signedSubmission.content
       span.setAttribute("sender", submission.sender.toString)
       span.setAttribute("message_id", submission.messageId.unwrap)
-      for {
-        estimatedSequencingTime <- EitherT.right(sequencingTime)
-        signedSubmissionWithFixedTs <- signatureVerifier
-          .verifySubmissionRequestSignature(
-            signedSubmission,
-            HashPurpose.SubmissionRequestSignature,
-            estimatedSequencingTime.getOrElse(clock.now),
-          )
-          .leftMap(e => SubmissionRequestRefused(e))
-        isMemberEnabled <- EitherT.right[SequencerDeliverError](
-          isEnabled(submission.sender)
-        )
-        _ <- EitherT.cond[FutureUnlessShutdown](
-          isMemberEnabled,
-          (),
-          SubmissionRequestRefused(
-            s"Member ${submission.sender} is disabled at the sequencer"
-          ),
-        )
-        _ <- sendAsyncSignedInternal(signedSubmissionWithFixedTs)
-      } yield ()
+      val validateET =
+        if (disableSubmissionChecksForTesting)
+          EitherTUtil.unitUS[CantonBaseError]
+        else
+          for {
+            estimatedSequencingTime <- EitherT.right(sequencingTime)
+            _ <- signatureVerifier
+              .verifySubmissionRequestSignature(
+                signedSubmission,
+                HashPurpose.SubmissionRequestSignature,
+                estimatedSequencingTime.getOrElse(clock.now),
+              )
+              .leftMap(e => SubmissionRequestRefused(e))
+            isMemberEnabled <- EitherT.right[SequencerDeliverError](
+              isEnabled(submission.sender)
+            )
+            _ <- EitherT.cond[FutureUnlessShutdown](
+              isMemberEnabled,
+              (),
+              SubmissionRequestRefused(
+                s"Member ${submission.sender} is disabled at the sequencer"
+              ),
+            )
+          } yield ()
+      validateET.flatMap(_ => sendAsyncSignedInternal(signedSubmission))
     }
 
   override def acknowledgeSigned(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(
       implicit traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] = for {
-    estimatedSequencingTime <-
-      if (protocolVersion >= ProtocolVersion.v35) EitherT.rightT[FutureUnlessShutdown, String](None)
-      else EitherT.right(sequencingTime).map(ts => Some(ts.getOrElse(clock.now)))
-    signedAcknowledgeRequestWithFixedTs <- signatureVerifier.verifyAcknowledgeRequestSignature(
-      signedAcknowledgeRequest,
-      HashPurpose.AcknowledgementSignature,
-      estimatedSequencingTime,
-      protocolVersion,
-    )
-    _ <- EitherT.right(acknowledgeSignedInternal(signedAcknowledgeRequestWithFixedTs))
-  } yield ()
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val ts = signedAcknowledgeRequest.content.timestamp
+    val shouldDropAckBeforeUpgradeTime =
+      lsuSequencingBounds.fold(false)(_.upgradeTime >= ts)
+
+    if (shouldDropAckBeforeUpgradeTime) {
+      logger.debug(
+        s"Dropping acknowledgement from ${signedAcknowledgeRequest.content.member} because it is before upgrade time"
+      )
+
+      EitherTUtil.unitUS
+    } else {
+      for {
+        estimatedSequencingTime <-
+          if (protocolVersion >= ProtocolVersion.v35)
+            EitherT.rightT[FutureUnlessShutdown, String](None)
+          else EitherT.right(sequencingTime).map(ts => Some(ts.getOrElse(clock.now)))
+        _ <- signatureVerifier.verifyAcknowledgeRequestSignature(
+          signedAcknowledgeRequest,
+          HashPurpose.AcknowledgementSignature,
+          estimatedSequencingTime,
+          protocolVersion,
+        )
+        _ <- EitherT.right(acknowledgeSignedInternal(signedAcknowledgeRequest))
+      } yield ()
+    }
+  }
 
   protected def acknowledgeSignedInternal(
       signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]

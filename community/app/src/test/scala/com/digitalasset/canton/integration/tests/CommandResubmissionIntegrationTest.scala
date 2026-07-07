@@ -4,12 +4,12 @@
 package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -19,8 +19,9 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.isConfirmationResponse
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.util.FutureUtil
 
-import java.util.concurrent.atomic.AtomicBoolean
+import scala.concurrent.Promise
 
 trait CommandResubmissionIntegrationTest
     extends CommunityIntegrationTest
@@ -54,18 +55,38 @@ trait CommandResubmissionIntegrationTest
 
     val sequencer = getProgrammableSequencer(sequencer1.name)
 
-    val delayDone = new AtomicBoolean(false)
+    val receivedConfirmationResponse = Promise[Unit]()
+    val releasedConfirmationResponse = Promise[Unit]()
 
     sequencer.setPolicy_("delay the first confirmation response sent by a participant") { request =>
       request.sender match {
-        case _: ParticipantId if !delayDone.get && isConfirmationResponse(request) =>
-          environment.simClock.value.advance(threeSeconds.plusSeconds(1).asJava)
-          delayDone.set(true)
+        case _: ParticipantId
+            if !receivedConfirmationResponse.isCompleted && isConfirmationResponse(request) =>
+          receivedConfirmationResponse.success(())
+          SendDecision.HoldBack(releasedConfirmationResponse.future)
         case _ =>
-        // No action needs to be taken in any other case
+          // No action needs to be taken in any other case
+          SendDecision.Process
       }
-      SendDecision.Process
     }
+
+    FutureUtil.doNotAwait(
+      receivedConfirmationResponse.future.map { _ =>
+        logger.info(
+          "The first confirmation response has been received, advancing the clock and awaiting time on synchronizer"
+        )
+        environment.simClock.value.advance(threeSeconds.plusSeconds(1).asJava)
+        // The time moves lazily on the CantonBFT, hence the need to wait
+        TestUtils.waitForTargetTimeOnSynchronizerNode(
+          targetTime = environment.simClock.value.now,
+          logger = logger,
+        )(sequencer1)
+        logger.info("Releasing the first confirmation response")
+        releasedConfirmationResponse.success(())
+      },
+      "processing and releasing the first confirmation response has failed",
+    )
+
     loggerFactory.assertLogsUnordered(
       assertPingSucceeds(
         participant1,
@@ -95,6 +116,6 @@ trait CommandResubmissionIntegrationTest
 class CommandResubmissionReferenceIntegrationTestPostgres
     extends CommandResubmissionIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

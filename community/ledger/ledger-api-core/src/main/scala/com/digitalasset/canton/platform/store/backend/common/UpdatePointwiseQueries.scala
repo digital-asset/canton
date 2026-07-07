@@ -13,6 +13,7 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.protocol.UpdateId
+import com.google.protobuf.ByteString
 
 import java.sql.Connection
 
@@ -37,6 +38,9 @@ class UpdatePointwiseQueries(
             cSQL"t.update_id = $updateId"
           case LookupKey.ByOffset(offset) =>
             cSQL"t.event_offset = $offset"
+          case LookupKey.ByHash(hash) =>
+            val hashBytes = hash.toByteArray
+            cSQL"t.transaction_hash = $hashBytes"
         }
 
       SQL"""
@@ -59,5 +63,6 @@ object UpdatePointwiseQueries {
   object LookupKey {
     final case class ByUpdateId(updateId: UpdateId) extends LookupKey
     final case class ByOffset(offset: data.Offset) extends LookupKey
+    final case class ByHash(hash: ByteString) extends LookupKey
   }
 }

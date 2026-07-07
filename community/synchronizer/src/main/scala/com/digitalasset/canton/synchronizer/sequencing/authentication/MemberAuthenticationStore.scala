@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencing.authentication
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.Nonce
+import com.digitalasset.canton.crypto.{Fingerprint, Nonce}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -45,10 +45,12 @@ final case class StoredAuthenticationToken(
     member: Member,
     expireAt: CantonTimestamp,
     token: AuthenticationToken,
+    signingKeyFingerprint: Fingerprint, // track the key used to allow for per-key token revocations
 ) extends HasExpiry
 
 class MemberAuthenticationStore(
-    maxItemsPerMember: PositiveInt,
+    maxNoncesPerMember: PositiveInt,
+    maxTokensPerMember: PositiveInt,
     val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
@@ -66,15 +68,15 @@ class MemberAuthenticationStore(
     nonces
       .getAndUpdate(_.updatedWith(nonce.member) {
         case Some(nonces) =>
-          Some(nonce :: nonces.take(maxItemsPerMember.value - 1))
+          Some(nonce :: nonces.take(maxNoncesPerMember.value - 1))
         case None => Some(List(nonce))
       })
       .get(nonce.member)
       .foreach { previously =>
-        if (previously.sizeIs > maxItemsPerMember.value - 1) {
+        if (previously.sizeIs > maxNoncesPerMember.value - 1) {
           // leave a hint in case anyone will ever hit this.
           logger.info(
-            s"Dropping excess nonce for ${nonce.member} as max per member is ${maxItemsPerMember.value}"
+            s"Dropping excess nonce for ${nonce.member} as max per member is ${maxNoncesPerMember.value}"
           )
         }
       }
@@ -101,14 +103,14 @@ class MemberAuthenticationStore(
         case Some(tokens) =>
           // remove excess tokens
           // this is fine if called multiple times as it will subsequently just be a no-op
-          if (tokens.sizeIs > maxItemsPerMember.value - 1)
-            tokens.drop(maxItemsPerMember.value - 1).foreach { stored =>
+          if (tokens.sizeIs > maxTokensPerMember.value - 1)
+            tokens.drop(maxTokensPerMember.value - 1).foreach { stored =>
               tokenLookup.remove(stored.token).discard
             }
-          val limitedTokens = tokens.take(maxItemsPerMember.value - 1)
-          if (tokens.sizeIs > maxItemsPerMember.value - 1) {
+          val limitedTokens = tokens.take(maxTokensPerMember.value - 1)
+          if (tokens.sizeIs > maxTokensPerMember.value - 1) {
             logger.info(
-              s"Dropping excess auth token for ${token.member} as max per member is ${maxItemsPerMember.value}"
+              s"Dropping excess auth token for ${token.member} as max per member is ${maxTokensPerMember.value}"
             )
           }
           Some(token :: limitedTokens)
@@ -144,7 +146,7 @@ class MemberAuthenticationStore(
     def go(): Unit = if (!expiryQueue.isEmpty && expiryQueue.peek().expireAt <= timestamp) {
       expiryQueue.poll() match {
         case StoredNonce(member, _, _, _) => members.add(member).discard
-        case StoredAuthenticationToken(member, _, _) => members.add(member).discard
+        case StoredAuthenticationToken(member, _, _, _) => members.add(member).discard
       }
       go()
     }
@@ -177,5 +179,20 @@ class MemberAuthenticationStore(
     // this is fine racy wise as the auth token itself is unique
     // while at the same time, the tokenLookup use always makes the self-consistency check
     tokens.remove(member).foreach(_.foreach(stored => tokenLookup.remove(stored.token).discard))
+  }
+
+  def invalidateTokensByFingerprint(fingerprint: Fingerprint): Unit = {
+    val tokensForFingerprint =
+      tokenLookup.values.filter(_.signingKeyFingerprint == fingerprint).toList
+    tokensForFingerprint.foreach { stored =>
+      tokenLookup.remove(stored.token).discard
+      tokens
+        .updateWith(stored.member) {
+          case Some(memberTokens) =>
+            noneIfEmpty(memberTokens.filterNot(_.token == stored.token))
+          case None => None
+        }
+        .discard
+    }
   }
 }

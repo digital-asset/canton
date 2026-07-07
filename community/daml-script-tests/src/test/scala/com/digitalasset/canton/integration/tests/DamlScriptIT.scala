@@ -249,7 +249,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
 
   private lazy val maybeEnableLfDev: Seq[ConfigTransform] =
     if (enableLfDev)
-      ConfigTransforms.enableAlphaVersionSupport
+      ConfigTransforms.enableDevVersionSupport
     else Nil
 
   override def environmentDefinition: EnvironmentDefinition =
@@ -385,11 +385,6 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
     super.runTests(testName, args)
   }
 
-  "All project script IDs match expected result map script IDs" onlyRunWith protocolVersionForTesting in {
-    _ =>
-      expectedResults.keySet shouldEqual scriptIdsToTest.toSet
-  }
-
   def testGivenScriptId(testScriptId: String)(env: FixtureParam): Assertion = {
     import env.participant1
 
@@ -443,6 +438,23 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
       }
     }
   }
+
+  /** This function contains the actual tests run. Variation tests have an alternative tests
+    * override this.
+    */
+  protected def doRunTests(scriptIdsToTest: List[String]): Unit = {
+    "All project script IDs match expected result map script IDs" onlyRunWith protocolVersionForTesting in {
+      _ =>
+        expectedResults.keySet shouldEqual scriptIdsToTest.toSet
+    }
+
+    // scriptIdsToTest needs to be defined in order for individual tests to be defined
+    scriptIdsToTest.foreach { testScriptId =>
+      testScriptId onlyRunWith protocolVersionForTesting in testGivenScriptId(testScriptId)
+    }
+
+  }
+
 }
 
 class DamlScriptPV34LF22IT extends DamlScriptIT(LanguageVersion.v2_2) {
@@ -452,7 +464,7 @@ class DamlScriptPV34LF22IT extends DamlScriptIT(LanguageVersion.v2_2) {
   override lazy val projectName = "ScriptLF22Tests"
   override lazy val protocolVersionForTesting = ProtocolVersion.v34
 
-  override protected val scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
+  override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
   override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
@@ -536,10 +548,7 @@ class DamlScriptPV34LF22IT extends DamlScriptIT(LanguageVersion.v2_2) {
     "TransientFailure:testBio" -> Failure("FAILED_PRECONDITION"),
   )
 
-  // scriptIdsToTest needs to be defined in order for individual tests to be defined
-  scriptIdsToTest.foreach { testScriptId =>
-    testScriptId onlyRunWith protocolVersionForTesting in testGivenScriptId(testScriptId)
-  }
+  doRunTests(scriptIdsToTest)
 }
 
 abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScriptIT(langVersion) {
@@ -548,7 +557,7 @@ abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScript
 
   override lazy val protocolVersionForTesting = ProtocolVersion.v35
 
-  override protected val scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
+  override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
   override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
@@ -632,19 +641,20 @@ abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScript
     "TransientFailure:testBio" -> Failure("FAILED_PRECONDITION"),
   )
 
-  // scriptIdsToTest needs to be defined in order for individual tests to be defined
-  scriptIdsToTest.foreach { testScriptId =>
-    testScriptId onlyRunWith protocolVersionForTesting in testGivenScriptId(testScriptId)
-  }
 }
 
-class DamlScriptPV35LF23IT extends DamlScriptPV35IT(LanguageVersion.v2_3) {
+/** This class is reused in variation testing, using LF version 2.3 Protocol version 3.5. When newer
+  * versions are to be tested and included in variations a new Base class will be needed and that
+  * need to be abstract as well (#33803) see also the usage in
+  * [[com.digitalasset.canton.integration.tests.variations.DamlScriptITLatestStable]]
+  */
+abstract class DamlScriptPV35LF23ITBase extends DamlScriptPV35IT(LanguageVersion.v2_3) {
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 
   override lazy val projectName = "ScriptLF23Tests"
 
-  override val expectedResults = super.expectedResults ++ List(
+  override def expectedResults = super.expectedResults ++ List(
     "AuthFailureWithKeys:t4_LookupByKeyMissingAuthorization" -> Failure(
       "requires authorizers .* for lookup by key"
     ),
@@ -727,6 +737,11 @@ class DamlScriptPV35LF23IT extends DamlScriptPV35IT(LanguageVersion.v2_3) {
     "NUCKTests:queryNByKeyUnauthorized" -> Success(),
     "NUCKTests:exerciseByKeyWithInvisibleButDisclosedKey" -> Success(),
   )
+
+}
+
+class DamlScriptPV35LF23IT extends DamlScriptPV35LF23ITBase {
+  doRunTests(scriptIdsToTest)
 }
 
 class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
@@ -736,7 +751,7 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   override lazy val projectName = "ScriptDevTests"
   override lazy val protocolVersionForTesting = ProtocolVersion.dev
 
-  override protected val scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
+  override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
   override def expectedResults = super.expectedResults ++ List(
     "ActionTest:testFilterA" -> Success(),
@@ -906,10 +921,7 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
     "NUCKTests:exerciseByKeyWithInvisibleButDisclosedKey" -> Success(),
   )
 
-  // scriptIdsToTest needs to be defined in order for individual tests to be defined
-  scriptIdsToTest.foreach { testScriptId =>
-    testScriptId onlyRunWith protocolVersionForTesting in testGivenScriptId(testScriptId)
-  }
+  doRunTests(scriptIdsToTest)
 }
 
 object DamlScriptIT {

@@ -35,6 +35,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.InitializeSequencerResponse
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import java.io.BufferedInputStream
@@ -46,13 +47,42 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Download sequencer snapshot at given point in time to bootstrap another sequencer"
   )
-  @Help.Description("""It is recommended to use onboarding_state_for_sequencer for onboarding
-      |a new sequencer.""")
-  def snapshot(timestamp: CantonTimestamp): SequencerSnapshot =
+  @Help.Description("""This method is only used for testing.
+      |It is recommended to use onboarding_state_for_sequencer for onboarding a new sequencer.""")
+  def snapshot(timestamp: CantonTimestamp, protocolVersion: ProtocolVersion): SequencerSnapshot =
     consoleEnvironment.run {
-      runner.adminCommand(SequencerAdminCommands.Snapshot(timestamp))
+      runner.adminCommand(SequencerAdminCommands.Snapshot(timestamp, protocolVersion))
     }
 
+  @Help.Summary(
+    "Download the onboarding state for a given sequencer"
+  )
+  @deprecated(
+    "Use onboarding_state_for_sequencerV2 instead.",
+    since = "3.5",
+  )
+  def onboarding_state_for_sequencer(
+      sequencerId: SequencerId,
+      timeout: NonNegativeDuration = timeouts.unbounded,
+  ): ByteString =
+    consoleEnvironment.run {
+      val responseObserver =
+        new ByteStringStreamObserver[OnboardingStateResponse](_.onboardingStateForSequencer)
+
+      def call =
+        runner.adminCommand(
+          SequencerAdminCommands.OnboardingState(
+            observer = responseObserver,
+            sequencerOrTimestamp = Left(sequencerId),
+          )
+        )
+      processResult(call, responseObserver.resultBytes, timeout, "Downloading onboarding state")
+    }
+
+  @deprecated(
+    "Use onboarding_state_at_timestampV2 instead.",
+    since = "3.5",
+  )
   @Help.Summary(
     "Download the onboarding state at a given point in time to bootstrap another sequencer"
   )
@@ -78,27 +108,6 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Download the onboarding state for a given sequencer"
   )
-  def onboarding_state_for_sequencer(
-      sequencerId: SequencerId,
-      timeout: NonNegativeDuration = timeouts.unbounded,
-  ): ByteString =
-    consoleEnvironment.run {
-      val responseObserver =
-        new ByteStringStreamObserver[OnboardingStateResponse](_.onboardingStateForSequencer)
-
-      def call =
-        runner.adminCommand(
-          SequencerAdminCommands.OnboardingState(
-            observer = responseObserver,
-            sequencerOrTimestamp = Left(sequencerId),
-          )
-        )
-      processResult(call, responseObserver.resultBytes, timeout, "Downloading onboarding state")
-    }
-
-  @Help.Summary(
-    "Download the onboarding state for a given sequencer"
-  )
   def onboarding_state_for_sequencerV2(
       sequencerId: SequencerId,
       timeout: NonNegativeDuration = timeouts.unbounded,
@@ -118,6 +127,28 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     }
 
   @Help.Summary(
+    "Download the onboarding state at a given point in time to bootstrap another sequencer"
+  )
+  def onboarding_state_at_timestampV2(
+      timestamp: CantonTimestamp,
+      timeout: NonNegativeDuration = timeouts.unbounded,
+  ): ByteString =
+    consoleEnvironment.run {
+      val responseObserver =
+        new ByteStringStreamObserver[OnboardingStateV2Response](_.onboardingStateForSequencer)
+
+      def call =
+        runner.adminCommand(
+          SequencerAdminCommands.OnboardingStateV2(
+            observer = responseObserver,
+            sequencerOrTimestamp = Right(timestamp),
+          )
+        )
+
+      processResult(call, responseObserver.resultBytes, timeout, "Downloading onboarding state")
+    }
+
+  @Help.Summary(
     "Initialize a sequencer from the beginning of the event stream"
   )
   @Help.Description(
@@ -127,6 +158,10 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       |This is called as part of the synchronizer.setup.bootstrap command, so you are unlikely
       |to need to call this directly.
       """"
+  )
+  @deprecated(
+    "Use assign_from_genesis_stateV2 instead.",
+    since = "3.5",
   )
   def assign_from_genesis_state(
       genesisState: ByteString,
@@ -138,7 +173,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromGenesisState(
-          genesisState,
+          genesisState.newInput(),
           synchronizerParameters.toInternal,
         )
       )
@@ -166,7 +201,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromGenesisStateV2(
-          genesisState,
+          genesisState.newInput(),
           synchronizerParameters.toInternal,
         )
       )
@@ -209,6 +244,10 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Dynamically initialize a sequencer from a point later than the beginning of the event stream"
   )
+  @deprecated(
+    "Use assign_from_onboarding_stateV2 instead.",
+    since = "3.5",
+  )
   def assign_from_onboarding_state(
       onboardingState: ByteString,
       waitForReady: Boolean = true,
@@ -218,7 +257,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
     consoleEnvironment.run {
       runner.adminCommand(
-        InitializeFromOnboardingState(onboardingState = onboardingState)
+        InitializeFromOnboardingState(onboardingStateStream = onboardingState.newInput())
       )
     }
   }
@@ -235,7 +274,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
     consoleEnvironment.run {
       runner.adminCommand(
-        InitializeFromOnboardingStateV2(onboardingState)
+        InitializeFromOnboardingStateV2(onboardingState.newInput())
       )
     }
   }

@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.topology.{Member, ParticipantId}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 class RecipientsTreeTest extends AnyWordSpec with BaseTest {

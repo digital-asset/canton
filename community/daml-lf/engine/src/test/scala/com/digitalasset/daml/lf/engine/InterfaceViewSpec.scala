@@ -6,8 +6,8 @@ package engine
 
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, Party, QualifiedName}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Versioned
@@ -40,10 +40,10 @@ class InterfaceViewSpecV2 extends InterfaceViewSpec(LanguageVersion.Major.V2)
 class InterfaceViewSpec(majorLanguageVersion: LanguageVersion.Major)
     extends AnyWordSpec
     with Matchers
-    with EitherValues 
+    with EitherValues
     with SuppressingLogging {
 
-  import InterfaceViewSpec._
+  import InterfaceViewSpec.*
 
   private def loadPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)

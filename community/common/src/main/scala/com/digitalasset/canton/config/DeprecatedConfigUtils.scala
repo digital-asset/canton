@@ -149,12 +149,12 @@ object DeprecatedConfigUtils {
         elc: ErrorLoggingContext,
         deprecatedFieldsFor: DeprecatedFieldsFor[T],
     ): ConfigReader[T] = {
-      val moved = implicitly[DeprecatedFieldsFor[T]].movedFields
+      val moved = deprecatedFieldsFor.movedFields
         .foldLeft(configReader) { case (reader, field) =>
           reader.moveDeprecatedField(field.from, field.since, field.to)
         }
 
-      implicitly[DeprecatedFieldsFor[T]].deprecatePath
+      deprecatedFieldsFor.deprecatePath
         .foldLeft(moved) { case (reader, deprecated) =>
           reader.deprecateConfigPath(deprecated)
         }

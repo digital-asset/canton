@@ -21,24 +21,7 @@ final case class OrderedBlockForOutput(
     viewNumber: ViewNumber,
     originalLeader: BftNodeId,
     isLastInEpoch: Boolean,
-    mode: OrderedBlockForOutput.Mode,
+    orderingMode: OrderingMode,
 )
 
-object OrderedBlockForOutput {
-
-  sealed trait Mode extends Product with Serializable {
-
-    /** If `true`, dissemination will use the current topology for the output pull protocol. */
-    def isStateTransfer: Boolean = this match {
-      case Mode.FromStateTransfer => true
-      case Mode.FromConsensus => false
-    }
-  }
-
-  object Mode {
-
-    case object FromConsensus extends Mode
-
-    case object FromStateTransfer extends Mode
-  }
-}
+object OrderedBlockForOutput

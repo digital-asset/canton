@@ -30,11 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Temporary
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
-import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransaction,
-  StoredTopologyTransactions,
-  TimeQuery,
-}
+import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery}
 import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
   SequencerSynchronizerState,
@@ -188,17 +184,27 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
         def assertFailure(
             transactions: Seq[GenericStoredTopologyTransaction],
             errorMessage: String,
-        ): Assertion =
+        ): Assertion = {
+          val out = new java.io.ByteArrayOutputStream()
+          transactions.foreach { stored =>
+            stored
+              .writeDelimitedTo(testedProtocolVersion, out)
+              .left
+              .foreach(error =>
+                throw new IllegalStateException(s"The synchronizer cannot be bootstrapped: $error")
+              )
+          }
           assertThrowsAndLogsCommandFailures(
-            sequencerToFail.setup.assign_from_genesis_state(
-              StoredTopologyTransactions(transactions).toByteString(testedProtocolVersion),
-              StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion),
+            sequencerToFail.setup.assign_from_genesis_stateV2(
+              ByteString.copyFrom(out.toByteArray),
+              StaticSynchronizerParameters.defaults(testedProtocolVersion),
             ),
             _.shouldBeCommandFailure(
               TopologyManagerError.InconsistentTopologySnapshot,
               errorMessage,
             ),
           )
+        }
 
         assertFailure(
           multipleFullyAuthorized,

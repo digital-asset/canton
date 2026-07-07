@@ -9,11 +9,10 @@ import cats.syntax.bifunctor.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.{Crypto, Fingerprint}
+import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -41,6 +40,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, topology}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.stub.StreamObserver
@@ -49,6 +49,7 @@ import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import java.io.OutputStream
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 final case class BaseQuery(
@@ -112,7 +113,6 @@ object BaseQuery {
 class GrpcTopologyManagerReadService(
     member: Member,
     stores: => Seq[topology.store.TopologyStore[topology.store.TopologyStoreId]],
-    crypto: Crypto,
     topologyClientLookup: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
     timeTrackerLookup: PhysicalSynchronizerId => Option[SynchronizerTimeTracker],
     physicalSynchronizerIdLookup: PsidLookup,
@@ -288,41 +288,24 @@ class GrpcTopologyManagerReadService(
           idFilter = idFilter,
           namespaceFilter = namespaceFilter,
         )
-        .flatMap { col =>
+        .map { col =>
           col.result
             .filter(
               baseQuery.filterSigningKey.isEmpty || _.transaction.signatures
                 .exists(_.authorizingLongTermKey.unwrap.startsWith(baseQuery.filterSigningKey))
             )
-            .parTraverse { tx =>
-              val resultE = for {
-                // Re-create the signed topology transaction if necessary
-                signedTx <- baseQuery.protocolVersion
-                  .map { protocolVersion =>
-                    SignedTopologyTransaction
-                      .asVersion(tx.transaction, protocolVersion)(crypto)
-                      .leftMap[Throwable](err =>
-                        new IllegalStateException(s"Failed to convert topology transaction: $err")
-                      )
-                  }
-                  .getOrElse {
-                    // Keep the original transaction in its existing protocol version if no desired protocol version is specified
-                    EitherT.rightT[FutureUnlessShutdown, Throwable](tx.transaction)
-                  }
-
-                result = TransactionSearchResult(
-                  TopologyStoreId.fromInternal(storeId),
-                  tx.sequenced,
-                  tx.validFrom,
-                  tx.validUntil,
-                  signedTx.operation,
-                  signedTx.transaction.hash.hash.getCryptographicEvidence,
-                  signedTx.transaction.serial,
-                  signedTx.signatures.map(_.authorizingLongTermKey),
-                )
-              } yield (result, tx.transaction.transaction.mapping)
-
-              EitherTUtil.toFutureUnlessShutdown(resultE)
+            .map { tx =>
+              val result = TransactionSearchResult(
+                TopologyStoreId.fromInternal(storeId),
+                tx.sequenced,
+                tx.validFrom,
+                tx.validUntil,
+                tx.operation,
+                tx.hash.hash.getCryptographicEvidence,
+                tx.serial,
+                tx.transaction.signatures.map(_.authorizingLongTermKey),
+              )
+              (result, tx.mapping)
             }
         }
     }
@@ -612,6 +595,31 @@ class GrpcTopologyManagerReadService(
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
+  override def listSequencingParametersState(
+      request: adminProto.ListSequencingParametersStateRequest
+  ): Future[adminProto.ListSequencingParametersStateResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      res <- collectFromStoresByFilterString(
+        request.baseQuery,
+        SequencingParametersState.code,
+        request.filterSynchronizerId,
+      )
+    } yield {
+      val results = res
+        .collect { case (result, x: SequencingParametersState) => (result, x) }
+        .map { case (context, elem) =>
+          new adminProto.ListSequencingParametersStateResponse.Result(
+            context = Some(createBaseResult(context)),
+            item = Some(elem.parameters.toProtoV30),
+          )
+        }
+
+      adminProto.ListSequencingParametersStateResponse(results = results)
+    }
+    CantonGrpcUtil.mapErrNewEUS(ret)
+  }
+
   override def listMediatorSynchronizerState(
       request: adminProto.ListMediatorSynchronizerStateRequest
   ): Future[adminProto.ListMediatorSynchronizerStateResponse] = {
@@ -670,6 +678,7 @@ class GrpcTopologyManagerReadService(
     )
   )
 
+  @nowarn("cat=deprecation")
   override def listAll(request: adminProto.ListAllRequest): Future[adminProto.ListAllResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val res = for {
@@ -689,16 +698,41 @@ class GrpcTopologyManagerReadService(
     CantonGrpcUtil.mapErrNewEUS(res)
   }
 
+  override def listAllV2(
+      request: adminProto.ListAllV2Request
+  ): Future[adminProto.ListAllV2Response] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val res = for {
+      baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
+      includeTopologyMappings <- wrapErrUS(
+        request.includeMappings.traverse(TopologyMapping.Code.fromString)
+      )
+      types =
+        if (includeTopologyMappings.isEmpty) TopologyMapping.Code.all
+        else includeTopologyMappings
+      storedTopologyTransactions <- listAllStoredTopologyTransactions(
+        baseQuery,
+        types,
+        request.filterNamespace,
+      )
+    } yield {
+      adminProto.ListAllV2Response(result = Some(storedTopologyTransactions.toProtoV30))
+    }
+    CantonGrpcUtil.mapErrNewEUS(res)
+  }
+
   override def exportTopologySnapshot(
       request: ExportTopologySnapshotRequest,
       responseObserver: StreamObserver[ExportTopologySnapshotResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient[ExportTopologySnapshotResponse](
       (out: OutputStream) => getTopologySnapshot(request, out),
       responseObserver,
       byteString => ExportTopologySnapshotResponse(byteString),
       processingTimeout.unbounded.duration,
     )
+  }
 
   private def getTopologySnapshot(
       request: ExportTopologySnapshotRequest,
@@ -727,13 +761,15 @@ class GrpcTopologyManagerReadService(
   override def exportTopologySnapshotV2(
       request: ExportTopologySnapshotV2Request,
       responseObserver: StreamObserver[ExportTopologySnapshotV2Response],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient[ExportTopologySnapshotV2Response](
       (out: OutputStream) => getTopologySnapshotV2(request, out),
       responseObserver,
       byteString => ExportTopologySnapshotV2Response(byteString),
       processingTimeout.unbounded.duration,
     )
+  }
 
   private def getTopologySnapshotV2(
       request: ExportTopologySnapshotV2Request,
@@ -812,13 +848,15 @@ class GrpcTopologyManagerReadService(
   override def genesisState(
       request: GenesisStateRequest,
       responseObserver: StreamObserver[GenesisStateResponse],
-  ): Unit =
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamToClient(
       (out: OutputStream) => getGenesisState(request.synchronizerStore, request.timestamp, out),
       responseObserver,
       byteString => GenesisStateResponse(byteString),
       processingTimeout.unbounded.duration,
     )
+  }
 
   private def getGenesisState(
       filterSynchronizerStore: Option[StoreId],
@@ -835,12 +873,15 @@ class GrpcTopologyManagerReadService(
   override def genesisStateV2(
       request: GenesisStateV2Request,
       responseObserver: StreamObserver[GenesisStateV2Response],
-  ): Unit = GrpcStreamingUtils.streamToClient(
-    (out: OutputStream) => getGenesisStateV2(request.synchronizerStore, request.timestamp, out),
-    responseObserver,
-    byteString => GenesisStateV2Response(byteString),
-    processingTimeout.unbounded.duration,
-  )
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) => getGenesisStateV2(request.synchronizerStore, request.timestamp, out),
+      responseObserver,
+      byteString => GenesisStateV2Response(byteString),
+      processingTimeout.unbounded.duration,
+    )
+  }
 
   private def getGenesisStateV2(
       filterSynchronizerStore: Option[StoreId],
@@ -917,13 +958,16 @@ class GrpcTopologyManagerReadService(
   override def sequencerLsuState(
       request: SequencerLsuStateRequest,
       responseObserver: StreamObserver[SequencerLsuStateResponse],
-  ): Unit = GrpcStreamingUtils.streamToClient(
-    (out: OutputStream) =>
-      getLogicalUpgradeState(request.synchronizerStore, request.timestamp, out),
-    responseObserver,
-    byteString => SequencerLsuStateResponse(byteString),
-    processingTimeout.unbounded.duration,
-  )
+  ): Unit = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) =>
+        getLogicalUpgradeState(request.synchronizerStore, request.timestamp, out),
+      responseObserver,
+      byteString => SequencerLsuStateResponse(byteString),
+      processingTimeout.unbounded.duration,
+    )
+  }
 
   private def getLogicalUpgradeState(
       synchronizerStore: Option[StoreId],

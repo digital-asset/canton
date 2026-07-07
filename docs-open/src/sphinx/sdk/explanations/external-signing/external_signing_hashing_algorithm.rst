@@ -26,6 +26,8 @@ and provide the required cryptographic guarantees. See `<https://protobuf.dev/pr
 Versioning
 ==========
 
+.. _hashing_scheme_version:
+
 Hashing Scheme Version
 ----------------------
 
@@ -44,7 +46,7 @@ Implementations must use a hashing scheme version supported on the synchronizer 
 ==================  =========================
 Protocol Version    Supported Hashing Schemes
 ==================  =========================
-v33                 V2
+v34                 V2
 v35                 V2, V3
 ==================  =========================
 
@@ -97,6 +99,13 @@ Changes from V1
 - Replace ``ledger_effective_time`` in the :ref:`metadata <metadata_encoding>` with ``min_ledger_effective_time`` and ``max_ledger_effective_time``.
 
     * These effectively replace a fixed ledger time with time bounds, allowing Daml Models to make assertions based on time without restricting the signing window as was required with a fixed set ledger time.
+
+.. important::
+
+    V3 introduces support for contract keys. Usage of contract keys in externally signed transactions
+    requires usage of V3. Contract keys will not work on V2.
+    Also note that V3 is only :ref:`supported <hashing_scheme_version>` on protocol version 35.
+
 
 Notation and Utility Functions
 ------------------------------
@@ -769,8 +778,23 @@ Both the signature along with the ``PreparedTransaction`` must be sent to the AP
 Example
 =======
 
+Example V3 implementation in Python
+
+.. toggle::
+
+    .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_v3.py
+
+
 Example V2 implementation in Python
 
 .. toggle::
 
     .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_v2.py
+
+
+Both versions make use of the following common code:
+
+.. toggle::
+
+    .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/daml_transaction_hashing_common.py
+

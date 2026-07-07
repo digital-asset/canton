@@ -106,7 +106,7 @@ class EnforceVisibleForTestingTest extends AnyWordSpec with Matchers {
     "not allow usage of classes annotated with @VisibleForTesting" in {
       val result = WartTestTraverser(EnforceVisibleForTesting) {
         @VisibleForTesting
-        class Foo {}
+        class Foo
         object Bar {
           def notAllowed = new Foo()
         }

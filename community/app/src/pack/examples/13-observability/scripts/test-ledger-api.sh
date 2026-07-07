@@ -14,7 +14,7 @@ if [ ! -f "${jar_file}" ]; then
   echo "  Build it from the repository root:" >&2
   echo "    sbt ledger-test-tool/assembly" >&2
   echo "  Then copy it here:" >&2
-  echo "    cp community/ledger-test-tool/target/scala-2.13/ledger-api-test-tool-2.2-*.jar \\" >&2
+  echo "    cp community/ledger-test-tool/target/scala-2.13/ledger-api-test-tool-2.3-*.jar \\" >&2
   echo "       community/app/target/release/canton-open-source-*/examples/13-observability/lapitt.jar" >&2
   echo "  See the Prerequisites section of README.md for details." >&2
   exit 1

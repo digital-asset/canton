@@ -25,6 +25,10 @@ trait HasPredefinedAwsKmsKeys extends HasPredefinedKmsKeys {
       KmsKeyId(String300.tryCreate("alias/canton-kms-test-signing-key-secp256k1")),
       KmsKeyId(String300.tryCreate("alias/canton-kms-test-another-signing-key-secp256k1"))
     ),
+    SigningKeySpec.MlDsa65 -> (
+      KmsKeyId(String300.tryCreate("alias/canton-kms-test-signing-key-mldsa65")),
+      KmsKeyId(String300.tryCreate("alias/canton-kms-test-another-signing-key-mldsa65"))
+    ),
   )
 
   override val predefinedAsymmetricEncryptionKeys: Map[EncryptionKeySpec, (KmsKeyId, KmsKeyId)] =
@@ -37,4 +41,4 @@ trait HasPredefinedAwsKmsKeys extends HasPredefinedKmsKeys {
 
 }
 
-object PredefinedAwsKmsKeys extends HasPredefinedAwsKmsKeys {}
+object PredefinedAwsKmsKeys extends HasPredefinedAwsKmsKeys

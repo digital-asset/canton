@@ -4,7 +4,6 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -17,6 +16,8 @@ import com.digitalasset.canton.version.ProtocolVersion.{
   stable,
   supported,
 }
+import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import io.circe.Encoder
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -247,7 +248,11 @@ object ProtocolVersion {
     )
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v34)
+    NonEmpty.mk(List, ProtocolVersion.v34, ProtocolVersion.v35)
+
+  // LF versions that should only be used with alpha/beta protocol versions
+  val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
+    NonEmpty.mk(List, LanguageVersion.v2_3)
 
   // Stable protocol versions supported by this release as printed in the release version information.
   // Note: Adding a new stable PV above is not enough, it needs to be added to build info key `stableProtocolVersions` in `BuildCommon` as well.
@@ -260,21 +265,21 @@ object ProtocolVersion {
     s"stable protocol versions $stable should be in sync with build info $releaseStable",
   )
 
-  val alpha: NonEmpty[List[AlphaProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v35, ProtocolVersion.dev)
+  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v36)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
       .map(pv => ProtocolVersion.createBeta(pv.v))
 
-  val supported: NonEmpty[List[ProtocolVersion]] = (alpha ++ beta ++ stable).sorted
+  val supported: NonEmpty[List[ProtocolVersion]] =
+    (NonEmpty.mk(List, dev) ++ alpha ++ beta ++ stable).sorted
 
-  private val allProtocolVersions = deprecated ++ deleted ++ alpha ++ beta ++ stable
+  private val allProtocolVersions = deprecated ++ deleted ++ List(dev) ++ alpha ++ beta ++ stable
 
   require(
     allProtocolVersions.sizeCompare(allProtocolVersions.distinct) == 0,
     s"All the protocol versions should be distinct." +
-      s"Found: ${Map("deprecated" -> deprecated, "deleted" -> deleted.forgetNE, "beta" -> beta, "alpha" -> alpha.forgetNE, "stable" -> stable.forgetNE)}",
+      s"Found: ${Map("deprecated" -> deprecated, "deleted" -> deleted.forgetNE, "beta" -> beta, "alpha" -> alpha, "dev" -> List(dev), "stable" -> stable.forgetNE)}",
   )
 
   /** The latest stable protocol version.
@@ -298,8 +303,7 @@ object ProtocolVersion {
       .get(CANTON_PROTOCOL_VERSION)
       .orElse(sys.props.get(CANTON_PROTOCOL_VERSION))
       .map(ProtocolVersion.tryCreate)
-      // TODO(i31167): When PV35 is stable, change the following line to use `latest` instead of `v35`
-      .getOrElse(ProtocolVersion.v35)
+      .getOrElse(ProtocolVersion.latest)
 
   lazy val dev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(Int.MaxValue)
@@ -307,8 +311,11 @@ object ProtocolVersion {
   lazy val v34: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
     ProtocolVersion.createStable(34)
 
-  lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
-    ProtocolVersion.createAlpha(35)
+  lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
+    ProtocolVersion.createStable(35)
+
+  lazy val v36: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    ProtocolVersion.createAlpha(36)
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v34

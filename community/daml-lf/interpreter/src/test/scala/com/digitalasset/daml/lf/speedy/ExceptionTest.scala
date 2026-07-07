@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
@@ -20,7 +20,12 @@ import com.digitalasset.daml.lf.testing.parser
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, GlobalKeyWithMaintainers, SerializationVersion, NextGenContractStateMachine as ContractStateMachine}
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  GlobalKey,
+  GlobalKeyWithMaintainers,
+  SerializationVersion,
+}
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
@@ -30,7 +35,12 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import scala.collection.immutable.ArraySeq
 
 // TEST_EVIDENCE: Integrity: Exceptions, throw/catch.
-class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
+class ExceptionTest
+    extends AnyFreeSpec
+    with Inside
+    with Matchers
+    with TableDrivenPropertyChecks
+    with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] = ParserParameters.default
   val defaultPackageId = defaultParserParameters.defaultPackageId
@@ -54,7 +64,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       compiledPackages: PureCompiledPackages,
       expr: Expr,
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = Map.empty,
-  ): Either[SError, SValue] = {
+  ): Either[SError, SValue] =
     runUpdateExpr(
       compiledPackages,
       Map.empty,
@@ -62,7 +72,6 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       PartialFunction.empty,
       getKeys,
     )
-  }
 
   private def runUpdateApp(
       compiledPackages: PureCompiledPackages,
@@ -71,7 +80,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       args: ArraySeq[SValue],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
-  ) = {
+  ) =
     runUpdateExpr(
       compiledPackages,
       packageResolution,
@@ -79,7 +88,6 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       getContract,
       getKeys,
     )
-  }
 
   private def runUpdateExpr(
       compiledPackages: PureCompiledPackages,
@@ -97,7 +105,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         committers = Set(alice),
         // we test only with contract key mode,
         // the state machine should no have any impact for this test.
-        mode = ContractStateMachine.Mode.NUCK,
+        interpretationConfig = InterpretationConfig.Key,
         logger = MachineLogger(),
       )
     SpeedyTestLib
@@ -689,7 +697,8 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
             applyToParty(pkgs, expr, alice),
             Set(alice),
             packageResolution = Map(pkg.pkgName -> defaultParserParameters.defaultPackageId),
-            logger = MachineLogger()
+            logger = MachineLogger(),
+            interpretationConfig = InterpretationConfig.Legacy,
           )
           .run()
         if (description.contains("can be caught"))
@@ -721,6 +730,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
           applyToParty(pkgs, example, party),
           Set(party),
           logger = MachineLogger(),
+          interpretationConfig = InterpretationConfig.Legacy,
         )
         .run()
       inside(res) { case SResultFinal(SUnit) =>
@@ -808,22 +818,21 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
           }
       """ (parserParameters.copy(defaultPackageId = commonDefsPkgId))
 
-    /** An abstract class whose [[templateDefinition]] method generates LF code that defines a template named
-      * [[templateName]].
-      * The class is meant to be extended by concrete case objects which override one the metadata's expressions with an
-      * expression that throws an exception.
+    /** An abstract class whose [[templateDefinition]] method generates LF code that defines a
+      * template named [[templateName]]. The class is meant to be extended by concrete case objects
+      * which override one the metadata's expressions with an expression that throws an exception.
       */
     abstract class TemplateGenerator(val templateName: String) {
       def precondition = """True"""
-      def signatories = s"""Cons @Party [Mod:${templateName} {p} this] (Nil @Party)"""
+      def signatories = s"""Cons @Party [Mod:$templateName {p} this] (Nil @Party)"""
       def observers = """Nil @Party"""
       def key =
         s"""
            |  '$commonDefsPkgId':Mod:Key {
            |    label = "test-key",
-           |    maintainers = (Cons @Party [Mod:${templateName} {p} this] (Nil @Party))
+           |    maintainers = (Cons @Party [Mod:$templateName {p} this] (Nil @Party))
            |  }""".stripMargin
-      def choiceControllers = s"""Cons @Party [Mod:${templateName} {p} this] (Nil @Party)"""
+      def choiceControllers = s"""Cons @Party [Mod:$templateName {p} this] (Nil @Party)"""
       def choiceObservers = """Nil @Party"""
 
       def maintainers =
@@ -838,7 +847,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
            |    observers $observers;
            |
            |    choice @nonConsuming SomeChoice (self) (u: Unit): Text
-           |      , controllers (Cons @Party [Mod:${templateName} {p} this] (Nil @Party))
+           |      , controllers (Cons @Party [Mod:$templateName {p} this] (Nil @Party))
            |      , observers (Nil @Party)
            |      to upure @Text "SomeChoice was called";
            |
@@ -890,8 +899,8 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
 
     val templateDefsPkgName = Ref.PackageName.assertFromString("-template-defs-")
 
-    /** A package that defines templates called Precondition, Signatories, ... whose metadata should evaluate without
-      * throwing exceptions.
+    /** A package that defines templates called Precondition, Signatories, ... whose metadata should
+      * evaluate without throwing exceptions.
       */
     val templateDefsV1PkgId = Ref.PackageId.assertFromString("-template-defs-v1-id-")
     val templateDefsV1ParserParams = parserParameters.copy(defaultPackageId = templateDefsV1PkgId)
@@ -931,15 +940,16 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       """ (templateDefsV2ParserParams)
 
     /** Generates a series of expressions meant to test that:
-      *   - When [[templateName]] is created, exceptions thrown when evaluating its metadata can be caught.
-      *   - When an instance of [[templateName]] is fetched/exercised by id/key/interface, exceptions thrown when
-      *     evaluating its metadata cannot be caught.
+      *   - When [[templateName]] is created, exceptions thrown when evaluating its metadata can be
+      *     caught.
+      *   - When an instance of [[templateName]] is fetched/exercised by id/key/interface,
+      *     exceptions thrown when evaluating its metadata cannot be caught.
       */
     def globalContractTests(pkgId: Ref.PackageId, templateName: String): String = {
       val tplQualifiedName = s"'$pkgId':Mod:$templateName"
       s"""
          |  // Checks that the error thrown when creating a $templateName instance can be caught.
-         |  val createAndCatchError${templateName}: Update Unit =
+         |  val createAndCatchError$templateName: Update Unit =
          |    try @Unit
          |      ubind _:(ContractId $tplQualifiedName) <-
          |          create @$tplQualifiedName ($tplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -949,7 +959,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of $templateName when exercising a choice on
          |  // it, should fail to do so.
-         |  val exerciseAndCatchErrorGlobal${templateName}: (ContractId $tplQualifiedName) -> Update Text =
+         |  val exerciseAndCatchErrorGlobal$templateName: (ContractId $tplQualifiedName) -> Update Text =
          |    \\(cid: ContractId $tplQualifiedName) ->
          |      try @Text
          |        exercise @$tplQualifiedName SomeChoice cid ()
@@ -958,7 +968,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of $templateName when exercising a choice by key on
          |  // it, should fail to do so.
-         |  val exerciseByKeyAndCatchErrorGlobal${templateName}: '$commonDefsPkgId':Mod:Key -> Update Text =
+         |  val exerciseByKeyAndCatchErrorGlobal$templateName: '$commonDefsPkgId':Mod:Key -> Update Text =
          |    \\(key: '$commonDefsPkgId':Mod:Key) ->
          |      try @Text
          |        exercise_by_key @$tplQualifiedName SomeChoice key ()
@@ -967,7 +977,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when fetching it,
          |  // should fail to do so.
-         |  val fetchAndCatchErrorGlobal${templateName}: (ContractId $tplQualifiedName) -> Update Text =
+         |  val fetchAndCatchErrorGlobal$templateName: (ContractId $tplQualifiedName) -> Update Text =
          |    \\(cid: ContractId $tplQualifiedName) ->
          |      try @Text
          |        ubind _:$tplQualifiedName <- fetch_template @$tplQualifiedName cid
@@ -977,7 +987,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when fetching it
          |  // by interface, should fail to do so.
-         |  val fetchByInterfaceAndCatchErrorGlobal${templateName}: (ContractId $tplQualifiedName) -> Update Text =
+         |  val fetchByInterfaceAndCatchErrorGlobal$templateName: (ContractId $tplQualifiedName) -> Update Text =
          |    \\(cid: ContractId $tplQualifiedName) ->
          |      try @Text
          |        ubind _:'$commonDefsPkgId':Mod:Iface <-
@@ -989,7 +999,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when fetching it
          |  // by key, should fail to do so.
-         |  val fetchByKeyAndCatchErrorGlobal${templateName}: '$commonDefsPkgId':Mod:Key -> Update Text =
+         |  val fetchByKeyAndCatchErrorGlobal$templateName: '$commonDefsPkgId':Mod:Key -> Update Text =
          |    \\(key: '$commonDefsPkgId':Mod:Key) ->
          |      try @Text
          |        ubind _:$tuple2TyCon (ContractId $tplQualifiedName) $tplQualifiedName <-
@@ -1000,19 +1010,20 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when looking it up
          |  // by key, should fail to do so.
-         |  val lookUpByKeyAndCatchErrorGlobal${templateName}: '$commonDefsPkgId':Mod:Key -> Update Text =
+         |  val lookUpByKeyAndCatchErrorGlobal$templateName: '$commonDefsPkgId':Mod:Key -> Update Text =
          |    \\(key: '$commonDefsPkgId':Mod:Key) ->
          |      try @Text
-         |        ubind _:Option (ContractId $tplQualifiedName) <-
-         |            lookup_by_key @$tplQualifiedName key
+         |        ubind _:Option (List ($tuple2TyCon (ContractId $tplQualifiedName) $tplQualifiedName)) <-
+         |            query_n_by_key @$tplQualifiedName 1 key
          |        in upure @Text "unexpected: contract was looked up by key"
          |      catch
          |        e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
          |""".stripMargin
     }
 
-    /** Generates a series of expressions meant to test that when a locally created v1 instance of [[templateName]] is
-      * fetched/exercised by id/key/interface as a v2 exceptions thrown when evaluating its metadata cannot be caught.
+    /** Generates a series of expressions meant to test that when a locally created v1 instance of
+      * [[templateName]] is fetched/exercised by id/key/interface as a v2 exceptions thrown when
+      * evaluating its metadata cannot be caught.
       */
     def localContractTests(
         v1PkgId: Ref.PackageId,
@@ -1024,7 +1035,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       s"""
          |  // Tries to catch the error thrown by the contract info of $templateName when exercising a choice on
          |  // it, should fail to do so.
-         |  val exerciseAndCatchErrorLocal${templateName}: Unit -> Update Text =
+         |  val exerciseAndCatchErrorLocal$templateName: Unit -> Update Text =
          |    \\(_:Unit) ->
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |         create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -1039,7 +1050,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of $templateName when exercising a choice by key on
          |  // it, should fail to do so.
-         |  val exerciseByKeyAndCatchErrorLocal${templateName}: Unit -> Update Text =
+         |  val exerciseByKeyAndCatchErrorLocal$templateName: Unit -> Update Text =
          |    \\(_:Unit) ->
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |         create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -1056,7 +1067,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when fetching it,
          |  // should fail to do so.
-         |  val fetchAndCatchErrorLocal${templateName}: Unit -> Update Text =
+         |  val fetchAndCatchErrorLocal$templateName: Unit -> Update Text =
          |    \\(_:Unit) ->
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |          create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -1070,7 +1081,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when fetching it
          |  // by interface, should fail to do so.
-         |  val fetchByInterfaceAndCatchErrorLocal${templateName}: Unit -> Update Text =
+         |  val fetchByInterfaceAndCatchErrorLocal$templateName: Unit -> Update Text =
          |    \\(_:Unit) ->
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |          create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -1084,7 +1095,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when fetching it
          |  // by key, should fail to do so.
-         |  val fetchByKeyAndCatchErrorLocal${templateName}: Unit -> Update Text =
+         |  val fetchByKeyAndCatchErrorLocal$templateName: Unit -> Update Text =
          |    \\(_:Unit) ->
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |          create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -1101,14 +1112,16 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |
          |  // Tries to catch the error thrown by the contract info of a $templateName contract when looking it up
          |  // by key, should fail to do so.
-         |  val lookUpByKeyAndCatchErrorLocal${templateName}: Unit -> Update Text =
+         |  val lookUpByKeyAndCatchErrorLocal$templateName: Unit -> Update Text =
          |    \\(_:Unit) ->
          |      ubind cid: ContractId $v1TplQualifiedName <-
          |          create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
          |      in try @Text
-         |        ubind _:Option (ContractId $v2TplQualifiedName) <-
-         |            lookup_by_key
+         |
+         |        ubind _:Option (List ($tuple2TyCon (ContractId $v2TplQualifiedName) $v2TplQualifiedName)) <-
+         |            query_n_by_key
          |                @$v2TplQualifiedName
+         |                1
          |                ('$commonDefsPkgId':Mod:Key {
          |                    label = "test-key",
          |                    maintainers = (Cons @Party ['$commonDefsPkgId':Mod:alice] (Nil @Party)) })
@@ -1118,11 +1131,11 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |""".stripMargin
     }
 
-    def dynamicChoiceTestsGlobal(templateName: String): String = {
+    def dynamicChoiceTestsGlobal(templateName: String): String =
       s"""
          |  // Tries to catch the error thrown by the dynamic exercise of a $templateName choice when fetching it
          |  // by interface, should fail to do so.
-         |  val exerciseByInterfaceAndCatchErrorGlobal${templateName}:
+         |  val exerciseByInterfaceAndCatchErrorGlobal$templateName:
          |      (ContractId '$commonDefsPkgId':Mod:Iface) -> Update Text =
          |    \\(cid: ContractId '$commonDefsPkgId':Mod:Iface) ->
          |      try @Text
@@ -1130,14 +1143,13 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
          |      catch
          |        e -> Some @(Update Text) (upure @Text "unexpected: some exception was caught");
       """.stripMargin
-    }
 
     def dynamicChoiceTestsLocal(v1PkgId: Ref.PackageId, templateName: String): String = {
       val v1TplQualifiedName = s"'$v1PkgId':Mod:$templateName"
       s"""
              |  // Tries to catch the error thrown by the dynamic exercise of a $templateName choice when fetching it
              |  // by interface, should fail to do so.
-             |  val exerciseByInterfaceAndCatchErrorLocal${templateName}: Unit -> Update Text =
+             |  val exerciseByInterfaceAndCatchErrorLocal$templateName: Unit -> Update Text =
              |    \\(_:Unit) ->
              |      ubind cid: ContractId $v1TplQualifiedName <-
              |          create @$v1TplQualifiedName ($v1TplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
@@ -1238,7 +1250,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         templateName in {
           runUpdateExpr(
             compiledPackages,
-            e"Mod:createAndCatchError${templateName}" (metadataTestsParserParams),
+            e"Mod:createAndCatchError$templateName" (metadataTestsParserParams),
           ) shouldBe Right(SUnit)
         }
       }
@@ -1305,7 +1317,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
                   SValue.SList(FrontStack(SValue.SParty(alice))),
                 ),
               )
-              val globalKey = GlobalKeyWithMaintainers.assertBuild(
+              val globalKey = GlobalKeyWithMaintainers(
                 templateId = templateId,
                 value = key.toNormalizedValue,
                 valueHash = SValueHash.assertHashContractKey(
@@ -1332,7 +1344,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
                     runUpdateApp(
                       compiledPackages,
                       packageResolution = Map(templateDefsPkgName -> templateDefsV2PkgId),
-                      e"Mod:${prefix}${origin.testMethodSuffix}$templateName" (
+                      e"Mod:$prefix${origin.testMethodSuffix}$templateName" (
                         metadataTestsParserParams
                       ),
                       ArraySeq(argProvider(cid, key)),

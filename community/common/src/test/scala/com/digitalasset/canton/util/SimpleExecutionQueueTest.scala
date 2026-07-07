@@ -6,6 +6,7 @@ package com.digitalasset.canton.util
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.util.FailureMode.{ContinueAfterFailure, StopAfterFailure}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AsyncWordSpec

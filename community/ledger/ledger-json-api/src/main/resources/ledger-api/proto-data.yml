@@ -314,12 +314,6 @@ fileComments:
               Modifiable
 
               Optional: can be empty
-      annotations_entry:
-        message:
-          comments: null
-          fieldComments:
-            key: ''
-            value: ''
     oneOfs:
       ObjectMeta: {}
     services: {}
@@ -629,6 +623,253 @@ fileComments:
         comments: |-
           Prune the ledger specifying the offset before and at which ledger transactions should be removed. Only returns when
           the potentially long-running prune request ends successfully or with an error.
+  admin/party_management_alpha_service.proto:
+    messages:
+      AcsIndexingProgress:
+        message:
+          comments: Progress metrics for indexing the replication changes into the
+            Ledger API.
+          fieldComments: {}
+      AcsReplicationProgress:
+        message:
+          comments: Progress metrics for the active contract set replication.
+          fieldComments:
+            processed_contract_count: |-
+              The total number of ACS contracts persisted by the target participant.
+
+              Required
+            fully_processed_acs: |-
+              Indicates whether the ACS replication phase has fully completed.
+
+              Required
+      AddPartyArguments:
+        message:
+          comments: null
+          fieldComments:
+            source_participant_uid: |-
+              The unique identifier of a source participant already hosting the party.
+
+              Required
+            topology_serial: |-
+              TODO(#31414): Remove: Either by inferring it internally or require record time (validFrom of the effective topology transaction)
+              TODO(#31414): Ensure that it will work with offboarding and re-onboarding
+              The serial number of the PartyToParticipant topology transaction.
+              Maps the party to this target participant.
+
+              Required
+            synchronizer_id: |-
+              The identifier of the synchronizer where the party will be replicated.
+
+              Required
+            participant_permission: |-
+              TODO(#31414): Remove: Figure it out from the topology transaction
+              The permission level of the party on the target participant.
+
+              Required
+            party_id: |-
+              The identifier of the party to be replicated.
+
+              Required
+      AddPartyWithAcsRequest:
+        message:
+          comments: null
+          fieldComments:
+            acs_snapshot: |-
+              The raw binary data of the ACS snapshot to be imported.
+              Splits data arbitrarily across chunks based on gRPC message size limits.
+
+              Optional: can be empty
+            arguments: |-
+              The arguments used for request validation and initialization.
+              Requires presence in the first stream message and absence in subsequent messages.
+
+              Optional
+      AddPartyWithAcsResponse:
+        message:
+          comments: null
+          fieldComments:
+            add_party_request_id: |-
+              TODO(#31414): Remove request ID as it can be computed from already known arguments
+              The unique identifier used to track the add party request.
+
+              Required
+      ExportPartyAcsRequest:
+        message:
+          comments: null
+          fieldComments:
+            wait_for_activation_timeout: |-
+              TODO(#31414): Removable iff we use timestamp
+              The maximum duration to wait for the party's activation topology transaction.
+              Defaults to a system timeout if left unset.
+
+              Optional
+            synchronizer_id: |-
+              The identifier of the synchronizer managing the contracts to be exported.
+              Scopes the ACS export to contracts assigned to this synchronizer.
+
+              Required
+            target_participant_uid: |-
+              The unique identifier of the target participant where the party will be replicated.
+              Scopes the ACS export to contracts missing from this participant.
+
+              Required
+            party_id: |-
+              The identifier of the party being replicated.
+              Requires the party to be active on the target participant for the export to succeed.
+
+              Required
+            begin_offset_exclusive: |-
+              TODO(#31414): Remove: Possibly replace with a timestamp (record time); that is the validFrom of the effective topology PTP mapping transaction
+              The exclusive ledger offset used as the starting point for the export.
+              Locates the party's most recent activation on the target participant.
+
+              Required
+      ExportPartyAcsResponse:
+        message:
+          comments: null
+          fieldComments:
+            chunk: |-
+              A streamed chunk of the Active Contract Set (ACS) snapshot.
+              Contains raw binary Ledger API active contract messages wrapped in `ActiveContract`.
+
+              Optional: can be empty
+      GetAddPartyStatusRequest:
+        message:
+          comments: null
+          fieldComments:
+            add_party_request_id: |-
+              TODO(#31414): Replace with underlying request ID hash arguments to compute the ID internally as needed
+              The unique identifier tracking the add party request.
+
+              Required
+      GetAddPartyStatusResponse:
+        message:
+          comments: null
+          fieldComments:
+            status: Required
+      PartyReplicationAuthorization:
+        message:
+          comments: Onboarding authorizations provided by party owners and the target
+            participant.
+          fieldComments:
+            onboarding_at: |-
+              The timestamp when onboarding authorization becomes effective and the ACS snapshot is anchored.
+
+              Required
+            is_onboarding_flag_cleared: |-
+              Indicates whether the party is fully onboarded to the target participant.
+              Clears the onboarding flag to allow active processing of transactions.
+
+              Required
+      PartyReplicationError:
+        message:
+          comments: Error details populated when a replication fails or requires operator
+            intervention.
+          fieldComments:
+            error_message: |-
+              The descriptive error message.
+
+              Required
+      PartyReplicationStatus:
+        message:
+          comments: Describes the various lifecycle states of a party replication
+            operation.
+          fieldComments:
+            authorization: |-
+              Topology authorization details; set once the party is authorized on the target participant.
+
+              Optional
+            replication: |-
+              ACS replication progress; set once the data transfer begins.
+
+              Optional
+            error_message: |-
+              Diagnostic details; populated during transient or terminal failures.
+
+              Optional
+            parameters: |-
+              Static party replication parameters.
+
+              Required
+            indexing: |-
+              Indexing progress metrics; set once background ledger indexing begins.
+
+              Optional
+            has_completed: |-
+              Indicates whether the party replication operation has completed successfully.
+
+              Required
+      ReplicationParameters:
+        message:
+          comments: Static parameters that remain constant throughout the party replication
+            operation.
+          fieldComments:
+            source_participant_uid: Required
+            topology_serial: |-
+              TODO(#31414): Remove: Avoid leaking internal implementation detail
+
+              Required
+            synchronizer_id: Required
+            target_participant_uid: Required
+            request_id: Required
+            party_id: Required
+    oneOfs:
+      AddPartyArguments: {}
+      AddPartyWithAcsRequest: {}
+      AddPartyWithAcsResponse: {}
+      ExportPartyAcsRequest: {}
+      ExportPartyAcsResponse: {}
+      GetAddPartyStatusRequest: {}
+      GetAddPartyStatusResponse: {}
+      PartyReplicationStatus: {}
+    services:
+      PartyManagementAlphaService:
+      - name: ExportPartyAcs
+        comments: |-
+          Exports the specified party's Active Contract Set (ACS) in the specified synchronizer so that the party
+          along with the ACS can be added to the specified target participant using the 'AddPartyWithAcs' endpoint.
+          This request requires that the party has been authorized for onboarding to the target participant.
+
+          Returns the party's ACS effective at the onboarding authorization timestamp.
+      - name: AddPartyWithAcs
+        comments: |-
+          Adds a party already hosted on one or more source participants to this target participant
+          in the specified synchronizer, along with the party's provided Active Contract Set (ACS).
+
+          Behavioral Flow:
+
+          1. Topology Verification (Synchronous): Expects to find an authorized PTP (PartyToParticipant)
+             topology with the `onboarding` flag set. If this is missing or invalid, the call fails immediately.
+          2. ACS Import (Synchronous): Imports the ACS snapshot into the participant-internal stores and runs
+             associated payload validations.
+          3. Indexer Processing (Asynchronous): Proceeds to perform background processing, including
+             feeding the imported changes into the indexer.
+          4. Topology Finalization (Asynchronous): The target participant authorizes a final topology
+             change to clear the `onboarding` flag.
+
+          Retries and Idempotency: Safe to retry this endpoint.
+
+          Synchronous Failure Scenarios
+          The synchronous phase can fail and return an error due to:
+          - Validation Errors: For example, a missing an effective PTP topology transaction with set onboarding flag.
+          - Connectivity Issues: Loss of participant connectivity to the party replication synchronizer
+            during the synchronous window.
+          - Data Validation: Faults or internal store issues uncovered during the ACS payload import phase.
+
+          Security and Trust Notice:
+          This operation assumes full trust in the source participant to provide a complete and
+          untampered state. Because the target participant cannot independently verify the historical
+          provenance of the imported contracts, validation is performed on a best-effort basis.
+          Use only when the source participant is a known, trusted authority!
+
+          TODO(#31414): Address remaining idempotency semantics:
+          Currently, retrying this request after it has fully and successfully completed results in an error.
+          Update this implementation to make a successful retry a clean no-op instead of throwing a
+          "party already hosted" error.
+      - name: GetAddPartyStatus
+        comments: |-
+          Status endpoint that given an 'add_party_request_id' returns status information about progress,
+          completion, or errors of a previous call to 'AddPartyWithAcs' on the target participant.
   admin/party_management_service.proto:
     messages:
       AllocateExternalPartyRequest:
@@ -1059,6 +1300,12 @@ fileComments:
               The right to authorize commands for this party.
 
               Required
+      CanActAsAnyParty:
+        message:
+          comments: |-
+            The right of a user to authorize commands as any party on a participant.
+            Its utility is predominantly for users that act on behalf of many parties.
+          fieldComments: {}
       CanExecuteAs:
         message:
           comments: null
@@ -1290,9 +1537,10 @@ fileComments:
             can_read_as_any_party: The user can read as any party on a participant
             identity_provider_admin: The user can administer users and parties assigned
               to the same identity provider as the one of the user.
-            can_read_as: The user can read ledger data visible to a specific party.
             participant_admin: The user can administer the participant node.
             can_act_as: The user can act as a specific party.
+            can_read_as: The user can read ledger data visible to a specific party.
+            can_act_as_any_party: The user can act as any party on a participant.
       UpdateUserIdentityProviderIdRequest:
         message:
           comments: 'Required authorization: ``HasRight(ParticipantAdmin)``'
@@ -1426,9 +1674,10 @@ fileComments:
               can_read_as_any_party: The user can read as any party on a participant
               identity_provider_admin: The user can administer users and parties assigned
                 to the same identity provider as the one of the user.
-              can_read_as: The user can read ledger data visible to a specific party.
               participant_admin: The user can administer the participant node.
               can_act_as: The user can act as a specific party.
+              can_read_as: The user can read ledger data visible to a specific party.
+              can_act_as_any_party: The user can act as any party on a participant.
       UpdateUserIdentityProviderIdRequest: {}
       UpdateUserIdentityProviderIdResponse: {}
       UpdateUserRequest: {}
@@ -1492,6 +1741,25 @@ fileComments:
           fieldComments:
             completion: ''
             offset_checkpoint: ''
+      GetCompletionsRequest:
+        message:
+          comments: null
+          fieldComments:
+            parties: |-
+              If specified, only completions of commands are included, which have at least one of the ``act_as`` parties
+              in the given set of parties.
+              Only Ledger API users with CanReadAsAnyParty permission allowed to provide no ``parties``.
+              Must be a valid PartyIdString (as described in ``value.proto``).
+
+              Optional: can be empty
+            begin_exclusive: |-
+              This optional field indicates the minimum offset for completions. This can be used to resume an earlier completion stream.
+              If not set the ledger uses the ledger begin offset instead.
+              If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset).
+              If the ledger has been pruned, this parameter must be specified and greater than the pruning offset. (the pruning
+              offset is accessible on the StateService.GetLatestPrunedOffsets endpoint)
+
+              Optional
     oneOfs:
       CompletionStreamRequest: {}
       CompletionStreamResponse:
@@ -1501,10 +1769,17 @@ fileComments:
             fieldComments:
               completion: ''
               offset_checkpoint: ''
+      GetCompletionsRequest: {}
     services:
       CommandCompletionService:
       - name: CompletionStream
-        comments: Subscribe to command completion events.
+        comments: |-
+          Deprecated: please use ``GetCompletions`` instead.
+          Subscribe to command completion events.
+      - name: GetCompletions
+        comments: |-
+          Subscribe to command completion events.
+          This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
   command_service.proto:
     messages:
       SubmitAndWaitForReassignmentRequest:
@@ -1680,8 +1955,10 @@ fileComments:
               Optional
             prefetch_contract_keys: |-
               Fetches the contract keys into the caches to speed up the command processing.
-              Should only contain contract keys that are expected to be resolved during interpretation of the commands.
-              Keys of disclosed contracts do not need prefetching.
+              Each entry specifies a key and a limit on how many contracts to prefetch for that key.
+              The limit does not count disclosed contracts, and should reflect the number of
+              additional contracts expected to be resolved during interpretation of the commands.
+              If a key appears multiple times, the last entry's limit wins.
 
               Optional: can be empty
             min_ledger_time_abs: |-
@@ -1872,6 +2149,14 @@ fileComments:
               The key of the contract the client wants to prefetch.
 
               Required
+            limit: |-
+              The number of contracts to prefetch for this key, if available.
+              This is in addition to disclosed contracts.
+              - for backward compatibility reason, absence is interpreted as 1
+              - 0 is forbidden
+              - capped at 2^31 - 1. The system may impose further limits.
+
+              Optional
     oneOfs:
       Command:
         command:
@@ -1912,6 +2197,20 @@ fileComments:
           comments: 'A completion represents the status of a submitted command on
             the ledger: it can be successful or failed.'
           fieldComments:
+            transaction_hash: |-
+              The transaction hash signed by the external party for prepared transactions
+              that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+              or one of its variants.
+
+              Use this to correlate prepared transactions with their execution result
+              on the *same participant* that executed the transaction.
+
+              Not available for:
+
+              - transactions executed on Canton versions prior to 3.5
+              - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+              Optional: can be empty
             command_id: |-
               The ID of the succeeded or failed command.
               Must be a valid LedgerString (as described in ``value.proto``).
@@ -2561,8 +2860,21 @@ fileComments:
             package_name: Required
             key: Required
             hash: 'Required: must be non-empty'
+      GlobalKeyWithMaintainers:
+        message:
+          comments: null
+          fieldComments:
+            key: |-
+              The key
+
+              Required
+            maintainers: |-
+              Key maintainers
+
+              Required: must be non-empty
     oneOfs:
       GlobalKey: {}
+      GlobalKeyWithMaintainers: {}
     services: {}
   interactive/interactive_submission_service.proto:
     messages:
@@ -2642,7 +2954,9 @@ fileComments:
 
               Required
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
             deduplication_duration: |-
@@ -2703,7 +3017,9 @@ fileComments:
 
               Required
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
             deduplication_duration: |-
@@ -2760,7 +3076,9 @@ fileComments:
 
               Required
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
             deduplication_duration: |-
@@ -2871,7 +3189,7 @@ fileComments:
               Required
       GlobalKeyMappingEntry:
         message:
-          comments: null
+          comments: This message is deprecated and may be removed in future releases
           fieldComments:
             key: Required
             value: Optional
@@ -2894,8 +3212,6 @@ fileComments:
               Maximum timestamp at which the transaction can be recorded onto the ledger via the synchronizer `synchronizer_id`.
               If submitted after it will be rejected even if otherwise valid, in which case it needs to be prepared and signed again
               with a new valid max_record_time.
-              Unsigned in 3.3 to avoid a breaking protocol change
-              Will be signed in 3.4+
               Set max_record_time in the PreparedTransactionRequest to get this field set accordingly
 
               Optional
@@ -2905,8 +3221,8 @@ fileComments:
             mediator_group: Required
             submitter_info: Required
             global_key_mapping: |-
-              Contextual information needed to process the transaction but not signed, either because it's already indirectly
-              signed by signing the transaction, or because it doesn't impact the ledger state
+              This fields is deprecated and will always be empty.
+              Keys and associated contracts are already present and signed within the transaction nodes where they're used
 
               Optional: can be empty
             input_contracts: |-
@@ -3051,6 +3367,8 @@ fileComments:
             hashing_scheme_version: |-
               The hashing scheme version to be used when building the hash.
               Defaults to HASHING_SCHEME_VERSION_V2.
+              HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Optional
             read_as: |-
@@ -3117,7 +3435,9 @@ fileComments:
 
               Optional
             hashing_scheme_version: |-
-              The hashing scheme version used when building the hash
+              The hashing scheme version used when building the hash.
+              HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
+              for stable synchronizers.
 
               Required
       PreparedTransaction:
@@ -3245,17 +3565,14 @@ fileComments:
       - name: ExecuteSubmission
         comments: |-
           Execute a prepared submission _asynchronously_ on the ledger.
+          Requires `actAs` or `executeAs` scope for the submitting party when LAPI User authorization is enabled
           Requires a signature of the transaction from the submitting external party.
       - name: ExecuteSubmissionAndWait
-        comments: |-
-          Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
-          IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-          A malicious node could make a successfully committed request appeared failed and vice versa
+        comments: Similar to ExecuteSubmission but _synchronously_ wait for the completion
+          of the transaction
       - name: ExecuteSubmissionAndWaitForTransaction
-        comments: |-
-          Similar to ExecuteSubmissionAndWait but additionally returns the transaction
-          IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-          A malicious node could make a successfully committed request appear as failed and vice versa
+        comments: Similar to ExecuteSubmissionAndWait but additionally returns the
+          transaction
       - name: GetPreferredPackageVersion
         comments: |-
           A preferred package is the highest-versioned package for a provided package-name
@@ -3295,11 +3612,15 @@ fileComments:
           comments: Create Node
           fieldComments:
             signatories: 'Required: must be non-empty'
+            key: |-
+              Only populated from lf_version >= 2
+
+              Optional
             package_name: Required
             argument: Required
             stakeholders: 'Required: must be non-empty'
             lf_version: |-
-              Specific LF version of the node
+              Specific LF serialization version of the node
 
               Required
             template_id: |-
@@ -3312,21 +3633,38 @@ fileComments:
           comments: Exercise node
           fieldComments:
             children: 'Optional: can be empty'
-            interface_id: |-
-              The identifier uses the package-id reference format.
-
-              Optional
             signatories: 'Required: must be non-empty'
             consuming: Required
+            key: |-
+              Can only be populated from lf_version >= 2
+
+              Optional
             acting_parties: 'Required: must be non-empty'
             package_name: Required
             exercise_result: Optional
             chosen_value: Required
             choice_id: Required
             choice_observers: 'Optional: can be empty'
+            external_call_results: |-
+              Can only be populated from lf_version dev.
+
+              Results of external calls made during this exercise.
+              These results are carried for external-call replay and validation.
+              They are encoded into the prepared transaction hash starting with
+              HASHING_SCHEME_VERSION_V4.
+
+              Optional: can be empty
+            interface_id: |-
+              The identifier uses the package-id reference format.
+
+              Optional
             stakeholders: 'Required: must be non-empty'
+            by_key: |-
+              Can only be true from lf_version >= 2
+
+              Required
             lf_version: |-
-              Specific LF version of the node
+              Specific LF serialization version of the node
 
               Required
             template_id: |-
@@ -3334,17 +3672,52 @@ fileComments:
 
               Required
             contract_id: Required
+      ExternalCallResult:
+        message:
+          comments: |-
+            Result of an external call made during transaction execution.
+            External calls are deterministic calls to participant extension services.
+            Results are stored in the transaction and replayed during validation.
+          fieldComments:
+            config: |-
+              Extension configuration hash bytes.
+
+              Required: must be non-empty
+            function_id: |-
+              Function identifier within the extension.
+
+              Required
+            extension_id: |-
+              Extension service identifier.
+
+              Required
+            output: |-
+              Output data returned by the extension.
+
+              Required: must be non-empty
+            input: |-
+              Input data sent to the extension.
+
+              Required: must be non-empty
       Fetch:
         message:
           comments: Fetch node
           fieldComments:
             interface_id: Optional
             signatories: 'Required: must be non-empty'
+            key: |-
+              Can only be populated from lf_version >= 2
+
+              Optional
             acting_parties: 'Required: must be non-empty'
             package_name: Required
             stakeholders: 'Required: must be non-empty'
+            by_key: |-
+              Can only be true from lf_version >= 2
+
+              Required
             lf_version: |-
-              Specific LF version of the node
+              Specific LF serialization version of the node
 
               Required
             template_id: |-
@@ -3357,9 +3730,32 @@ fileComments:
           comments: null
           fieldComments:
             create: ''
-            fetch: ''
-            exercise: ''
             rollback: ''
+            exercise: ''
+            fetch: ''
+            query_by_key: Only from PV 35
+      QueryByKey:
+        message:
+          comments: null
+          fieldComments:
+            result: |-
+              Result of the query: list of contract Ids matching the query
+
+              Optional: can be empty
+            key: |-
+              key to query for
+
+              Required
+            exhaustive: Required
+            package_name: Required
+            lf_version: |-
+              Specific LF serialization version of the node
+
+              Required
+            template_id: |-
+              The identifier uses the package-id reference format.
+
+              Required
       Rollback:
         message:
           comments: Rollback Node
@@ -3368,6 +3764,7 @@ fileComments:
     oneOfs:
       Create: {}
       Exercise: {}
+      ExternalCallResult: {}
       Fetch: {}
       Node:
         node_type:
@@ -3375,9 +3772,11 @@ fileComments:
             comments: Required
             fieldComments:
               create: ''
-              fetch: ''
-              exercise: ''
               rollback: ''
+              exercise: ''
+              fetch: ''
+              query_by_key: Only from PV 35
+      QueryByKey: {}
       Rollback: {}
     services: {}
   offset_checkpoint.proto:
@@ -4197,6 +4596,11 @@ fileComments:
               If positive, the absolute offset of the ledger as viewed by the participant.
 
               Optional
+            synchronizer_times: |-
+              Final record times observed by this participant for each of the sequencers that were ever connected.
+              If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
+
+              Optional: can be empty
       IncompleteAssigned:
         message:
           comments: null
@@ -4432,12 +4836,27 @@ fileComments:
           comments: Filtered view of an on-ledger transaction's create and archive
             events.
           fieldComments:
+            transaction_hash: |-
+              The transaction hash signed by the external party for prepared transactions
+              that were submitted using `InteractiveSubmissionService.ExecuteSubmission`
+              or one of its variants.
+
+              Use this to correlate prepared transactions with their execution result
+              on the *same participant* that executed the transaction.
+
+              Not available for:
+
+              - transactions executed on Canton versions prior to 3.6
+              - transactions of internal parties submitted using `CommandSubmissionService.Submit` and its variants
+
+              Optional: can be empty
             command_id: |-
               The ID of the command which resulted in this transaction. Missing for everyone except the submitting party.
               Must be a valid LedgerString (as described in ``value.proto``).
 
               Optional
             external_transaction_hash: |-
+              Deprecated: please use ``transaction_hash`` which has the same value.
               For transaction externally signed, contains the external transaction hash
               signed by the external party. Can be used to correlate an external submission with a committed transaction.
 
@@ -4677,12 +5096,6 @@ fileComments:
               for submitting it as a disclosed contract with future commands.
 
               Optional
-      filters_by_party_entry:
-        message:
-          comments: null
-          fieldComments:
-            key: ''
-            value: ''
     oneOfs:
       CumulativeFilter:
         identifier_filter:
@@ -4717,6 +5130,18 @@ fileComments:
     services: {}
   update_service.proto:
     messages:
+      GetUpdateByHashRequest:
+        message:
+          comments: null
+          fieldComments:
+            transaction_hash: |-
+              The transaction hash to look up.
+
+              Required: must be non-empty
+            update_format: |-
+              The format for the update.
+
+              Required
       GetUpdateByIdRequest:
         message:
           comments: null
@@ -4763,7 +5188,7 @@ fileComments:
               ``next_page_token`` of the last ``GetUpdatesPageResponse``.
               To achieve correct paging: subsequent requests must
 
-              - be executed on the same participant with the same version of canton,
+              - be executed on the same participant,
               - have the same begin_offset_exclusive,
               - have the same end_offset_inclusive,
               - have the same update_format and
@@ -4854,6 +5279,7 @@ fileComments:
             offset_checkpoint: ''
             topology_transaction: ''
     oneOfs:
+      GetUpdateByHashRequest: {}
       GetUpdateByIdRequest: {}
       GetUpdateByOffsetRequest: {}
       GetUpdateResponse:
@@ -4900,6 +5326,12 @@ fileComments:
         comments: |-
           Lookup an update by its ID.
           If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+      - name: GetUpdateByHash
+        comments: |-
+          Look up an update by its transaction hash.
+          This is only available for updates received after upgrading to Canton version 3.6.
+          If there is no update with this transaction hash, or all the events are filtered,
+          or the update was populated before upgrading to Canton version 3.6, an UPDATE_NOT_FOUND error will be raised.
       - name: GetUpdatesPage
         comments: |-
           Read a page of ledger's filtered updates. It returns the event types in accordance with

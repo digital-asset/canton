@@ -12,12 +12,12 @@ import com.digitalasset.base.error.{
   Explanation,
   Resolution,
 }
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.error.{CantonBaseError, TransactionError, TransactionErrorImpl}
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.rpc.status.Status
 
 import java.time.Instant
@@ -180,6 +180,20 @@ object SequencerErrors extends SequencerErrorGroup {
   }
 
   @Explanation(
+    """This error occurs when the provided aggregation rule cannot be resolved against the topology state."""
+  )
+  @Resolution(
+    """This is only expected to happen at the exact moment when the synchronizer adds or removes mediator groups. Just retry."""
+  )
+  case object AggregateSubmissionInvalidRule
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_AGGREGATE_INVALID_RULE",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    def invalid(desc: String): SequencerDeliverError = apply(desc)
+  }
+
+  @Explanation(
     """This error occurs when the sequencer has already sent out the aggregate submission for the request."""
   )
   @Resolution(
@@ -189,6 +203,28 @@ object SequencerErrors extends SequencerErrorGroup {
       extends SequencerDeliverErrorCode(
         id = "SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+
+    def apply(message: String, protocolVersion: ProtocolVersion): SequencerDeliverError =
+      // for backward compatibility reasons, we need to keep the message format unchanged
+      if (protocolVersion <= ProtocolVersion.v35)
+        super.apply(message)
+      else
+        AggregateSubmissionAlreadySentV2.apply(message)
+  }
+
+  @Explanation(
+    """This error occurs when the sequencer has already sent out the aggregate submission for the request."""
+  )
+  @Resolution(
+    """This is expected to happen during operation of a system with aggregate submissions enabled. No action required.
+      |This error code has been modified to report Grpc RESOURCE_EXISTS and is used for synchronous rejects and
+      |async rejects starting with PV36."""
+  )
+  case object AggregateSubmissionAlreadySentV2
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
       )
 
   @Explanation(
@@ -226,22 +262,6 @@ object SequencerErrors extends SequencerErrorGroup {
         id = "SEQUENCER_NOT_ENOUGH_TRAFFIC_CREDIT",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       )
-
-  @Explanation(
-    """An onboarded sequencer has put a tombstone in place of an event with a topology timestamp older than the sequencer signing key."""
-  )
-  @Resolution(
-    """Clients should connect to another sequencer with older event history to consume the tombstoned events
-      |before reconnecting to the recently onboarded sequencer."""
-  )
-  case object PersistTombstone
-      extends SequencerDeliverErrorCode(
-        id = "SEQUENCER_TOMBSTONE_PERSISTED",
-        ErrorCategory.InvalidGivenCurrentSystemStateOther,
-      ) {
-    def apply(ts: CantonTimestamp, sc: SequencerCounter): SequencerDeliverError =
-      apply(s"Sequencer signing key not available at $ts and $sc")
-  }
 
   @Explanation(
     """The senders of the submission request or the eligible senders in the aggregation rule are not known to the sequencer."""

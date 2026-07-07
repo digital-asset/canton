@@ -3,13 +3,14 @@
 
 package com.digitalasset.daml.lf
 
-import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine => ContractStateMachine,
-  Node, NodeId,
-  TransactionError => TxErr,
-}
-import com.digitalasset.daml.lf.interpretation.{Error => IE}
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.speedy.SError.SErrorCrash
+import com.digitalasset.daml.lf.transaction.{
+  NextGenContractStateMachine as ContractStateMachine,
+  Node,
+  NodeId,
+  TransactionError as TxErr,
+}
 
 import scala.collection.immutable.HashMap
 
@@ -18,8 +19,11 @@ package object speedy {
   val Compiler = compiler.Compiler
   type Compiler = compiler.Compiler
 
-
-  private[speedy] def convTxError(nodes: HashMap[NodeId, Node], context: => String, err: TxErr): IE = {
+  private[speedy] def convTxError(
+      nodes: HashMap[NodeId, Node],
+      context: => String,
+      err: TxErr,
+  ): IE =
     err match {
       case TxErr.DuplicateContractId(contractId) =>
         // TODO(#23969) check if ww want a proper IE errors instead of crashing the engine.
@@ -28,13 +32,15 @@ package object speedy {
       case TxErr.InconsistentContractKey(key) =>
         IE.InconsistentContractKey(key)
       case TxErr.AlreadyConsumed(cid, tmplId, nid) =>
-         IE.ContractNotActive(cid, tmplId, nid)
+        IE.ContractNotActive(cid, tmplId, nid)
       case e: TxErr.EffectfulRollback =>
         convEffectfulRollbackError(nodes, e)
     }
-  }
 
-  private[speedy] def convEffectfulRollbackError(nodes: HashMap[NodeId, Node], err: TxErr.EffectfulRollback): IE.EffectfulRollback = {
+  private[speedy] def convEffectfulRollbackError(
+      nodes: HashMap[NodeId, Node],
+      err: TxErr.EffectfulRollback,
+  ): IE.EffectfulRollback =
     IE.EffectfulRollback(
       err.nodeIds
         .map(id => nodes(id))
@@ -43,7 +49,6 @@ package object speedy {
           case n: Node.Create => IE.EffectfulRollback.Node.fromCreate(n)
         }
     )
-  }
 
   // Continuation-passing style traverse. Defined as an implicit class to help type inference.
   private[speedy] implicit class IterableOps[X](val xs: Iterable[X]) extends AnyVal {

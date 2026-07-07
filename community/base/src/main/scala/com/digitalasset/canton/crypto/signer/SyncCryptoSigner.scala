@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.signer
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CacheConfig, CryptoConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
@@ -24,7 +23,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.KmsMetrics
+import com.digitalasset.canton.metrics.CryptoMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.Clock
@@ -32,6 +31,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
@@ -69,6 +69,8 @@ trait SyncCryptoSigner extends NamedLogging with AutoCloseable {
     for {
       signingKeys <- EitherT.right(topologySnapshot.signingKeys(member, usage))
       existingKeys <- signingKeys.toList
+        // TODO(#33650) - replace with unboundedFilterA; safe because a member typically has a very small number of active keys (single digit)
+        // and `existsSigningKey` resolves against fast local caches or read-locks.
         .parFilterA(pk => cryptoPrivateStore.existsSigningKey(pk.fingerprint))
         .leftMap[SyncCryptoError](SyncCryptoError.StoreError.apply)
       kk <- NonEmpty
@@ -108,7 +110,7 @@ object SyncCryptoSigner {
       member: Member,
       crypto: SynchronizerCrypto,
       cryptoConfig: CryptoConfig,
-      kmsMetrics: Option[KmsMetrics],
+      cryptoMetrics: CryptoMetrics,
       publicKeyConversionCacheConfig: CacheConfig,
       futureSupervisor: FutureSupervisor,
       timeouts: ProcessingTimeout,
@@ -130,7 +132,7 @@ object SyncCryptoSigner {
           staticSynchronizerParameters,
           member,
           crypto.privateCrypto,
-          kmsMetrics,
+          cryptoMetrics,
           crypto.cryptoPrivateStore,
           cryptoConfig.sessionSigningKeys,
           publicKeyConversionCacheConfig,

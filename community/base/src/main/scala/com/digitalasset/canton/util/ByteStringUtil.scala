@@ -14,7 +14,14 @@ import com.digitalasset.canton.serialization.{
 import com.google.protobuf.ByteString
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
-import java.io.{ByteArrayOutputStream, EOFException, InputStream, OutputStream}
+import java.io.{
+  ByteArrayOutputStream,
+  EOFException,
+  FilterInputStream,
+  IOException,
+  InputStream,
+  OutputStream,
+}
 import java.util.zip.{GZIPOutputStream, ZipException}
 import scala.annotation.tailrec
 
@@ -91,6 +98,33 @@ object ByteStringUtil {
         case count =>
           out.write(buffer, 0, count)
           copyNBuffered(n - count, buffer, in, out)
+      }
+    }
+
+  /** Wraps `in` so that reading strictly more than `maxBytes` total bytes throws an
+    * [[java.io.IOException]]. Streaming is preserved: bytes are counted, not buffered. Suitable for
+    * bounding the decompressed size of an untrusted stream without materializing it.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  def boundedInputStream(in: InputStream, maxBytes: Long): InputStream =
+    new FilterInputStream(in) {
+      // No need for AtomicLong since InputStreams are inherently single-threaded
+      private var count = 0L
+      private def check(read: Int): Unit =
+        if (read > 0) {
+          count += read
+          if (count > maxBytes)
+            throw new IOException(s"Decompressed size exceeds the limit of $maxBytes bytes")
+        }
+      override def read(): Int = {
+        val b = super.read()
+        check(if (b >= 0) 1 else 0)
+        b
+      }
+      override def read(b: Array[Byte], off: Int, len: Int): Int = {
+        val read = super.read(b, off, len)
+        check(read)
+        read
       }
     }
 

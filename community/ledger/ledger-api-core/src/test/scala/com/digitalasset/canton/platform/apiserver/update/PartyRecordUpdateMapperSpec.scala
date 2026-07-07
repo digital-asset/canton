@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.platform.apiserver.update
 
-import com.digitalasset.canton.ledger.api.{IdentityProviderId, ObjectMeta, PartyDetails}
-import com.digitalasset.canton.ledger.localstore.api.{ObjectMetaUpdate, PartyDetailsUpdate}
+import com.digitalasset.canton.ledger.api.PartyDetails
+import com.digitalasset.canton.ledger.localstore.api.PartyDetailsUpdate
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, ObjectMetaUpdate}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.field_mask.FieldMask
 import org.scalatest.EitherValues

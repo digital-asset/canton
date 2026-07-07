@@ -396,7 +396,7 @@ final class LfValueTranslation(
 
     def asyncCreatedEventBlob = condFuture(renderResult.createdEventBlob) {
       (for {
-        encoded <- TransactionCoder
+        encoded <- ContractInstanceCoder
           .encodeFatContractInstance(fatContractInstance)
           .left
           .map(_.errorMessage)
@@ -546,6 +546,11 @@ final class LfValueTranslation(
 
           case LfEngine.ResultPrefetch(_, _, resume) =>
             goAsync(resume())
+
+          case LfEngine.ResultNeedExternalCall(_, _, _, _, _) =>
+            Future.failed(
+              new IllegalStateException("View computation must be a pure function")
+            )
         }
 
       Future(engine.computeInterfaceView(templateId, value, interfaceId))

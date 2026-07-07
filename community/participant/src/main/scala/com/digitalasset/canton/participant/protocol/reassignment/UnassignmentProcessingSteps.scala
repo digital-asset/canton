@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{
@@ -66,6 +65,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -149,15 +149,8 @@ private[reassignment] class UnassignmentProcessingSteps(
         TargetSynchronizerIsSourceSynchronizer(psid.unwrap, contractIds),
       )
 
-      targetStaticSynchronizerParameters <- EitherT.fromEither[FutureUnlessShutdown](
-        reassignmentCoordination
-          .getStaticSynchronizerParameter(targetSynchronizer)
-      )
       targetTopology <- reassignmentCoordination
-        .getRecentTopologySnapshot(
-          targetSynchronizer,
-          targetStaticSynchronizerParameters,
-        )
+        .getTargetApproximateSnapshot(targetSynchronizer)
       targetTimestamp = targetTopology.map(_.timestamp)
       _ = logger.debug(withDetails(s"Picked target timestamp $targetTimestamp"))
 
@@ -362,7 +355,7 @@ private[reassignment] class UnassignmentProcessingSteps(
   }
 
   override def createSubmissionResult(
-      deliver: Deliver[Envelope[?]],
+      deliver: Deliver[Batch[Envelope[?]]],
       pendingSubmission: PendingSubmissionData,
   ): SubmissionResult =
     SubmissionResult(
@@ -495,28 +488,12 @@ private[reassignment] class UnassignmentProcessingSteps(
       )
     } yield {
       val confirmationResponseF =
-        if (
-          unassignmentValidationResult.reassigningParticipantValidationResult.isTargetTsValidatable
-        ) {
-          createConfirmationResponses(
-            parsedRequest.requestId,
-            parsedRequest.malformedPayloads,
-            protocolVersion.unwrap,
-            unassignmentValidationResult,
-          )
-        } else {
-          logger.info(
-            s"Sending an abstain verdict for ${unassignmentValidationResult.hostedConfirmingReassigningParties} because target timestamp is not validatable"
-          )
-          FutureUnlessShutdown.pure(
-            createAbstainResponse(
-              parsedRequest.requestId,
-              unassignmentValidationResult.rootHash,
-              s"Non-validatable target timestamp when processing unassignment ${parsedRequest.reassignmentId}",
-              unassignmentValidationResult.hostedConfirmingReassigningParties,
-            )
-          )
-        }
+        createConfirmationResponses(
+          parsedRequest.requestId,
+          parsedRequest.malformedPayloads,
+          protocolVersion.unwrap,
+          unassignmentValidationResult,
+        )
       val responseF =
         confirmationResponseF.map(_.map((_, Recipients.cc(parsedRequest.mediator))))
 
@@ -564,7 +541,7 @@ private[reassignment] class UnassignmentProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: PendingUnassignment,
       pendingSubmissionMap: PendingSubmissions,
@@ -624,7 +601,7 @@ private[reassignment] class UnassignmentProcessingSteps(
 
     for {
       rejectionFromPhase3 <- EitherT.right(
-        checkPhase7Validations(unassignmentValidationResult)
+        checkPhase7Validations(unassignmentValidationResult.commonValidationResult)
       )
 
       // Additional validation requested during security audit as DIA-003-013.

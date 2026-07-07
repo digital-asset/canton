@@ -7,7 +7,7 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "3.6.0-adhoc.20260422.14679.0.v560a8256"
+  val version: String = "3.6.0-snapshot.20260701.14730.0.v747c2c70"
 
   /** The dpm registry to install daml components from.
     */
@@ -24,10 +24,4 @@ object DamlVersions {
   /** The version to use when sdk jvm libraries published to maven repositories.
     */
   val libraries_version: String = if (useCustomDamlVersion) customDamlVersion else version
-
-  /** The daml-lf language versions supported by canton. (needed to load the corresponding daml-libs
-    * dependencies when building packaged dars)
-    */
-  val daml_language_versions = Seq("2.1", "2.2", "2.dev")
-
 }

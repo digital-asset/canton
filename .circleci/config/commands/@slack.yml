@@ -26,7 +26,7 @@ slack_red_main_with_volunteer:
         mentions: "${SELECTED_VOLUNTEER}"
         fail_only: true
         only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
-        failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: Person on support takes care of failed nightly jobs.)'
+        failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: The person on the CI rota takes care of failed nightly jobs.)'
         webhook: << parameters.webhook_url >>
 
 # This command will send a notification to team-sdk-updates

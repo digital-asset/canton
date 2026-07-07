@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.admin.api.client.data.{
+  ComponentHealthState,
   SequencerConnections,
   SubmissionRequestAmplification,
   TrafficControlParameters,
@@ -24,6 +25,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -79,8 +81,16 @@ abstract class SubmissionRequestAmplificationIntegrationTest
               Map(
                 // A threshold of two ensures that the mediators connect to both sequencers.
                 // TODO(#19911) Make this properly configurable
-                mediator1 -> (Seq(sequencer1, sequencer2), PositiveInt.two, NonNegativeInt.zero),
-                mediator2 -> (Seq(sequencer1, sequencer2), PositiveInt.two, NonNegativeInt.zero),
+                mediator1 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
+                mediator2 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                ),
               )
             )
           )
@@ -101,6 +111,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
             config.NonNegativeFiniteDuration.Zero,
           ),
           old.sequencerConnectionPoolDelays,
+          old.subscriptionLivenessLimits,
         )
       }
     )
@@ -561,6 +572,16 @@ abstract class SubmissionRequestAmplificationIntegrationTest
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
           sequencers.local.foreach(_.stop())
+          clue("Wait for the connections to be down on participant1") {
+            eventually() {
+              val p1connectionStatus = participant1.health.status.trySuccess.components
+                .filter(_.name.startsWith("internal-sequencer-connection-"))
+              forAll(p1connectionStatus)(_.state match {
+                case _: ComponentHealthState.Failed =>
+                case _ => fail()
+              })
+            }
+          }
           participant1.health
             .maybe_ping(
               participant2.id,

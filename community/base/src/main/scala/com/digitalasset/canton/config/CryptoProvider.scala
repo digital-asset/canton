@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.config
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{
   CryptoKeyFormat,
   EncryptionAlgorithmSpec,
@@ -17,6 +16,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 sealed trait CryptoProvider extends PrettyPrinting {
 
@@ -59,6 +59,7 @@ object CryptoProvider {
           SigningAlgorithmSpec.Ed25519,
           SigningAlgorithmSpec.EcDsaSha256,
           SigningAlgorithmSpec.EcDsaSha384,
+          SigningAlgorithmSpec.MlDsa65,
         ),
       )
 
@@ -71,6 +72,7 @@ object CryptoProvider {
           SigningKeySpec.EcP256,
           SigningKeySpec.EcP384,
           SigningKeySpec.EcSecp256k1,
+          SigningKeySpec.MlDsa65,
         ),
       )
 
@@ -165,6 +167,7 @@ object CryptoProvider {
           SigningAlgorithmSpec.Ed25519,
           SigningAlgorithmSpec.EcDsaSha256,
           SigningAlgorithmSpec.EcDsaSha384,
+          SigningAlgorithmSpec.MlDsa65,
         ),
       )
 
@@ -177,6 +180,7 @@ object CryptoProvider {
           SigningKeySpec.EcP256,
           SigningKeySpec.EcP384,
           SigningKeySpec.EcSecp256k1,
+          SigningKeySpec.MlDsa65,
         ),
       )
 

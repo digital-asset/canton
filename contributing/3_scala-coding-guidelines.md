@@ -302,7 +302,7 @@ For further information on cats imports see [this guide](https://eed3si9n.com/he
 
 **Exceptions:**
 
-* The `NonEmpty` instances must be imported with `import com.daml.nonempty.catsinstances.*`.
+* The `NonEmpty` instances must be imported with `import com.digitalasset.nonempty.catsinstances.*`.
   Types such as `NonEmpty[List[X]]` must first be converted to `NonEmptyF[List, X]` using the `.toNEF` method.
   This ensures that scalac's type inference searches for correct type class instances.
   The method `.fromNEF` converts a `NonEmptyF[List, X]` to a `NonEmpty[List[X]]`.
@@ -330,7 +330,13 @@ MonadUtil.sequentialTraverse(xs)(f)
 
 # TODO Comments
 TODO comments should have the form `TODO(#<issue-number>): <description>`, where
-`<issue-number>` is the reference number of a GitHub issue.
+`<issue-number>` is the reference number of a GitHub issue in the DACH-NY/canton repo.
+
+External contributors who cannot create issues in the internal repo should instead use the full
+OSS GitHub URL: `TODO(https://github.com/digital-asset/canton/issues/<issue-number>): <description>`.
+
+For work that spans both the `canton` and `daml` repos, you can also reference a `daml` issue directly:
+`TODO(https://github.com/digital-asset/daml/issues/<issue-number>): <description>`.
 
 A script is used to aggregate TODOs and detect problems such as TODOs without an issue number or referencing a closed issue.
 The script uses a more complex pattern than described above to cover existing TODOs from the codebase,

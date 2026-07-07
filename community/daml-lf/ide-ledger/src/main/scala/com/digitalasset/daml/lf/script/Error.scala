@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package script
 
-import com.digitalasset.daml.lf.data.Ref.{Identifier, Party, PackageId}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, Party}
 import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.language.Ast.PackageMetadata
 import com.digitalasset.daml.lf.speedy.SError.SError
@@ -45,8 +45,8 @@ object Error {
       consumedBy: Option[EventId],
   ) extends Error
 
-  /** A fetch or exercise was being made against a contract that has not
-    * been disclosed to 'committer'.
+  /** A fetch or exercise was being made against a contract that has not been disclosed to
+    * 'committer'.
     */
   final case class ContractNotVisible(
       coid: ContractId,

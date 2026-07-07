@@ -8,8 +8,7 @@ by signing with a private key they only control.
 This has a number of consequences, largely on how these parties submit Daml transactions and on their topology state.
 
 We here only focus on what that means in terms of testing. The following describes the best practices to interact with
-parties
-in tests such that both local and external parties can be covered by the test.
+parties in tests such that both local and external parties can be covered by the test.
 
 Note that all tooling details below works both for local and external parties.
 
@@ -20,8 +19,7 @@ To create a party in tests, use:
 `participant.parties.testing.enable(...)`.
 
 Note the **testing** part. This method has the same signature as `participant.parties.enable` which you may be familiar
-with,
-but it will create either a local or an external party, depending on the implicit `PartyKind` in scope.
+with, but it will create either a local or an external party, depending on the implicit `PartyKind` in scope.
 This `partyKind` is set to local party by default and can be overridden to external party via an environment variable,
 see [Running Tests](#running-tests).
 

@@ -7,7 +7,6 @@ import cats.syntax.parallel.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -29,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.{TempDirectory, TempFile}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import monocle.macros.syntax.lens.*
 import pureconfig.ConfigCursor

@@ -26,9 +26,11 @@ import com.digitalasset.canton.resource.{DbStorage, DbStorageSingle}
 import com.digitalasset.canton.store.db.{DbStorageSetup, PostgresDbStorageSetup}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Pause, Success as RetrySuccess}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import monocle.macros.syntax.lens.*
 
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext}
 import scala.util.control.NonFatal
 import scala.util.{Random, Success}
@@ -220,20 +222,33 @@ class UsePostgres(
     val dbNames = nodes.map(generateDbName).distinct
     val storage = dbSetup.storage
     import storage.api.*
-    storage
-      .update_(
-        DBIO.seq(
-          dbNames.flatMap(db =>
-            List(
-              sqlu""" drop database if exists "#$db"""",
-              sqlu""" drop user if exists "#$db-user"""",
-            )
-          )*
-        ),
-        functionFullName,
-      )
+
+    implicit val success: RetrySuccess[Unit] = RetrySuccess.always
+
+    val retryPolicy = Pause(
+      logger = logger,
+      hasSynchronizeWithClosing = this,
+      maxRetries = 5,
+      delay = 1.second,
+      operationName = "drop-postgres-databases",
+    )
+
+    val dropDbTask = storage.update_(
+      DBIO.seq(
+        dbNames.flatMap(db =>
+          List(
+            sqlu""" drop database if exists "#$db"""",
+            sqlu""" drop user if exists "#$db-user"""",
+          )
+        )*
+      ),
+      functionFullName,
+    )
+
+    retryPolicy
+      .unlessShutdown(dropDbTask, AllExceptionRetryPolicy)
       .recover { case NonFatal(e) =>
-        logger.warn(s"Dropping database failed", e)
+        logger.warn(s"Dropping database failed after all retries", e)
         logOpenQueries(storage).discard
         UnlessShutdown.Outcome(())
       }

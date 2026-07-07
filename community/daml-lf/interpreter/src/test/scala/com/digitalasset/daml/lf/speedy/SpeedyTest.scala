@@ -4,28 +4,27 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
+import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Struct}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.speedy.SBuiltinFun._
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
 import com.digitalasset.daml.lf.speedy.SError.SError
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.speedy.SpeedyTestLib.typeAndCompile
-import com.digitalasset.daml.lf.testing.parser.Implicits._
-import org.scalactic.Equality
-import org.scalatest.matchers.should.Matchers
+import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
+import org.scalactic.Equality
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.ArraySeq
 
 class SpeedyTest extends AnyFreeSpec with Matchers with Inside with SuppressingLogging {
 
-  import SpeedyTest._
+  import SpeedyTest.*
 
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
 
@@ -253,7 +252,7 @@ module M {
 
   "from_any" - {
     "throw an exception on Int64" in {
-      eval(e"""from_any @Test:T1 1""", anyPkgs) shouldBe a[Left[_, _]]
+      eval(e"""from_any @Test:T1 1""", anyPkgs) shouldBe a[Left[?, ?]]
     }
 
     "return Some(tpl) if template type matches" in {
@@ -516,10 +515,14 @@ object SpeedyTest {
 
   val alice: SParty = SParty(Party.assertFromString("Alice"))
 
-  def eval(e: Expr, packages: PureCompiledPackages)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
+  def eval(e: Expr, packages: PureCompiledPackages)(implicit
+      loggingContext: NamedLoggingContext
+  ): Either[SError, SValue] =
     evalSExpr(packages.compiler.unsafeCompile(e), packages)
 
-  def evalSExpr(e: SExpr, packages: PureCompiledPackages)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] = {
+  def evalSExpr(e: SExpr, packages: PureCompiledPackages)(implicit
+      loggingContext: NamedLoggingContext
+  ): Either[SError, SValue] = {
     val machine = Speedy.Machine.fromPureSExpr(packages, e, MachineLogger())
     machine.runPure()
   }

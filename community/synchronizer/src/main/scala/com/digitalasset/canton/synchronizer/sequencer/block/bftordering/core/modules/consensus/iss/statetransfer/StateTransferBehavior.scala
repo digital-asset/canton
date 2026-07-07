@@ -50,7 +50,7 @@ import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import scala.util.{Failure, Random, Success}
+import scala.util.{Failure, Success}
 
 /** A state transfer behavior for [[IssConsensusModule]]. There are 2 types of state transfer:
   * onboarding (for new nodes) and catch-up (for lagging-behind nodes). These two types work
@@ -92,7 +92,6 @@ final class StateTransferBehavior[E <: Env[E]](
     clock: Clock,
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
-    random: Random,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -126,7 +125,6 @@ final class StateTransferBehavior[E <: Env[E]](
       thisNode,
       dependencies,
       epochStore,
-      random,
       metrics,
       loggerFactory,
     )()
@@ -145,8 +143,10 @@ final class StateTransferBehavior[E <: Env[E]](
   private[iss] var maybeLastReceivedEpochTopology: Option[Consensus.NewEpochTopology[E]] =
     None
 
-  override def ready(self: ModuleRef[Consensus.Message[E]]): Unit =
-    self.asyncSendNoTrace(Consensus.Init.KickOff)
+  override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
+      traceContext: TraceContext
+  ): Unit =
+    self.asyncSend(Consensus.Init.KickOff)
 
   override protected def receiveInternal(
       message: Consensus.Message[E]
@@ -234,16 +234,22 @@ final class StateTransferBehavior[E <: Env[E]](
           )
         }
 
-      case Consensus.NewEpochStored(newEpochInfo, membership, cryptoProvider: CryptoProvider[E]) =>
+      case Consensus.NewEpochStored(
+            newEpochInfo,
+            membership,
+            cryptoProvider: CryptoProvider[E],
+          ) =>
         // Mainly so that the onboarding state transfer start epoch is not set as the latest completed epoch initially.
         // A new event can be introduced to avoid branching.
         if (newEpochInfo != epochState.epoch.info) {
-          logger.debug(
+          logger.info(
             s"$messageType: setting new epoch ${newEpochInfo.number} during $stateTransferType state transfer"
           )
           setNewEpochState(newEpochInfo, membership, cryptoProvider)
         }
+
         cleanUpPostponedMessageQueue()
+
         stateTransferManager.stateTransferNewEpoch(
           newEpochInfo.number,
           membership,
@@ -255,6 +261,8 @@ final class StateTransferBehavior[E <: Env[E]](
           Consensus.Admin.GetOrderingTopologyResponse(
             epochState.epoch.info.number,
             activeTopologyInfo.currentMembership.orderingTopology.nodes,
+            activeTopologyInfo.currentMembership.leaders,
+            activeTopologyInfo.currentMembership.blacklistedNodes,
             activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
           )
         )
@@ -317,7 +325,11 @@ final class StateTransferBehavior[E <: Env[E]](
       case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
       case Success(_) =>
         logger.debug(s"$messageType: stored start epoch $startEpochNumber")
-        Consensus.NewEpochStored(startEpochInfo, membership, cryptoProvider)
+        Consensus.NewEpochStored(
+          startEpochInfo,
+          membership,
+          cryptoProvider,
+        )
     }
   }
 
@@ -412,7 +424,11 @@ final class StateTransferBehavior[E <: Env[E]](
         logger.debug(
           s"$messageType: stored completed epoch $currentEpochNumber and new epoch $newEpochNumber"
         )
-        Consensus.NewEpochStored(newEpochInfo, newMembership, newCryptoProvider)
+        Consensus.NewEpochStored(
+          newEpochInfo,
+          newMembership,
+          newCryptoProvider,
+        )
     }
   }
 
@@ -478,13 +494,12 @@ final class StateTransferBehavior[E <: Env[E]](
         clock,
         loggerFactory,
       ),
-      random,
       dependencies,
       loggerFactory,
       timeouts,
       futurePbftMessageQueue = initialState.pbftMessageQueue,
       postponedConsensusMessageQueue = Some(postponedConsensusMessages),
-    )()(catchupDetector)
+    )(initTraceContext = traceContext)(catchupDetector)
 
     context.become(consensusBehavior)
 

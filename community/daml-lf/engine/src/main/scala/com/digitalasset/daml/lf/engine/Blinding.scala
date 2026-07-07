@@ -3,47 +3,44 @@
 
 package com.digitalasset.daml.lf.engine
 
-import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
-import com.digitalasset.daml.lf.transaction.Node
+import com.digitalasset.daml.lf.data.{Relation, *}
+import com.digitalasset.daml.lf.ledger.*
 import com.digitalasset.daml.lf.transaction.{
   BlindingInfo,
-  Transaction,
+  Node,
   NodeId,
+  Transaction,
   VersionedTransaction,
 }
-import com.digitalasset.daml.lf.ledger._
-import com.digitalasset.daml.lf.data.Relation
 
 import scala.annotation.tailrec
 
 object Blinding {
 
-  /** Given a transaction provide concise information on visibility
-    * for all stakeholders
+  /** Given a transaction provide concise information on visibility for all stakeholders
     *
-    * We keep this in Engine since it needs the packages and your
-    * typical engine already has a way to look those up and we do not
-    * want to reinvent the wheel.
+    * We keep this in Engine since it needs the packages and your typical engine already has a way
+    * to look those up and we do not want to reinvent the wheel.
     *
-    *  @param tx transaction to be blinded
+    * @param tx
+    *   transaction to be blinded
     */
   def blind(tx: VersionedTransaction): BlindingInfo =
     BlindingTransaction.calculateBlindingInfo(tx)
 
   /** Returns the part of the transaction which has to be divulged to the given party.
     *
-    * Note that if the child of a root node is divulged but the parent isn't, the child
-    * will become a root note itself. Such nodes are "uprooted" in order, in the sense
-    * that nodes that come before when traversing depth first, left to right will appear
-    * first in the roots list.
+    * Note that if the child of a root node is divulged but the parent isn't, the child will become
+    * a root note itself. Such nodes are "uprooted" in order, in the sense that nodes that come
+    * before when traversing depth first, left to right will appear first in the roots list.
     *
-    * This also mean that there might be more roots in the divulged transaction than in
-    * the original transaction.
+    * This also mean that there might be more roots in the divulged transaction than in the original
+    * transaction.
     *
     * This function will crash if the transaction provided is malformed -- that is, if the
-    * transaction has Nid references that are not present in its nodes. Use `isWellFormed`
-    * if you are getting the transaction from a third party.
+    * transaction has Nid references that are not present in its nodes. Use `isWellFormed` if you
+    * are getting the transaction from a third party.
     */
   def divulgedTransaction(
       divulgences: Relation[NodeId, Party],
@@ -60,7 +57,7 @@ object Blinding {
     def go(
         filteredRoots: BackStack[NodeId],
         remainingRoots: FrontStack[NodeId],
-    ): ImmArray[NodeId] = {
+    ): ImmArray[NodeId] =
       remainingRoots.pop match {
         case None => filteredRoots.toImmArray
         case Some((root, remainingRoots)) =>
@@ -70,14 +67,13 @@ object Blinding {
             tx.nodes(root) match {
               case nr: Node.Rollback =>
                 go(filteredRoots, nr.children ++: remainingRoots)
-              case _: Node.Fetch | _: Node.Create | _: Node.LookupByKey =>
+              case _: Node.Fetch | _: Node.Create | _: Node.QueryByKey =>
                 go(filteredRoots, remainingRoots)
               case ne: Node.Exercise =>
                 go(filteredRoots, ne.children ++: remainingRoots)
             }
           }
       }
-    }
 
     Transaction(
       roots = go(BackStack.empty, tx.roots.toFrontStack),

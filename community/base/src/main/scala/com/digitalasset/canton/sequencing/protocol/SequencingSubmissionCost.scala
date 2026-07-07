@@ -64,6 +64,6 @@ object SequencingSubmissionCost
     for {
       cost <- ProtoConverter.parseNonNegativeLong("cost", costP)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-    } yield SequencingSubmissionCost(cost, rpv.representative)
+    } yield SequencingSubmissionCost(cost)(rpv)
   }
 }

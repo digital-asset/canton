@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.repair
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIdsFromJava
 import com.digitalasset.canton.admin.api.client.data.{
@@ -30,6 +29,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSync
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   Deliver,
   DeliverError,
   MediatorGroupRecipient,
@@ -49,6 +49,7 @@ import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 import com.digitalasset.canton.topology.transaction.NamespaceDelegation
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags}
+import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
@@ -81,7 +82,7 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
 
   def loadLastStoredEvent()(implicit
       env: TestConsoleEnvironment
-  ): PossiblyIgnoredSequencedEvent[DefaultOpenEnvelope] = {
+  ): PossiblyIgnoredSequencedEvent[Batch[DefaultOpenEnvelope]] = {
     import env.*
     participant1.testing.state_inspection
       .findMessage(daId, LatestUpto(CantonTimestamp.MaxValue))
@@ -541,7 +542,10 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
               val foundPoisonousPing = lastTwoEvents.foldRight(false) { case (event, state) =>
                 if (!state) {
                   val eventRecipients =
-                    event.underlying.value.content.asInstanceOf[Deliver[?]].batch.allRecipients
+                    event.underlying.value.content
+                      .asInstanceOf[Deliver[Batch[?]]]
+                      .batch
+                      .allRecipients
                   logger.info(
                     s"Event: ${event.underlying.value.content}, with recipients: $eventRecipients, with " +
                       s"timestamp: ${event.underlying.value.content.timestamp}"

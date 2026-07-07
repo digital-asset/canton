@@ -73,7 +73,7 @@ sealed trait PackageRemovalIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-      .addConfigTransforms(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
 
   // Note that CantonTests depends on CantonExamples
   private val cantonTestsPkg = PackageId.assertFromString(Many.PACKAGE_ID)
@@ -437,7 +437,9 @@ sealed trait PackageRemovalIntegrationTest
         },
         inside(_) { case head :: _tail =>
           val exceptionMessage =
-            s"""Unable to load package $cantonTestsPkg even though the package has been vetted: VettedPackage(packageId = ${cantonTestsPkg.show}, unbounded). Crashing...
+            s"""Unable to load package $cantonTestsPkg even though the package has been vetted: VettedPackage(packageId = ${toShow(
+                cantonTestsPkg
+              ).show}, unbounded). Crashing...
                  |To recover from this error upload the package with id $cantonTestsPkg to the participant and then reconnect the participant to the synchronizer.""".stripMargin
 
           head.throwable.value.getMessage shouldBe exceptionMessage

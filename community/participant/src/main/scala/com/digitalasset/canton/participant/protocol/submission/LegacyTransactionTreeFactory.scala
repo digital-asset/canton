@@ -27,7 +27,6 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.protocol.submission.LegacyTransactionTreeFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithAbsoluteSuffixes,
   WithoutSuffixes,
@@ -41,7 +40,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.KeyInactive
 import com.digitalasset.daml.lf.transaction.Transaction.{
   KeyActive,
@@ -96,7 +94,6 @@ class LegacyTransactionTreeFactory(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
-      legacyKeyResolver: LfGlobalKeyMapping,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
   )(implicit
@@ -108,7 +105,7 @@ class LegacyTransactionTreeFactory(
       mediator,
       transactionUuid,
       metadata.ledgerTime,
-      legacyKeyResolver.asCidOptionMap,
+      keyResolver = Map.empty,
     )
 
     // Create salts
@@ -129,8 +126,9 @@ class LegacyTransactionTreeFactory(
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
         transaction,
-        RollbackContext.empty,
+        PathRollbackContext.empty,
         Some(participantId.adminParty.toLf),
+        PathRollbackContextFactory,
       )
 
     val commonMetadata = CommonMetadata
@@ -308,7 +306,9 @@ class LegacyTransactionTreeFactory(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, TransactionView] = {
-    state.signalRollbackScope(view.rbContext.rollbackScope)
+    state.signalRollbackScope(
+      checked(PathRollbackScope.tryToPathRollbackScope(view.rbContext.rollbackScope))
+    )
 
     // reset to a fresh state with projected resolver before visiting the subtree
     val previousCsmState = state.csmState
@@ -392,7 +392,9 @@ class LegacyTransactionTreeFactory(
               state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
             }
 
-            _ = state.signalRollbackScope(rbScope)
+            _ = state.signalRollbackScope(
+              checked(PathRollbackScope.tryToPathRollbackScope(rbScope))
+            )
 
             _ <- EitherT.fromEither[FutureUnlessShutdown]({
               for {
@@ -458,7 +460,7 @@ class LegacyTransactionTreeFactory(
         actionDescription,
         viewParticipantDataSalt,
         contractOfId,
-        view.rbContext,
+        checked(PathRollbackContext.tryToPathRollbackContext(view.rbContext)),
       )
 
       // fast-forward the former state over the subtree
@@ -506,16 +508,17 @@ class LegacyTransactionTreeFactory(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, LfNodeCreate] = {
 
-    val cantonContractInst = checked(
+    val suffixedArg = checked(
       LfTransactionUtil
-        .suffixContractInst(state.suffixOfCreatedContract)(createNode.versionedCoinst)
+        .suffixArg(state.suffixOfCreatedContract)(createNode.arg)
         .valueOr(cid =>
           throw new IllegalStateException(
             s"Invalid contract id $cid found in contract instance of create node"
           )
         )
-    ).unversioned
-    val createNodeWithSuffixedArg = createNode.copy(arg = cantonContractInst.arg)
+    )
+
+    val createNodeWithSuffixedArg = createNode.copy(arg = suffixedArg)
 
     val contractSalt = cantonContractIdVersion match {
       case _: CantonContractIdV1Version =>
@@ -733,7 +736,7 @@ class LegacyTransactionTreeFactory(
       actionDescription: ActionDescription,
       salt: Salt,
       contractOfId: ContractInstanceOfId,
-      rbContextCore: RollbackContext,
+      rbContextCore: PathRollbackContext,
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, ViewParticipantData] = {
 
     val consumedInCore =
@@ -798,10 +801,11 @@ class LegacyTransactionTreeFactory(
             coreInputs = coreInputsWithInstances,
             createdCore = created,
             createdInSubviewArchivedInCore = createdInSubviewArchivedInCore,
-            resolvedKeys = resolvedKeys.toMap.fmap(_.map(_.tryToNextGen())),
+            keyResolution = resolvedKeys.toMap.fmap(_.map(_.tryToNextGen())),
             actionDescription = actionDescription,
             rollbackContext = rbContextCore,
             salt = salt,
+            externalCallResults = Seq.empty,
             protocolVersion = protocolVersion,
           )
         )
@@ -850,7 +854,6 @@ class LegacyTransactionTreeFactory(
       topologySnapshot: TopologySnapshot,
       contractOfId: ContractInstanceOfId,
       rbContext: RollbackContext,
-      legacyKeyResolver: LfGlobalKeyMapping,
       absolutizer: ContractIdAbsolutizer,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -871,11 +874,11 @@ class LegacyTransactionTreeFactory(
 
     val metadata = transaction.metadata
     val state = stateForValidation(
-      mediator,
-      transactionUuid,
-      metadata.ledgerTime,
-      viewSalts,
-      legacyKeyResolver.asCidOptionMap,
+      mediator = mediator,
+      transactionUUID = transactionUuid,
+      ledgerTime = metadata.ledgerTime,
+      salts = viewSalts,
+      keyResolver = Map.empty,
     )
 
     val decompositionsF =
@@ -884,6 +887,7 @@ class LegacyTransactionTreeFactory(
         transaction,
         rbContext,
         submittingParticipantO.map(_.adminParty.toLf),
+        PathRollbackContextFactory,
       )
     for {
       decompositions <- EitherT.right(decompositionsF)
@@ -918,7 +922,12 @@ class LegacyTransactionTreeFactory(
         .leftMap(ContractIdAbsolutizationError(_): TransactionTreeConversionError)
     } yield {
       view -> checked(
-        WellFormedTransaction.checkOrThrow(absolutizedTx, metadata, WithAbsoluteSuffixes)
+        WellFormedTransaction.checkOrThrow(
+          absolutizedTx,
+          metadata,
+          WithAbsoluteSuffixes,
+          PathRollbackContextFactory,
+        )
       )
     }
   }
@@ -1034,9 +1043,10 @@ object LegacyTransactionTreeFactory {
         : mutable.Map[LfGlobalKey, (LfSerializationVersion, Set[LfPartyId])] =
       mutable.Map.empty
 
-    /** Out parameter for the [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State]]
+    /** Out parameter for the
+      * [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State]]
       *
-      * The state of the [[com.digitalasset.daml.lf.transaction.ContractStateMachine]] after
+      * The state of the [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine]] after
       * iterating over the following nodes in execution order:
       *   1. The iteration starts at the root node of the current view.
       *   1. The iteration includes all processed nodes of the view. This includes the nodes of
@@ -1045,17 +1055,15 @@ object LegacyTransactionTreeFactory {
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var csmState: ContractStateMachine.State[Unit] = initialCsmState
 
-    /** This resolver is used to feed
-      * [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.handleLookupWith]].
-      */
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var currentResolver: ContractStateMachine.KeyResolver = initialResolver
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    private var rollbackScope: RollbackScope = RollbackScope.empty
+    private var rollbackScope: PathRollbackScope = PathRollbackScope.empty
 
-    def signalRollbackScope(target: RollbackScope): Unit = {
-      val (pops, pushes) = RollbackScope.popsAndPushes(rollbackScope, target)
+    def signalRollbackScope(scope: RollbackScope): Unit = {
+      val target = checked(PathRollbackScope.tryToPathRollbackScope(scope))
+      val (pops, pushes) = PathRollbackScope.popsAndPushes(rollbackScope, target)
       for (_ <- 1 to pops) { csmState = csmState.endRollback() }
       for (_ <- 1 to pushes) { csmState = csmState.beginRollback() }
       rollbackScope = target

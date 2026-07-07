@@ -141,6 +141,18 @@ abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
           .discard
       }
 
+      // Flake prevention: The dev-1 topology store is populated asynchronously via
+      // a local database copy ONLY AFTER a successful handshake with the new sequencer.
+      // We must wait for this background copy to finish copying Alice's mapping
+      // to the new synchronizer before we shut down sequencer2.
+      eventually() {
+        participant2.topology.party_to_participant_mappings.list(
+          synchronizerId = fixture.newPsid,
+          filterParty = alice.filterString,
+          filterParticipant = participant2.id.filterString,
+        ) should not be empty
+      }
+
       sequencer2.stop() // to prevent reconnect to the synchronizer
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 

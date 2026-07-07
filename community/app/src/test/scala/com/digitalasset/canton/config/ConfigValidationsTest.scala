@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import cats.data.Validated.Valid
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.auth.AuthorizedUser
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
@@ -34,10 +33,12 @@ import com.digitalasset.canton.synchronizer.mediator.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import monocle.macros.syntax.lens.*
 import org.scalatest.prop.{TableFor1, TableFor2}
@@ -334,7 +335,64 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
-    "prevent dev protocol in sequencer configurations without non-standard-config option" in {
+    "prevent BftBlockOrdering standalone mode in sequencer configuration without non-standard config option" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(),
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            sequencer = SequencerConfig.BftSequencer(
+              config = BftBlockOrdererConfig(
+                // The config validation logic only checks for the standalone config being != `None`
+                standalone = Some(null)
+              )
+            )
+          )
+        ),
+      )
+      assertErrors(config)(bftBlockOrderingStandaloneModeRequiresNonStandardError("s1"))
+      assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
+    }
+
+    "prevent dev protocol in all nodes configurations without non-standard-config option" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(),
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            parameters = SequencerNodeParameterConfig(devVersionSupport = true)
+          )
+        ),
+        mediators = Map(
+          InstanceName.tryCreate("m1") -> MediatorNodeConfig(
+            parameters = MediatorNodeParameterConfig(devVersionSupport = true)
+          )
+        ),
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(devVersionSupport = true)
+          )
+        ),
+      )
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "dev-version-support",
+          "sequencer",
+          "s1",
+        ),
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "dev-version-support",
+          "mediator",
+          "m1",
+        ),
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "dev-version-support",
+          "participant",
+          "p1",
+        ),
+      )
+      assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
+    }
+
+    "prevent alpha protocol in sequencer configurations without non-standard-config option" in {
       val config = CantonConfig(
         parameters = CantonParameters(),
         sequencers = Map(
@@ -343,11 +401,17 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           )
         ),
       )
-      assertErrors(config)(alphaProtocolVersionRequiresNonStandardError("sequencer", "s1"))
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "alpha-version-support",
+          "sequencer",
+          "s1",
+        )
+      )
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
-    "prevent dev protocol in mediator configurations without non-standard-config option" in {
+    "prevent alpha protocol in mediator configurations without non-standard-config option" in {
       val config = CantonConfig(
         parameters = CantonParameters(),
         mediators = Map(
@@ -356,7 +420,9 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           )
         ),
       )
-      assertErrors(config)(alphaProtocolVersionRequiresNonStandardError("mediator", "m1"))
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError("alpha-version-support", "mediator", "m1")
+      )
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 
@@ -369,7 +435,13 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           )
         ),
       )
-      assertErrors(config)(alphaProtocolVersionRequiresNonStandardError("participant", "p1"))
+      assertErrors(config)(
+        devOrAlphaProtocolVersionRequiresNonStandardError(
+          "alpha-version-support",
+          "participant",
+          "p1",
+        )
+      )
       assertValid(config.copy(parameters = CantonParameters(nonStandardConfig = true)))
     }
 

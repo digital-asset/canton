@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages.*
@@ -12,7 +11,9 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Optional
@@ -35,6 +36,10 @@ trait ClosedEnvelope extends Envelope[ByteString] {
 
   @VisibleForTesting
   def withRecipients(newRecipients: Recipients): ClosedEnvelope
+
+  /** Returns this envelope with the given bound used for decompression.
+    */
+  def withMaxBytesToDecompress(maxBytesToDecompress: MaxBytesToDecompress): ClosedEnvelope
 }
 
 object ClosedEnvelope {
@@ -59,6 +64,20 @@ object ClosedEnvelope {
     val hash = snapshot.pureCrypto.digest(HashPurpose.SignedProtocolMessageSignature, content)
     snapshot.verifySignatures(hash, sender, signatures, SigningKeyUsage.ProtocolOnly)
   }
+
+  def verifyKeyUsage(
+      snapshot: SyncCryptoApi,
+      sender: Member,
+      signature: Signature,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    snapshot.verifyKeyUsage(
+      sender,
+      signature.authorizingLongTermKey,
+      signature.signatureDelegation,
+      SigningKeyUsage.ProtocolOnly,
+    )
 
   def verifyMediatorSignatures(
       snapshot: SyncCryptoApi,

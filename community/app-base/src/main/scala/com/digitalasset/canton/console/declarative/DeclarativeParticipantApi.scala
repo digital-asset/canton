@@ -28,8 +28,6 @@ import com.digitalasset.canton.console.declarative.DeclarativeApi.{
   UpdateResult,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.api
-import com.digitalasset.canton.ledger.api.IdentityProviderId
 import com.digitalasset.canton.lifecycle.{CloseContext, LifeCycle, RunOnClosing}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.DeclarativeApiMetrics
@@ -51,8 +49,9 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.{BinaryFileUtil, MonadUtil}
-import com.digitalasset.canton.{SynchronizerAlias, config}
+import com.digitalasset.canton.{SynchronizerAlias, config, user}
 import com.digitalasset.daml.lf.archive.DarParser
 import com.google.protobuf.field_mask.FieldMask
 
@@ -189,8 +188,7 @@ class DeclarativeParticipantApi(
       val mapping = SynchronizerTrustCertificate(
         participantId,
         synchronizerId,
-        featureFlags =
-          (ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer +: oldFeatureFlags),
+        featureFlags = (ParticipantTopologyFeatureFlag.EnableMultiSynchronizer +: oldFeatureFlags),
       )
       queryAdminApi(
         TopologyAdminCommands.Write.Propose(
@@ -211,7 +209,7 @@ class DeclarativeParticipantApi(
               current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
               currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Seq.empty)
               shouldUpdate = !currentFeatureFlags.contains(
-                ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer
+                ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
               )
               done <-
                 if (shouldUpdate) {
@@ -452,6 +450,7 @@ class DeclarativeParticipantApi(
               participantAdmin = rights.participantAdmin,
               identityProviderAdmin = rights.identityProviderAdmin,
               readAsAnyParty = rights.readAsAnyParty,
+              actAsAnyParty = rights.actAsAnyParty,
             ),
             primaryPartyAuthentication = primaryPartyAuthentication,
           )(resourceVersion = metadata.resourceVersion)
@@ -518,6 +517,7 @@ class DeclarativeParticipantApi(
           readAsAnyParty = user.rights.readAsAnyParty,
           executeAs = user.rights.executeAs.map(PartyId.tryFromProtoPrimitive).map(_.toLf),
           executeAsAnyParty = user.rights.executeAsAnyParty,
+          actAsAnyParty = user.rights.actAsAnyParty,
           primaryPartyAuthentication = user.primaryPartyAuthentication,
         )
       ).map(_ => ())
@@ -571,6 +571,8 @@ class DeclarativeParticipantApi(
           grantOrRevoke(existing.readAsAnyParty, desired.readAsAnyParty)
         val (grantExecuteAsAny, revokeExecuteAsAny) =
           grantOrRevoke(existing.executeAsAnyParty, desired.executeAsAnyParty)
+        val (grantActAsAny, revokeActAsAny) =
+          grantOrRevoke(existing.actAsAnyParty, desired.actAsAnyParty)
         val (grantReadAs, revokeReadAs) =
           grantOrRevokeSet(existing.readAs, desired.readAs)
         val (grantExecuteAs, revokeExecuteAs) =
@@ -579,7 +581,7 @@ class DeclarativeParticipantApi(
           grantOrRevokeSet(existing.actAs, desired.actAs)
         val grantE =
           if (
-            grantParticipantAdmin || grantIdpAdmin || grantReadAsAny || grantReadAs.nonEmpty || grantActAs.nonEmpty || grantExecuteAsAny || grantExecuteAs.nonEmpty
+            grantParticipantAdmin || grantIdpAdmin || grantReadAsAny || grantReadAs.nonEmpty || grantActAs.nonEmpty || grantExecuteAsAny || grantExecuteAs.nonEmpty || grantActAsAny
           ) {
             queryLedgerApi(
               LedgerApiCommands.Users.Rights.Grant(
@@ -592,12 +594,13 @@ class DeclarativeParticipantApi(
                 readAsAnyParty = grantReadAsAny,
                 executeAsAnyParty = grantExecuteAsAny,
                 identityProviderAdmin = grantIdpAdmin,
+                actAsAnyParty = grantActAsAny,
               )
             ).map(_ => ())
           } else Either.unit
         val revokeE =
           if (
-            revokeParticipantAdmin || revokeIdpAdmin || revokeReadAsAny || revokeReadAs.nonEmpty || revokeActAs.nonEmpty || revokeExecuteAsAny || revokeExecuteAs.nonEmpty
+            revokeParticipantAdmin || revokeIdpAdmin || revokeReadAsAny || revokeReadAs.nonEmpty || revokeActAs.nonEmpty || revokeExecuteAsAny || revokeExecuteAs.nonEmpty || revokeActAsAny
           ) {
             queryLedgerApi(
               LedgerApiCommands.Users.Rights.Revoke(
@@ -610,6 +613,7 @@ class DeclarativeParticipantApi(
                 readAsAnyParty = revokeReadAsAny,
                 executeAsAnyParty = revokeExecuteAsAny,
                 identityProviderAdmin = revokeIdpAdmin,
+                actAsAnyParty = revokeActAsAny,
               )
             ).map(_ => ())
           } else Either.unit
@@ -711,9 +715,12 @@ class DeclarativeParticipantApi(
       )
 
     def fetchConnections(): Either[String, Seq[(SynchronizerAlias, DeclarativeConnectionConfig)]] =
-      queryAdminApi(ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers)
-        .map(_.map { case (synchronizerConnectionConfig, _, _) => synchronizerConnectionConfig }
-          .map(toDeclarative))
+      queryAdminApi(
+        ParticipantAdminCommands.SynchronizerConnectivity.ListActiveRegisteredSynchronizers
+      )
+        .map(_.map { case (synchronizerConnectionConfig, _, _) =>
+          toDeclarative(synchronizerConnectionConfig.toInternal)
+        })
 
     def getConnection(
         alias: SynchronizerAlias
@@ -726,7 +733,7 @@ class DeclarativeParticipantApi(
       // cannot really remove connections for now, just disconnect and disable
       for {
         currentO <- queryAdminApi(
-          ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers
+          ParticipantAdminCommands.SynchronizerConnectivity.ListActiveRegisteredSynchronizers
         ).map(_.collectFirst {
           case (config, psidO, _) if config.synchronizerAlias == synchronizerAlias =>
             (config, psidO)
@@ -741,7 +748,7 @@ class DeclarativeParticipantApi(
         (currentConfig, psidO) = current
         _ <- queryAdminApi(
           ParticipantAdminCommands.SynchronizerConnectivity.ModifySynchronizerConnection(
-            config = currentConfig.copy(manualConnect = true),
+            config = currentConfig.copy(manualConnect = true).toInternal,
             synchronizerId = psidO.toOption,
             sequencerConnectionValidation = SequencerConnectionValidation.Disabled,
           )
@@ -755,6 +762,7 @@ class DeclarativeParticipantApi(
           ParticipantAdminCommands.SynchronizerConnectivity.ConnectSynchronizer(
             synchronizerConnectionConfig,
             sequencerConnectionValidation = SequencerConnectionValidation.Active,
+            onboardingTransactions = Nil,
           )
         )
       } yield ()
@@ -833,7 +841,7 @@ class DeclarativeParticipantApi(
     def update(config: DeclarativeIdpConfig): Either[String, Unit] =
       queryLedgerApi(
         LedgerApiCommands.IdentityProviderConfigs.Update(
-          identityProviderConfig = api.IdentityProviderConfig(
+          identityProviderConfig = user.IdentityProviderConfig(
             identityProviderId = config.apiIdentityProviderId,
             isDeactivated = config.isDeactivated,
             jwksUrl = config.apiJwksUrl,

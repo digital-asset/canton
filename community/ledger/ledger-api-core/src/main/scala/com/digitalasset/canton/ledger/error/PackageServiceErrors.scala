@@ -16,7 +16,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.archive.Error as LfArchiveError
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Error
-import com.digitalasset.daml.lf.{VersionRange, language, validation}
+import com.digitalasset.daml.lf.{language, validation}
 
 import ParticipantErrorGroup.LedgerApiErrorGroup.PackageServiceErrorGroup
 
@@ -253,7 +253,7 @@ object PackageServiceErrors extends PackageServiceErrorGroup {
     final case class AllowedLanguageMismatchError(
         packageId: Ref.PackageId,
         languageVersion: language.LanguageVersion,
-        allowedLanguageVersions: VersionRange[language.LanguageVersion],
+        allowedLanguageVersions: Seq[language.LanguageVersion],
     )(implicit
         val loggingContext: ErrorLoggingContext
     ) extends ContextualizedDamlError(

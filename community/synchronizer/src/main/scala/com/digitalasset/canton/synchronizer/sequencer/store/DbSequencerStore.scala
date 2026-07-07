@@ -14,8 +14,6 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.metrics.CacheMetrics
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.catsinstances.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
@@ -58,6 +56,7 @@ import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, 
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{BatchAggregator, BytesUnit, EitherTUtil, ErrorUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import org.h2.api.ErrorCode as H2ErrorCode
@@ -397,29 +396,31 @@ class DbSequencerStore(
   protected override def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[RegisteredMember] =
-    storage.queryAndUpdate(
-      for {
-        _ <- profile match {
-          case _: H2 =>
-            sqlu"""merge into sequencer_members using dual
+    storage
+      .queryAndUpdate(
+        for {
+          updated <- profile match {
+            case _: H2 =>
+              sqlu"""merge into sequencer_members using dual
                     on member = $member
                     when not matched then
                       insert (member, registered_ts) values ($member, $timestamp)
                   """
-          case _: Postgres =>
-            sqlu"""insert into sequencer_members (member, registered_ts)
+            case _: Postgres =>
+              sqlu"""insert into sequencer_members (member, registered_ts)
                   values ($member, $timestamp)
                   on conflict (member) do nothing
              """
-        }
-        registeredMember <-
-          sql"select id, registered_ts, enabled from sequencer_members where member = $member"
-            .as[(SequencerMemberId, CantonTimestamp, Boolean)]
-            .head
-            .map((RegisteredMember.apply _).tupled)
-      } yield registeredMember,
-      "registerMember",
-    )
+          }
+          registeredMember <-
+            sql"select id, registered_ts, enabled from sequencer_members where member = $member"
+              .as[(SequencerMemberId, CantonTimestamp, Boolean)]
+              .head
+              .map((RegisteredMember.apply _).tupled)
+        } yield (updated, registeredMember),
+        "registerMember",
+      )(traceContext, closeContext, { case (updated, _) => updated > 0 })
+      .map { case (_, registeredMember) => registeredMember }
 
   protected override def lookupMemberInternal(member: Member)(implicit
       traceContext: TraceContext
@@ -868,7 +869,7 @@ class DbSequencerStore(
             )
 
         storage
-          .update_(action, functionFullName)(traceContext, cc)
+          .update_(action, functionFullName)(traceContext, cc, implicitly)
           .recover { case _: TimeoutException =>
             logger.debug(s"goOffline of instance $instanceIndex timed out")
             if (cc.context.isClosing) UnlessShutdown.AbortedDueToShutdown else UnlessShutdown.unit
@@ -878,38 +879,40 @@ class DbSequencerStore(
   override def goOnline(instanceIndex: Int, now: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[CantonTimestamp] =
-    storage.queryAndUpdate(
-      {
-        val lookupMaxAndUpdate = for {
-          maxExistingWatermark <- sql"select max(watermark_ts) from sequencer_watermarks"
-            .as[Option[CantonTimestamp]]
-            .headOption
-          watermark = maxExistingWatermark.flatten.map(_ max now).getOrElse(now)
-          _ <- profile match {
-            case _: Postgres =>
-              sqlu"""insert into sequencer_watermarks (node_index, watermark_ts, sequencer_online)
+    storage
+      .queryAndUpdate(
+        {
+          val lookupMaxAndUpdate = for {
+            maxExistingWatermark <- sql"select max(watermark_ts) from sequencer_watermarks"
+              .as[Option[CantonTimestamp]]
+              .headOption
+            watermark = maxExistingWatermark.flatten.map(_ max now).getOrElse(now)
+            updated <- profile match {
+              case _: Postgres =>
+                sqlu"""insert into sequencer_watermarks (node_index, watermark_ts, sequencer_online)
                values ($instanceIndex, $watermark, true)
                on conflict (node_index) do
                  update set watermark_ts = $watermark, sequencer_online = true
                """
-            case _: H2 =>
-              sqlu"""merge into sequencer_watermarks using dual
+              case _: H2 =>
+                sqlu"""merge into sequencer_watermarks using dual
                   on (node_index = $instanceIndex)
                   when matched then
                     update set watermark_ts = $watermark, sequencer_online = 1
                   when not matched then
                     insert (node_index, watermark_ts, sequencer_online) values($instanceIndex, $watermark, ${true})
                 """
-          }
-        } yield watermark
+            }
+          } yield (updated, watermark)
 
-        // ensure that a later watermark won't be inserted between when we query the max watermark and set ours
-        lookupMaxAndUpdate.transactionally.withTransactionIsolation(
-          TransactionIsolation.Serializable
-        )
-      },
-      functionFullName,
-    )
+          // ensure that a later watermark won't be inserted between when we query the max watermark and set ours
+          lookupMaxAndUpdate.transactionally.withTransactionIsolation(
+            TransactionIsolation.Serializable
+          )
+        },
+        functionFullName,
+      )(traceContext, closeContext, { case (updated, _) => updated > 0 })
+      .map { case (_, watermark) => watermark }
 
   override def fetchOnlineInstances(implicit
       traceContext: TraceContext
@@ -1594,30 +1597,32 @@ class DbSequencerStore(
       latestTopologyClientTimestamp: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SaveLowerBoundError, Unit] =
     EitherT(
-      storage.queryAndUpdate(
-        (for {
-          existingTsO <- dbEitherT(fetchLowerBoundDBIO())
-          _ <- EitherT.fromEither[DBIO](
-            existingTsO
-              .filter { case (existingTs, existingTopologyTs) =>
-                existingTs > ts || existingTopologyTs > latestTopologyClientTimestamp
-              }
-              .map(
-                SaveLowerBoundError.BoundLowerThanExisting(_, (ts, latestTopologyClientTimestamp))
-              )
-              .toLeft(())
-          )
-          _ <- dbEitherT[SaveLowerBoundError](
-            existingTsO.fold(
-              sqlu"insert into sequencer_lower_bound (ts, latest_topology_client_timestamp) values ($ts, $latestTopologyClientTimestamp)"
-            )(_ =>
-              sqlu"update sequencer_lower_bound set ts = $ts, latest_topology_client_timestamp = $latestTopologyClientTimestamp"
+      storage
+        .queryAndUpdate(
+          (for {
+            existingTsO <- dbEitherT(fetchLowerBoundDBIO())
+            _ <- EitherT.fromEither[DBIO](
+              existingTsO
+                .filter { case (existingTs, existingTopologyTs) =>
+                  existingTs > ts || existingTopologyTs > latestTopologyClientTimestamp
+                }
+                .map(
+                  SaveLowerBoundError.BoundLowerThanExisting(_, (ts, latestTopologyClientTimestamp))
+                )
+                .toLeft(())
             )
-          )
-        } yield ()).value.transactionally
-          .withTransactionIsolation(TransactionIsolation.Serializable),
-        "saveLowerBound",
-      )
+            updated <- dbEitherT[SaveLowerBoundError](
+              existingTsO.fold(
+                sqlu"insert into sequencer_lower_bound (ts, latest_topology_client_timestamp) values ($ts, $latestTopologyClientTimestamp)"
+              )(_ =>
+                sqlu"update sequencer_lower_bound set ts = $ts, latest_topology_client_timestamp = $latestTopologyClientTimestamp"
+              )
+            )
+          } yield updated).value.transactionally
+            .withTransactionIsolation(TransactionIsolation.Serializable),
+          "saveLowerBound",
+        )
+        .map(_.map(_ => ()))
     )
 
   override protected def updatePrunedPreviousEventTimestampsInternal(

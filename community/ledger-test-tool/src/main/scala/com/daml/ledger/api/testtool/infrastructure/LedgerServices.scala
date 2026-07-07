@@ -83,6 +83,7 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CommandCompletionServiceGrpc,
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.CommandServiceGrpc.CommandService
 import com.daml.ledger.api.v2.command_service.{
@@ -159,6 +160,7 @@ import com.daml.ledger.api.v2.testing.time_service.TimeServiceGrpc
 import com.daml.ledger.api.v2.testing.time_service.TimeServiceGrpc.TimeService
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.UpdateService
 import com.daml.ledger.api.v2.update_service.{
+  GetUpdateByHashRequest,
   GetUpdateByIdRequest,
   GetUpdateByOffsetRequest,
   GetUpdateResponse,
@@ -245,7 +247,7 @@ import sttp.tapir.{DecodeResult, Endpoint}
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipInputStream
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 import scala.util.Using
@@ -298,6 +300,7 @@ private final class LedgerServicesJson(
         .apply(mat.system)
         .withMaxConnections(16)
         .withMaxOpenRequests(256)
+        .withResponseEntitySubscriptionTimeout(5.seconds)
     ),
     customizeRequest = { request =>
       logger.debug(s"JSON Request ${request.method} ${request.uri}")
@@ -521,16 +524,35 @@ private final class LedgerServicesJson(
     } yield response
   }
 
-  def commandCompletion: CommandCompletionService = (
-      request: CompletionStreamRequest,
-      responseObserver: StreamObserver[CompletionStreamResponse],
-  ) =>
-    wsCall(
-      JsCommandService.completionStreamEndpoint,
-      request,
-      responseObserver,
-      Future.successful(_: CompletionStreamResponse),
-    )
+  def commandCompletion: CommandCompletionService = new CommandCompletionService {
+
+    /** Deprecated: please use ``GetCompletions`` instead. Subscribe to command completion events.
+      */
+    override def completionStream(
+        request: CompletionStreamRequest,
+        responseObserver: StreamObserver[CompletionStreamResponse],
+    ): Unit =
+      wsCall(
+        JsCommandService.completionStreamEndpoint,
+        request,
+        responseObserver,
+        Future.successful(_: CompletionStreamResponse),
+      )
+
+    /** Subscribe to command completion events. This streaming endpoint provides more flexibility in
+      * filtering than the predecessor ``CompletionStream``.
+      */
+    override def getCompletions(
+        request: GetCompletionsRequest,
+        responseObserver: StreamObserver[CompletionStreamResponse],
+    ): Unit =
+      wsCall(
+        JsCommandService.commandCompletionsEndpoint,
+        request,
+        responseObserver,
+        Future.successful(_: CompletionStreamResponse),
+      )
+  }
 
   def commandSubmission: CommandSubmissionService = new CommandSubmissionService {
 
@@ -820,6 +842,13 @@ private final class LedgerServicesJson(
     ): Future[GetUpdateResponse] =
       clientCall(
         JsUpdateService.getUpdateByIdEndpoint,
+        request,
+      )
+        .flatMap(protocolConverters.GetUpdateResponse.fromJson)
+
+    override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] =
+      clientCall(
+        JsUpdateService.getUpdateByHashEndpoint,
         request,
       )
         .flatMap(protocolConverters.GetUpdateResponse.fromJson)

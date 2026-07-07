@@ -30,11 +30,11 @@ class InterfaceFetchIntegrationTest extends CommunityIntegrationTest with Shared
     participant2.dars.upload(UpgradingBaseTest.UpgradeV1)
     participant2.dars.upload(UpgradingBaseTest.UpgradeV2)
 
-    val bank = participant1.parties.enable(
+    val bank = participant1.parties.testing.enable(
       "bank",
       synchronizeParticipants = Seq(participant2),
     )
-    val alice = participant2.parties.enable(
+    val alice = participant2.parties.testing.enable(
       "alice",
       synchronizeParticipants = Seq(participant1),
     )

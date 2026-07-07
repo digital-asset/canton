@@ -62,14 +62,15 @@ trait StorageBackendSpec
   /** Runs the given database operation */
   protected def executeSql[T](f: Connection => T): T = f(defaultConnection)
 
-  protected def withConnections[T](n: Int)(f: List[Connection] => T): T =
+  protected def tryWithConnections[T](n: Int)(f: List[Connection] => T): Try[T] =
     Using
       .Manager { manager =>
         val connections = List.fill(n)(manager(dataSource.getConnection))
         f(connections)
       }
-      .success
-      .value
+
+  protected def withConnections[T](n: Int)(f: List[Connection] => T): T =
+    tryWithConnections(n)(f).success.value
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()

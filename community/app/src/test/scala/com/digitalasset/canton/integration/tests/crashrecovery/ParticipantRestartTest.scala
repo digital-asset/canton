@@ -25,7 +25,6 @@ import com.daml.ledger.javaapi as javab
 import com.daml.ledger.javaapi.data.{Command, Transaction}
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.{
   AdverseScenario,
@@ -42,7 +41,6 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -82,8 +80,9 @@ import com.digitalasset.canton.integration.tests.crashrecovery.ParticipantRestar
 import com.digitalasset.canton.integration.util.TestUtils.damlSet
 import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.SubmissionAlreadyInFlight
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry}
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
@@ -94,8 +93,10 @@ import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.protocol.{RequestJournal, TransactionProcessor}
 import com.digitalasset.canton.participant.pruning.PruningProcessor
+import com.digitalasset.canton.participant.store.db.DbParticipantPruningStore
 import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
+  ParticipantPruningStore,
   StoredSynchronizerConnectionConfig,
   SynchronizerConnectionConfigStore,
 }
@@ -134,7 +135,6 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
-import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   CloseableTest,
@@ -144,6 +144,7 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
   config,
 }
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import monocle.macros.syntax.lens.*
 import org.scalactic.source.Position
@@ -153,7 +154,6 @@ import org.scalatest.time.{Minutes, Seconds, Span}
 
 import java.nio.charset.StandardCharsets
 import java.time.{Duration as JDuration, Instant}
-import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.{nowarn, tailrec}
 import scala.concurrent.*
@@ -389,6 +389,7 @@ abstract class ParticipantRestartTest
             testedReleaseProtocolVersion,
             futureSupervisor,
             wallClock,
+            CommonMockMetrics.cryptoMetrics,
             executionContext,
             timeouts,
             BatchingConfig(),
@@ -608,8 +609,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)
@@ -974,7 +974,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
       )
 
@@ -1399,19 +1399,23 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     awaitTopologyUpToDate(acmeId, staticSynchronizerParameters2, participant1, participant2)
     reassign()
 
-    logger.info(s"Perform restart")
+    clue("Perform restart") {
+      stopAndRestart(
+        participant1,
+        runAfterStopBeforeRestart = {
+          // Participant 1 replays the unassignments and assignments
+          stateInspection1.moveLedgerEndBackToScratch()
+        },
+        numSynchronizers = 2,
+      )
+    }
 
-    stopAndRestart(
-      participant1,
-      runAfterStopBeforeRestart = {
-        // Participant 1 replays the unassignments and assignments
-        stateInspection1.moveLedgerEndBackToScratch()
-      },
-      numSynchronizers = 2,
-    )
+    clue("Ping after restart") {
+      // Following pings should prevent flaking on by advancing the watermark on both participant before the reassign:
+      // `Failed to observe update on all nodes: Alice::12201b2f11b1...@Participant 'participant1': observed, Bob::1220d079e1c0...@Participant 'participant2': not observed`
+      Seq(daId, acmeId).foreach(id => participant1.health.ping(participant2, synchronizerId = id))
+    }
 
-    logger.info(s"Ping after restart")
-    participant1.health.ping(participant2)
     reassign()
 
   }
@@ -1588,7 +1592,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
 }
 
 abstract class ParticipantRestartStaticTimeIntegrationTestBase(
-    alphaMultiSynchronizerSupport: Boolean = false
+    enableAllLedgerApiReassignments: Boolean = false
 ) extends ParticipantRestartTest {
 
   private val overrideMaxRequestSize = NonNegativeInt.tryCreate(100 * 1024)
@@ -1607,18 +1611,39 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
           _.focus(_.sequencerClient.overrideMaxRequestSize).replace(Some(overrideMaxRequestSize))
         ),
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(alphaMultiSynchronizerSupport)
+          _.focus(_.parameters.enableAllLedgerApiReassignments)
+            .replace(enableAllLedgerApiReassignments)
         ),
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(Seq(EnvironmentDefinition.S1M1)).bootstrap()
       }
 
+  /** Test Goal: Verify that a participant node correctly recovers and assigns record order/time to
+    * internally generated events (like offline repairs and local rejections) if it crashes in the
+    * middle of processing a massive batch of expired timeouts.
+    *
+    * Test Design:
+    *   1. The test drops participant requests at the sequencer and submits 250 commands.
+    *   1. The clock is advanced, forcing all 250 commands to time out simultaneously.
+    *   1. The participant node is violently crashed *during* this flood of local timeout
+    *      rejections.
+    *   1. While offline, a manual `repair.purge` is executed. The test asserts that the resulting
+    *      repair event correctly inherits the record time of the interrupted timeout batch.
+    *   1. The participant node reconnects with sequencer reads blocked. The test verifies the
+    *      remaining timeouts finish processing, and then forces an immediate local rejection (via a
+    *      payload size limit). It asserts this new rejection also adopts the safely recovered
+    *      record time.
+    */
   "repair and timely reject due to errors are correctly created in record order after restart, if crash before publishing next sequencer counter which is preceded by published floating events after the last published sequencer counter" in {
     implicit env =>
       import env.*
       val participant1 = startAndGet("participant1")
+
+      // Disable auto-reconnect so we can keep the node offline after the restart
+      // to perform manual repair operations before it receives new network traffic.
       connectToDa(participant1, noAutoReconnect = true)
+
       participant1.dars.upload(CantonExamplesPath)
       val stateInspection1 = this.stateInspectionFor(participant1)
       val party = participant1.adminParty
@@ -1632,7 +1657,9 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
         val cyclePayload = if (small) { prefix + "-small" }
         else {
           prefix + "-big" + Seq
-            // Use a random ASCII string so that it cannot be compressed easily beyond a factor of 2
+            // Use a random ASCII string so that it cannot be compressed easily beyond a factor of 2.
+            // Generating a payload definitively larger than overrideMaxRequestSize forces the local sequencer client
+            // to reject the command immediately, bypassing the network.
             .fill(overrideMaxRequestSize.value * 2)(Random.nextPrintableChar().toString)
             .mkString("")
         }
@@ -1661,28 +1688,34 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
           submissionId = s"$prefix-submission-id",
         )
 
-      logger.info("Create a single contract to set the baseline")
-      val baselineTransaction = createCycleContractSync("baseline", small = true)
-      val baselineOffset = baselineTransaction.getOffset
-      val baselineRecordTime =
-        CantonTimestamp.assertFromInstant(baselineTransaction.getRecordTime)
-      val baseLineContractIds = baselineTransaction.getEventsById.asScala.collect {
-        case (_, event) => event.getContractId
-      }
-      baseLineContractIds should have size 1
-      val baselineContractId = LfContractId.assertFromString(
-        baseLineContractIds.headOption.value
-      )
-      logger.info(
-        s"Created a single contract to set the baseline with offset: $baselineOffset record time: $baselineRecordTime contractID: $baselineContractId"
-      )
+      val (baselineOffset, _baselineRecordTime, baselineContractId) =
+        clue("Create a single contract to set the baseline") {
+          val baselineTransaction = createCycleContractSync("baseline", small = true)
+          val offset = baselineTransaction.getOffset
+          val recordTime = CantonTimestamp.assertFromInstant(baselineTransaction.getRecordTime)
+          val baseLineContractIds = baselineTransaction.getEventsById.asScala.collect {
+            case (_, event) => event.getContractId
+          }
+          baseLineContractIds should have size 1
+          val contractId = LfContractId.assertFromString(baseLineContractIds.headOption.value)
+
+          logger.info(
+            s"Created a single contract to set the baseline with offset: $offset record time: $recordTime contractID: $contractId"
+          )
+          (offset, recordTime, contractId)
+        }
 
       val p1id = participant1.id
       val programmableSequencer1 = getProgrammableSequencer(sequencer1.name)
+      val droppedRequestsCounter = new AtomicInteger(0)
+
+      // Silently dropping confirmation requests ensures the submitted commands will sit in the in-flight tracker
+      // until the simulated clock is advanced past their max decision time.
       programmableSequencer1.setPolicy("drop confirmation requests by participant1")(
         SendPolicy.processTimeProofs { implicit traceContext => submissionRequest =>
           if (submissionRequest.isConfirmationRequest && submissionRequest.sender == p1id) {
-            logger.debug(s"Dropping confirmation request")
+            val counter = droppedRequestsCounter.incrementAndGet()
+            logger.debug(s"Dropping confirmation request with counter $counter")
             SendDecision.Drop
           } else SendDecision.Process
         }
@@ -1694,23 +1727,33 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
       1 to timeoutCommandCount foreach { i =>
         createCycleContractAsync(s"sequencing-timeout-batch-$i", small = true)
       }
+
+      clue("Wait for all async submissions to be fully processed and reach the sequencer") {
+        eventually() {
+          droppedRequestsCounter.get() shouldBe timeoutCommandCount
+        }
+      }
+
       val ledgerEndBeforeTriggeringTimeoutRejections = participant1.ledger_api.state.end()
       logger.info(s"Finished creating $timeoutCommandCount commands which supposed to timeout")
 
-      // start consuming the completions already to get the response ASAP
-      val firstTimeoutRejectionF = Future(
-        participant1.ledger_api.completions
-          .list(party, 1, ledgerEndBeforeTriggeringTimeoutRejections)
-          .headOption
-          .value
-      )
-      // sleep for letting some time for the completion stream to materialize
-      Threading.sleep(200)
+      val firstTimeoutRejection =
+        clue("Advancing time to trigger timeouts and waiting for the first rejection") {
+          environment.simClock.value.advance(java.time.Duration.ofDays(365))
 
-      logger.info("Advance time so that the potentially sequenced submissions time out")
-      environment.simClock.value.advance(java.time.Duration.ofDays(365))
+          eventually(timeUntilSuccess = 60.seconds) {
+            participant1.ledger_api.completions
+              .list(
+                partyId = party,
+                atLeastNumCompletions = 1,
+                beginOffsetExclusive = ledgerEndBeforeTriggeringTimeoutRejections,
+                timeout = config.NonNegativeDuration.ofSeconds(2), // fast fail to allow retries
+              )
+              .headOption
+              .value
+          }
+        }
 
-      val firstTimeoutRejection = firstTimeoutRejectionF.futureValue
       firstTimeoutRejection.status.value.message should include(
         TransactionProcessor.SubmissionErrors.TimeoutError.id
       )
@@ -1722,30 +1765,33 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
       logger.info(
         s"First timeout rejection arrived (offset: $firstTimeoutOffset record-time:$firstTimeoutRejectionRecordTime), crashing participant before the SequencerIndex moves ahead"
       )
+
       stopAndRestart(
         participant1,
         runAfterStopBeforeRestart = {
-          logger.info(
+          clue(
             "Cleaning SequencedEventStore: all elements above the SynchronizerIndex will be removed"
-          )
-          stateInspection1.cleanSequencedEventStoreAboveCleanSynchronizerIndex(daId)
-          logger.info(
-            "Cleaned SequencedEventStore: all elements above the SynchronizerIndex are removed"
-          )
+          ) {
+            // This simulates a hard crash where recently processed events (like our flood of timeouts)
+            // were not fully committed and must be recovered during the node's startup sequence.
+            stateInspection1.cleanSequencedEventStoreAboveCleanSynchronizerIndex(daId)
+          }
         },
         runBeforeReconnect = Some { () =>
           val ledgerEndAfterRestart = participant1.ledger_api.state.end()
-          // approximating received timeout rejections with the number of bumps the ledger end received: we need to make sure we did not receive all,
-          // ensuring that shutdown caught before ingesting the timeproof event (which is actually triggering all the timeout tasks to be published).
-          // If this condition is failing (maybe in a flaky test), then increasing timeoutCommandCount might help
+          // Approximating received timeout rejections with the number of bumps the ledger end received:
+          // We need to make sure we did not receive all, ensuring that shutdown happens before ingesting the timeproof
+          // event (which is actually triggering all the timeout tasks to be published).
+          // If this condition is failing (maybe in a flaky test), then increasing timeoutCommandCount might help.
           ledgerEndAfterRestart should be < firstTimeoutOffset + timeoutCommandCount
           logger.info(
             s"Participant restarted, synchronizers not connected yet, offset: $ledgerEndAfterRestart"
           )
 
+          // Perform an offline repair operation before the node connects to the network
           participant1.repair.purge(daName, Seq(baselineContractId), ignoreAlreadyPurged = false)
 
-          val (repairOffset, repairRecordTime) = if (alphaMultiSynchronizerSupport) {
+          val (repairOffset, repairRecordTime) = if (enableAllLedgerApiReassignments) {
             participant1.ledger_api.updates
               .reassignments(
                 Set(party),
@@ -1785,9 +1831,13 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
             s"Repair finished, one update is committed at offset: $repairOffset record-time: $repairRecordTime"
           )
           repairOffset shouldBe ledgerEndAfterRestart + 1
+
+          // Proves that the offline repair operation correctly inherited the participant's
+          // last known record time from the floating timeout events being recovered.
           firstTimeoutRejectionRecordTime shouldBe repairRecordTime
 
-          // muting the synchronizer from here on
+          // Muting the synchronizer isolates the participant from the network. This guarantees
+          // that the completions we observe next are purely from the local recovery mechanism.
           programmableSequencer1.blockFutureMemberRead(participant1.member)
           logger.info(
             s"Connecting participant1 to $daName, the underlying sequencer connection should be blocked"
@@ -1796,39 +1846,53 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
         },
       )
 
-      // after the synchronizer is connected we see all the timeout events flowing in, as the timeout is already reached before
-      logger.info(
-        "Synchronizer connected, now all the scheduled rejections are pouring in as the timeout is expired, waiting for them..."
-      )
-      val completions = participant1.ledger_api.completions
-        .list(
-          partyId = party,
-          atLeastNumCompletions = timeoutCommandCount,
-          beginOffsetExclusive = baselineOffset,
-          filter = _.commandId.startsWith("sequencing-timeout-batch"),
-        )
+      // After the synchronizer is connected we see all the timeout events flowing in, as the timeout is already reached before.
+      val completions =
+        clue(s"Waiting for all $timeoutCommandCount timeout rejections after restart") {
+          eventually(timeUntilSuccess = 60.seconds) {
+            val res = participant1.ledger_api.completions
+              .list(
+                partyId = party,
+                atLeastNumCompletions = timeoutCommandCount,
+                beginOffsetExclusive = baselineOffset,
+                timeout = config.NonNegativeDuration.ofSeconds(2), // fast fail to allow retries
+                filter = _.commandId.startsWith("sequencing-timeout-batch"),
+              )
+            res should have size timeoutCommandCount.toLong
+            res
+          }
+        }
+
       completions.foreach(
         _.status.value.message should include(TransactionProcessor.SubmissionErrors.TimeoutError.id)
       )
-      completions should have size timeoutCommandCount.toLong
-      logger.info(
-        "All scheduled rejections observed"
-      )
-      val ledgerEndAfterAllTimeoutRejections = participant1.ledger_api.state.end()
-      // after all rejections received, there should not be any traffic on the ledger, as the synchronizer is not connected
-      // ensuring this optimistically with a 2 seconds delay
-      Threading.sleep(2000)
-      val ledgerEnd2SecondsAfterAllTimeoutRejections = participant1.ledger_api.state.end()
-      ledgerEnd2SecondsAfterAllTimeoutRejections shouldBe ledgerEndAfterAllTimeoutRejections
+      logger.info("All scheduled rejections observed")
 
-      logger.info(
-        "Sending a command which should be immediately rejected"
-      )
-      createCycleContractAsync("immediately-rejected", small = false)
-      val immediatelyRejectedCompletion = participant1.ledger_api.completions
-        .list(party, 1, ledgerEnd2SecondsAfterAllTimeoutRejections)
-        .headOption
-        .value
+      val ledgerEndAfterAllTimeoutRejections = participant1.ledger_api.state.end()
+
+      // After all rejections received, there should not be any traffic on the ledger, as the synchronizer is not connected.
+      clue("Ensuring no unexpected traffic occurs while synchronizer is disconnected") {
+        Threading.sleep(2000)
+        participant1.ledger_api.state.end() shouldBe ledgerEndAfterAllTimeoutRejections
+      }
+
+      val immediatelyRejectedCompletion =
+        clue("Sending a command which should be immediately rejected and waiting for completion") {
+          createCycleContractAsync("immediately-rejected", small = false)
+
+          eventually(timeUntilSuccess = 60.seconds) {
+            participant1.ledger_api.completions
+              .list(
+                partyId = party,
+                atLeastNumCompletions = 1,
+                beginOffsetExclusive = ledgerEndAfterAllTimeoutRejections,
+                timeout = config.NonNegativeDuration.ofSeconds(2), // fast fail
+              )
+              .headOption
+              .value
+          }
+        }
+
       val immediatelyRejectedOffset = immediatelyRejectedCompletion.offset
       val immediatelyRejectedRecordTime = CantonTimestamp
         .fromProtoTimestamp(
@@ -1836,14 +1900,19 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
         )
         .toOption
         .value
+
       logger.info(
         s"Immediate rejection received with offset: $immediatelyRejectedOffset, record-time: $immediatelyRejectedRecordTime"
       )
+
       immediatelyRejectedCompletion.commandId shouldBe "immediately-rejected-command-id"
       immediatelyRejectedCompletion.status.value.message should include(
         TransactionProcessor.SubmissionErrors.SequencerRequest.id
       )
-      immediatelyRejectedOffset shouldBe ledgerEnd2SecondsAfterAllTimeoutRejections + 1
+      immediatelyRejectedOffset shouldBe ledgerEndAfterAllTimeoutRejections + 1
+
+      // Proves that synchronously rejected commands generated *after* recovery
+      // correctly align with the frozen recovered record time.
       immediatelyRejectedRecordTime shouldBe firstTimeoutRejectionRecordTime
 
       logger.info(
@@ -2046,159 +2115,273 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
     assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1, stateInspection1)
   }
 
-  "deduplicate commands across restarts" in { implicit env =>
+  /** Test Goal: Verify that the participant node's command deduplication and in-flight tracking
+    * mechanisms remain completely consistent across multiple hard participant node crashes and
+    * restarts.
+    *
+    * Test Design: The suite deterministically interleaves 6 command submissions (using the same
+    * `commandId` but different `submissionId`s to simulate application retries) with 3 hard
+    * participant restarts. It evaluates the deduplication boundaries across two distinct scenarios:
+    *
+    *   1. Crash AFTER reaching sequencer: The initial command successfully reaches the network
+    *      before the first crash. Verifies that subsequent retries correctly bounce (synchronously
+    *      or asynchronously), resulting in exactly 1 contract created.
+    *
+    *   1. Crash BEFORE reaching sequencer: The node crashes while the command is still trapped in
+    *      the local in-flight tracker. Verifies that the initial command is safely aborted, retries
+    *      are handled cleanly upon recovery, resulting in exactly 0 contracts created.
+    */
+  class DedupFixture(implicit env: TestConsoleEnvironment) {
     import env.*
 
     val commandId = "restart-command-dedup-id"
     val submissionIdPrefix = "restart-command-dedup-submission-id"
-    // keep sending the same command ID, but with different content, and crashing the participant
-    // In the end, we want to find at most one contract being created.
 
     val participant1 = startAndGet("participant1")
     connectToDa(participant1)
     participant1.dars.upload(CantonExamplesPath)
 
     val sequencer = getProgrammableSequencer(sequencer1.name)
-    val requestCounter = new AtomicInteger(0)
     val participant1Id = participant1.id // Do not inline because requires the participant to run
-    sequencer.setPolicy("Count requests by participant1")(SendPolicy.processTimeProofs {
-      implicit traceContext => submissionRequest =>
-        if (submissionRequest.isConfirmationRequest && submissionRequest.sender == participant1Id) {
-          val newCount = requestCounter.incrementAndGet()
-          logger.debug(s"Advanced request count to $newCount")
-        }
-        SendDecision.Process
-    })
+    val requestCounter = new AtomicInteger(0)
 
     val severin = participant1.parties.testing.enable("Severin", synchronizeParticipants = Nil)
-
-    val semaphore = new Semaphore(1)
     val totalSubmissions = 6
-    val totalRestarts = 3
 
     val tolerance = DynamicSynchronizerParameters
       .initialValues(testedProtocolVersion)
       .ledgerTimeRecordTimeTolerance
     val timeTrackerPatience = sequencer1.config.timeTracker.patienceDuration
-    // This test makes only sense if the time tracker's patience is much shorter than the tolerance
+
+    // Ensure the time tracker triggers timeouts well before the ledger time tolerance is exceeded.
+    // This prevents retries from failing with unrelated ledger-time bounds errors instead of the expected
+    // deduplication/timeout behaviors.
     timeTrackerPatience.asJava.multipliedBy(5) should be < tolerance.unwrap
 
     val participantOffsetEnd = participant1.ledger_api.state.end()
     val simClock = env.environment.simClock.value
 
+    // Tracks synchronous rejections to accurately calculate how many Ledger API completions to wait for:
+    // - If `submit_async` bounces a command immediately "at the door" (e.g., throwing SUBMISSION_ALREADY_IN_FLIGHT
+    //   because the previous retry is still pending), the Ledger API does NOT emit an asynchronous
+    //   completion event to the stream.
+    // - By subtracting these synchronous bounces from the total submissions, we prevent the test from hanging and
+    //   timing out while waiting for completion events that will never arrive.
     val synchronousRejectionCount = new AtomicInteger(0)
 
-    def submit(index: Int): Future[Unit] = {
-      val createCycleContract =
-        new C.Cycle(
-          s"restart-command-dedup-$index",
-          severin.toProtoPrimitive,
-        ).create.commands.loneElement
+    def doRestart(): Future[Unit] = Future {
+      stopAndRestart(participant1)
+    }
+
+    /** Submits a command and executes the provided `waitLogic` closure. This abstracts the
+      * submission mechanics while leaving the timing control to the caller.
+      */
+    def submit(index: Int)(waitLogic: (Boolean, Int, String) => Unit): Future[Unit] = Future {
+      val createCycleContract = new C.Cycle(
+        s"restart-command-dedup-$index",
+        severin.toProtoPrimitive,
+      ).create.commands.loneElement
       val submissionId = s"$submissionIdPrefix-$index"
 
-      Future {
-        blocking {
-          semaphore.acquire()
-        }
-        try {
-          logger.debug(s"Attempting command submission $index")
-          val requestCounterBefore = requestCounter.get()
-          val expectSequencingOrCompletion = loggerFactory.assertLogsUnorderedOptional(
-            Either
-              .catchOnly[CommandFailure] {
-                participant1.ledger_api.javaapi.commands.submit_async(
-                  Seq(severin),
-                  Seq(createCycleContract),
-                  commandId = commandId,
-                  submissionId = submissionId,
-                  deduplicationPeriod = Some(
-                    DeduplicationDuration(java.time.Duration.ofDays(1))
-                  ), // Long dedup period so that all commands get deduplicated
-                )
-              }
-              .isRight,
-            (
-              LogEntryOptionality.Optional,
-              _.errorMessage should include(SubmissionAlreadyInFlight.id),
-            ),
-          )
+      logger.debug(s"Attempting command submission $index")
+      val requestCounterBefore = requestCounter.get()
 
+      // Dynamically assert the logs based on the outcome of the submission
+      val submissionResult = loggerFactory.assertLogsUnorderedOptionalFromResult(
+        Either.catchOnly[CommandFailure] {
+          participant1.ledger_api.javaapi.commands.submit_async(
+            Seq(severin),
+            Seq(createCycleContract),
+            commandId = commandId, // Same commandId forces deduplication
+            submissionId = submissionId, // Different submissionId tracks retries
+
+            // Explicitly set a massive deduplication window (1 day) to guarantee
+            // that all 6 retries across all 3 node restarts are caught by the same
+            // deduplication boundary, rather than being treated as fresh commands.
+            deduplicationPeriod = Some(DeduplicationDuration(java.time.Duration.ofDays(1))),
+          )
+        },
+        { (result: Either[CommandFailure, ?]) =>
+          val assertion: LogEntry => Assertion =
+            _.shouldBeCantonErrorCode(SubmissionAlreadyInFlight)
+
+          // If the command failed synchronously, we REQUIRE the in-flight bounce log.
+          // If it succeeded, the log is Optional (we don't expect it, but don't strictly forbid it).
+          if (result.isLeft) Seq(LogEntryOptionality.Required -> assertion)
+          else Seq(LogEntryOptionality.Optional -> assertion)
+        },
+      )
+
+      val expectSequencingOrCompletion = submissionResult.isRight
+
+      if (submissionResult.isLeft) {
+        synchronousRejectionCount.incrementAndGet().discard
+      }
+
+      // Delegate to the test-specific wait behavior (e.g., waiting for sequencer vs. fire-and-forget)
+      waitLogic(expectSequencingOrCompletion, requestCounterBefore, submissionId)
+    }
+
+    /** Deterministically executes the submit and restart sequence, guaranteeing the exact
+      * interleaving of submissions and node crashes to avoid flaky race conditions.
+      */
+    def runSequence(submitFn: Int => Future[Unit]): Unit = {
+      val testExecutionSequence = for {
+        _ <- submitFn(1)
+        _ <- submitFn(2)
+        _ <- doRestart()
+        _ <- submitFn(3)
+        _ <- submitFn(4)
+        _ <- doRestart()
+        _ <- submitFn(5)
+        _ <- submitFn(6)
+        _ <- doRestart()
+      } yield ()
+
+      val patience = defaultPatience.copy(timeout = defaultPatience.timeout.scaledBy(10))
+      testExecutionSequence.futureValue(patience, Position.here)
+    }
+
+    def getExpectedCompletionsCount: Int = totalSubmissions - synchronousRejectionCount.get()
+
+    /** Polls the Ledger API for the dynamically calculated number of expected completions */
+    def fetchCompletions(): (Seq[Completion], Seq[Completion]) = {
+      val expected = getExpectedCompletionsCount
+      val completions = clue(
+        s"Waiting for $expected completions ($totalSubmissions total - ${synchronousRejectionCount.get()} synchronous rejections)"
+      ) {
+        eventually(timeUntilSuccess = 60.seconds) {
+          val res = participant1.ledger_api.completions.list(
+            partyId = severin,
+            atLeastNumCompletions =
+              expected, // Query exactly the remaining amount so the stream returns promptly
+            beginOffsetExclusive = participantOffsetEnd,
+            timeout =
+              config.NonNegativeDuration.ofSeconds(2), // Fast-fail to avoid hanging the test thread
+            filter = completion => completion.commandId == commandId,
+          )
+          res.size shouldBe expected
+          res
+        }
+      }
+      completions.partition(_.status.exists(_.code == com.google.rpc.Code.OK_VALUE))
+    }
+  }
+
+  "deduplicate commands across multiple restarts (crash AFTER reaching sequencer)" in {
+    implicit env =>
+      val fixture = new DedupFixture
+      import fixture.*
+
+      // Arrange
+      // Sequencer policy: Count requests to allow us to wait until the message hits the network
+      sequencer.setPolicy("Count requests by participant1") {
+        SendPolicy.processTimeProofs { implicit traceContext => submissionRequest =>
+          if (
+            submissionRequest.isConfirmationRequest && submissionRequest.sender == participant1Id
+          ) {
+            val newCount = requestCounter.incrementAndGet()
+            logger.debug(s"Advanced request count to $newCount")
+          }
+          SendDecision.Process
+        }
+      }
+
+      // Arrange
+      // Wait behavior: Block until the request reaches the sequencer BEFORE continuing to the next step (the crash)
+      def submitAndWait(index: Int): Future[Unit] = submit(index) {
+        (expectSequencingOrCompletion, requestCounterBefore, submissionId) =>
           if (expectSequencingOrCompletion) {
-            eventually() {
-              // Wait until a request has hit the sequencer, i.e., the participant has processed the submission,
-              // or we find a rejection completion
+            eventually(timeUntilSuccess = 60.seconds) {
               val requestCounterAfter = requestCounter.get()
               val aRequestReachedTheSequencer = requestCounterAfter > requestCounterBefore
               val allRequestsReachedTheSequencer = requestCounterAfter >= totalSubmissions
+
               if (!(aRequestReachedTheSequencer || allRequestsReachedTheSequencer)) {
                 val completions = participant1.ledger_api.completions.list(
-                  severin,
-                  1,
-                  participantOffsetEnd,
-                  timeout = 500.millis,
-                  filter = { completion =>
-                    completion.commandId == commandId && completion.submissionId == submissionId
-                  },
+                  partyId = severin,
+                  atLeastNumCompletions = 1,
+                  beginOffsetExclusive = participantOffsetEnd,
+                  timeout = config.NonNegativeDuration.ofMillis(500),
+                  filter = c => c.commandId == commandId && c.submissionId == submissionId,
                 )
+
                 // If there are no completions either, advance the time to trigger timely rejections and go looking again
                 if (completions.isEmpty) {
+                  // If the message is genuinely stuck in the pipeline without reaching the sequencer,
+                  // manually advancing the simulated clock past the patience threshold forces the in-flight
+                  // tracker to finally issue a timeout rejection, breaking the wait loop.
                   simClock.advance(timeTrackerPatience.asJava.plusMillis(1))
                   fail("Found neither the sequenced message nor a completion. Go look again")
                 } else succeed
               }
             }
-          } else {
-            synchronousRejectionCount.incrementAndGet().discard
           }
-        } finally {
-          semaphore.release()
-          Thread.`yield`()
+      }
+
+      // Act
+      runSequence(submitAndWait)
+
+      // Assert
+      val (accepts, rejects) = fetchCompletions()
+
+      clue(
+        "Since the first command was guaranteed to reach the sequencer, exactly 1 command must be accepted"
+      )(accepts should have size 1)
+      clue("All other asynchronous completions must be rejections")(
+        rejects should have size (getExpectedCompletionsCount - 1).toLong
+      )
+  }
+
+  "deduplicate commands across multiple restarts (crash BEFORE reaching sequencer)" in {
+    implicit env =>
+      val fixture = new DedupFixture
+      import fixture.*
+
+      // Arrange
+      // Sequencer policy: Drop requests entirely to simulate a node crashing before it can emit to the network
+      sequencer.setPolicy("Drop requests by participant1 to simulate crash before sequencing") {
+        SendPolicy.processTimeProofs { implicit traceContext => submissionRequest =>
+          if (
+            submissionRequest.isConfirmationRequest && submissionRequest.sender == participant1Id
+          ) {
+            logger.debug(s"Dropping request to simulate crash before reaching sequencer")
+            SendDecision.Drop
+          } else {
+            SendDecision.Process
+          }
         }
       }
-    }
 
-    def stopAndRestart(): Future[Unit] = Future {
-      blocking {
-        semaphore.acquire()
-      }
-      try {
-        this.stopAndRestart(participant1)
-      } finally {
-        semaphore.release()
-      }
-    }
+      // Arrange
+      // Wait behavior: Fire-and-forget. We do not wait for the sequencer, meaning the subsequent crash happens immediately.
+      def submitAsyncOnly(index: Int): Future[Unit] = submit(index)((_, _, _) => ())
 
-    val submissionF = MonadUtil.sequentialTraverse_(1 to totalSubmissions)(submit)
-    val restartF = MonadUtil.sequentialTraverse_(1 to totalRestarts)(_ => stopAndRestart())
+      // Act
+      runSequence(submitAsyncOnly)
 
-    val patience = defaultPatience.copy(timeout = defaultPatience.timeout.scaledBy(10))
-    submissionF.futureValue(patience, Position.here)
-    restartF.futureValue
+      // Teardown: Restore normal sequencer behavior and advance clock to forcefully timeout the dropped, in-flight messages
+      sequencer.resetPolicy()
+      simClock.advance(java.time.Duration.ofDays(365))
 
-    val completions = participant1.ledger_api.completions.list(
-      severin,
-      totalSubmissions,
-      participantOffsetEnd,
-      filter = completion => completion.commandId == commandId,
-    )
-    val (accepts, rejects) =
-      completions.partition(completion =>
-        completion.status.exists(_.code == com.google.rpc.Code.OK_VALUE)
+      // Assert
+      val (accepts, rejects) = fetchCompletions()
+
+      clue(
+        "Since the commands were dropped before sequencing, exactly 0 commands must be accepted"
+      )(accepts shouldBe empty)
+      clue("All asynchronous completions must be rejections")(
+        rejects should have size getExpectedCompletionsCount.toLong
       )
-
-    // TODO(#24776): Improve test and assertion
-    assert(accepts.size <= 1)
-    assert(rejects.size == totalSubmissions - accepts.size - synchronousRejectionCount.get())
   }
+
 }
 
-@UnstableTest // TODO(#19922)
 class ParticipantRestartStaticTimeIntegrationTest
     extends ParticipantRestartStaticTimeIntegrationTestBase
 
-@UnstableTest // TODO(#30408)
 class ParticipantRestartStaticTimeReassignmentIntegrationTest
-    extends ParticipantRestartStaticTimeIntegrationTestBase(alphaMultiSynchronizerSupport = true)
+    extends ParticipantRestartStaticTimeIntegrationTestBase(enableAllLedgerApiReassignments = true)
 
 @nowarn("msg=match may not be exhaustive")
 class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTest {
@@ -2356,7 +2539,6 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   }
 }
 
-@UnstableTest // TODO(#21107)
 class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
   private val reconciliationInterval = PositiveSeconds.tryOfSeconds(2)
   private val transactionTolerance = reconciliationInterval.unwrap
@@ -2418,7 +2600,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     val clock = environment.simClock.value
     clock.advance(JDuration.ofSeconds(1))
 
-    val pingF = Future.traverse((1 to 100).toList) { _ =>
+    val pingF = Future.traverse((1 to 200).toList) { _ =>
       Future {
         assertPingSucceeds(participant1, participant1, timeoutMillis = 60000)
       }
@@ -2476,8 +2658,6 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
       .value
       .updateId
 
-    val contractCountBeforePruning = stateInspection.contractCount.futureValueUS
-
     // Make sure that the first update can be queried before pruning
     participant1.ledger_api.updates
       .update_by_id(firstUpdateId, updateFormat) should not be empty
@@ -2486,7 +2666,15 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     participant1.ledger_api.updates
       .update_by_id(lastUpdateId, updateFormat) should not be empty
 
-    logger.info(s"Pruning at $pruneOffset ...")
+    val pruningStoreForPolling = new DbParticipantPruningStore(
+      name = ParticipantPruningStore.dbStoreName,
+      storage = storageP1,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
+    )
+    val statusBeforePruning = pruningStoreForPolling.pruningStatus().futureValueUS
+
+    logger.info(s"Pruning at $pruneOffset, current pruning status: $statusBeforePruning ...")
 
     // Start pruning in the background
     val pruneF = loggerFactory.assertThrowsAndLogsAsync[CommandFailure](
@@ -2495,11 +2683,13 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
       _.commandFailureMessage should include("UNAVAILABLE/Network closed for unknown reason"),
     )
 
-    // Wait until we are sure that pruning has started
+    // Wait until we are sure that ledger-level pruning has started
     eventually(maxPollInterval = 2.millis) { // low poll interval so that we don't flake because of exponential backoff and missing the prune
-      logger.info(s"Checking if we can interrupt pruning now ${CantonTimestamp.now()}")
-      val contractCount = stateInspection.contractCount.futureValueUS
-      contractCount should be < contractCountBeforePruning
+      logger.info(s"Loading pruning status")
+      // Using Await as futureValue might evaluate via polling / resulting longer wait times here
+      val status = Await.result(pruningStoreForPolling.pruningStatus(), 20.millis).toOption.value
+      logger.info(s"Loaded pruning status: $status")
+      status.startedO.isDefined shouldBe true
     }
 
     // Restart
@@ -2543,38 +2733,33 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     stateInspection.contractCount.futureValueUS should be > 0 withClue
       s"The new first offset is not smaller than pruning offset $pruneOffset. Did we miss restarting the participant before prune finished?"
 
-    // Make sure that the first update can not be queried, as pruning had started before the restart
+    // Make sure that the first update can still be queried, as the ledger api server index
+    // has not been pruned (only canton stores were partially pruned before the restart)
     participant1.ledger_api.updates
-      .update_by_id(firstUpdateId, updateFormat) shouldBe empty withClue
-      "Since we have interrupted pruning and ledger api server index should be aware and first transaction must not be readable"
+      .update_by_id(firstUpdateId, updateFormat) should not be empty withClue
+      "Since we have interrupted pruning and ledger api server index has not been pruned, first transaction must still be readable"
 
     participant1.ledger_api.updates
-      .update_by_offset(firstTx.transaction.offset, updateFormat) shouldBe empty withClue
-      "Since we have interrupted pruning and ledger api server index should be aware and first transaction must not be readable"
+      .update_by_offset(firstTx.transaction.offset, updateFormat) should not be empty withClue
+      "Since we have interrupted pruning and ledger api server index has not been pruned, first transaction must still be readable"
 
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.ledger_api.event_query
-        .by_contract_id(firstContractId, Seq(participant1.adminParty.toLf)),
-      _.commandFailureMessage should include("Contract events not found, or not visible."),
-    )
+    participant1.ledger_api.event_query
+      .by_contract_id(firstContractId, Seq(participant1.adminParty.toLf))
 
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.ledger_api.updates
-        .updates(
-          updateFormat = updateFormat,
-          completeAfter = PositiveInt.tryCreate(1000000),
-          endOffsetInclusive = Some(pruneOffset),
-        ),
-      _.commandFailureMessage should include regex
-        s"FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Transactions request from 1 to $pruneOffset precedes pruned offset",
-    )
+    participant1.ledger_api.updates
+      .updates(
+        updateFormat = updateFormat,
+        completeAfter = PositiveInt.tryCreate(1000000),
+        endOffsetInclusive = Some(pruneOffset),
+      )
 
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.ledger_api.state.acs
-        .of_party(participant1.adminParty.toLf, activeAtOffsetO = Some(firstTx.transaction.offset)),
-      _.commandFailureMessage should include regex
-        s"FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Active contracts request at offset ${firstTx.transaction.offset} precedes pruned offset",
-    )
+    participant1.ledger_api.state.acs
+      .of_party(participant1.adminParty.toLf, activeAtOffsetO = Some(firstTx.transaction.offset))
+
+    // Make sure also that the last update can still be queried
+    participant1.ledger_api.updates
+      .update_by_id(lastUpdateId, updateFormat) should not be empty withClue
+      "Since we have interrupted pruning and ledger api server index has not been pruned, last transaction must still be readable"
 
     // Make sure the participant is still functional despite partial pruning
     assertPingSucceeds(participant1, participant1)

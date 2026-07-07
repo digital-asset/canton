@@ -70,6 +70,9 @@ class SequencedEventTestFixture(
   val sequencerCarlos: SequencerId = SequencerId(
     UniqueIdentifier.tryCreate("da3", namespace)
   )
+  val sequencerDave: SequencerId = SequencerId(
+    UniqueIdentifier.tryCreate("da4", namespace)
+  )
   implicit val actorSystem: ActorSystem = ActorSystem(
     classOf[SequencedEventTestFixture].getSimpleName
   )
@@ -118,7 +121,12 @@ class SequencedEventTestFixture(
   )
 
   def mkAggregator(
-      config: MessageAggregationConfig = MessageAggregationConfig(PositiveInt.tryCreate(1))
+      useNewAggregator: Boolean,
+      config: MessageAggregationConfig = MessageAggregationConfig(
+        sequencerTrustThreshold = PositiveInt.tryCreate(1),
+        maxNbOfContributions = PositiveInt.tryCreate(1),
+      ),
+      pastEventCacheSize: PositiveInt = PositiveInt.tryCreate(100),
   ) = {
     val postAggregationHandler = new PostAggregationHandler {
       override def handlerIsIdleF: Future[Unit] = Future.unit
@@ -127,20 +135,30 @@ class SequencedEventTestFixture(
       ): Unit = ()
     }
 
-    new SequencerAggregator(
+    SequencerAggregator.create(
+      useNewAggregator,
       postAggregationHandler = postAggregationHandler,
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
       eventInboxSize = PositiveInt.tryCreate(2),
+      pastEventsCacheSize = pastEventCacheSize,
       loggerFactory = loggerFactory,
       initialConfig = config,
       updateSendTracker = _ => (),
+      notifyNewEvent = _ => (),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
     )
   }
 
-  def config(sequencerTrustThreshold: Int = 1): MessageAggregationConfig =
-    MessageAggregationConfig(PositiveInt.tryCreate(sequencerTrustThreshold))
+  def config(
+      sequencerTrustThreshold: Int = 1,
+      overrideMaxNbOfContributionsO: Option[Int] = None,
+  ): MessageAggregationConfig =
+    MessageAggregationConfig(
+      sequencerTrustThreshold = PositiveInt.tryCreate(sequencerTrustThreshold),
+      maxNbOfContributions =
+        PositiveInt.tryCreate(overrideMaxNbOfContributionsO.getOrElse(sequencerTrustThreshold)),
+    )
 
   def mkValidator(
       syncCryptoApi: SynchronizerCryptoClient = subscriberCryptoApi
@@ -174,7 +192,7 @@ class SequencedEventTestFixture(
       Seq.empty,
       testedProtocolVersion,
     )
-    val deliver: Deliver[ClosedEnvelope] = Deliver.create[ClosedEnvelope](
+    val deliver: Deliver[Batch[ClosedEnvelope]] = Deliver.create[Batch[ClosedEnvelope]](
       previousTimestamp = previousTimestamp,
       timestamp,
       synchronizerId,

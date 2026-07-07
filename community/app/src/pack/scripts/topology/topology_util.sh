@@ -20,14 +20,13 @@ encode_to_base64() {
 
 # Decode base64 string to bytes
 decode_from_base64() {
-  openssl base64 -d
+  openssl base64 -d -A
 }
 
 # Encode bytes read from stdin to hexadecimal
 encode_to_hex() {
-  local hex; hex=$(xxd -ps -c 0)
-  hex="${hex//$'\n'/}"  # Remove newlines for xxd < 2022-01-14, see https://github.com/vim/vim/commit/c0a1d370fa655cea9eaa74f5e605b95825dc9de1
-  echo "$hex"
+  od -An -v -tx1 | tr -d ' \n' # strip spaces and newlines
+  echo
 }
 # [end byte utility functions]
 

@@ -39,7 +39,6 @@ import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
-  PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -463,6 +462,12 @@ class ParticipantPartiesAdministrationGroup(
       |Performs some checks synchronously and then initiates party replication asynchronously.
       |The returned `addPartyRequestId` parameter allows identifying asynchronous progress or
       |errors and is stable across each retry with the same request parameters.
+      |
+      |This operation assumes full trust in the source participant to provide a complete and
+      |untampered state. Because the target participant cannot independently verify
+      |the historical provenance of the imported contracts,
+      |validation is performed on a best-effort basis.
+      |Use only when the source participant is a known, trusted authority.
       """
   )
   def add_party_async(
@@ -484,58 +489,6 @@ class ParticipantPartiesAdministrationGroup(
       )
     }
   }
-
-  @Help.Summary(
-    "Add an already hosted party to the participant using an ACS snapshot file",
-    FeatureFlag.Preview,
-  )
-  @Help.Description(
-    """Add a party that is already hosted on other participants to this participant on the
-      |specified synchronizer using the Active Contract Set (ACS) provided in the specified
-      |file.
-      |
-      |Performs some checks and imports the ACS synchronously and then completes party
-      |replication asynchronously. The returned `addPartyRequestId` parameter allows tracking
-      |progress or identifying errors and is stable across each retry with the same request
-      |parameters.
-      """
-  )
-  def add_party_with_acs_async(
-      importFilePath: String = "canton-acs-export.gz",
-      party: PartyId,
-      synchronizerId: SynchronizerId,
-      sourceParticipant: ParticipantId,
-      serial: PositiveInt,
-      participantPermission: ParticipantPermission,
-  ): String = check(FeatureFlag.Preview) {
-    consoleEnvironment.run {
-      reference.adminCommand(
-        ParticipantAdminCommands.PartyManagement.AddPartyWithAcsAsync(
-          new java.io.File(importFilePath),
-          party,
-          synchronizerId,
-          sourceParticipant,
-          serial,
-          participantPermission,
-        )
-      )
-    }
-  }
-
-  @Help.Summary("Obtain status on a pending `add_party_async` call", FeatureFlag.Preview)
-  @Help.Description(
-    """Retrieve status information on a party previously added via the `add_party_async`
-      |endpoint by specifying the previously returned `addPartyRequestId` parameter.
-      """
-  )
-  def get_add_party_status(addPartyRequestId: String): PartyReplicationStatus =
-    check(FeatureFlag.Preview) {
-      consoleEnvironment.run {
-        reference.adminCommand(
-          ParticipantAdminCommands.PartyManagement.GetAddPartyStatus(addPartyRequestId)
-        )
-      }
-    }
 
   @Help.Summary("Finds a party's highest activation offset")
   @Help.Description(
@@ -768,8 +721,9 @@ class ParticipantPartiesAdministrationGroup(
       |- party: The party being replicated, it must already be active on the target
       |  participant.
       |- synchronizerId: Restricts the export to the given synchronizer.
-      |- targetParticipantId: Unique identifier of the target participant where the
-      |  party will be replicated.
+      |- targetParticipantId: Unique identifier of the target participant where the party
+      |  will be replicated. Restricts the export to contracts not already known to
+      |  the target participant.
       |- beginOffsetExclusive: Exclusive ledger offset used as a starting point to find
       |  the party's activation on the target participant.
       |- exportFilePath: The path denoting the file where the ACS snapshot will be
@@ -827,7 +781,12 @@ class ParticipantPartiesAdministrationGroup(
       |the synchronizer where the contract is assigned to, the whole import process
       |fails depending on the value of `contractImportMode`.
       |
-      |By default `contractImportMode` is set to `ContractImportMode.Validation`.
+      |This operation assumes the provided snapshot file (located at `importFilePath`)
+      |contains the complete and untampered ACS originating from a trusted source participant.
+      |Because the target participant cannot independently verify the historical provenance
+      |of the imported contracts, validation is performed on a best-effort basis,
+      |even if `contractImportMode` is `Validation`.
+      |Use only when the provided snapshot file comes from a known, trusted authority.
       |
       |Expert only: As validation of contract IDs may lengthen the import significantly,
       |you have the option to simply accept the contract IDs as they are using the
@@ -854,7 +813,7 @@ class ParticipantPartiesAdministrationGroup(
       """
   )
   def import_party_acs(
-      synchronizerId: Synchronizer,
+      synchronizerId: SynchronizerId,
       party: Option[PartyId] = None,
       importFilePath: String = "canton-acs-export.gz",
       workflowIdPrefix: String = "",
@@ -862,7 +821,6 @@ class ParticipantPartiesAdministrationGroup(
       representativePackageIdOverride: RepresentativePackageIdOverride =
         RepresentativePackageIdOverride.NoOverride,
   ): Unit =
-    // TODO(#30096): May want to swap for logical synchronizer ID after topology state copies during the new synchronizer's initial handshake. (Needed for LSU / OffPR test scenario).
     consoleEnvironment.run {
       reference.adminCommand(
         ParticipantAdminCommands.PartyManagement.ImportPartyAcs(

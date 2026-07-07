@@ -3,33 +3,32 @@
 
 package com.digitalasset.canton.http.json
 
+import com.digitalasset.canton.http.json.v2.ProtoInfo
+import com.digitalasset.canton.proto.ProtoParser
 import org.scalatest.AppendedClues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
 
-/** This test ensures that all new proto comments contain clear Required or Optional markers. It
-  * accepts a certain number of already existing fields without clear markers to avoid failing the
-  * build.
+/** This test ensures that all new proto comments contain clear Required or Optional markers.
   */
 class ProtoDocumentationConformanceTest extends AnyWordSpecLike with Matchers with AppendedClues {
 
-  // TODO(i31478) Filter our false positives, fix remaining comments and unignore test
-  // This is number of known fields in proto files without clear Required or Optional markers
-  val numberOfKnownUnspecifiedFields = 57
-
   "new proto comments" should {
-    "contain clear Required or Optional marks" ignore {
+    "contain clear Required or Optional marks" in {
       val allFields = ProtoCommentsChecker.reportProto()
-      val conflictingFields = allFields.filter(f => f.isOptional && f.isRequired)
-      val unspecifiedFields = allFields.filter(f => !f.isOptional && !f.isRequired)
+      val checkedFields = allFields.filterNot(_.isSkipped)
+      val conflictingFields = checkedFields.filter(f => f.isOptional && f.isRequired)
+      val unspecifiedFields = checkedFields.filter(f => !f.isOptional && !f.isRequired)
       conflictingFields shouldBe empty withClue
         s"The following fields have conflicting Required and Optional markers:\n" +
         conflictingFields
           .map(f => s"- ${f.fileName} / ${f.messageName} / ${f.fieldName}: ${f.comment.trim}")
           .mkString("\n")
-      unspecifiedFields.length should be <= numberOfKnownUnspecifiedFields withClue
-        s"""The are ${unspecifiedFields.length} fields in proto files without Required or Optional markers, max accepted number is $numberOfKnownUnspecifiedFields
-           |Check if any recently added fields in proto files contain clear Required or Optional comment""".stripMargin
+      unspecifiedFields shouldBe empty withClue
+        s"The following fields in proto files have no Required or Optional marker:\n" +
+        unspecifiedFields
+          .map(f => s"- ${f.fileName} / ${f.messageName} / ${f.fieldName}")
+          .mkString("\n")
     }
   }
 }
@@ -40,26 +39,48 @@ final case class ReportedField(
     fieldName: String,
     isOptional: Boolean,
     isRequired: Boolean,
+    isSkipped: Boolean, // oneof variant field; Required/Optional doesn't apply
     comment: String,
 )
 
 object ProtoCommentsChecker {
 
-  lazy val protoInfo = GenerateJSONApiDocs.regenerateProtoData()
+  lazy val protoInfo = ProtoInfo.loadData()
+
+  /** (messageName, fieldName) pairs that are oneof variants and don't need Required/Optional
+    * markers.
+    */
+  private lazy val skippedFieldKeys: Set[(String, String)] = {
+    import scala.jdk.CollectionConverters.CollectionHasAsScala
+    import io.protostuff.compiler.model.Message
+    def collectNested(m: Message): Iterator[Message] =
+      Iterator.single(m) ++ m.getMessages.asScala.iterator.flatMap(collectNested)
+    val all =
+      ProtoParser
+        .parseProtos()
+        .iterator
+        .flatMap(_.getMessages.asScala.iterator)
+        .flatMap(collectNested)
+    (for {
+      msg <- all
+      field <- msg.getOneofs.asScala.flatMap(_.getFields.asScala)
+    } yield msg.getName -> field.getName).toSet
+  }
 
   def reportProto(): Seq[ReportedField] =
-    protoInfo.protoComments.fileComments.flatMap { case (fileName, fileComments) =>
-      fileComments.messages.flatMap { case (messageName, messageInfo) =>
-        messageInfo.message.fieldComments.map { case (fieldName, comment) =>
+    protoInfo.protoComments.fileComments.toSeq.flatMap { case (fileName, fileComments) =>
+      fileComments.messages.toSeq.flatMap { case (messageName, messageInfo) =>
+        messageInfo.message.fieldComments.toSeq.map { case (fieldName, comment) =>
           ReportedField(
             fileName,
             messageName,
             fieldName,
             messageInfo.isFieldOptional(fieldName),
             messageInfo.isFieldRequired(fieldName),
+            skippedFieldKeys.contains(messageName -> fieldName),
             comment,
           )
         }
       }
-    }.toSeq
+    }
 }

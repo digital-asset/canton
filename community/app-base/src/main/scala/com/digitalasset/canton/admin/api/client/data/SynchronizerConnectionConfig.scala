@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.catsinstances.`cats nonempty traverse`
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.ConsoleEnvironment
@@ -90,6 +89,7 @@ final case class SynchronizerConnectionConfig(
               `sequencerConnections`.`sequencerLivenessMargin`,
               `sequencerConnections`.submissionRequestAmplification,
               `sequencerConnections`.sequencerConnectionPoolDelays,
+              `sequencerConnections`.subscriptionLivenessLimits,
             ),
             `manualConnect`,
             otherSynchronizerId,
@@ -148,6 +148,7 @@ final case class SynchronizerConnectionConfig(
             sequencerConnections.sequencerLivenessMargin,
             sequencerConnections.submissionRequestAmplification,
             sequencerConnections.sequencerConnectionPoolDelays,
+            sequencerConnections.subscriptionLivenessLimits,
           )
         } yield this.copy(
           synchronizerId = updatedSynchronizerId,
@@ -242,10 +243,11 @@ final case class SynchronizerConnectionConfig(
       ),
     )
 
-  private[canton] def toInternal(implicit
-      consoleEnvironment: ConsoleEnvironment
-  ): SynchronizerConnectionConfigInternal =
-    this.transformInto[SynchronizerConnectionConfigInternal]
+  private[canton] def toInternal: SynchronizerConnectionConfigInternal =
+    this
+      .into[SynchronizerConnectionConfigInternal]
+      .withFieldRenamed(_.synchronizerId, _.psid)
+      .transform
 }
 
 object SynchronizerConnectionConfig {
@@ -296,6 +298,7 @@ object SynchronizerConnectionConfig {
         SubmissionRequestAmplification.NoAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays =
         SequencerConnectionPoolDelays.default,
+      subscriptionLivenessLimits: SubscriptionLivenessLimits = SubscriptionLivenessLimits.default,
   )(implicit consoleEnvironment: ConsoleEnvironment): SynchronizerConnectionConfig = {
     val sequencerConnections =
       SequencerConnections.tryMany(
@@ -304,6 +307,7 @@ object SynchronizerConnectionConfig {
         sequencerLivenessMargin = sequencerLivenessMargin,
         submissionRequestAmplification = submissionRequestAmplification,
         sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
+        subscriptionLivenessLimits = subscriptionLivenessLimits,
       )
 
     SynchronizerConnectionConfig(
@@ -319,8 +323,8 @@ object SynchronizerConnectionConfig {
     )
   }
 
-  private[canton] def fromInternal(internal: SynchronizerConnectionConfigInternal)(implicit
-      consoleEnvironment: ConsoleEnvironment
+  private[canton] def fromInternal(
+      internal: SynchronizerConnectionConfigInternal
   ): SynchronizerConnectionConfig =
-    internal.transformInto[SynchronizerConnectionConfig]
+    internal.into[SynchronizerConnectionConfig].withFieldRenamed(_.psid, _.synchronizerId).transform
 }

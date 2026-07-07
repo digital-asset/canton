@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.topology
 import cats.data.EitherT
 import cats.implicits.catsSyntaxSemigroup
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.Offset
@@ -19,7 +18,7 @@ import com.digitalasset.canton.participant.store.{
   DamlPackageStore,
   ReassignmentStore,
 }
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError.*
 import com.digitalasset.canton.topology.transaction.HostingParticipant
@@ -33,6 +32,8 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -46,6 +47,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
       dryRunSnapshot: PackageMetadata,
       forceFlags: ForceFlags,
       disableUpgradeValidation: Boolean,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -63,6 +65,8 @@ trait ParticipantTopologyValidation extends NamedLogging {
           packageMetadataSnapshot,
           dryRunSnapshot,
           forceFlags,
+          // Protocol versions 35 and above do not require anymore that a vetted package's dependencies are themselves vetted as well
+          checkDependenciesVetting = protocolVersion <= ProtocolVersion.v34,
         )
       _ <- EitherT.fromEither[FutureUnlessShutdown] {
         if (
@@ -152,7 +156,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
       nextHostingParticipants: Seq[HostingParticipant],
       forceFlags: ForceFlags,
       reassignmentStores: () => Map[SynchronizerId, ReassignmentStore],
-      ledgerEnd: () => FutureUnlessShutdown[Option[ParameterStorageBackend.LedgerEnd]],
+      ledgerEnd: () => Option[LedgerEnd],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -161,10 +165,9 @@ trait ParticipantTopologyValidation extends NamedLogging {
       case (synchronizerId, reassignmentStore) =>
         EitherT(
           for {
-            ledgerEnd <- ledgerEnd()
             incompleteReassignments <- reassignmentStore.findIncomplete(
               sourceSynchronizer = None,
-              validAt = ledgerEnd.map(_.lastOffset).getOrElse(Offset.firstOffset),
+              validAt = ledgerEnd().map(_.lastOffset).getOrElse(Offset.firstOffset),
               stakeholders = NonEmpty.from(Set(party.toLf)),
               limit = NonNegativeInt.maxValue,
             )
@@ -256,6 +259,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
       packageMetadataSnapshot: PackageMetadata,
       dryRunSnapshot: PackageMetadata,
       forceFlags: ForceFlags,
+      checkDependenciesVetting: Boolean,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -291,7 +295,10 @@ trait ParticipantTopologyValidation extends NamedLogging {
       val unvettedDeps = (dependenciesOfAdded -- vettedPackagesTarget) ++ removedDeps
       if (unknownToBeAdded.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnknownPackage))
         Left(CannotVetDueToMissingPackages.Missing(unknownToBeAdded))
-      else if (unvettedDeps.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnvettedDependencies))
+      else if (
+        checkDependenciesVetting && !forceFlags
+          .permits(ForceFlag.AllowUnvettedDependencies) && unvettedDeps.nonEmpty
+      )
         Left(DependenciesNotVetted.Reject(unvettedDeps))
       else Right(())
     })

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
@@ -51,9 +52,11 @@ import scala.collection.immutable.Seq
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
-import CompanionImplicits.*
+final class CommandServiceIT(override protected val testDars: TestDars)
+    extends LedgerTestSuite
+    with CommandSubmissionTestUtils {
+  import testDars.companionImplicits.*
 
-final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestUtils {
   test(
     "CSsubmitAndWaitBasic",
     "CSsubmitAndWaitBasic returns a valid transaction identifier",
@@ -65,6 +68,7 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
       updateId = response.updateId
       retrievedTransaction <- ledger.transactionById(updateId, Seq(party))
       transactions <- ledger.transactions(AcsDelta, party)
+      completions <- ledger.firstCompletions(party)
     } yield {
 
       assert(updateId.nonEmpty, "The transaction identifier was empty but shouldn't.")
@@ -88,8 +92,18 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
       )
 
       assert(
+        transactions.headOption.value.transactionHash.isEmpty,
+        "Expected empty transaction hash for a local party transaction",
+      )
+
+      assert(
         transactions.headOption.flatMap(_.paidTrafficCost).exists(_ > 0),
         "Expected a non empty traffic cost",
+      )
+
+      assert(
+        completions.headOption.exists(_.transactionHash.isEmpty),
+        "Expected empty transaction hash on completion for non-interactive submission",
       )
 
       assert(
@@ -165,8 +179,8 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         s"The returned transaction should contain an exercised event, but was ${event2.event}",
       )
       assert(
-        event1.getCreated.getTemplateId == Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
-        s"The template ID of the created event should be ${Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1}, but was ${event1.getCreated.getTemplateId}",
+        event1.getCreated.getTemplateId == dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
+        s"The template ID of the created event should be ${dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1}, but was ${event1.getCreated.getTemplateId}",
       )
       assert(
         transaction.paidTrafficCost.exists(_ > 0L),
@@ -687,7 +701,7 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         assertEquals(
           "Unexpected template identifier in create event",
           transactionsLedgerEffects.flatMap(createdEvents).map(_.getTemplateId),
-          Vector(Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
+          Vector(dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1),
         )
         val contractId =
           transactionsLedgerEffects.flatMap(createdEvents).headOption.value.contractId
@@ -915,6 +929,7 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         recordTime = transactionLedgerEffects.recordTime,
         externalTransactionHash = transactionLedgerEffects.externalTransactionHash,
         paidTrafficCost = transactionLedgerEffects.paidTrafficCost,
+        transactionHash = transactionLedgerEffects.transactionHash,
       ),
     )
 

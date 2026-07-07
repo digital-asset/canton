@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.time
 import cats.data.EitherT
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -14,7 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.LsuSequencingBounds
 import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyMapping}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
 
@@ -46,7 +45,7 @@ final case class LsuSequencingBounds private (
 ) {
   require(
     lowerBoundSequencingTimeExclusive <= upgradeTime,
-    s"lowerBoundSequencingTimeExclusive should be <= upgradeTime but found $lowerBoundSequencingTimeExclusive and $upgradeTime",
+    s"lowerBoundSequencingTimeExclusive should be <= upgradeTime but found $lowerBoundSequencingTimeExclusive and $upgradeTime respectively",
   )
 }
 
@@ -58,7 +57,7 @@ object LsuSequencingBounds {
       lsuSequencingBoundsOverride: LsuSequencingBoundsOverride,
       store: TopologyStore[SynchronizerStore],
   )(implicit
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, String, LsuSequencingBounds] = {
 
@@ -66,7 +65,7 @@ object LsuSequencingBounds {
       lsuSequencingBoundsOverride
 
     for {
-      upgradeTimeFromStoreO <- EitherT.liftF(findUpgradeTimeFromPredecessor(store))
+      upgradeTimeFromStoreO <- EitherT.liftF(store.findUpgradeTimeFromPredecessor())
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         upgradeTimeFromStoreO.isEmpty,
         "LsuSequencingBoundsOverride cannot be set if an LSU announcement exists in the topology store",
@@ -100,7 +99,7 @@ object LsuSequencingBounds {
     implicit val traceContext = errorLoggingContext.traceContext
 
     for {
-      upgradeTimeO <- findUpgradeTimeFromPredecessor(store)
+      upgradeTimeO <- store.findUpgradeTimeFromPredecessor()
 
       lsuSequencingBounds <- upgradeTimeO
         .traverse { upgradeTime =>
@@ -110,7 +109,7 @@ object LsuSequencingBounds {
               case Some((_, latestEffectiveTime)) =>
                 /*
                 Note: the require in the LsuSequencingBounds might throw if the invariant is not respected.
-                This is fine because it means that something went terribly wrong: a topology change is effective after ugprade time.
+                This is fine because it means that something went terribly wrong: a topology change is effective after upgrade time.
                  */
                 LsuSequencingBounds(
                   upgradeTime = upgradeTime,
@@ -124,36 +123,5 @@ object LsuSequencingBounds {
         }
         .map(_.flatten)
     } yield lsuSequencingBounds
-  }
-
-  private def findUpgradeTimeFromPredecessor(
-      store: TopologyStore[SynchronizerStore]
-  )(implicit
-      errorLoggingContext: ErrorLoggingContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[Option[CantonTimestamp]] = {
-    val psid = store.storeId.psid
-    implicit val traceContext = errorLoggingContext.traceContext
-
-    store
-      .findPositiveTransactions(
-        CantonTimestamp.MaxValue,
-        asOfInclusive = false,
-        isProposal = false,
-        types = Seq(TopologyMapping.Code.LsuAnnouncement),
-        filterUid = Some(NonEmpty(Seq, psid.uid)),
-        filterNamespace = None,
-      )
-      .map(
-        _.collectOfMapping[LsuAnnouncement].result
-          .filter(_.mapping.successorSynchronizerId == psid)
-          .toList match {
-          case Nil => None
-          case one :: Nil => one.mapping.upgradeTime.some
-
-          case _moreThanOne =>
-            ErrorUtil.invalidState("Found more than one LsuAnnouncement mapping")
-        }
-      )
   }
 }

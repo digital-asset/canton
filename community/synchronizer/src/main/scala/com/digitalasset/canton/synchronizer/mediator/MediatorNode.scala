@@ -11,7 +11,9 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.admin.mediator.v30.MediatorStatusServiceGrpc.MediatorStatusService
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{
@@ -46,6 +48,7 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.synchronizer.Synchronizer
+import com.digitalasset.canton.synchronizer.mediator.VerdictSenderParameters
 import com.digitalasset.canton.synchronizer.mediator.admin.data.MediatorNodeStatus
 import com.digitalasset.canton.synchronizer.mediator.admin.gprc.{
   InitializeMediatorRequest,
@@ -81,7 +84,6 @@ import com.digitalasset.canton.version.{
 }
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
-import monocle.Lens
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.ActorSystem
 
@@ -90,6 +92,43 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
 import scala.util.Success
 
+/** configuration parameters for the delayed verdict sender
+  *
+  * In order to reduce the load on the sequencer, we can configure the mediators to delay the
+  * sending of the verdicts to the sequencer. For every verdict, threshold + immediateExtra
+  * mediators will send the verdict immediately.
+  *
+  * The rest will start to send verdicts after an initial delay plus an incremental delay based on
+  * their priority in the queue. The priority is determined rotating the order of the mediators in
+  * the topology state using the request-id as an offset (modulo the number of active mediators).
+  *
+  * @param enabled
+  *   if true (default), then verdicts will be sent with a delay
+  * @param livenessMargin
+  *   how many verdicts will be sent immediately in excess of threshold
+  * @param immediateBeforeDeadline
+  *   immediately send the verdict if we are approaching the deadline
+  * @param initialDelay
+  *   how long should a mediator wait before sending
+  * @param delay
+  *   incremental delay between senders
+  */
+final case class DelayedVerdictSenderConfig(
+    enabled: Boolean = true,
+    livenessMargin: NonNegativeInt = DelayedVerdictSenderConfig.DefaultLivenessMargin,
+    immediateBeforeDeadline: config.NonNegativeFiniteDuration =
+      DelayedVerdictSenderConfig.DefaultImmediateBeforeDeadline,
+    initialDelay: config.NonNegativeFiniteDuration = DelayedVerdictSenderConfig.DefaultInitialDelay,
+    delay: config.NonNegativeFiniteDuration = DelayedVerdictSenderConfig.DefaultDelay,
+)
+
+object DelayedVerdictSenderConfig {
+  private val DefaultLivenessMargin = NonNegativeInt.three
+  private val DefaultImmediateBeforeDeadline = config.NonNegativeFiniteDuration.ofSeconds(5)
+  private val DefaultInitialDelay = config.NonNegativeFiniteDuration.ofSeconds(3)
+  private val DefaultDelay = config.NonNegativeFiniteDuration.ofSeconds(1)
+}
+
 /** Various parameters for non-standard mediator settings
   *
   * @param dontWarnOnDeprecatedPV
@@ -97,27 +136,41 @@ import scala.util.Success
   *   deprecated protocol version.
   */
 final case class MediatorNodeParameterConfig(
+    override val devVersionSupport: Boolean = false,
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,
     override val batching: BatchingConfig = BatchingConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val watchdog: Option[WatchdogConfig] = None,
+    delayedVerdictSender: DelayedVerdictSenderConfig = DelayedVerdictSenderConfig(),
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 
 final case class MediatorNodeParameters(
     general: CantonNodeParameters.General,
     protocol: CantonNodeParameters.Protocol,
+    delayedVerdictSender: DelayedVerdictSenderConfig,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
-    with HasProtocolCantonNodeParameters
+    with HasProtocolCantonNodeParameters {
+  def verdictSenderParameters: VerdictSenderParameters = VerdictSenderParameters(
+    enableDelay = delayedVerdictSender.enabled,
+    livenessMargin = delayedVerdictSender.livenessMargin,
+    immediateBeforeDeadline = delayedVerdictSender.immediateBeforeDeadline,
+    initialDelay = delayedVerdictSender.initialDelay,
+    delay = delayedVerdictSender.delay,
+    parallelism = general.batchingConfig.parallelism,
+  )
+}
 
 final case class RemoteMediatorConfig(
     adminApi: FullClientConfig,
     token: Option[String] = None,
+    httpHealth: Option[HttpHealthServerConfig] = None,
 ) extends NodeConfig {
   override def clientAdminApi: ClientConfig = adminApi
+  override def httpHealthClientConfig: Option[HttpHealthServerConfig] = httpHealth
 }
 
 /** Mediator Node configuration that defaults to auto-init
@@ -220,23 +273,24 @@ class MediatorNodeBootstrap(
   override protected def mkNodeHealthService(
       storage: Storage
   ): (DependenciesHealthService, LivenessHealthService) = {
-    val readiness =
-      DependenciesHealthService(
-        "mediator",
-        logger,
-        timeouts,
-        criticalDependencies = Seq(storage),
-        softDependencies = Eval.always(
-          deferredSequencerClientHealth +:
-            deferredSequencerConnectionPoolHealthRef.get.apply()
-        ),
-      )
-
     val liveness = LivenessHealthService(
       logger,
       timeouts,
       fatalDependencies = Seq(deferredSequencerClientHealth),
     )
+    val readiness =
+      DependenciesHealthService(
+        "mediator",
+        logger,
+        timeouts,
+        criticalDependencies = Seq(
+          storage
+        ) ++ liveness.dependencies,
+        softDependencies = Eval.always(
+          deferredSequencerConnectionPoolHealthRef.get.apply()
+        ),
+      )
+
     (readiness, liveness)
   }
 
@@ -266,22 +320,6 @@ class MediatorNodeBootstrap(
         false, // this stage does not have auto-init
       )
       with GrpcMediatorInitializationService.Callback {
-
-    private val connectionPoolFactory = new GrpcSequencerConnectionPoolFactory(
-      clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(parameters),
-      minimumProtocolVersion = Some(ProtocolVersion.minimum),
-      authConfig = parameters.sequencerClient.authToken,
-      params = parameters.sequencerClient.clientChannelParams(parameters.tracing.propagation),
-      member = mediatorId,
-      clock = clock,
-      crypto = crypto,
-      seedForRandomnessO = arguments.testingConfig.sequencerTransportSeed,
-      metrics = arguments.metrics.sequencerClient.connectionPool,
-      metricsContext = MetricsContext.Empty,
-      futureSupervisor = futureSupervisor,
-      timeouts = timeouts,
-      loggerFactory = loggerFactory,
-    )
 
     override def getAdminToken: Option[String] = Some(adminTokenDispenser.getCurrentToken.secret)
 
@@ -382,12 +420,28 @@ class MediatorNodeBootstrap(
           logger.info(
             s"Assigning mediator to ${request.synchronizerId} via sequencers ${request.sequencerConnections}"
           )
+          val connectionPoolFactory = new GrpcSequencerConnectionPoolFactory(
+            clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(parameters),
+            minimumProtocolVersion = Some(ProtocolVersion.minimum),
+            authConfig = parameters.sequencerClient.authToken,
+            params = parameters.sequencerClient.clientChannelParams(parameters.tracing.propagation),
+            member = mediatorId,
+            clock = clock,
+            crypto = crypto,
+            seedForRandomnessO = arguments.testingConfig.sequencerTransportSeed,
+            metrics = arguments.metrics.sequencerClient.connectionPool,
+            metricsContext = MetricsContext("psid" -> request.synchronizerId.toProtoPrimitive),
+            futureSupervisor = futureSupervisor,
+            timeouts = timeouts,
+            loggerFactory = loggerFactory,
+          )
+
           for {
             connectionPool <- EitherT.fromEither[FutureUnlessShutdown](
               connectionPoolFactory
                 .createFromOldConfig(
                   request.sequencerConnections,
-                  expectedPsidO = None,
+                  expectedPsidO = Some(request.synchronizerId),
                   tracingConfig = parameters.tracing,
                   name = "temp",
                 )
@@ -409,6 +463,7 @@ class MediatorNodeBootstrap(
               staticParameters,
               request.sequencerConnections,
             )
+
             _ <- EitherT.right(synchronizerConfigurationStore.saveConfiguration(configToStore))
           } yield (
             staticParameters,
@@ -535,7 +590,7 @@ class MediatorNodeBootstrap(
       crypto = crypto.crypto,
       seedForRandomnessO = arguments.testingConfig.sequencerTransportSeed,
       metrics = arguments.metrics.sequencerClient.connectionPool,
-      metricsContext = MetricsContext.Empty,
+      metricsContext = MetricsContext("psid" -> psid.toProtoPrimitive),
       futureSupervisor = futureSupervisor,
       timeouts = timeouts,
       loggerFactory = synchronizerLoggerFactory,
@@ -567,6 +622,7 @@ class MediatorNodeBootstrap(
               .createProcessorAndClientForSynchronizer(
                 synchronizerTopologyStore,
                 upgradeTimeFromPredecessor = None,
+                sequencerSnapshotTimestamp = None,
                 crypto.pureCrypto,
                 arguments.parameterConfig,
                 arguments.config.topology,
@@ -575,7 +631,7 @@ class MediatorNodeBootstrap(
                 arguments.metrics.topologyCache,
                 arguments.futureSupervisor,
                 synchronizerLoggerFactory,
-              )()
+              )
           )
       (topologyProcessor, topologyClient) = topologyProcessorAndClient
       _ = ips.add(topologyClient)
@@ -588,7 +644,7 @@ class MediatorNodeBootstrap(
         staticSynchronizerParameters,
         crypto,
         cryptoConfig,
-        Some(arguments.metrics.kmsMetrics),
+        arguments.metrics.cryptoMetrics,
         parameters.cachingConfigs.publicKeyConversionCache,
         timeouts,
         futureSupervisor,
@@ -625,6 +681,7 @@ class MediatorNodeBootstrap(
       connectionPoolAndSequencerConnections <-
         GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValidWithPool(
           connectionPoolFactory = connectionPoolFactory,
+          psid = psid,
           tracingConfig = parameters.tracing,
           flagCloseable = this,
           loadConfig = getSequencerConnectionFromStore,
@@ -649,13 +706,9 @@ class MediatorNodeBootstrap(
 
       sequencerClientRef =
         GrpcSequencerConnectionService
-          .setup[MediatorSynchronizerConfiguration](
+          .setup(
             adminServerRegistry,
-            () => synchronizerConfigurationStore.fetchConfiguration(),
-            config => synchronizerConfigurationStore.saveConfiguration(config),
-            Lens[MediatorSynchronizerConfiguration, SequencerConnections](_.sequencerConnections)(
-              connection => conf => conf.copy(sequencerConnections = connection)
-            ),
+            synchronizerConfigurationStore,
             connectionPoolFactory,
             sequencerClient,
             parameters.tracing,
@@ -710,6 +763,7 @@ class MediatorNodeBootstrap(
               topologyConfig,
               Some(staticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               synchronizerLoggerFactory,
             ),
             topologyClient,

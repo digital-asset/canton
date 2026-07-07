@@ -8,8 +8,6 @@ import org.scalatest.AppendedClues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class NamesSpec_V2Dev extends NamesSpec(AvailableTests.v2_dev)
-
 class NamesSpec(availableTests: AvailableTests)
     extends AnyWordSpec
     with Matchers

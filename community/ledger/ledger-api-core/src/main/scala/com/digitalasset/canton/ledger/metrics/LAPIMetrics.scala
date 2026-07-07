@@ -34,21 +34,11 @@ class LAPIMetrics private[metrics] (
   final class StreamsMetrics private[LAPIMetrics] {
     private val prefix: MetricName = LAPIMetrics.this.prefix :+ "streams"
 
-    val transactionTrees: Counter = metricsFactory.counter(
-      MetricInfo(
-        prefix :+ "transaction_trees_sent",
-        summary = "The number of the transaction trees sent over the ledger api.",
-        description = """The total number of the transaction trees sent over the ledger api streams
-                      |to all clients.""",
-        qualification = MetricQualification.Traffic,
-      )
-    )
-
     val updates: Counter = metricsFactory.counter(
       MetricInfo(
         prefix :+ "updates_sent",
-        summary = "The number of the flat updates sent over the ledger api.",
-        description = """The total number of the flat updates sent over the ledger api streams to
+        summary = "The number of the updates sent over the ledger api.",
+        description = """The total number of the updates sent over the ledger api streams to
                       |all clients.""",
         qualification = MetricQualification.Traffic,
       )

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.SetsUtil.requireDisjoint
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
+import com.digitalasset.nonempty.NonEmpty
 
 /** Describes the effect of a confirmation request on the active contracts, contract keys, and
   * reassignments. Transient contracts appear the following two sets:
@@ -110,29 +110,31 @@ object CommitSet {
       transient: Map[LfContractId, Set[LfPartyId]],
       createdContracts: Map[LfContractId, GenContractInstance],
       commitAfterFailedActivenessCheck: Boolean,
-  )(implicit loggingContext: ErrorLoggingContext): CommitSet =
-    if (activenessResult.isSuccessful || commitAfterFailedActivenessCheck) {
-      val archivals = (consumedInputsOfHostedParties ++ transient).map {
-        case (cid, hostedStakeholders) =>
-          cid -> CommitSet.ArchivalCommit(hostedStakeholders)
-      }
-      val reassignmentCounter = ReassignmentCounter.Genesis
-      val creations =
-        createdContracts.fmap(c => CommitSet.CreationCommit(c.metadata, reassignmentCounter))
-      CommitSet(
-        archivals = archivals,
-        creations = creations,
-        unassignments = Map.empty,
-        assignments = Map.empty,
-      )
-    } else {
+  )(implicit loggingContext: ErrorLoggingContext): CommitSet = {
+    if (!activenessResult.isSuccessful) {
       SyncServiceAlarm
         .Warn(s"Request $requestId with failed activeness check is approved.")
         .report()
-      loggingContext.debug(s"Failed activeness result for request $requestId is $activenessResult")
-      // TODO(i12904) Handle this case gracefully
-      throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
+      loggingContext.info(s"Failed activeness result for request $requestId is $activenessResult")
+      if (!commitAfterFailedActivenessCheck) {
+        throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
+      }
     }
+
+    val archivals = (consumedInputsOfHostedParties ++ transient).map {
+      case (cid, hostedStakeholders) =>
+        cid -> CommitSet.ArchivalCommit(hostedStakeholders)
+    }
+    val reassignmentCounter = ReassignmentCounter.Genesis
+    val creations =
+      createdContracts.fmap(c => CommitSet.CreationCommit(c.metadata, reassignmentCounter))
+    CommitSet(
+      archivals = archivals,
+      creations = creations,
+      unassignments = Map.empty,
+      assignments = Map.empty,
+    )
+  }
 
   def createForAssignment(
       reassignmentId: ReassignmentId,

@@ -7,10 +7,9 @@ import com.digitalasset.daml.lf.speedy.SExpr.SExpr
 
 /** Top-level speedy definition.
   *
-  * The computation of the definition is cached to avoid expensive
-  * re-evaluation of complex definitions. When evaluating SEVal we
-  * further memoize the cached value in SEVal to avoid the definition
-  * lookup.
+  * The computation of the definition is cached to avoid expensive re-evaluation of complex
+  * definitions. When evaluating SEVal we further memoize the cached value in SEVal to avoid the
+  * definition lookup.
   */
 final case class SDefinition(
     body: SExpr

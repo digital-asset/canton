@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.party
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -52,6 +51,7 @@ import com.digitalasset.canton.{
   ReassignmentCounter,
   RepairCounter,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
@@ -118,8 +118,7 @@ final class PartyReplicationProcessorTest
         .thenReturn(EitherTUtil.unitUS)
       when(
         indexingStore.addImportedContractActivations(
-          any[PartyId],
-          any[TimeOfChange],
+          any[PartyReplicationIndexingStore.Watermark],
           any[NonEmpty[Seq[ContractReassignment]]],
         )(anyTraceContext)
       )
@@ -172,7 +171,6 @@ final class PartyReplicationProcessorTest
       }
 
       new PartyReplicationTargetParticipantProcessor(
-        partyId = alice,
         requestId = addPartyRequestId,
         psid = psid,
         partyOnboardingAt = EffectiveTime(CantonTimestamp.ofEpochSecond(10)),

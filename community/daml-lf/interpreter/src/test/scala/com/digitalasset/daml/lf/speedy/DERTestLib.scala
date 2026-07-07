@@ -21,13 +21,11 @@ import scala.util.Try
 
 object DERTestLib {
   object DERUtil {
-    def encode(data: ASN1Primitive): Bytes = {
+    def encode(data: ASN1Primitive): Bytes =
       Bytes.fromByteArray(data.getEncoded())
-    }
 
-    def decode(data: Bytes): ASN1Primitive = {
+    def decode(data: Bytes): ASN1Primitive =
       ASN1Primitive.fromByteArray(data.toByteArray)
-    }
   }
 
   def derBitStringGen: Gen[DERBitString] =
@@ -38,26 +36,26 @@ object DERTestLib {
       )
     } yield new DERBitString(new DEROctetString(bytes.toArray))
 
-  def asn1ObjectIdentifierGen: Gen[ASN1ObjectIdentifier] = {
+  def asn1ObjectIdentifierGen: Gen[ASN1ObjectIdentifier] =
     for {
-      label <- Gen.frequency(
-        1 -> (for {
-          prefix <- Gen.oneOf(0, 1, 2)
-          suffix <- Gen.nonEmptyListOf(Gen.posNum[Int])
-        } yield (prefix +: suffix).mkString(".")),
-        99 -> Gen.oneOf("1.2.840.10045.2.1", "1.3.132.0.10"),
-      ).suchThat(txt => Try(new ASN1ObjectIdentifier(txt)).isSuccess)
+      label <- Gen
+        .frequency(
+          1 -> (for {
+            prefix <- Gen.oneOf(0, 1, 2)
+            suffix <- Gen.nonEmptyListOf(Gen.posNum[Int])
+          } yield (prefix +: suffix).mkString(".")),
+          99 -> Gen.oneOf("1.2.840.10045.2.1", "1.3.132.0.10"),
+        )
+        .suchThat(txt => Try(new ASN1ObjectIdentifier(txt)).isSuccess)
     } yield new ASN1ObjectIdentifier(label)
-  }
 
-  def asn1ObjectIdentifierSequenceGen: Gen[DLSequence] = {
+  def asn1ObjectIdentifierSequenceGen: Gen[DLSequence] =
     for {
       objIds <- Gen.frequency(
         1 -> Gen.listOf(asn1ObjectIdentifierGen),
         99 -> Gen.listOfN(2, asn1ObjectIdentifierGen),
       )
     } yield new DLSequence(objIds.toArray[ASN1Encodable])
-  }
 
   def derPublicKeyGen: Gen[DLSequence] =
     for {
@@ -84,14 +82,13 @@ object DERTestLib {
       n <- bigIntegerGen
     } yield new ASN1Integer(n)
 
-  def derSignatureGen: Gen[DLSequence] = {
+  def derSignatureGen: Gen[DLSequence] =
     for {
       coords <- Gen.frequency(
         1 -> Gen.listOf(asn1IntegerGen),
         99 -> Gen.listOfN(2, asn1IntegerGen),
       )
     } yield new DLSequence(coords.toArray[ASN1Encodable])
-  }
 
   def derSignatureHexStringGen: Gen[Ref.HexString] =
     Gen.frequency(

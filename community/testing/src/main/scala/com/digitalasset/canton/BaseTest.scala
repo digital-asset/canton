@@ -625,7 +625,6 @@ object BaseTest {
     )
 
   lazy val defaultMaxBytesToDecompress: MaxBytesToDecompress = MaxBytesToDecompress(
-    // TODO(i29003): Define our own param for this.
     DynamicSynchronizerParameters.defaultMaxRequestSize.value
   )
 
@@ -639,6 +638,9 @@ object BaseTest {
     case object CommandTracking extends UnsupportedExternalPartyTest
     // TODO(i30256): Synchronizer routing for external parties
     case object MultiSynchronizerParties extends UnsupportedExternalPartyTest
+    // TODO(i32963): Support malicious nodes for external parties
+    case object UsesMaliciousNode extends UnsupportedExternalPartyTest
+
   }
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer

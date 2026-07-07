@@ -34,23 +34,22 @@ trait SynchronizerConnectivityStatusStore {
 
   def setTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
-  def isTopologyInitialized(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
+  def isTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
 }
 
 object SynchronizerConnectivityStatusStore {
   def apply(
       storage: Storage,
-      synchronizerId: PhysicalSynchronizerId,
+      psid: PhysicalSynchronizerId,
       processingTimeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SynchronizerConnectivityStatusStore =
     storage match {
       case _: MemoryStorage =>
-        new InMemorySynchronizerConnectivityStatusStore(
-        )
+        new InMemorySynchronizerConnectivityStatusStore()
       case db: DbStorage =>
         new DbSynchronizerConnectivityStatusStore(
-          synchronizerId,
+          psid,
           db,
           processingTimeouts,
           loggerFactory,

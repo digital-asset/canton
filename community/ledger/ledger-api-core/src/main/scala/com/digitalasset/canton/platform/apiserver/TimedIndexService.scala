@@ -6,25 +6,25 @@ package com.digitalasset.canton.platform.apiserver
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.daml.ledger.api.v2.update_service.{
-  GetUpdateResponse,
-  GetUpdatesPageResponse,
-  GetUpdatesResponse,
-}
+import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesPageResponse}
 import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.HealthStatus
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
-import com.digitalasset.canton.ledger.api.{AcsRangeInfo, EventFormat, UpdateFormat}
+import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.ledger.participant.state.index.*
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
-import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.apache.pekko.NotUsed
@@ -35,12 +35,15 @@ import scala.concurrent.Future
 final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMetrics)
     extends IndexService {
 
-  override def currentLedgerEnd(): Future[Option[Offset]] =
-    Timed.future(metrics.services.index.currentLedgerEnd, delegate.currentLedgerEnd())
+  override def currentLedgerEnd(): Option[LedgerEnd] =
+    Timed.value(
+      metrics.services.index.currentLedgerEnd,
+      delegate.currentLedgerEnd(),
+    )
 
   override def getCompletions(
       begin: Option[Offset],
-      userId: Ref.UserId,
+      userId: Option[Ref.UserId],
       parties: Set[Ref.Party],
   )(implicit loggingContext: LoggingContextWithTrace): Source[CompletionStreamResponse, NotUsed] =
     Timed.source(
@@ -54,10 +57,16 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       updateFormat: UpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
-  )(implicit loggingContext: LoggingContextWithTrace): Source[GetUpdatesResponse, NotUsed] =
+  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdateResponse, NotUsed] =
     Timed.source(
-      metrics.services.index.transactions,
-      delegate.updates(begin, endAt, updateFormat, descendingOrder, skipPruningChecks),
+      metrics.services.index.updates,
+      delegate.updates(
+        begin = begin,
+        endAt = endAt,
+        updateFormat = updateFormat,
+        descendingOrder = descendingOrder,
+        skipPruningChecks = skipPruningChecks,
+      ),
     )
 
   def getUpdateBy(
@@ -65,7 +74,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       updateFormat: UpdateFormat,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetUpdateResponse]] =
     Timed.future(
-      metrics.services.index.getUpdateByOffset,
+      metrics.services.index.getUpdate,
       delegate.getUpdateBy(lookupKey, updateFormat),
     )
 
@@ -81,6 +90,19 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       delegate.getActiveContracts(eventFormat, activeAt, rangeInfo),
     )
 
+  override def acs(
+      synchronizerId: SynchronizerId,
+      activeAt: Offset,
+      stakeholders1: Set[Party],
+      stakeholders2: Set[Party],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Source[InternalIndexService.ActiveContract, NotUsed] =
+    Timed.source(
+      metrics.services.index.acs,
+      delegate.acs(synchronizerId, activeAt, stakeholders1, stakeholders2),
+    )
+
   override def lookupActiveContract(
       readers: Set[Ref.Party],
       contractId: Value.ContractId,
@@ -90,15 +112,6 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
     Timed.future(
       metrics.services.index.lookupActiveContract,
       delegate.lookupActiveContract(readers, contractId),
-    )
-
-  override def lookupContractKey(
-      readers: Set[Ref.Party],
-      key: GlobalKey,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[Value.ContractId]] =
-    Timed.future(
-      metrics.services.index.lookupContractKey,
-      delegate.lookupContractKey(readers, key),
     )
 
   override def lookupMaximumLedgerTimeAfterInterpretation(
@@ -150,6 +163,8 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
   ): Future[Option[Offset]] =
     delegate.indexDbPrunedUpto
 
+  override def isPruningInProgress: Boolean = delegate.isPruningInProgress
+
   override def currentHealth(): HealthStatus =
     delegate.currentHealth()
 
@@ -175,15 +190,15 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       delegate.getEventsByContractId(contractId, eventFormat),
     )
 
-  override def lookupNonUniqueContractKey(
+  override def lookupContractKey(
       readers: Set[Party],
       key: Key,
       pageToken: Option[Long],
       limit: Int,
   )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
     Timed.future(
-      metrics.services.index.lookupNonUniqueContractKey,
-      delegate.lookupNonUniqueContractKey(readers, key, pageToken, limit),
+      metrics.services.index.lookupContractKey,
+      delegate.lookupContractKey(readers, key, pageToken, limit),
     )
 
   // TODO(i16065): Re-enable getEventsByContractKey tests

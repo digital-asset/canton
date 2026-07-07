@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.protocol.party
 
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationSourceParticipantMessage.DataOrStatus
 import com.digitalasset.canton.participant.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmpty
 
 final case class PartyReplicationSourceParticipantMessage(dataOrStatus: DataOrStatus)(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[

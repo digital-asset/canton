@@ -51,6 +51,25 @@ publish_libs_to_google_artifact_registry:
         # TODO(#29907) re-enable failure on error
         fail_on_error_in_output: false
 
+publish_api_to_gar:
+  parameters:
+    gar_maven_repo_url:
+      type: string
+  steps:
+    - setup_gcp_gar
+    - run:
+        name: Publish API artifacts to Google Artifact Registry
+        command: |
+          GAR_MAVEN_REPO_URL=<< parameters.gar_maven_repo_url >> ./scripts/ci/publish-api-to-gar.sh
+
+publish_api_to_maven_central:
+  steps:
+    - setup_gpg
+    - run:
+        name: Publish API artifacts to Maven Central
+        command: |
+          ./scripts/ci/publish-api-to-maven-central.sh
+
 setup_gpg:
   steps:
     - run:
@@ -67,3 +86,4 @@ publish_libs_to_maven_central:
         cmd: "publishToSonatype"
         # TODO(#29907) re-enable failure on error
         fail_on_error_in_output: false
+        timeout: 60m

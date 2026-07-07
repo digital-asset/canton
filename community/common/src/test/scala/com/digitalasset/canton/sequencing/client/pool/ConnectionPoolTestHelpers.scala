@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.sequencer.api.v30 as SequencerService
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.sequencer.api.v30.SequencerServiceGrpc.SequencerServiceStub
+import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.pool.Connection.{
   ConnectionConfig,
@@ -39,16 +39,18 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.
   SequencerSubscriptionPoolConfig,
   SequencerSubscriptionPoolHealth,
 }
+import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
+import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandlerTrait.SubscriptionLivenessStatus
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.client.{
   SequencedEventValidator,
   SequencerClientSubscriptionError,
 }
 import com.digitalasset.canton.sequencing.{
-  ProcessingSerializedEvent,
-  SequencerAggregator,
+  MaybeCompressedSerializedEvent,
   SequencerConnectionPoolDelays,
   SequencerConnections,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{
@@ -61,13 +63,14 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.{Mutex, PekkoUtil, ResourceUtil}
+import com.digitalasset.canton.util.{EitherTUtil, Mutex, PekkoUtil, ResourceUtil}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
   ReleaseVersion,
 }
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.StreamObserver
 import io.grpc.{CallOptions, Channel, Status}
 import org.apache.pekko.actor.ActorSystem
@@ -222,6 +225,7 @@ trait ConnectionPoolTestHelpers {
       poolDelays: SequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
       blockValidation: Int => Boolean = _ => false,
       metrics: SequencerConnectionPoolMetrics = CommonMockMetrics.sequencerClient.connectionPool,
+      metricsContext: MetricsContext = MetricsContext.Empty,
       namePrefix: String = "test",
   )(
       f: (
@@ -251,6 +255,7 @@ trait ConnectionPoolTestHelpers {
       testCrypto.crypto,
       Some(seedForRandomness),
       metrics = metrics,
+      metricsContext = metricsContext,
       futureSupervisor,
       testTimeouts,
       loggerFactory,
@@ -274,6 +279,8 @@ trait ConnectionPoolTestHelpers {
     SequencerSubscriptionPoolConfig(
       livenessMargin = livenessMargin,
       subscriptionRequestDelay = poolDelays.subscriptionRequestDelay,
+      maxTimestampDelta = SubscriptionLivenessLimits.default.maxTimestampDelta,
+      maxOrdinalDelta = SubscriptionLivenessLimits.default.maxOrdinalDelta,
     )
 
   protected def withSubscriptionPool[V](
@@ -286,16 +293,19 @@ trait ConnectionPoolTestHelpers {
       sequencerSubscriptionFactory = new TestSequencerSubscriptionFactory(timeouts, loggerFactory),
       subscriptionHandlerFactory = TestSubscriptionHandlerFactory,
       metrics = CommonMockMetrics.sequencerClient.connectionPool,
-      metricsContext = MetricsContext.Empty,
+      metricsContext = connectionPool.metricsContext,
       timeouts = timeouts,
       loggerFactory = loggerFactory,
     )
+    val subscriptionStartProvider = new SubscriptionStartProvider {
+      override def getLatestProcessedEventO: Option[EventAndOrdinal] = None
+    }
     val subscriptionPool = subscriptionPoolFactory.create(
       initialConfig = config,
       connectionPool = connectionPool,
       member = testMember,
       initialSubscriptionEventO = None,
-      mock[SequencerAggregator],
+      subscriptionStartProvider,
     )
 
     val listener = new TestHealthListener(subscriptionPool.health)
@@ -389,6 +399,7 @@ protected object ConnectionPoolTestHelpers {
 
   private lazy val clientProtocolVersions: NonEmpty[List[ProtocolVersion]] =
     ProtocolVersionCompatibility.supportedProtocols(
+      includeDevVersion = true,
       includeAlphaVersions = true,
       includeBetaVersions = true,
       release = ReleaseVersion.current,
@@ -412,28 +423,40 @@ protected object ConnectionPoolTestHelpers {
     override def create(
         connection: SequencerConnection,
         member: Member,
-        preSubscriptionEventO: Option[ProcessingSerializedEvent],
+        preSubscriptionEventO: Option[EventAndOrdinal],
         subscriptionHandlerFactory: SubscriptionHandlerFactory,
         parent: HasUnlessClosing,
     )(implicit
         traceContext: TraceContext,
         ec: ExecutionContext,
-    ): SequencerSubscriptionImpl[SequencerClientSubscriptionError] =
+    ): SequencerSubscriptionImpl = {
+      val subscriptionHandler = new SubscriptionHandlerTrait {
+        override def handleEvent(
+            serializedEvent: MaybeCompressedSerializedEvent
+        ): FutureUnlessShutdown[Either[SequencerClientSubscriptionError, Unit]] =
+          EitherTUtil.unitUS.value
+
+        override def getLivenessStatus(
+            latest: EventAndOrdinal
+        ): Option[SubscriptionLivenessStatus] = None
+      }
+
       new SequencerSubscriptionImpl(
         connection = connection,
         member = member,
         startingTimestampO = None,
-        handler = _ => FutureUnlessShutdown.pure(Right(())),
+        handler = subscriptionHandler,
         parent = parent,
         timeouts = timeouts,
         loggerFactory = loggerFactory,
       )
+    }
   }
 
   private object TestSubscriptionHandlerFactory extends SubscriptionHandlerFactory {
     override def create(
         eventValidator: SequencedEventValidator,
-        initialPriorEvent: Option[ProcessingSerializedEvent],
+        initialPriorEventO: Option[EventAndOrdinal],
         sequencerAlias: SequencerAlias,
         sequencerId: SequencerId,
         loggerFactory: NamedLoggerFactory,
@@ -450,6 +473,7 @@ protected object ConnectionPoolTestHelpers {
       crypto: Crypto,
       seedForRandomnessO: Option[Long],
       metrics: SequencerConnectionPoolMetrics,
+      metricsContext: MetricsContext,
       futureSupervisor: FutureSupervisor,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -462,6 +486,7 @@ protected object ConnectionPoolTestHelpers {
       responsesForConnection,
       validationBlocker,
       metrics,
+      metricsContext,
       futureSupervisor,
       timeouts,
       loggerFactory,
@@ -489,7 +514,7 @@ protected object ConnectionPoolTestHelpers {
           crypto,
           seedForRandomnessO,
           metrics,
-          MetricsContext.Empty,
+          metricsContext,
           futureSupervisor,
           timeouts,
           loggerFactory,
@@ -514,6 +539,7 @@ protected object ConnectionPoolTestHelpers {
       responsesForConnection: PartialFunction[Int, TestResponses],
       validationBlocker: TestValidationBlocker,
       metrics: SequencerConnectionPoolMetrics,
+      metricsContext: MetricsContext,
       futureSupervisor: FutureSupervisor,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -559,7 +585,7 @@ protected object ConnectionPoolTestHelpers {
         ClientChannelParams.ForTesting,
         stubFactory = stubFactory,
         metrics = metrics,
-        metricsContext = MetricsContext.Empty,
+        metricsContext = metricsContext,
         futureSupervisor = futureSupervisor,
         timeouts = timeouts,
         loggerFactory = loggerFactory.append("connection", config.name),

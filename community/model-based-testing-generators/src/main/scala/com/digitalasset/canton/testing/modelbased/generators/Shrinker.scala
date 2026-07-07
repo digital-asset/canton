@@ -137,15 +137,6 @@ object Shrinker {
       shrinkContractId
         .shrink(contractId)
         .map(Fetch.apply)
-    case LookupByKey(contractId, keyId, maintainers) =>
-      Shrink
-        .shrinkTuple3(
-          Shrink.shrinkOption(shrinkContractId),
-          shrinkKeyId,
-          shrinkPartySet,
-        )
-        .shrink((contractId, keyId, maintainers))
-        .map((LookupByKey.apply _).tupled)
     case FetchByKey(contractId, keyId, maintainers) =>
       Shrink
         .shrinkTuple3(

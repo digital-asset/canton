@@ -10,7 +10,7 @@ import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.configuration.FluentConfiguration
 import org.flywaydb.core.api.migration.JavaMigration
 import org.flywaydb.core.api.resource.LoadableResource
-import org.flywaydb.core.internal.scanner.{LocationScannerCache, ResourceNameCache, Scanner}
+import org.flywaydb.core.internal.scanner.Scanner
 import org.scalatest.matchers.should.Matchers.*
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -73,10 +73,8 @@ object FlywayMigrationsSpec {
   private def scanner(config: FluentConfiguration) =
     new Scanner(
       classOf[JavaMigration],
-      false,
-      new ResourceNameCache,
-      new LocationScannerCache,
       config,
+      config.getLocations,
     )
 
   private def getExpectedDigest(

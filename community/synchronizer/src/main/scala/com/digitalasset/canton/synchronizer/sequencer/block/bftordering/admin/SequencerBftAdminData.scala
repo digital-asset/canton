@@ -5,9 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin
 
 import cats.implicits.*
 import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
-import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
+import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
+import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port, PositiveLong}
 import com.digitalasset.canton.config.{PemFile, PemString}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyNameOnlyCase, PrettyPrinting}
+import com.digitalasset.canton.sequencer.admin.v30.GetOrderingTopologyResponse.DynamicSequencingParameters
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security.Empty
 import com.digitalasset.canton.sequencer.admin.v30.{
@@ -25,12 +27,13 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   TlsClientCertificate as ProtoTlsClientCertificate,
   TlsPeerEndpoint as ProtoTlsPeerEndpoint,
 }
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.SequencerId
 
 import scala.util.{Failure, Success, Try}
@@ -158,7 +161,11 @@ object SequencerBftAdminData {
     ) extends PeerConnectionStatus {
 
       override val pretty: Pretty[PeerEndpointStatus] =
-        prettyOfClass(param("p2pEndpointId", _.p2pEndpointId), param("health", _.health))
+        prettyOfClass(
+          param("p2pEndpointId", _.p2pEndpointId),
+          param("isOutgoingConnection", _.isOutgoingConnection),
+          param("health", _.health),
+        )
 
       def toProto: ProtoPeerConnectionStatus =
         ProtoPeerConnectionStatus(
@@ -363,14 +370,19 @@ object SequencerBftAdminData {
   final case class OrderingTopology(
       currentEpoch: Long,
       sequencerIds: Seq[SequencerId],
-      sequencingParameters: SequencingParameters,
+      leaderSequencerIds: Seq[SequencerId],
+      blacklistedSequencerIds: Seq[SequencerId],
+      sequencingParameters: topology.SequencingParameters,
   ) {
 
     def toProto: GetOrderingTopologyResponse =
       GetOrderingTopologyResponse(
         currentEpoch,
         sequencerIds.map(SequencerNodeId.toBftNodeId),
-        Option(sequencingParameters.toProto),
+        GetOrderingTopologyResponse.DynamicSequencingParameters
+          .DynamicSequencingParametersPayload31(sequencingParameters.toProto31),
+        leaderSequencerIds.map(SequencerNodeId.toBftNodeId),
+        blacklistedSequencerIds.map(SequencerNodeId.toBftNodeId),
       )
   }
 
@@ -384,10 +396,50 @@ object SequencerBftAdminData {
             .leftMap(_.toString)
         } yield sequencerId
       }.sequence
-      parameters <- ProtoConverter
-        .required("dynamicSequencingParametersPayload", response.dynamicSequencingParametersPayload)
-        .flatMap(SequencingParameters.fromProto)
-        .leftMap(_.toString)
-    } yield OrderingTopology(response.currentEpoch, sequencers, parameters)
+      leaders <- response.leaderSequencerIds.map { sequencerIdString =>
+        for {
+          sequencerId <- SequencerId
+            .fromProtoPrimitive(sequencerIdString, "sequencerId")
+            .leftMap(_.toString)
+        } yield sequencerId
+      }.sequence
+      blacklisted <- response.blacklistedSequencerIds.map { sequencerIdString =>
+        for {
+          sequencerId <- SequencerId
+            .fromProtoPrimitive(sequencerIdString, "sequencerId")
+            .leftMap(_.toString)
+        } yield sequencerId
+      }.sequence
+      parsedParameters = response.dynamicSequencingParameters match {
+        case DynamicSequencingParameters.Empty =>
+          Left(FieldNotSet("dynamicSequencingParameters"))
+        case DynamicSequencingParameters.DynamicSequencingParametersPayload(value) =>
+          topology.SequencingParameters.fromProto30(value)
+        case DynamicSequencingParameters.DynamicSequencingParametersPayload31(value) =>
+          topology.SequencingParameters.fromProto31(value)
+      }
+      parameters <- parsedParameters.leftMap(_.toString)
+    } yield OrderingTopology(response.currentEpoch, sequencers, leaders, blacklisted, parameters)
+  }
+
+  final case class SequencingParameters(
+      pbftViewChangeTimeout: PositiveFiniteDuration,
+      segmentLength: PositiveLong,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+  ) extends PrettyPrinting {
+    override protected def pretty: Pretty[SequencingParameters] =
+      prettyOfClass(
+        param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
+        param("segmentLength", _.segmentLength),
+        param("blacklistLeaderSelectionPolicyConfig", _.blacklistLeaderSelectionPolicyConfig),
+      )
+  }
+  object SequencingParameters {
+    def apply(topologySequencingParameters: topology.SequencingParameters): SequencingParameters =
+      SequencingParameters(
+        topologySequencingParameters.pbftViewChangeTimeout,
+        topologySequencingParameters.segmentLength.length,
+        topologySequencingParameters.blacklistLeaderSelectionPolicyConfig,
+      )
   }
 }

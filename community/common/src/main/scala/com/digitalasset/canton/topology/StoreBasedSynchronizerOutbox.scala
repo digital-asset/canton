@@ -242,17 +242,14 @@ class StoreBasedSynchronizerOutbox(
         val ret = for {
           pendingAndApplicable <- EitherT.right(pendingAndApplicableF)
           (pending, applicable) = pendingAndApplicable
-          _ = lastDispatched.set(applicable.lastOption)
-          // Try to convert if necessary the topology transactions for the required protocol version of the synchronizer
-          convertedTxs <- synchronizeWithClosing(functionFullName) {
-            convertTransactions(applicable)
-          }
+          converted <- synchronizeWithClosing(functionFullName)(convertTransactions(applicable))
+          _ = lastDispatched.set(converted.lastOption)
           // dispatch to synchronizer
-          responses <- dispatch(synchronizerAlias, transactions = convertedTxs)
+          responses <- dispatch(synchronizerAlias, transactions = converted)
           observed <- EitherT.right(
             // we either receive accepted or failed for all transactions in a submission batch.
             // failed submissions are turned into a Left in dispatch. Therefore, it's safe to await without additional checks.
-            convertedTxs.headOption
+            converted.headOption
               .map(
                 awaitTransactionObserved(
                   _,
@@ -270,7 +267,7 @@ class StoreBasedSynchronizerOutbox(
           )
           // update watermark according to responses
           _ <- EitherT.right[String](
-            updateWatermark(pending, applicable, responses)
+            updateWatermark(pending, converted, responses)
           )
         } yield ()
 

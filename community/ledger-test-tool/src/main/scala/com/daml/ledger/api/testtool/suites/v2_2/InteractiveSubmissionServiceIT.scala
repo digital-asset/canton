@@ -3,7 +3,6 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
-import com.daml.ledger.api.testtool.infrastructure
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.createdEvents
@@ -18,7 +17,7 @@ import com.daml.ledger.api.testtool.suites.v2_2.CommandServiceIT.{
   createEventToDisclosedContract,
   formatByPartyAndTemplate,
 }
-import com.daml.ledger.api.testtool.suites.v2_2.CompanionImplicits.*
+import com.daml.ledger.api.testtool.{TestDars, infrastructure}
 import com.daml.ledger.api.v2.commands.DisclosedContract
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.Metadata.InputContract
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.Metadata.InputContract.Contract
@@ -51,7 +50,11 @@ import com.google.protobuf.timestamp.Timestamp
 import java.time.Instant
 import scala.concurrent.{ExecutionContext, Future}
 
-final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandSubmissionTestUtils {
+final class InteractiveSubmissionServiceIT(override protected val testDars: TestDars)
+    extends LedgerTestSuite
+    with CommandSubmissionTestUtils {
+  import testDars.companionImplicits.*
+
   test(
     "ISSPrepareSubmissionRequestBasic",
     "Prepare a submission request",
@@ -239,7 +242,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
       val transaction = assertSingleton("expected one transaction", transactions)
       val event = transaction.events.headOption.value.event
       assert(event.isCreated)
-      assert(transaction.externalTransactionHash.contains(prepareResponse.preparedTransactionHash))
+      assert(transaction.transactionHash.contains(prepareResponse.preparedTransactionHash))
     }
   })
 
@@ -269,7 +272,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
       val event = retrievedTransaction.events.headOption.value.event
       assert(event.isCreated, "Expected created event")
       assert(
-        retrievedTransaction.externalTransactionHash.contains(
+        retrievedTransaction.transactionHash.contains(
           prepareResponse.preparedTransactionHash
         ),
         "Transaction hash was not set or incorrect",
@@ -388,7 +391,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
         val event = transaction.events.headOption.value.event
         assert(event.isExercised)
         assert(
-          transaction.externalTransactionHash.contains(prepareResponse.preparedTransactionHash)
+          transaction.transactionHash.contains(prepareResponse.preparedTransactionHash)
         )
       }
   })
@@ -540,9 +543,15 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
         assertSingleton("expected single event", exerciseTransaction.events).getCreated.templateId,
         "expected template id",
       )
-      assert(templateId.packageId == Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.getPackageId)
-      assert(templateId.moduleName == Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.getModuleName)
-      assert(templateId.entityName == Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.getEntityName)
+      assert(
+        templateId.packageId == dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.getPackageId
+      )
+      assert(
+        templateId.moduleName == dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.getModuleName
+      )
+      assert(
+        templateId.entityName == dummyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.getEntityName
+      )
     }
   })
 
@@ -703,12 +712,12 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
       result.packageReferences.sortBy(_.packageId),
       Seq(
         PackageReference(
-          packageId = Dummy.PACKAGE_ID,
+          packageId = dummyCompanion.PACKAGE_ID,
           packageName = Dummy.PACKAGE_NAME,
           packageVersion = Dummy.PACKAGE_VERSION.toString,
         ),
         PackageReference(
-          packageId = DivulgenceProposal.PACKAGE_ID,
+          packageId = divulgenceProposalCompanion.PACKAGE_ID,
           packageName = DivulgenceProposal.PACKAGE_NAME,
           packageVersion = DivulgenceProposal.PACKAGE_VERSION.toString,
         ),
@@ -821,7 +830,7 @@ final class InteractiveSubmissionServiceIT extends LedgerTestSuite with CommandS
           assertEquals(
             _,
             PackageReference(
-              packageId = Dummy.PACKAGE_ID,
+              packageId = dummyCompanion.PACKAGE_ID,
               packageName = Dummy.PACKAGE_NAME,
               packageVersion = Dummy.PACKAGE_VERSION.toString,
             ),

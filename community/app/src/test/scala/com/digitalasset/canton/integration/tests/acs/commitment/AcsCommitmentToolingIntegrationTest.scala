@@ -51,7 +51,7 @@ import com.digitalasset.canton.participant.pruning.{
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.protocol.ReassignmentId
-import com.digitalasset.canton.protocol.messages.AcsCommitment
+import com.digitalasset.canton.protocol.messages.Digest
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -64,8 +64,7 @@ import org.slf4j.event.Level
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.{ExecutionContext, Promise}
+import scala.concurrent.Promise
 import scala.jdk.CollectionConverters.*
 
 trait AcsCommitmentToolingIntegrationTest
@@ -100,8 +99,7 @@ trait AcsCommitmentToolingIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxCommandDeduplicationDuration),
-        ConfigTransforms.updateTargetTimestampForwardTolerance(24.hours),
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(
@@ -628,7 +626,7 @@ trait AcsCommitmentToolingIntegrationTest
         val deployedIouContractsAndCommitment =
           deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
         val notSentCmt = LtHash16().getByteString()
-        val hashedNotSentCmd = AcsCommitment.hashCommitment(notSentCmt)
+        val hashedNotSentCmd = Digest.hashDigest(notSentCmt)
         // give wrong commitment but correct timestamp and counter-participant
         loggerFactory.assertThrowsAndLogs[CommandFailure](
           participant1.commitments.open_commitment(
@@ -799,11 +797,10 @@ trait AcsCommitmentToolingIntegrationTest
       def getCleanReqTs(
           participant: LocalParticipantReference,
           synchronizerId: SynchronizerId,
-      )(implicit ec: ExecutionContext): Option[CantonTimestamp] = {
+      ): Option[CantonTimestamp] = {
         val cleanReqTs = eventually() {
           participant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore
             .cleanSynchronizerIndex(synchronizerId)
-            .futureValueUS
             .flatMap(_.sequencerIndex)
         }
         cleanReqTs

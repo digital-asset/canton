@@ -4,12 +4,12 @@
 package com.digitalasset.canton.sequencing
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.GeneratorsTopology
 import com.digitalasset.canton.{Generators, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import magnolify.scalacheck.auto.genArbitrary
 import org.scalacheck.{Arbitrary, Gen}
 
@@ -44,6 +44,8 @@ final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
     )
   implicit val sequencerConnectionPoolDelaysArb: Arbitrary[SequencerConnectionPoolDelays] =
     genArbitrary
+  implicit val subscriptionLivenessLimitsArb: Arbitrary[SubscriptionLivenessLimits] =
+    genArbitrary
 
   implicit val sequencerConnectionsArb: Arbitrary[SequencerConnections] = Arbitrary(
     for {
@@ -57,12 +59,14 @@ final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
         .map(NonNegativeInt.tryCreate)
       submissionRequestAmplification <- submissionRequestAmplificationArb.arbitrary
       sequencerConnectionPoolDelays <- sequencerConnectionPoolDelaysArb.arbitrary
+      subscriptionLivenessLimits <- subscriptionLivenessLimitsArb.arbitrary
     } yield SequencerConnections.tryMany(
       connections,
       sequencerTrustThreshold,
       sequencerLivenessMargin,
       submissionRequestAmplification,
       sequencerConnectionPoolDelays,
+      subscriptionLivenessLimits,
     )
   )
 }

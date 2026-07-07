@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
@@ -21,11 +20,9 @@ trait P2PConnectionState {
 
   def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean
 
-  def authenticatedCount: NonNegativeInt
-
   def associateP2PEndpointIdToBftNodeId(
       p2pAddress: P2PAddress
-  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult
+  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult[Unit]
 
   /** Called by the P2P network output module to ensure connectivity with a peer. It must call
     * either `createNetworkRef` to create a new network reference or `actionIfPresent` if a network
@@ -50,7 +47,7 @@ trait P2PConnectionState {
 
 object P2PConnectionState {
 
-  type P2PEndpointIdAssociationResult = Either[Error, Unit]
+  type P2PEndpointIdAssociationResult[T] = Either[Error, T]
 
   sealed trait Error extends Product with Serializable
 

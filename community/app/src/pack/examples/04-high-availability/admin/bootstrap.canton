@@ -1,4 +1,4 @@
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
 import com.digitalasset.canton.sequencing.SequencerConnection
@@ -18,7 +18,7 @@ def isActive(node: InstanceReference): Boolean =
   node.health.status match {
     case NodeStatus.Success(nodeStatus) => nodeStatus.active
     case NodeStatus.Failure(msg) => false
-    case NodeStatus.NotInitialized(active, _) => active
+    case NodeStatus.NotInitialized(active, _, _) => active
   }
 
 def findActive[I <: InstanceReference](node1: I, node2: I): I =
@@ -36,7 +36,7 @@ val iouId = bootstrap.synchronizer(
   synchronizerOwners = synchronizerOwners,
   synchronizerThreshold = PositiveInt.two,
   staticSynchronizerParameters =
-    StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+    StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 val active_participant = findActive(participant_a, participant_b)

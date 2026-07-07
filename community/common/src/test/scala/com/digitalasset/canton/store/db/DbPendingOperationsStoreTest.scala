@@ -12,7 +12,7 @@ import com.digitalasset.canton.store.{
   PendingOperationStore,
   PendingOperationStoreTest,
 }
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
 import org.scalatest.BeforeAndAfterAll
@@ -80,6 +80,32 @@ sealed trait DbPendingOperationsStoreTest
         loggerFactory,
         TestPendingOperationMessage,
         SynchronizerId.fromString,
+      )
+    )
+  }
+
+  "DbGenericPendingOperationsStore" should {
+    behave like genericPendingOperationStore(() =>
+      (
+        new DbGenericPendingOperationStore(
+          storage,
+          timeouts,
+          loggerFactory,
+        ),
+        new DbPendingOperationsStore(
+          storage,
+          timeouts,
+          loggerFactory,
+          TestPendingOperationMessage,
+          SynchronizerId.fromString,
+        ),
+        new DbPendingOperationsStore(
+          storage,
+          timeouts,
+          loggerFactory,
+          TestPendingOperationMessage,
+          PhysicalSynchronizerId.fromString,
+        ),
       )
     )
   }

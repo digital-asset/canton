@@ -6,27 +6,27 @@ package engine
 
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
-import com.digitalasset.daml.lf.speedy._
+import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
+import com.digitalasset.daml.lf.speedy.SBuiltinFun.SBViewInterface
 import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.{
+  ExceptionMessageDefRef,
+  LfDefRef,
+  SDefinitionRef,
   SEApp,
+  SEAppAtomicGeneral,
   SEBuiltinFun,
+  SELocA,
+  SEMakeClo,
   SEValue,
   SExpr,
-  SEAppAtomicGeneral,
-  SDefinitionRef,
-  LfDefRef,
-  ExceptionMessageDefRef,
-  SEMakeClo,
-  SELocA,
 }
-import com.digitalasset.daml.lf.speedy.SBuiltinFun.SBViewInterface
-import com.digitalasset.daml.lf.speedy.Speedy.Machine
-import com.digitalasset.daml.lf.speedy.Speedy.PureMachine
-import com.digitalasset.daml.lf.speedy.SResult._
-import com.digitalasset.daml.lf.speedy.SValue.{SPAP, SAny}
+import com.digitalasset.daml.lf.speedy.SResult.*
+import com.digitalasset.daml.lf.speedy.SValue.{SAny, SPAP}
+import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine}
 import com.digitalasset.daml.lf.value.GenValue
+
 import scala.annotation.{nowarn, tailrec}
 import scala.collection.immutable.ArraySeq
 
@@ -40,9 +40,9 @@ object ScriptEngine {
   type ExtendedValue = GenValue[GenValue.Extension[SPAP]]
 
   val defaultCompilerConfig: Compiler.Config = {
-    import Compiler._
+    import Compiler.*
     Config(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       packageValidation = FullPackageValidation,
       profiling = NoProfile,
       stacktracing = FullStackTrace,
@@ -62,9 +62,9 @@ object ScriptEngine {
           compiledPackages: CompiledPackages,
           translator: ExtendedValueTranslator,
       ): Either[RuntimeException, SExpr] = {
-        import scalaz.syntax.traverse._
-        import scalaz.std.list._
-        import scalaz.std.either._
+        import cats.syntax.traverse.*
+        import cats.instances.list.*
+        import cats.instances.either.*
         args
           .traverse(v => translator.translateExtendedValue(v).map(SEValue(_)))
           .map(sArgs => SEAppAtomicGeneral(SEValue(f.getContent), ArraySeq.from(sArgs)))
@@ -92,10 +92,10 @@ object ScriptEngine {
           compiledPackages: CompiledPackages,
           translator: ExtendedValueTranslator,
       ): Either[RuntimeException, SExpr] = {
-        import scalaz.syntax.traverse._
-        import scalaz.std.list._
-        import scalaz.std.either._
-        import scalaz.std.option._
+        import cats.syntax.traverse.*
+        import cats.instances.list.*
+        import cats.instances.either.*
+        import cats.instances.option.*
         for {
           sExpr <-
             compiledPackages.getDefinition(ref) match {

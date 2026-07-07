@@ -85,7 +85,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       .addConfigTransform(
         // We want to retry more aggressively in the test
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.lsu.handshakeRetry)
+          _.focus(_.parameters.lsu.handshake.retry)
             .replace(
               ExponentialBackoffConfig(
                 initialDelay = config.NonNegativeFiniteDuration.ofMillis(100),
@@ -220,14 +220,14 @@ final class LsuMetricsIntegrationTest extends LsuBase {
             .filter(_.item.sequencerId == sequencer2.id)
             .loneElement
         )
-      }
 
-      getLsuStatusMetricValues(participant1) shouldBe Map(
-        fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
-      )
-      getLsuStatusMetricValues(participant2) shouldBe Map(
-        fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
-      )
+        getLsuStatusMetricValues(participant1) shouldBe Map(
+          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+        )
+        getLsuStatusMetricValues(participant2) shouldBe Map(
+          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+        )
+      }
     }
 
     "when handshake/topology copy is done" in { implicit env =>

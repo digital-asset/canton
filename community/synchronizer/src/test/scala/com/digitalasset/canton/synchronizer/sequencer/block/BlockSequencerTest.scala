@@ -5,9 +5,8 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{
-  ApiLoggingConfig,
-  BatchingConfig,
   CachingConfigs,
   DefaultProcessingTimeouts,
   ProcessingTimeout,
@@ -15,9 +14,10 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencing.protocol.{
@@ -30,6 +30,7 @@ import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager.Chu
 import com.digitalasset.canton.synchronizer.block.data.memory.InMemorySequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, BlockInfo}
 import com.digitalasset.canton.synchronizer.block.update.{
+  BlockProcessingParameters,
   BlockUpdate,
   BlockUpdateGenerator,
   OrderedBlockUpdate,
@@ -37,6 +38,11 @@ import com.digitalasset.canton.synchronizer.block.update.{
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerLsuConfig,
+  SequencerNodeParameters,
+  TimeAdvancingTopologyConfig,
+}
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerIntegration}
@@ -54,7 +60,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{NoPackageDependencies, ValidatedTopologyTransaction}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, MockedNodeParameters}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Source}
@@ -64,7 +70,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, Future, Promise}
 
-class BlockSequencerTest
+final class BlockSequencerTest
     extends AsyncWordSpec
     with BaseTest
     with HasExecutionContext
@@ -188,22 +194,33 @@ class BlockSequencerTest
         health = None,
         clock = new SimClock(loggerFactory = loggerFactory),
         blockRateLimitManager = defaultRateLimiter,
-        orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-        lsuSequencingBounds = None,
-        drSequencingTimeUpperBound = None,
-        processingTimeouts = BlockSequencerTest.this.timeouts,
-        logEventDetails = true,
-        prettyPrinter = new CantonPrettyPrinter(
-          ApiLoggingConfig.defaultMaxStringLength,
-          ApiLoggingConfig.defaultMaxMessageLines,
+        blockProcessingParameters = BlockProcessingParameters(
+          orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
+          lsuSequencingBounds = None,
+          parallelism = PositiveInt.two,
+          enablePrevalidation = true,
+        ),
+        parameters = SequencerNodeParameters(
+          general = MockedNodeParameters.cantonNodeParameters(
+            ProcessingTimeout()
+          ),
+          protocol = CantonNodeParameters.Protocol.Impl(
+            devVersionSupport = false,
+            alphaVersionSupport = false,
+            betaVersionSupport = true,
+            dontWarnOnDeprecatedPV = false,
+          ),
+          maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
+          asyncWriter = AsyncWriterParameters(),
+          timeAdvancingTopology = TimeAdvancingTopologyConfig(),
+          delayRequestsBeforeLsuTrafficInit = false,
+          enableRejectDeliveredAggregationsOnPv35 = Seq.empty,
+          lsuConfig = SequencerLsuConfig(),
+          enablePrevalidation = true,
         ),
         metrics = SequencerMetrics.noop(this.getClass.getName),
-        batchingConfig = BatchingConfig(),
-        consistencyChecks = true,
         loggerFactory = loggerFactory,
-        exitOnFatalFailures = true,
         runtimeReady = FutureUnlessShutdown.unit,
-        delayRequestsBeforeLsuTrafficInit = false,
       )
 
     override def close(): Unit = {
@@ -280,10 +297,19 @@ class BlockSequencerTest
     ): Flow[Traced[BlockUpdate], Traced[CantonTimestamp], NotUsed] =
       Flow[Traced[BlockUpdate]].map(_.map(_ => CantonTimestamp.MinValue))
 
-    override def getHeadState: BlockSequencerStateManager.HeadState =
-      BlockSequencerStateManager.HeadState(
+    override def getPersistenceHeadState
+        : BlockSequencerStateManager.AccumulatedStatePersistingBlocks =
+      BlockSequencerStateManager.AccumulatedStatePersistingBlocks(
         BlockInfo.initial,
         ChunkState.initial(BlockEphemeralState.empty),
+      )
+
+    override def getProcessingHeadState: BlockUpdateGenerator.AccumulatedStateProcessingBlocks = ???
+
+    override def asyncWriterHealth: HealthComponent =
+      new HealthComponent.AlwaysHealthyComponent(
+        "fake-block-sequencer-async-writer",
+        BlockSequencerTest.this.logger,
       )
 
     override protected def timeouts: ProcessingTimeout = BlockSequencerTest.this.timeouts

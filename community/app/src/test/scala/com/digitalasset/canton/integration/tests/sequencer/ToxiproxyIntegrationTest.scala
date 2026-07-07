@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.SequencerReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -42,6 +43,7 @@ abstract class ToxiproxyIntegrationTest
   private lazy val BongLevels: Int = 3
   private lazy val BongTimeout = 3.minutes
   private lazy val PingTimeout = config.NonNegativeDuration.ofMinutes(1)
+  private lazy val NetworkTimeout = config.NonNegativeDuration.ofSeconds(15)
   private lazy val SequencersCount = 3
   private lazy val MediatorsCount = 1
 
@@ -83,13 +85,24 @@ abstract class ToxiproxyIntegrationTest
             // Use a threshold of two to ensure that the mediator connects to all sequencers.
             // TODO(#19911) Reduce to one again once this can be configured independently.
             Some(
-              testMediators.map(_ -> (testSequencers, PositiveInt.two, NonNegativeInt.zero)).toMap
+              testMediators
+                .map(
+                  _ -> MediatorSequencersConfiguration(
+                    testSequencers,
+                    trustThreshold = PositiveInt.two,
+                    livenessMargin = NonNegativeInt.zero,
+                  )
+                )
+                .toMap
             ),
         )
         NetworkBootstrapper(Seq(description))
       }
       .addConfigTransforms(
-        _.focus(_.parameters.timeouts.console.ping).replace(PingTimeout)
+        _.focus(_.parameters.timeouts.console.ping)
+          .replace(PingTimeout)
+          .focus(_.parameters.timeouts.processing.network)
+          .replace(NetworkTimeout)
       )
       .withSetup { implicit env =>
         import env.*

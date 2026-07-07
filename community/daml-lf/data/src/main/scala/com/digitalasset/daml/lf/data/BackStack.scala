@@ -120,9 +120,6 @@ final class BackStack[+A] private (fq: BQ[A], val length: Int) {
   /** O(n) */
   def reverseForeach(f: A => Unit): Unit = this.reverseIterator.foreach(f)
 
-  /** O(1) */
-  def canEqual(that: Any) = that.isInstanceOf[BackStack[?]]
-
   /** O(n) */
   override def equals(that: Any) = that match {
     case thatQueue: BackStack[?] =>

@@ -7,6 +7,7 @@ import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.protocol.{
@@ -20,6 +21,7 @@ import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchron
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
 
@@ -35,13 +37,14 @@ class TestSequencerClientSend(override protected[canton] val clock: Clock)(impli
   def requests: Iterable[Request] = requestsQueue.asScala
 
   override def psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId
-
+  @nowarn("cat=deprecation")
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
       timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
+      trafficCostValidator: TrafficCostValidator,
       amplify: Boolean,
       useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit

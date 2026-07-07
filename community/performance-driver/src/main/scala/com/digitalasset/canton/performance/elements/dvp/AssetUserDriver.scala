@@ -4,7 +4,6 @@
 package com.digitalasset.canton.performance.elements.dvp
 
 import com.daml.ledger.javaapi.data.{Identifier, Party}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.performance.acs.ContractStore
 import com.digitalasset.canton.performance.elements.ParticipantDriver
 import com.digitalasset.canton.performance.model.java as M
@@ -12,6 +11,7 @@ import com.digitalasset.canton.performance.model.java.dvp.asset.Asset
 import com.digitalasset.canton.performance.model.java.generator.Generator
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
 import scala.concurrent.ExecutionContextExecutor

@@ -6,7 +6,6 @@ package com.digitalasset.canton.common.sequencer.grpc
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
@@ -32,6 +31,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
@@ -39,7 +39,8 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, LoggerUtil, retry}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -189,6 +190,7 @@ class SequencerInfoLoader(
           HandshakeRequest(
             clientProtocolVersions,
             minimumProtocolVersion,
+            ReleaseVersion.current,
           ),
           dontWarnOnDeprecatedPV,
         )
@@ -220,6 +222,7 @@ class SequencerInfoLoader(
         sequencerLivenessMargin = sequencerConnections.sequencerLivenessMargin,
         submissionRequestAmplification = sequencerConnections.submissionRequestAmplification,
         sequencerConnectionPoolDelays = sequencerConnections.sequencerConnectionPoolDelays,
+        subscriptionLivenessLimits = sequencerConnections.subscriptionLivenessLimits,
         sequencerConnectionValidation = sequencerConnectionValidation,
         expectedSynchronizerId = expectedSynchronizerId,
       )
@@ -633,6 +636,7 @@ object SequencerInfoLoader {
       sequencerLivenessMargin: NonNegativeInt,
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
+      subscriptionLivenessLimits: SubscriptionLivenessLimits,
       sequencerConnectionValidation: SequencerConnectionValidation,
       expectedSynchronizerId: Option[PhysicalSynchronizerId],
   )(
@@ -675,6 +679,7 @@ object SequencerInfoLoader {
               sequencerLivenessMargin,
               submissionRequestAmplification,
               sequencerConnectionPoolDelays,
+              subscriptionLivenessLimits,
             )
             .leftMap(SequencerInfoLoaderError.FailedToConnectToSequencers.apply)
             .map(connections =>

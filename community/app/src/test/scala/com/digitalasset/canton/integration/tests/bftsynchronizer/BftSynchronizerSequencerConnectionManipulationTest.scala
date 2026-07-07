@@ -4,22 +4,20 @@
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
 import com.daml.metrics.api.testing.MetricValues.*
-import com.digitalasset.canton.admin.api.client.data.{
-  SequencerConnectionPoolDelays,
-  SequencerConnections,
-  SubmissionRequestAmplification,
-}
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalSequencerReference
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.bootstrap.{
+  NetworkBootstrapper,
+  NetworkTopologyDescription,
+}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.{SequencerAlias, config}
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import monocle.macros.syntax.lens.*
 
 import scala.collection.immutable.Seq
@@ -29,10 +27,25 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
     with SharedEnvironment {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S2M2.addConfigTransform(
-      _.focus(_.parameters.timeouts.processing.sequencerInfo)
-        .replace(config.NonNegativeDuration.ofSeconds(1))
-    )
+    EnvironmentDefinition.P2S4M4_Config
+      .withNetworkBootstrap { implicit env =>
+        import env.*
+        NetworkBootstrapper(
+          Seq(
+            NetworkTopologyDescription(
+              daName,
+              synchronizerOwners = Seq(sequencer1, sequencer2, sequencer3, sequencer4),
+              synchronizerThreshold = PositiveInt.one,
+              sequencers = Seq(sequencer1, sequencer2, sequencer3, sequencer4),
+              mediators = Seq(mediator1), // minimize the mediators to save time runtime
+            )
+          )
+        )
+      }
+      .addConfigTransform(
+        _.focus(_.parameters.timeouts.processing.sequencerInfo)
+          .replace(config.NonNegativeDuration.ofSeconds(1))
+      )
 
   "Basic synchronizer startup with 1 out of 2 sequencers threshold" in { implicit env =>
     import env.*
@@ -109,10 +122,10 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
     }
 
     // stop both mediators to ensure that they don't attempt to reach the sequencer and emit warnings
-    Seq(mediator1, mediator2).foreach(_.stop())
+    mediator1.stop()
     sequencer2.stop()
-    clue("restarting mediators after turning off sequencer2") {
-      Seq(mediator1, mediator2).foreach(_.start())
+    clue("restarting mediator after turning off sequencer2") {
+      mediator1.start()
     }
 
     clue("reconnecting participants while sequencer2 is offline") {
@@ -127,7 +140,7 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
     }
 
     // STEP 5: expect sequencer working after disconnect
-    Seq(mediator1, mediator2).foreach(_.stop())
+    mediator1.stop()
     participant1.synchronizers.disconnect(daName)
     participant2.synchronizers.disconnect(daName)
 
@@ -135,73 +148,33 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
     sequencer2.start()
 
     clue("reconnecting nodes after switching from p1 to p2") {
-      Seq(mediator1, mediator2).foreach(_.start())
+      mediator1.start()
       participant1.synchronizers.reconnect(daName)
       participant2.synchronizers.reconnect(daName)
     }
 
     clue("pinging works again") {
-      participant1.health.ping(participant2.id, timeout = pingTimeout)
+      loggerFactory.assertLogsUnorderedOptional(
+        participant1.health.ping(participant2.id, timeout = pingTimeout),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should include(
+            "Mempool received client request but this node is currently blacklisted, rejecting"
+          ),
+        ),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should include("Network error: TransportError"),
+        ),
+      )
     }
 
     sequencer1.start()
   }
-
-  "Modification of sequencer connections triggers sequencers id fetching and storing" in {
-    implicit env =>
-      import env.*
-
-      participant3.synchronizers.connect_local(sequencer1, daName)
-
-      participant3.synchronizers
-        .config(daName)
-        .value
-        .sequencerConnections
-        .connections
-        .forgetNE should have size 1
-
-      participant3.synchronizers.modify(
-        daName,
-        _.copy(sequencerConnections =
-          SequencerConnections.tryMany(
-            Seq(sequencer1, sequencer2).map { sequencer =>
-              // On purpose, we don't set the sequencer id. It should be grabbed automatically.
-              sequencer.sequencerConnection.withAlias(SequencerAlias.tryCreate(sequencer.name))
-            },
-            sequencerTrustThreshold = PositiveInt.two,
-            sequencerLivenessMargin = NonNegativeInt.zero,
-            SubmissionRequestAmplification.NoAmplification,
-            SequencerConnectionPoolDelays.default,
-          )
-        ),
-      )
-
-      // Check that ids are set
-      val configs: Map[SequencerAlias, Option[SequencerId]] = participant3.synchronizers
-        .config(daName)
-        .value
-        .sequencerConnections
-        .aliasToConnection
-        .view
-        .mapValues(_.sequencerId)
-        .toMap
-
-      val expectedConfigs = Map(
-        sequencer1.sequencerAlias -> Some(sequencer1.id),
-        sequencer2.sequencerAlias -> Some(sequencer2.id),
-      )
-
-      configs shouldBe expectedConfigs
-  }
-
 }
 
-class BftSynchronizerSequencerConnectionManipulationTestPostgres
+final class BftSynchronizerSequencerConnectionManipulationTestPostgres
     extends BftSynchronizerSequencerConnectionManipulationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
-      loggerFactory
-    )
-  )
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

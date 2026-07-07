@@ -29,7 +29,7 @@ import com.digitalasset.canton.testing.modelbased.runner.InterpretationErrors.{
 }
 import com.digitalasset.canton.testing.modelbased.universal.java.universal
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{Party, PartyKind, PhysicalSynchronizerId}
 import com.digitalasset.daml.lf.data.Ref
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -63,11 +63,11 @@ final class CantonInterpreter private (
     *   the new contract ID mappings and updated disclosure store produced by this submission
     */
   private def runCommands(
-      partyIdMapping: PartyIdMapping,
+      partyIdMapping: CantonPartyIdMapping,
       contractIdMapping: ContractIdMapping,
       disclosureStore: DisclosureStore,
       commands: Concrete.Commands,
-  ): Either[InterpreterError, (ContractIdMapping, DisclosureStore)] =
+  ): Either[InterpreterError, SubmissionState] =
     for {
       protoCommands <- commands.commands
         .traverse(cmd =>
@@ -82,10 +82,7 @@ final class CantonInterpreter private (
 
         val participant = participants(commands.participantId)
         val actAs =
-          commands.actAs.toSeq.map(pid =>
-            com.digitalasset.canton.topology.PartyId
-              .tryFromProtoPrimitive(partyIdMapping(pid))
-          )
+          commands.actAs.toSeq.map(partyIdMapping)
         // Submit with LEDGER_EFFECTS shape to get exercise results and created event blobs
         Either
           .catchOnly[CommandFailure](
@@ -104,15 +101,16 @@ final class CantonInterpreter private (
             val updatedDisclosureStore = disclosureStore.recordFromTransaction(protoTx)
             val javaTx =
               javaapi.data.Transaction.fromProto(ProtoTransaction.toJavaProto(protoTx))
-            (
+            SubmissionState(
               // In the case of a Create node, commandResultsToContractIdMapping only extracts the singleton mapping for
               // the created contract, so we need to combine it with the existing mapping to preserve previously mapped
               // contract IDs. In the case of an Exercise, this union is redundant but harmless.
-              contractIdMapping ++ ContractIdMappings.commandResultsToContractIdMapping(
-                commands.commands.map(_.action),
-                javaTx,
-              ),
-              updatedDisclosureStore,
+              contractIdMapping =
+                contractIdMapping ++ ContractIdMappings.commandResultsToContractIdMapping(
+                  commands.commands.map(_.action),
+                  javaTx,
+                ),
+              disclosureStore = updatedDisclosureStore,
             )
           }
       }
@@ -125,44 +123,40 @@ final class CantonInterpreter private (
     *   the accumulated contract ID mapping after all submissions
     */
   private def runCommandsList(
-      partyIdMapping: PartyIdMapping,
-      contractIdMapping: ContractIdMapping,
+      partyIdMapping: CantonPartyIdMapping,
       commandsList: List[Concrete.Commands],
       cancelled: () => Boolean,
-  ): Either[InterpreterError, ContractIdMapping] =
+  ): Either[InterpreterError, SubmissionState] =
     commandsList
-      .foldLeftM((contractIdMapping, DisclosureStore())) {
-        case ((previousContractIdMapping, previousDisclosureStore), commands) =>
-          // We check the cancellation flag between each runCommands to enable cooperative shutdown.
-          checkCancelled(cancelled) >> runCommands(
-            partyIdMapping,
-            previousContractIdMapping,
-            previousDisclosureStore,
-            commands,
-          )
+      .foldLeftM(SubmissionState()) { case (previousState, commands) =>
+        // We check the cancellation flag between each runCommands to enable cooperative shutdown.
+        checkCancelled(cancelled) >> runCommands(
+          partyIdMapping,
+          previousState.contractIdMapping,
+          previousState.disclosureStore,
+          commands,
+        )
       }
-      .map(_._1)
 
   /** For each party, for each participant that hosts it, fetch the projection. We check the
     * cancellation flag between each fetch to enable cooperative shutdown.
     */
   private def fetchProjections(
       partyToParticipants: Map[Concrete.PartyId, Set[Concrete.Participant]],
-      partyIdMapping: PartyIdMapping,
+      partyIdMapping: CantonPartyIdMapping,
       contractIdMapping: ContractIdMapping,
-      numLedgerSteps: Int,
       cancelled: () => Boolean,
   ): Either[InterpreterError, Map[
     Projections.PartyId,
     Map[Concrete.ParticipantId, Projections.Projection],
   ]] = {
-    val reversePartyIds = partyIdMapping.map(_.swap)
+    val reversePartyIds = partyIdMapping.view.mapValues(_.partyId.toLf).toMap.map(_.swap)
     val reverseContractIds = contractIdMapping.map { case (k, v) => v.contractId -> k }
+    val perParticipantEndOffset: Map[Concrete.ParticipantId, Long] =
+      participants.indices.map(i => i -> participants(i).ledger_api.state.end()).toMap
     partyToParticipants.toList
       .traverse { case (partyId, partyParticipants) =>
-        val party = com.digitalasset.canton.topology.PartyId.tryFromProtoPrimitive(
-          partyIdMapping(partyId)
-        )
+        val party = partyIdMapping(partyId).partyId
         partyParticipants.toList
           .traverse { p =>
             checkCancelled(cancelled).map { _ =>
@@ -171,7 +165,7 @@ final class CantonInterpreter private (
                 party,
                 reversePartyIds,
                 reverseContractIds,
-                numLedgerSteps,
+                perParticipantEndOffset(p.participantId),
               )
             }
           }
@@ -203,7 +197,7 @@ final class CantonInterpreter private (
   def runAndProject(
       scenario: Concrete.Scenario,
       cancelled: () => Boolean = () => false,
-  ): Either[
+  )(implicit partyKind: PartyKind): Either[
     String,
     Map[Projections.PartyId, Map[Concrete.ParticipantId, Projections.Projection]],
   ] = {
@@ -224,6 +218,11 @@ final class CantonInterpreter private (
         ).id
       }
 
+    val participantPermission = partyKind match {
+      case PartyKind.Local => ParticipantPermission.Submission
+      case _: PartyKind.External => ParticipantPermission.Confirmation
+    }
+
     // Build target topology: each party should be hosted on all participants listed in the topology
     val targetTopology: Map[String, Map[
       PhysicalSynchronizerId,
@@ -233,36 +232,34 @@ final class CantonInterpreter private (
         val hostingParticipants =
           partyParticipants
             .map[(com.digitalasset.canton.topology.ParticipantId, ParticipantPermission)](p =>
-              participants(p.participantId).id -> ParticipantPermission.Submission
+              participants(p.participantId).id -> participantPermission
             )
         party(partyId) -> Map(synchronizerId -> (PositiveInt.one, hostingParticipants))
       }
 
     // Allocate parties according to the two mappings computed above
-    val allocatedPartyIds: Seq[PartyId] =
+    val allocatedParties: Seq[Party] =
       allocateParties(participants.toSet, partyOwnership, targetTopology)
 
     // Build mapping from abstract party IDs to allocated Canton party IDs
-    val partyIdMapping: PartyIdMapping = partyToParticipants.keys.toSeq
-      .zip(allocatedPartyIds)
-      .map { case (abstractId, cantonPartyId) =>
-        abstractId -> Ref.Party.assertFromString(cantonPartyId.toProtoPrimitive)
+    val partyIdMapping: CantonPartyIdMapping = partyToParticipants.keys.toSeq
+      .zip(allocatedParties)
+      .map { case (abstractId, cantonParty) =>
+        abstractId -> cantonParty
       }
       .toMap
 
     // Run all commands
     val result = for {
-      contractIdMapping <- runCommandsList(
+      submissionResult <- runCommandsList(
         partyIdMapping = partyIdMapping,
-        contractIdMapping = Map.empty,
         commandsList = scenario.ledger,
         cancelled = cancelled,
       )
       projections <- fetchProjections(
         partyToParticipants = partyToParticipants,
         partyIdMapping = partyIdMapping,
-        contractIdMapping = contractIdMapping,
-        numLedgerSteps = scenario.ledger.size,
+        contractIdMapping = submissionResult.contractIdMapping,
         cancelled = cancelled,
       )
     } yield projections
@@ -272,6 +269,12 @@ final class CantonInterpreter private (
 }
 
 object CantonInterpreter {
+
+  /** State threaded through successive command submissions. */
+  private final case class SubmissionState(
+      contractIdMapping: ContractIdMapping = Map.empty,
+      disclosureStore: DisclosureStore = DisclosureStore(),
+  )
 
   // -- Type aliases --
 
@@ -285,7 +288,7 @@ object CantonInterpreter {
     )
 
   /** A function that allocates parties on participants, returning their allocated
-    * [[com.digitalasset.canton.topology.PartyId]]s.
+    * [[com.digitalasset.canton.topology.Party]]s.
     *
     * This is typically backed by `com.digitalasset.canton.integration.util.PartiesAllocator.apply`
     * but is injected as a function to avoid a dependency on `community-app`.
@@ -294,7 +297,7 @@ object CantonInterpreter {
       Set[ParticipantReference],
       Seq[(String, com.digitalasset.canton.topology.ParticipantId)],
       Map[String, Map[PhysicalSynchronizerId, PartyHostingState]],
-  ) => Seq[PartyId]
+  ) => Seq[Party]
 
   // -- Converters --
 
@@ -353,26 +356,25 @@ object CantonInterpreter {
       party: com.digitalasset.canton.topology.Party,
       reversePartyIds: PartyIdReverseMapping,
       reverseContractIds: ContractIdReverseMapping,
-      numTransactions: Int,
-  ): Projections.Projection =
-    if (numTransactions == 0) Nil
-    else {
-      val javaTxs: Seq[javaapi.data.GetUpdatesResponse] =
-        participant.ledger_api.javaapi.updates.transactions(
-          partyIds = Set(party),
-          completeAfter = PositiveInt.tryCreate(numTransactions),
-          transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
-        )
-
-      val transactions: List[javaapi.data.Transaction] =
-        javaTxs.flatMap(_.getTransaction.toScala).toList
-
-      ToProjection.convertFromCantonProjection(
-        reversePartyIds,
-        reverseContractIds,
-        transactions,
+      endOffset: Long,
+  ): Projections.Projection = {
+    val javaTxs: Seq[javaapi.data.GetUpdatesResponse] =
+      participant.ledger_api.javaapi.updates.transactions(
+        partyIds = Set(party),
+        completeAfter = PositiveInt.MaxValue,
+        endOffsetInclusive = Some(endOffset),
+        transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
       )
-    }
+
+    val transactions: List[javaapi.data.Transaction] =
+      javaTxs.flatMap(_.getTransaction.toScala).toList
+
+    ToProjection.convertFromCantonProjection(
+      reversePartyIds,
+      reverseContractIds,
+      transactions,
+    )
+  }
 
   // -- Entry point --
 

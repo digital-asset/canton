@@ -160,7 +160,13 @@ class DefaultMediatorEventDeduplicator(
 
     val requestId = RequestId(requestTimestamp)
     val verdict = MediatorVerdict.MediatorReject(rejection).toVerdict(protocolVersion)
-    val finalizedResponse = FinalizedResponse(requestId, request, requestTimestamp, verdict)(
+    val finalizedResponse = FinalizedResponse(
+      requestId,
+      request,
+      requestTimestamp,
+      verdict,
+      firstResponseReceived = None,
+    )(
       traceContext
     )
     val rootHashMessages = envelopes.mapFilter(

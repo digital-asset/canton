@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SigningPublicKey
@@ -17,6 +16,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -65,7 +65,15 @@ class TopologyTransactionTestFactory(
     )
   val ns1k2_k1 = mkAdd(createNs(ns1, key2, CanSignAllMappings), key1)
   val ns1k2_k1p = mkAdd(createNs(ns1, key2, CanSignAllMappings), key1)
-  val ns1k3_k2 = mkAdd(createNs(ns1, key3, CanSignAllButNamespaceDelegations), key2)
+  val ns1k2_k2_restrict_nsd =
+    mkAdd(createNs(ns1, key2, CanSignAllButNamespaceDelegations), key2, serial = PositiveInt.two)
+  val ns1k3_k2_restrict_nsd = mkAdd(createNs(ns1, key3, CanSignAllButNamespaceDelegations), key2)
+  val ns1k3_k2 = mkAdd(createNs(ns1, key3, CanSignAllMappings), key2)
+  val ns1k2_k3 = mkAdd(createNs(ns1, key2, CanSignAllMappings), key3)
+  val ns1k4_k1 = mkAdd(createNs(ns1, key4, CanSignAllMappings), key1)
+  val ns1k5_k4 = mkAdd(createNs(ns1, key5, CanSignAllMappings), key4)
+  val ns1k6_k5 = mkAdd(createNs(ns1, key6, CanSignAllMappings), key5)
+  val ns1k7_k6 = mkAdd(createNs(ns1, key7, CanSignAllMappings), key6)
   val ns1k8_k3_fail = mkAdd(createNs(ns1, key8, CanSignAllButNamespaceDelegations), key3)
   val ns2k2_k2 = mkAdd(createNs(ns2, key2, CanSignAllMappings), key2)
   val ns3k3_k3 = mkAdd(createNs(ns3, key3, CanSignAllMappings), key3)

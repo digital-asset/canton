@@ -6,32 +6,33 @@ package com.digitalasset.canton.integration.plugins
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton
 import com.digitalasset.canton.UniquePortGenerator
+import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{CantonConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
-import com.digitalasset.canton.integration.EnvironmentSetupPlugin
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.UseStandaloneConfig
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.{
   MultiSynchronizer,
   SequencerSynchronizerGroups,
   SingleSynchronizer,
 }
+import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandalonePeerConfig,
-  DefaultConsensusBlockCompletionTimeout,
   DefaultDedicatedExecutionContextDivisor,
-  DefaultEpochLength,
   DefaultMaxBatchCreationInterval,
   DefaultMaxBatchesPerProposal,
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
   P2PNetworkConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerConfig,
@@ -68,12 +69,13 @@ final class UseBftSequencer(
     shouldOverwriteStoredEndpoints: Boolean = false,
     shouldUseMemoryStorageForBftOrderer: Boolean = false,
     shouldBenchmarkBftSequencer: Boolean = false,
-    standaloneOrderingNodes: Boolean = false,
-    epochLength: EpochLength = DefaultEpochLength,
+    standaloneOrderingNodes: Option[UseStandaloneConfig] = None,
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
-    consensusBlockCompletionTimeout: FiniteDuration = DefaultConsensusBlockCompletionTimeout,
+    // Use a longer topology warn timeout in tests to avoid flakes under concurrent CI load.
+    consensusNewEpochTopologyWarnTimeout: FiniteDuration = 10.seconds,
+    sequencingParameters: Option[topology.SequencingParameters] = None,
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
@@ -88,10 +90,30 @@ final class UseBftSequencer(
     new SingleUseCell()
 
   override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
-    if (shouldGenerateEndpointsOnly) generateEndpoints(config)
-    else createFullConfig(config)
+    if (shouldGenerateEndpointsOnly) generateEndpoints(config, sequencingParameters)
+    else createFullConfig(config, sequencingParameters)
 
-  private def generateEndpoints(config: CantonConfig) = {
+  override def afterEnvironmentCreated(
+      config: CantonConfig,
+      environment: TestConsoleEnvironment,
+  ): Unit =
+    sequencingParameters.foreach { sequencingParameters =>
+      val sequencingParametersByteString = sequencingParameters.toByteString
+      // > PV34: take the sequencer parameters from the topology.
+      //  This only works if the environment is automatically initialized,
+      //  else the test must do it manually.
+      environment.runOnAllInitializedSynchronizersForAllOwners { case (owner, synchronizer) =>
+        owner.topology.sequencing_parameters.propose(
+          synchronizer.synchronizerId,
+          SequencingParameters(Option(sequencingParametersByteString)),
+        )
+      }
+    }
+
+  private def generateEndpoints(
+      config: CantonConfig,
+      sequencingParameters: Option[topology.SequencingParameters],
+  ): CantonConfig = {
     val instanceNameToPort =
       config.sequencers.keys.map(_ -> UniquePortGenerator.next).toMap
 
@@ -104,9 +126,10 @@ final class UseBftSequencer(
                 blockSequencerConfig,
                 bftOrdererConfig
                   .copy(
-                    epochLength = epochLength,
+                    leaderSelectionPolicyConfigForPv34 =
+                      getLeaderSelectionPolicyConfigForPv34(sequencingParameters, bftOrdererConfig),
                     consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
-                    consensusBlockCompletionTimeout = consensusBlockCompletionTimeout,
+                    consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
                     maxRequestsInBatch = maxRequestsInBatch,
                     minRequestsInBatch = minRequestsInBatch,
                     maxBatchCreationInterval = maxBatchCreationInterval,
@@ -156,7 +179,10 @@ final class UseBftSequencer(
     config.focus(_.sequencers).replace(sequencers)
   }
 
-  private def createFullConfig(config: CantonConfig): CantonConfig = {
+  private def createFullConfig(
+      config: CantonConfig,
+      sequencingParameters: Option[topology.SequencingParameters],
+  ): CantonConfig = {
     // Contains all sequencers from the environment definition. Typically, the environment definition also contains
     //  sequencers that are onboarded dynamically by tests (i.e, not initialized from the very beginning).
     val groups = sequencerGroups match {
@@ -199,7 +225,7 @@ final class UseBftSequencer(
             peerEndpoints = otherInitialEndpoints,
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
           )
-          val standaloneOpt = Option.when(standaloneOrderingNodes) {
+          val standaloneOpt = standaloneOrderingNodes.map { standaloneConfig =>
             val keyPair = JcePrivateCrypto
               .generateSigningKeypair(SigningKeySpec.EcCurve25519, SigningKeyUsage.ProtocolOnly)
               .getOrElse(throw new RuntimeException("Failed to generate keypair"))
@@ -213,6 +239,7 @@ final class UseBftSequencer(
               thisSequencerId = sequencerId(selfInstanceName),
               signingPrivateKeyProtoFile = privKeyFile.toJava,
               signingPublicKeyProtoFile = pubKeyFile.toJava,
+              segmentLength = standaloneConfig.segmentLength,
               peers = otherInitialNames
                 .map { otherInitialInstanceName =>
                   BftBlockOrderingStandalonePeerConfig(
@@ -223,19 +250,30 @@ final class UseBftSequencer(
                 },
             )
           }
-          val blockSequencerConfig =
+          val blockSequencerConfig = {
+            // without this config overrides (which are applied before plugins) are not preserved
+            val existingBlockSequencerConfig =
+              config.sequencers.get(selfInstanceName).map(_.sequencer) match {
+                case Some(bft: SequencerConfig.BftSequencer) => bft.block
+                case Some(external: SequencerConfig.External) => external.block
+                case _ => BlockSequencerConfig()
+              }
             if (shouldBenchmarkBftSequencer)
-              BlockSequencerConfig(
+              existingBlockSequencerConfig.copy(
                 circuitBreaker = BlockSequencerConfig.CircuitBreakerConfig(enabled = false),
                 streamInstrumentation = BlockSequencerStreamInstrumentationConfig(isEnabled = true),
               )
-            else BlockSequencerConfig()
+            else existingBlockSequencerConfig
+          }
           selfInstanceName -> SequencerConfig.BftSequencer(
             block = blockSequencerConfig,
             config = BftBlockOrdererConfig(
-              epochLength = epochLength,
+              leaderSelectionPolicyConfigForPv34 = getLeaderSelectionPolicyConfigForPv34(
+                sequencingParameters,
+                BftBlockOrdererConfig(),
+              ),
               consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
-              consensusBlockCompletionTimeout = consensusBlockCompletionTimeout,
+              consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
               maxRequestsInBatch = maxRequestsInBatch,
               minRequestsInBatch = minRequestsInBatch,
               maxBatchCreationInterval = maxBatchCreationInterval,
@@ -274,8 +312,20 @@ final class UseBftSequencer(
       .modify(_.map(mapSequencerConfigs))
   }
 
+  private def getLeaderSelectionPolicyConfigForPv34(
+      sequencingParameters: Option[topology.SequencingParameters],
+      bftOrdererConfig: BftBlockOrdererConfig,
+  ): Option[BlacklistLeaderSelectionPolicyConfig] =
+    sequencingParameters
+      .map(_.blacklistLeaderSelectionPolicyConfig)
+      .orElse(bftOrdererConfig.leaderSelectionPolicyConfigForPv34)
+
   private def sequencerId(instanceName: InstanceName): String =
     SequencerId
       .tryCreate(instanceName.unwrap, Namespace(Fingerprint.tryFromString("default")))
       .toProtoPrimitive
+}
+
+object UseBftSequencer {
+  final case class UseStandaloneConfig(segmentLength: Long)
 }

@@ -36,6 +36,11 @@ import scala.concurrent.Future
 trait TestPredicateFiltersFixtureAnyWordSpec {
   this: TestEssentials & FixtureAnyWordSpecLike =>
 
+  @nowarn(
+    "cat=unused"
+  ) // Reason is not used but forces us to identify the reason which can be linked to a T O D O
+  def onlyLocalParty(reason: UnsupportedExternalPartyTest): Boolean = partiesKind == PartyKind.Local
+
   implicit class CheckString(verb: String) {
     def onlyRunWhen(condition: Boolean): OnlyRunWhenWordSpecStringWrapper =
       new OnlyRunWhenWordSpecStringWrapper(verb, condition)
@@ -110,6 +115,9 @@ trait TestPredicateFiltersFixtureAnyWordSpec {
 
     def when(testFun: => Unit /* Assertion */ )(implicit pos: source.Position): Unit =
       if (condition) verb.when(testFun) else verb.ignore(() => testFun)
+
+    def andWhen(otherCondition: => Boolean) =
+      new OnlyRunWhenWordSpecStringWrapper(verb, condition && otherCondition)
   }
 }
 
@@ -237,6 +245,14 @@ trait ProtocolVersionChecksAsyncWordSpec {
     def in(testFun: => Future[Assertion])(implicit pos: source.Position): Unit =
       if (condition) verb.in(testFun) else verb.ignore(testFun)
 
+    def inUS(
+        testFun: => FutureUnlessShutdown[Assertion]
+    )(implicit pos: source.Position): Unit = {
+      def testFunHandleShutdown(): Future[Assertion] =
+        testFun.onShutdown(fail(s"Unexpected shutdown in OnlyRunWhenWordSpecStringWrapper.inUS"))
+      if (condition) verb.in(testFunHandleShutdown()) else verb.ignore(testFunHandleShutdown())
+    }
+
     def when(testFun: => Unit)(implicit pos: source.Position): Unit =
       if (condition) verb.when(testFun)
   }
@@ -267,6 +283,11 @@ trait ProtocolVersionChecksAnyWordSpec {
 
     def onlyRunWith(protocolVersion: ProtocolVersion): OnlyRunWhenWordSpecStringWrapper =
       new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion == protocolVersion)
+
+    def onlyRunWithOrLessThan(
+        maxProtocolVersion: ProtocolVersion
+    ): OnlyRunWhenWordSpecStringWrapper =
+      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion <= maxProtocolVersion)
 
     def onlyRunWhen(
         condition: ProtocolVersion => Boolean

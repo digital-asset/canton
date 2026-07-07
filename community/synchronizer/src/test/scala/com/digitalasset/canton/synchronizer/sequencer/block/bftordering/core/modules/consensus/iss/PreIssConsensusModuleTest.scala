@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -55,11 +54,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Instant
-import scala.util.Random
 
 class PreIssConsensusModuleTest
     extends AsyncWordSpec
@@ -192,12 +191,14 @@ class PreIssConsensusModuleTest
     new PreIssConsensusModule[ProgrammableUnitTestEnv](
       OrderingTopologyInfo(
         myId,
-        orderingTopology,
-        failingCryptoProvider,
-        Seq(myId),
+        currentTopology = orderingTopology,
+        currentCryptoProvider = failingCryptoProvider,
+        currentLeaders = Seq(myId),
+        currentBlacklistedNodes = Seq.empty,
         previousTopology = orderingTopology, // not relevant
-        failingCryptoProvider,
-        Seq(myId),
+        previousCryptoProvider = failingCryptoProvider,
+        previousLeaders = Seq(myId),
+        previousBlacklistedNodes = Seq.empty,
       ),
       epochStore,
       None,
@@ -210,13 +211,13 @@ class PreIssConsensusModuleTest
             cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
             latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
             epochInProgress: EpochInProgress,
+            _traceContext: TraceContext,
         )(
             segmentState: SegmentState,
             metricsAccumulator: EpochMetricsAccumulator,
         ): IgnoringSegmentModuleRef[ConsensusSegment.Message] =
           new IgnoringSegmentModuleRef(latestCompletedEpochLastCommits)
       },
-      new Random(4),
       new ConsensusModuleDependencies[ProgrammableUnitTestEnv](
         fakeModuleExpectingSilence,
         fakeModuleExpectingSilence,

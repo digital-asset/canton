@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
+import anorm.SqlParser.int
+import anorm.SqlStringInterpolation
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -22,8 +25,14 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.ParticipantSimpleStreamHelper
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetOutOfRange
+import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.participant.admin.data.{
+  ContractImportMode,
+  RepairContract,
+  RepresentativePackageIdOverride,
+}
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
-import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
+import com.digitalasset.canton.protocol.{ContractInstance, ExampleContractFactory, LfContractId}
 import com.digitalasset.canton.sequencing.protocol.{Recipients, SubmissionRequest}
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
@@ -38,7 +47,19 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{SynchronizerAlias, config}
+import com.digitalasset.canton.{
+  LfPackageId,
+  LfPackageName,
+  ReassignmentCounter,
+  SynchronizerAlias,
+  config,
+}
+import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.daml.lf.value.Value
+import monocle.Monocle.toAppliedFocusOps
+import org.apache.pekko.stream.QueueOfferResult
+import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.Assertions.fail
 import org.scalatest.{Assertion, OptionValues}
 
@@ -80,6 +101,10 @@ abstract class LedgerPruningIntegrationTest
         ConfigTransforms.updatePruningBatchSize(internalPruningBatchSize),
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.batching.maxAcsImportBatchSize)
+            .replace(PositiveInt.one)
+        ),
       )
       .withSetup { env =>
         import env.*
@@ -641,10 +666,13 @@ abstract class LedgerPruningIntegrationTest
     assertEventNotFound(participant1, immediateDivulgedP1.contractId, alice)
   }
 
+  var partyAlice: PartyId = _
+
   "prune retroactively divulged contracts" in { implicit env =>
     import env.*
 
     val alice = participant1.parties.enable("Alice2", synchronizeParticipants = Seq(participant2))
+    partyAlice = alice
     val bob = participant2.parties.enable("Bob2", synchronizeParticipants = Seq(participant1))
     val clock = environment.simClock.value
     val end2AtStart = participant2.ledger_api.state.end()
@@ -683,6 +711,123 @@ abstract class LedgerPruningIntegrationTest
     contractFor(participant1, daId, aliceStakeholderCreatedP1.contractId) shouldBe empty
     contractFor(participant2, daId, aliceStakeholderCreatedP1.contractId) shouldBe empty
     assertEventNotFound(participant1, aliceStakeholderCreatedP1.contractId, alice)
+  }
+
+  "after failed repair operation the respective contract instances will be cleaned during the next pruning" in {
+    implicit env =>
+      import env.*
+      val clock = environment.simClock.value
+      // ensuring that current ledger end can be pruned
+      val ledgerEnd = participant1.ledger_api.state.end()
+      pruneAtCurrentLedgerEnd(clock, participant1, participant1.health.ping(participant1))
+
+      // initiate a repair of two contracts
+      participant1.synchronizers.disconnect_all()
+      val metadataSnapshot = participant1.underlying.value.sync.getPackageMetadataSnapshot
+      val (contractQueue, contractSource) = Source.queue[RepairContract](10).preMaterialize()
+      val repairF = participant1.underlying.value.sync.repairService.addContracts(
+        synchronizerId = daId,
+        contracts = contractSource,
+        contractImportMode = ContractImportMode.Accept,
+        packageMetadataSnapshot = metadataSnapshot,
+        representativePackageIdOverride = RepresentativePackageIdOverride.NoOverride,
+        workflowIdPrefix = Some("failedAddContractOperation"),
+      )
+
+      // add two contracts
+      val iouPackageId = LfPackageId.assertFromString(IouSyntax.modelCompanion.PACKAGE_ID)
+      val iouPackageName = LfPackageName.assertFromString(IouSyntax.modelCompanion.PACKAGE_NAME)
+      val iouTemplateId = Ref.Identifier(
+        iouPackageId,
+        Ref.QualifiedName.assertFromString(
+          IouSyntax.modelCompanion.TEMPLATE_ID.getModuleName + ":" + IouSyntax.modelCompanion.TEMPLATE_ID.getEntityName
+        ),
+      )
+      val contractTime = clock.now.minusSeconds(1).underlying
+      def pushContract(amount: String): LfContractId = {
+        val contract = ExampleContractFactory.build(
+          templateId = iouTemplateId,
+          packageName = iouPackageName,
+          argument = Value.ValueRecord(
+            tycon = None,
+            fields = ImmArray(
+              None -> Value.ValueParty(partyAlice.toLf), // payer
+              None -> Value.ValueParty(partyAlice.toLf), // owner
+              None -> Value.ValueRecord(
+                tycon = None,
+                fields = ImmArray(
+                  None -> Value.ValueNumeric(
+                    com.digitalasset.daml.lf.data.Numeric.assertFromString(amount)
+                  ),
+                  None -> Value.ValueText("CHF"),
+                ),
+              ), // amount
+              None -> Value.ValueList(FrontStack.empty), // viewers
+            ),
+          ),
+          createdAt = CreationTime.CreatedAt(contractTime),
+          signatories = Set(partyAlice.toLf),
+          stakeholders = Set(partyAlice.toLf),
+        )
+        contractQueue.offer(
+          RepairContract(
+            synchronizerId = daId,
+            contract = contract.inst,
+            reassignmentCounter = ReassignmentCounter.Genesis,
+            representativePackageId = iouPackageId,
+          )
+        ) shouldBe QueueOfferResult.Enqueued
+        contract.contractId
+      }
+      val cid1 = pushContract("0.01").coid
+      val cid2 = pushContract("0.02").coid
+
+      // eventually the two contracts should be available in the contract store and in the event store too
+      eventually() {
+        contractFor(participant1, daId, cid1).isDefined shouldBe true
+        contractFor(participant1, daId, cid2).isDefined shouldBe true
+        participant1.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value.ledgerApiDbSupport.dbDispatcher
+          .executeSql(DatabaseMetrics.ForTesting("getting-all-activations-with-workflow-id"))(
+            SQL"""select count(*) c
+                  from lapi_events_activate_contract
+                  where workflow_id like 'failedAddContractOperation%'""".as(int("c").single)(_)
+          )(LoggingContextWithTrace.ForTesting)
+          .futureValue shouldBe 2
+      }
+
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          // as cancelling the repair, the repair operation should finish with error
+          contractQueue.fail(new RuntimeException("cancel repair"))
+          repairF.value.failed.futureValueUS.getMessage shouldBe "cancel repair"
+
+          // participant1 should recover after the failed repair operation
+          participant1.synchronizers.reconnect_all()
+          participant1.health.ping(participant1)
+        },
+        // as repair failed, the offset dispatcher is reinitializing, which can cause ResilientLedgerSubscription warnings
+        logEntries => {
+          logEntries.foreach { logEntry =>
+            clue(logEntry.toString) {
+              logEntry.loggerName should include("ResilientLedgerSubscription")
+              logEntry.message should include(
+                "Ledger subscription PingService failed with an error"
+              )
+              ()
+            }
+          }
+          succeed
+        },
+      )
+
+      // cid1 is still available in the contract store
+      contractFor(participant1, daId, cid1).isDefined shouldBe true
+
+      // but as we prune the same offset which was pruned before (contract store pruning anyway commences independently of pruning should not find anything else to prune)
+      participant1.pruning.prune(ledgerEnd)
+
+      // cid1 should be purged from the contract store as well
+      contractFor(participant1, daId, cid1).isDefined shouldBe false
   }
 
   "find_safe_offset returns error when asked to find a safe offset before timestamp without canton ledger state" in {

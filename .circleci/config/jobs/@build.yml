@@ -33,6 +33,15 @@ static_tests:
   steps:
     - checkout:
         method: blobless
+    - run:
+        name: Check branch name does not contain URL-special characters
+        command: |
+          if [[ "$CIRCLE_BRANCH" == *"#"* || "$CIRCLE_BRANCH" == *"%"* ]]; then
+            echo "ERROR: Branch name '$CIRCLE_BRANCH' contains a URL-special character ('#' or '%')."
+            echo "'#' is treated as a URL fragment delimiter and '%' as a percent-encoding prefix by azcopy, breaking Azure cache operations."
+            echo "Please rename your branch without '#' or '%'."
+            exit 1
+          fi
     - check_pr_skip_ci
     - restore_sbt_cache
     - execute_sbt_command:
@@ -52,13 +61,23 @@ static_tests:
         command: scripts/ci/check-protobuf-required-optional.sh
         name: Check Protobuf Required/Optional requirements
     - run:
+        name: Lint yaml files
+        command: |
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
+    - run:
         name: Check that Nix definitions are up to date
         command: |
           echo "checking that the containers shell.nix matches the one in the repository".
           echo "if this fails, you need to update our build image. have a look at .ci/README.md"
           diff shell.nix /tmp/shell.nix || exit 1
           diff -r nix /tmp/nix || exit 1
-    # run checker last as it will rebase to main to avoid the race condition
+    - slack_red_main_with_volunteer
+
+check_todos:
+  executor: canton-medium-docker
+  steps:
+    - checkout:
+        method: blobless
     - run:
         name: Run the todo checker
         command: |
@@ -129,13 +148,12 @@ update_canton_build_docker_image:
           git diff-index --quiet HEAD || git commit -m "Updated docker image for Canton builds"
           git push
 
-verify_circleci_config_and_compliance_label:
+verify_circleci_config:
   executor: canton-small-docker
   steps:
     - checkout:
         method: blobless
     - check_pr_skip_ci
-    - check_pr_compliance_labels
     - run:
         name: Generate and check circleci config with committed one
         command: |
@@ -145,10 +163,6 @@ verify_circleci_config_and_compliance_label:
             echo "ERROR: Committed config.yml is stale, please run build-config.sh in .circleci"
             exit 1
           fi
-    - run:
-        name: Lint yaml files
-        command: |
-          nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
     - slack_red_main_with_volunteer
 
 daml_upgrade_pr:

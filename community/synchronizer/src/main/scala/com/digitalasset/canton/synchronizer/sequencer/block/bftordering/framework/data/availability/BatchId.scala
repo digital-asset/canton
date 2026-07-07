@@ -13,6 +13,8 @@ import com.google.protobuf.ByteString
 final case class BatchId private (hash: Hash) extends HasCryptographicEvidence {
 
   override def getCryptographicEvidence: ByteString = hash.getCryptographicEvidence
+
+  override lazy val toString: String = s"${getClass.getSimpleName}(${hash.toHexString})"
 }
 
 object BatchId {

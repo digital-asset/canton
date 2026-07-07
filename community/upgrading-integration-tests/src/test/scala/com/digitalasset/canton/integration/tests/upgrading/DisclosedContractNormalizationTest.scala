@@ -13,19 +13,16 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   TestDynamicSynchronizerParameterGetter,
 }
 import com.digitalasset.canton.platform.config.CommandServiceConfig
+import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.{AuthenticatedContractIdVersionV10, LfFatContractInst}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.util.{ContractValidator, TestEngine}
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  NextGenContractStateMachine,
-  Node,
-  TransactionCoder,
-}
+import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, FatContractInstance, Node}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.scalatest.Assertion
@@ -43,12 +40,16 @@ class DisclosedContractNormalizationTest
   private val ec: ExecutionContext = executorService
 
   val engine = new Engine(
-    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange),
+    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersions),
     loggerFactory,
   )
 
   private val testEngine =
-    new TestEngine(packagePaths = Seq(UpgradingBaseTest.UpgradeV2), loggerFactory = loggerFactory)
+    new TestEngine(
+      packagePaths = Seq(UpgradingBaseTest.UpgradeV2),
+      interpretationConfig = InterpretationConfig.Default,
+      loggerFactory = loggerFactory,
+    )
 
   private def buildUpgrading(
       alice: String,
@@ -97,8 +98,8 @@ class DisclosedContractNormalizationTest
     )
 
     // Here we recode to strip any type info that does not make it into the blob
-    val v10fatRecoded = TransactionCoder
-      .decodeFatContractInstance(TransactionCoder.encodeFatContractInstance(v10fat).value)
+    val v10fatRecoded = ContractInstanceCoder
+      .decodeFatContractInstance(ContractInstanceCoder.encodeFatContractInstance(v10fat).value)
       .value
       .asInstanceOf[LfFatContractInst]
 
@@ -125,6 +126,7 @@ class DisclosedContractNormalizationTest
         dynParamGetter =
           new TestDynamicSynchronizerParameterGetter(NonNegativeFiniteDuration.Zero)(ec),
         timeProvider = TimeProvider.UTC,
+        externalCallHandler = ExternalCallHandler.Unsupported,
       )(ec)
 
     def interpretDisclosure(cId: Upgrading.ContractId, fat: LfFatContractInst): Assertion = {
@@ -133,7 +135,7 @@ class DisclosedContractNormalizationTest
       val commands = testEngine.validateCommand(command, alice, disclosedContracts = Seq(fat))
 
       val result = underTest
-        .interpret(commands, NextGenContractStateMachine.Mode.default, testEngine.randomHash())(
+        .interpret(commands, InterpretationConfig.Default, testEngine.randomHash())(
           LoggingContextWithTrace(loggerFactory),
           ec,
         )

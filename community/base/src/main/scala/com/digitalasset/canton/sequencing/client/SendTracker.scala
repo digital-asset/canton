@@ -16,10 +16,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SendResult.{Error, Success, Timeout}
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  DecompressedSequencedEvent,
   Deliver,
   DeliverError,
+  Envelope,
   MessageId,
-  SequencedEvent,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficStateController
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
@@ -36,10 +38,9 @@ import scala.collection.concurrent.TrieMap
   * max-sequencing-time of the request, the tracker then observes sequenced events and will notify
   * the provided handler whether the send times out. For aggregatable submission requests, the send
   * tracker notifies the handler of successful sequencing of the submission request, not of
-  * successful delivery of the envelopes when the
-  * [[com.digitalasset.canton.sequencing.protocol.AggregationRule.threshold]] has been reached. In
-  * fact, there is no notification of whether the threshold was reached before the max sequencing
-  * time.
+  * successful delivery of the envelopes when the threshold encoded in the
+  * [[com.digitalasset.canton.sequencing.protocol.AggregationRule]] has been reached. In fact, there
+  * is no notification of whether the threshold was reached before the max sequencing time.
   */
 class SendTracker(
     initialPendingSends: Map[MessageId, CantonTimestamp],
@@ -153,7 +154,7 @@ class SendTracker(
     * sends stored to be retried.
     */
   def update(
-      events: Seq[SequencedEventWithTraceContext[?]]
+      events: Seq[SequencedEventWithTraceContext[Batch[Envelope[?]]]]
   ): Unit = if (events.isEmpty) ()
   else {
     val maxTimestamp = events.foldLeft(CantonTimestamp.MinValue) { case (maxTs, event) =>
@@ -192,7 +193,7 @@ class SendTracker(
   }
 
   private def removePendingSend(
-      event: SequencedEvent[?]
+      event: DecompressedSequencedEvent[Envelope[?]]
   )(implicit traceContext: TraceContext): Unit =
     extractSendResult(event).foreach { case (messageId, sendResult) =>
       removePendingSendUnlessTimeout(
@@ -321,7 +322,7 @@ class SendTracker(
   }
 
   private def extractSendResult(
-      event: SequencedEvent[?]
+      event: DecompressedSequencedEvent[Envelope[?]]
   )(implicit traceContext: TraceContext): Option[(MessageId, SendResult)] =
     Option(event) collect {
       case deliver @ Deliver(_, _, _, Some(messageId), _, _, _) =>

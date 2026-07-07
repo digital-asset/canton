@@ -32,9 +32,8 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.platform.apiserver.SeedService
-import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.canton.topology.Party
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.Assertion
 
@@ -66,7 +65,7 @@ abstract class LedgerApiDynamicTemplateFilterIntegrationTest
         import env.*
 
         val alice =
-          participant1.parties.enable("alice")
+          participant1.parties.testing.enable("alice")
         val aliceP = alice.toProtoPrimitive
 
         // Start ongoing subscriptions for Upgrade package name
@@ -120,7 +119,7 @@ abstract class LedgerApiDynamicTemplateFilterIntegrationTest
   ): Assertion = {
     toJavaProto(create.templateId.value) shouldBe expectedIdentifier
     create.createdEventBlob should not be empty
-    TransactionCoder
+    ContractInstanceCoder
       .decodeFatContractInstance(create.createdEventBlob)
       .value
       .packageName shouldBe UpgradingV1.PACKAGE_NAME
@@ -134,7 +133,7 @@ abstract class LedgerApiDynamicTemplateFilterIntegrationTest
 
   private class Subscriptions(
       participant: LocalParticipantReference,
-      party: PartyId,
+      party: Party,
       filterIdentifier: ScalaPbIdentifier,
       includeCreatedEventBlob: Boolean,
       expectedCreatesSize: Int,
@@ -226,8 +225,6 @@ final class ReferenceLedgerApiDynamicTemplateFilterIntegrationTestNoCaches
             .replace(0)
             .focus(_.ledgerApi.userManagementService.maxRightsPerUser)
             .replace(100)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
             .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
             .replace(0)
             .focus(_.ledgerApi.indexService.maxContractStateCacheSize)

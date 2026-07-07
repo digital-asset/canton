@@ -10,7 +10,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
@@ -50,6 +49,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{MonadUtil, ReassignmentTag, SameReassignmentType}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -136,7 +136,7 @@ class SynchronizerMigration(
       sourceConnection <- EitherT.fromEither[FutureUnlessShutdown](sourceConnectionE).map(Source(_))
 
       // check that synchronizer id (in config) matches observed synchronizer id
-      _ <- target.unwrap.synchronizerId.traverse_ { expectedSynchronizerId =>
+      _ <- target.unwrap.psid.traverse_ { expectedSynchronizerId =>
         EitherT.cond[FutureUnlessShutdown](
           expectedSynchronizerId.logical == targetSynchronizerId.unwrap,
           (),
@@ -200,7 +200,7 @@ class SynchronizerMigration(
           sequencerInfoLoader
             .loadAndAggregateSequencerEndpoints(
               synchronizerConnectionConfig.synchronizerAlias,
-              synchronizerConnectionConfig.synchronizerId,
+              synchronizerConnectionConfig.psid,
               synchronizerConnectionConfig.sequencerConnections,
               SequencerConnectionValidation.Active,
             )(traceContext, CloseContext(this))

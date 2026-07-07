@@ -5,13 +5,18 @@ package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
-import com.digitalasset.canton.ProtoDeserializationError.{OtherError, ValueConversionError}
+import com.digitalasset.canton.ProtoDeserializationError.{
+  OtherError,
+  ProtoDeserializationFailure,
+  ValueConversionError,
+}
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -27,6 +32,7 @@ import com.digitalasset.canton.participant.admin.data.{
 import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService.ValidExportAcsRequest
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -35,6 +41,7 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   PartyId,
   PhysicalSynchronizerId,
+  Synchronizer,
   SynchronizerId,
   UniqueIdentifier,
 }
@@ -50,6 +57,7 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
   protocol,
 }
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.actor.ActorSystem
 
@@ -633,6 +641,94 @@ final class GrpcParticipantRepairService(
 
     CantonGrpcUtil.mapErrNewEUS(res)
   }
+
+  override def deleteSynchronizerConnectionConfig(
+      request: DeleteSynchronizerConnectionConfigRequest
+  ): Future[DeleteSynchronizerConnectionConfigResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val ret = for {
+      psid <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          PhysicalSynchronizerId
+            .fromProtoPrimitive(request.physicalSynchronizerId, "physical_synchronizer_id")
+            .leftMap[CantonBaseError](err =>
+              ProtoDeserializationFailure.WrapNoLoggingStr(err.message)
+            )
+        )
+      _ <-
+        sync.synchronizerConnectionConfigStore
+          .delete(psid)
+          .leftMap[CantonBaseError](err => UnknownPhysicalSynchronizerId(err.id))
+    } yield DeleteSynchronizerConnectionConfigResponse()
+
+    CantonGrpcUtil.mapErrNewEUS(ret.leftMap(_.toCantonRpcError))
+  }
+
+  override def listPendingOperations(
+      request: ListPendingOperationsRequest
+  ): Future[ListPendingOperationsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    if (sync.genericPendingOperationStore.isInMemoryStore()) {
+      Future.failed(
+        io.grpc.Status.UNIMPLEMENTED
+          .withDescription(
+            "listPendingOperations is not supported with an in-memory pending operation store"
+          )
+          .asRuntimeException()
+      )
+    } else {
+      val result = for {
+        operationName <- wrapErrUS(
+          request.operationName
+            .traverse(str => NonEmptyString.fromProtoPrimitive(str, "operation_name"))
+        )
+        synchronizer <- wrapErrUS(request.filterSynchronizer.traverse(Synchronizer.fromProtoV30))
+
+        operationKey = request.filterOperationKey.flatMap(OptionUtil.emptyStringAsNone)
+        pendingOperations <- EitherT.right[RpcError](
+          sync.genericPendingOperationStore
+            .getAllMetadata(operationName, synchronizer, operationKey)(traceContext)
+        )
+        sortedMetadata = pendingOperations.toSeq
+          .sortBy(op => (op.name, op.synchronizer.toString, op.key))
+          .map(op =>
+            PendingOperationMetadata(
+              operationName = op.name.unwrap,
+              operationKey = op.key,
+              synchronizer = Some(op.synchronizer.toProtoV30),
+            )
+          )
+      } yield ListPendingOperationsResponse(pendingOperations = sortedMetadata)
+
+      CantonGrpcUtil.mapErrNewEUS(result)
+    }
+  }
+
+  override def deletePendingOperation(
+      request: DeletePendingOperationRequest
+  ): Future[DeletePendingOperationResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val result = for {
+      operationName <- wrapErrUS(
+        NonEmptyString.fromProtoPrimitive(request.operationName, "operation_name")
+      )
+      synchronizer <- wrapErrUS(
+        request.synchronizer
+          .toRight(ValueConversionError("synchronizer", "missing"))
+          .flatMap(Synchronizer.fromProtoV30)
+      )
+      operationKey = request.operationKey
+      _ <- EitherT.right[RpcError](
+        sync.genericPendingOperationStore.delete(synchronizer, operationKey, operationName)
+      )
+
+    } yield DeletePendingOperationResponse()
+
+    CantonGrpcUtil.mapErrNewEUS(result)
+  }
+
 }
 
 object GrpcParticipantRepairService {

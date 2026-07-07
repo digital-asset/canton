@@ -138,6 +138,7 @@ class MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
   private def mk(maxItems: PositiveInt = PositiveInt.tryCreate(10)): MemberAuthenticationStore =
     new MemberAuthenticationStore(
       maxItems,
+      maxItems,
       loggerFactory,
     )
 
@@ -145,7 +146,12 @@ class MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
       member: Member,
       expiry: CantonTimestamp = defaultExpiry,
   ): StoredAuthenticationToken =
-    StoredAuthenticationToken(member, expiry, AuthenticationToken.generate(crypto))
+    StoredAuthenticationToken(
+      member,
+      expiry,
+      AuthenticationToken.generate(crypto),
+      member.fingerprint,
+    )
 
   private def generateNonce(member: Member, expiry: CantonTimestamp = defaultExpiry): StoredNonce =
     StoredNonce(member, Nonce.generate(crypto), CantonTimestamp.Epoch, expiry)

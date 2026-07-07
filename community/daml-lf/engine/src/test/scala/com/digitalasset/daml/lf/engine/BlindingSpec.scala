@@ -8,16 +8,16 @@ import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.engine.BlindingSpec.TxBuilder
 import com.digitalasset.daml.lf.speedy.SValue
-import com.digitalasset.daml.lf.transaction.{BlindingInfo, Node}
 import com.digitalasset.daml.lf.transaction.test.{
   NodeIdTransactionBuilder,
   TestNodeBuilder,
   TransactionBuilder,
 }
+import com.digitalasset.daml.lf.transaction.{BlindingInfo, Node, NodeId}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueRecord
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.ArraySeq
 
@@ -27,7 +27,7 @@ object BlindingSpec {
 
 class BlindingSpec extends AnyFreeSpec with Matchers {
 
-  import TransactionBuilder.Implicits._
+  import TransactionBuilder.Implicits.*
   import TestNodeBuilder.CreateKey
 
   def create(builder: TxBuilder): (Value.ContractId, Node.Create) = {
@@ -301,4 +301,36 @@ class BlindingSpec extends AnyFreeSpec with Matchers {
       ),
     )
   }
+
+  "does not overflow" in {
+
+    def mkTx(i: Int) = {
+      val builder = new TxBuilder()
+      val create = builder.create(
+        id = builder.newCid,
+        templateId = "M:T",
+        argument = ValueRecord(None, ImmArray.empty),
+        signatories = Seq("A", "B"),
+        observers = Seq(),
+      )
+      val exe: Node = builder.exercise(
+        create,
+        "Choice",
+        consuming = true,
+        Set("C"),
+        ValueRecord(None, ImmArray.empty),
+        byKey = false,
+      )
+
+      def loop(i: Int, parentId: NodeId): Unit =
+        if (i > 0) loop(i - 1, builder.add(exe, parentId))
+
+      loop(i, builder.add(exe))
+      builder.build()
+    }
+
+    Blinding.blind(mkTx(40000))
+    succeed
+  }
+
 }

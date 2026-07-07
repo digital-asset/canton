@@ -48,10 +48,10 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   CreationTime,
   FatContractInstance,
   Node,
-  TransactionCoder,
 }
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
@@ -536,6 +536,7 @@ sealed trait GracefulRejectsIntegrationTest
                     _,
                     _,
                     _,
+                    _,
                   )
                 )
               ) =>
@@ -564,7 +565,7 @@ sealed trait GracefulRejectsIntegrationTest
             modifyAuthenticationData: Bytes => Bytes = identity,
             modifyCreateTime: CreationTime => CreationTime = identity,
         ): ByteString =
-          TransactionCoder
+          ContractInstanceCoder
             .decodeFatContractInstance(createdEventBlob)
             .left
             .map(err => s"Failed $err")
@@ -579,7 +580,7 @@ sealed trait GracefulRejectsIntegrationTest
                 keyOpt = contract.contractKeyWithMaintainers,
                 version = contract.version,
               )
-              TransactionCoder
+              ContractInstanceCoder
                 .encodeFatContractInstance(
                   FatContractInstance.fromCreateNode(
                     create = create,

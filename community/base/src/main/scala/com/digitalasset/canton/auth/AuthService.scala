@@ -31,11 +31,34 @@ trait AuthService {
     * only a single [[com.digitalasset.canton.auth.ClaimPublic]] claim to reject all non-public
     * requests with a PERMISSION_DENIED status. Return a failed future to reject requests with an
     * INTERNAL error status.
+    *
+    * When a present token cannot be verified, do not log the reason eagerly: several
+    * [[com.digitalasset.canton.auth.AuthService]]s may be tried in sequence and an earlier failure
+    * is irrelevant once a later service authenticates the request. Instead, return
+    * [[com.digitalasset.canton.auth.ClaimSet.Unauthenticated]] together with an
+    * [[com.digitalasset.canton.auth.AuthService.Result.deferredWarning]]; the
+    * [[com.digitalasset.canton.auth.AuthInterceptor]] logs it once, and only if no service manages
+    * to authenticate the request.
     * @param authToken
     *   The value of the `Authorization` header, (for instance http or grpc)
     */
   def decodeToken(authToken: Option[String], serviceName: String)(implicit
       traceContext: TraceContext
-  ): Future[ClaimSet]
+  ): Future[AuthService.Result]
 
+}
+
+object AuthService {
+
+  /** Outcome of one [[com.digitalasset.canton.auth.AuthService]] attempting to authenticate a
+    * request.
+    *
+    * @param claimSet
+    *   resolved claims, or [[com.digitalasset.canton.auth.ClaimSet.Unauthenticated]] if this
+    *   service could not (or chose not to) authenticate the request.
+    * @param deferredWarning
+    *   reason a *present* token was rejected. The [[com.digitalasset.canton.auth.AuthInterceptor]]
+    *   logs it once, and only if no service authenticates the request.
+    */
+  final case class Result(claimSet: ClaimSet, deferredWarning: Option[String] = None)
 }

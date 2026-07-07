@@ -30,9 +30,12 @@ import java.util.UUID
   */
 object CantonRequireTypes {
 
-  final case class NonEmptyString private (private val str: String) {
+  final case class NonEmptyString private (private val str: String)
+      extends Ordered[NonEmptyString] {
     def unwrap: String = str
     require(str.nonEmpty, s"Unable to create a NonEmptyString as the empty string $str was given.")
+
+    override def compare(that: NonEmptyString): Int = this.str.compare(that.str)
   }
 
   object NonEmptyString {
@@ -56,6 +59,14 @@ object CantonRequireTypes {
       override def description: String =
         s"The value you gave for this configuration setting ('$str') was the empty string, but we require a non-empty string for this configuration setting"
     }
+
+    def fromProtoPrimitive(
+        str: String,
+        name: String,
+    ): Either[ProtoInvariantViolation, NonEmptyString] =
+      NonEmptyString
+        .create(str)
+        .leftMap(e => ProtoInvariantViolation(field = Some(name), error = e.toString))
   }
 
   /** This trait wraps a String that is limited to a certain maximum length. The canonical use case

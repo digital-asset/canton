@@ -5,8 +5,8 @@ package com.digitalasset.canton.platform.store.backend.localstore
 
 import anorm.SqlParser.{int, long, str}
 import anorm.{RowParser, SqlParser, SqlStringInterpolation, ~}
-import com.digitalasset.canton.ledger.api.IdentityProviderId
 import com.digitalasset.canton.platform.store.backend.Conversions.party
+import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.daml.lf.data.Ref
 
 import java.sql.Connection

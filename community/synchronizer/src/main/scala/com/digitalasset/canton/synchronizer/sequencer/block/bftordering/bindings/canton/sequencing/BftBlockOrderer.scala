@@ -68,8 +68,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PNetworkOutModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.BftOrdererPruningScheduler
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.data.BftOrdererPruningSchedulerStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.{
+  BftOrdererPruningScheduler,
+  PartitionManager,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
   BftBlockOrdererConfig,
   BftOrderingModuleSystemInitializer,
@@ -78,7 +81,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
-  EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
@@ -181,26 +183,7 @@ final class BftBlockOrderer(
       BftNodeId(standaloneConfig.thisSequencerId)
     }
 
-  // The initial metrics factory, which also pre-initializes histograms (as required by OpenTelemetry), is built
-  //  very early in the Canton bootstrap process, before unique IDs for synchronizer nodes are even available,
-  //  so it doesn't include the sequencer ID in the labels, rather just the node name AKA "instance name".
-  //
-  //  The instance name, though, coming from the Canton config, is operator-chosen and is, in general, not unique and
-  //  even uncorrelated with the sequencer ID, while the BFT ordering system must refer to nodes uniquely and, thus,
-  //  refers to them only by their sequencer IDs.
-  //
-  //  Since we want to always be able to correlate the sequencer IDs included as additional metrics context, e.g. in
-  //  consensus voting metrics, with the label used by each sequencer to identify itself as the metrics reporting
-  //  sequencer, we use the sequencer ID for that, rather than the instance name.
-  //
-  //  Hence, we add to the metrics context this node's sequencer ID as the reporting sequencer.
-  //  Also, we do it as soon as the BFT block orderer is created, so that all BFT ordering sequencers include it in all
-  //  emitted metrics.
-  private implicit val metricsContext: MetricsContext =
-    MetricsContext(metrics.global.labels.ReportingSequencer -> thisNode)
-
-  // Initialize the non-compliant behavior meter so that a value appears even if all behavior is compliant.
-  metrics.security.noncompliant.behavior.mark(0)
+  private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
   metrics.performance.enabled = config.enablePerformanceMetrics
 
@@ -285,10 +268,6 @@ final class BftBlockOrderer(
       timeouts,
       loggerFactory,
     )
-  private val epochStore = EpochStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
-  private val outputStore = OutputMetadataStore(localStorage, timeouts, loggerFactory)
-  private val pruningSchedulerStore =
-    BftOrdererPruningSchedulerStore(localStorage, timeouts, loggerFactory)
 
   private val sequencerSnapshotAdditionalInfo = sequencerSnapshotInfo.map { snapshot =>
     implicit val traceContext: TraceContext = TraceContext.empty
@@ -306,6 +285,28 @@ final class BftBlockOrderer(
         },
       )
   }
+
+  val partitionManager: Option[
+    (PartitionManager.PartitionCreator[PekkoEnv], PartitionManager.PartitionPruner[PekkoEnv])
+  ] = {
+    // If this is a newly onboarded node, the partition manager needs to be initialized knowing the initial epochNumber
+    // to start partitions from. Otherwise, it will start from the beginning.
+    val onboardedSequencerEpochNumberO = for {
+      info <- sequencerSnapshotAdditionalInfo
+      nodeActiveAt <- info.nodeActiveAt.get(thisNode)
+      epochNumber <- nodeActiveAt.startEpochNumber
+    } yield epochNumber
+    awaitFuture(
+      PartitionManager
+        .create(localStorage, timeouts, loggerFactory, onboardedSequencerEpochNumberO),
+      "Initializing partition management",
+    )(TraceContext.empty)
+  }
+
+  private val epochStore = EpochStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
+  private val outputStore = OutputMetadataStore(localStorage, timeouts, loggerFactory)
+  private val pruningSchedulerStore =
+    BftOrdererPruningSchedulerStore(localStorage, timeouts, loggerFactory)
 
   private val isOrdererHealthy = new AtomicBoolean(true)
 
@@ -337,6 +338,7 @@ final class BftBlockOrderer(
       createNetworkManager,
       exitOnFatalFailures,
       isOrdererHealthy,
+      config.initTimeout,
       metrics,
       loggerFactory,
     )
@@ -344,8 +346,13 @@ final class BftBlockOrderer(
   private lazy val blockSubscription =
     new PekkoBlockSubscription[PekkoEnv](
       BlockNumber(sequencerSubscriptionInitialHeight),
+      // Passing the output module reference as a closure because, due to Scala init shenanigans with lazy vals,
+      //  else it would be _often_ `null`.
+      () => outputModuleRef,
       timeouts,
       loggerFactory,
+      metrics,
+      config.sequencerCoreSubscriptionConfig,
       config.outputEnqueueMaxRetries,
       config.outputEnqueueMaxRetryDelay,
     )(
@@ -376,7 +383,7 @@ final class BftBlockOrderer(
         for {
           size <-
             if (overwrite) store.clearAllEndpoints().map(_ => 0)
-            else store.listEndpoints.map(_.size)
+            else store.listEndpoints().map(_.size)
           _ <-
             if (size == 0)
               PekkoFutureUnlessShutdown.sequence(
@@ -386,7 +393,7 @@ final class BftBlockOrderer(
               )
             else PekkoFutureUnlessShutdown.pure(())
         } yield (),
-        "init endpoints",
+        "Storing P2P endpoints",
       )
       if (overwrite) {
         logger.info("BFT P2P endpoints from configuration written to the store (overwriting mode)")
@@ -414,19 +421,19 @@ final class BftBlockOrderer(
         epochStoreReader = epochStore,
         outputStore,
         pruningSchedulerStore,
+        partitionManager,
       )
     val topologyProvider =
       config.standalone.fold[OrderingTopologyProvider[PekkoEnv]](
         new CantonOrderingTopologyProvider(
           cryptoApi,
-          EpochLength(config.epochLength), // TODO(#24184) make this dynamic sequencing parameter
+          config,
           loggerFactory,
           metrics,
         )
       ) { standaloneConfig =>
         new FixedFileBasedOrderingTopologyProvider(
           standaloneConfig,
-          EpochLength(config.epochLength),
           cryptoApi.pureCrypto,
           metrics,
         )
@@ -539,7 +546,11 @@ final class BftBlockOrderer(
             ServerInterceptors.intercept(
               BftOrderingServiceGrpc.bindService(
                 new P2PGrpcBftOrderingService(
-                  createPeerReceiverForIncomingConnection,
+                  sendingStreamObserver =>
+                    TraceContext.withNewTraceContext("p2p-incoming-connection") {
+                      implicit traceContext =>
+                        createPeerReceiverForIncomingConnection(sendingStreamObserver)
+                    },
                   loggerFactory,
                 ),
                 executionContext,
@@ -664,7 +675,7 @@ final class BftBlockOrderer(
     FutureUnlessShutdown.pure(outputPreviousStoredBlock.getBlockNumberAndBftTime.map(_._2))
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    logger.debug("Beginning async BFT block orderer shutdown")(TraceContext.empty)
+    logger.info("Beginning async BFT block orderer shutdown")(TraceContext.empty)
 
     // Shutdown the P2P network client portion and module system
     SyncCloseable(
@@ -684,6 +695,8 @@ final class BftBlockOrderer(
           SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
           SyncCloseable("pruningScheduler.close()", pruningScheduler.close()),
           SyncCloseable("pruningSchedulerStore.close()", pruningSchedulerStore.close()),
+          SyncCloseable("PartitionCreator.close()", partitionManager.map(_._1).foreach(_.close())),
+          SyncCloseable("PartitionPruner.close()", partitionManager.map(_._2).foreach(_.close())),
         ) ++
         // Shutdown the dedicated local storage if present
         Option
@@ -848,8 +861,8 @@ final class BftBlockOrderer(
   private def awaitFuture[T](f: PekkoFutureUnlessShutdown[T], description: String)(implicit
       traceContext: TraceContext
   ): T = {
-    logger.debug(description)
-    timeouts.default
+    logger.info(description)
+    config.initTimeout
       .await(s"${getClass.getSimpleName} $description")(
         f.futureUnlessShutdown().failOnShutdownToAbortException(description)
       )(ErrorLoggingContext.fromTracedLogger(logger))

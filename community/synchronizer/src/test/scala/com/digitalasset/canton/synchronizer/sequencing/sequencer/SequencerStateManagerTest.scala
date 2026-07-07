@@ -3,15 +3,9 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{
-  BatchingConfig,
-  CachingConfigs,
-  DefaultProcessingTimeouts,
-  TopologyConfig,
-}
+import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts, TopologyConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -23,6 +17,7 @@ import com.digitalasset.canton.synchronizer.block.*
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.*
 import com.digitalasset.canton.synchronizer.block.data.memory.InMemorySequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.update.{
+  BlockProcessingParameters,
   BlockUpdateGeneratorImpl,
   InFlightAggregations,
 }
@@ -63,6 +58,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   config,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -106,7 +102,11 @@ class SequencerStateManagerTest
   private val ts101 = ts0.plusSeconds(101)
 
   private lazy val aggregationRule1 =
-    AggregationRule(NonEmpty(Seq, alice, bob), PositiveInt.tryCreate(2), testedProtocolVersion)
+    AggregationRule.testing(
+      NonEmpty(Seq, alice, bob),
+      PositiveInt.tryCreate(2),
+      testedProtocolVersion,
+    )
 
   private def aggregationRequestFor(
       sender: Member,
@@ -129,7 +129,7 @@ class SequencerStateManagerTest
       .value
 
   private lazy val aggregationRule2 =
-    AggregationRule(NonEmpty(Seq, alice), PositiveInt.one, testedProtocolVersion)
+    AggregationRule.testing(NonEmpty(Seq, alice), PositiveInt.one, testedProtocolVersion)
   private lazy val aggregationRequest2 = aggregationRequestFor(alice, aggregationRule2).futureValue
   @unused
   private lazy val aggregationId2 =
@@ -155,6 +155,8 @@ class SequencerStateManagerTest
   }
 
   private def newTimestamp() = CantonTimestamp.now()
+
+  private val metrics = SequencerTestMetrics(this.getClass.getSimpleName)
 
   val testedUseUnifiedSequencer = true
 
@@ -220,7 +222,7 @@ class SequencerStateManagerTest
             alice,
             CantonTimestamp.MinValue.immediateSuccessor,
           )
-          ts1 = stateManager.getHeadState.block.lastTs.immediatePredecessor
+          ts1 = stateManager.getPersistenceHeadState.block.lastTs.immediatePredecessor
           ack <- signedAcknowledgement(alice, ts1)
           wait2F = stateManager.waitForAcknowledgementToComplete(alice, ts1)
           _ = handleBlock(initialHeight + 1, ack)
@@ -236,7 +238,7 @@ class SequencerStateManagerTest
         for {
           submissionReq1 <- senderSignedSubmissionRequest(alice)
           _ = handleBlock(initialHeight, Send(newTimestamp(), submissionReq1, sequencer))
-          ts1 = stateManager.getHeadState.block.lastTs
+          ts1 = stateManager.getPersistenceHeadState.block.lastTs
           ts0 = ts1.immediatePredecessor
           ts2 = ts1.immediateSuccessor
           wait0F = stateManager.waitForAcknowledgementToComplete(alice, ts0)
@@ -263,7 +265,7 @@ class SequencerStateManagerTest
         for {
           submissionReq1 <- senderSignedSubmissionRequest(alice)
           _ = handleBlock(initialHeight, Send(newTimestamp(), submissionReq1, sequencer))
-          ts1 = stateManager.getHeadState.block.lastTs
+          ts1 = stateManager.getPersistenceHeadState.block.lastTs
           ts0 = ts1.immediatePredecessor
           wait0F = stateManager.waitForAcknowledgementToComplete(alice, ts0)
           wait1F = stateManager.waitForAcknowledgementToComplete(alice, ts1)
@@ -370,14 +372,17 @@ class SequencerStateManagerTest
       cryptoApi,
       sequencer1,
       defaultRateLimiter,
-      orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-      lsuSequencingBounds = None,
       drSequencingTimeUpperBound = None,
       getAnnouncedLsu = None,
       producePostOrderingTopologyTicks = false,
-      SequencerTestMetrics,
-      BatchingConfig(),
       consistencyChecks = true,
+      parameters = BlockProcessingParameters(
+        orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
+        lsuSequencingBounds = None,
+        parallelism = PositiveInt.two,
+        enablePrevalidation = true,
+      ),
+      metrics,
       memberValidator = new SequencerMemberValidator {
         override def isMemberRegisteredAt(member: Member, time: CantonTimestamp)(implicit
             tc: TraceContext
@@ -387,7 +392,7 @@ class SequencerStateManagerTest
             tc: TraceContext
         ): FutureUnlessShutdown[Map[Member, Boolean]] = ???
       },
-      loggerFactory,
+      loggerFactory = loggerFactory,
     )(closeContext, NoReportingTracerProvider.tracer)
 
     def signedAcknowledgement(
@@ -440,12 +445,14 @@ class SequencerStateManagerTest
           store,
           trafficConsumedStore,
           asyncWriterParameters = AsyncWriterParameters(),
+          BlockSequencerStreamInstrumentationConfig(),
           enableInvariantCheck = true,
+          enablePrevalidation = true,
+          prevalidationParallelism = PositiveInt.two,
+          metrics.block,
           timeouts,
           futureSupervisor,
           loggerFactory,
-          BlockSequencerStreamInstrumentationConfig(),
-          SequencerTestMetrics.block,
         )(executorService, traceContext)
 
     private val processingTimestampWatermark =

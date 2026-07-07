@@ -11,9 +11,9 @@ import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.sync.CommandProgressTrackerConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.time
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{config, time}
 import com.google.common.annotations.VisibleForTesting
 
 final case class ParticipantNodeParameters(
@@ -35,19 +35,26 @@ final case class ParticipantNodeParameters(
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
     disableOptionalTopologyChecks: Boolean,
     commitmentAsynchronousInitialization: Boolean,
-    commitmentCheckpointInterval: PositiveDurationSeconds,
+    commitmentCheckpointInterval: config.PositiveDurationSeconds,
     commitmentMismatchDebugging: Boolean,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt],
     commitmentReduceParallelism: NonNegativeInt,
     commitmentUseDbSnapshotForParticipantLookup: Boolean,
     autoSyncProtocolFeatureFlags: Boolean,
-    alphaMultiSynchronizerSupport: Boolean,
+    enableAllLedgerApiReassignments: Boolean,
     commitAfterFailedActivenessCheck: Boolean,
+    validateLegacyContractsV11: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
+
+  override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def alphaVersionSupport: Boolean = protocolConfig.alphaVersionSupport
   override def betaVersionSupport: Boolean = protocolConfig.betaVersionSupport
+
+  // Indexing of party onboarding events is deferred if OnPR indexer pausing is off.
+  def deferPartyOnboardingIndexing: Boolean =
+    alphaOnlinePartyReplicationSupport.exists(!_.pauseSynchronizerIndexingDuringPartyReplication)
 }
 
 object ParticipantNodeParameters {
@@ -84,6 +91,7 @@ object ParticipantNodeParameters {
     stores = ParticipantStoreConfig(),
     protocolConfig = ParticipantProtocolConfig(
       Some(testedProtocolVersion),
+      devVersionSupport = false,
       alphaVersionSupport = false,
       betaVersionSupport = true,
       dontWarnOnDeprecatedPV = false,
@@ -96,19 +104,18 @@ object ParticipantNodeParameters {
     commandProgressTracking = CommandProgressTrackerConfig(),
     alphaOnlinePartyReplicationSupport = None,
     lsuConfig = LsuConfig(),
-    reassignmentsConfig = ReassignmentsConfig(
-      targetTimestampForwardTolerance = NonNegativeFiniteDuration.ofSeconds(30)
-    ),
+    reassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments = false,
     disableOptionalTopologyChecks = false,
     commitmentAsynchronousInitialization = true,
-    commitmentCheckpointInterval = PositiveDurationSeconds.ofMinutes(1),
+    commitmentCheckpointInterval = config.PositiveDurationSeconds.ofMinutes(1),
     commitmentMismatchDebugging = false,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp = None,
     commitmentReduceParallelism = NonNegativeInt.zero,
     commitmentUseDbSnapshotForParticipantLookup = false,
     autoSyncProtocolFeatureFlags = true,
-    alphaMultiSynchronizerSupport = false,
+    enableAllLedgerApiReassignments = false,
     commitAfterFailedActivenessCheck = false,
+    validateLegacyContractsV11 = true,
   )
 }

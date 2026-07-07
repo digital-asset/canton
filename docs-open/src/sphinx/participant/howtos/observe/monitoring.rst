@@ -648,8 +648,6 @@ gRPC Health Check Service
 
 Each Canton node can optionally be configured to start a gRPC server exposing the `gRPC Health Service <https://github.com/grpc/grpc/blob/master/doc/health-checking.md#service-definition>`__. Passive nodes (see :ref:`High Availability <ha_user_manual>` for more information on active/passive states) return ``NOT_SERVING``. Consider this when configuring `liveness and readiness probes in a Kubernetes environment <https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/>`__.
 
-The precise way the state is computed is subject to change.
-
 Here is an example monitoring configuration to place inside a node configuration object:
 
 .. literalinclude:: CANTON/community/app/src/pack/config/participant.conf
@@ -663,7 +661,7 @@ Here is an example monitoring configuration to place inside a node configuration
 .. note::
 
     To support usage as a Kubernetes liveness probe, the health server exposes a service named ``liveness`` that should be targeted when `configuring a gRPC probe <https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-grpc-liveness-probe>`__.
-    The latter service always returns ``SERVING``.
+    This service returns ``SERVING`` as long as the node does not require a restart.
 
 HTTP Health Check
 ~~~~~~~~~~~~~~~~~

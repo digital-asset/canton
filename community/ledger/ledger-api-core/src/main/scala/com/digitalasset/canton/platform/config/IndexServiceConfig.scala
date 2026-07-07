@@ -37,8 +37,6 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   configurations pertaining to the ledger api server's "active contracts service"
   * @param updatesStreams
   *   configurations pertaining to the ledger api server's streams of updates
-  * @param transactionTreeStreams
-  *   configurations pertaining to the ledger api server's streams of transaction trees
   * @param globalMaxEventIdQueries
   *   maximum number of concurrent event id queries across all stream types
   * @param globalMaxEventPayloadQueries
@@ -47,6 +45,8 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   the interval duration for OffsetCheckpoint cache updates
   * @param idleStreamOffsetCheckpointTimeout
   *   the timeout duration for checking if a new OffsetCheckpoint is created
+  * @param maxLookupLimit
+  *   the maximum limit for contract key lookups. Requests will be capped at this value.
   */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
@@ -75,6 +75,7 @@ final case class IndexServiceConfig(
     contractPruningMaxRetries: Int = IndexServiceConfig.DefaultContractPruningMaxRetries,
     contractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
       IndexServiceConfig.DefaultContractPruningDelayBeforeRetry,
+    maxLookupLimit: Int = IndexServiceConfig.DefaultMaxLookupLimit,
 )
 
 object IndexServiceConfig {
@@ -82,7 +83,7 @@ object IndexServiceConfig {
   val DefaultBufferedStreamsPageSize: Int = 100
   val DefaultMaxContractStateCacheSize: Long = 10000L
   val DefaultMaxContractKeyStateCacheSize: Long = 10000L
-  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 1000
+  val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 1100
   val DefaultApiStreamShutdownTimeout: Duration = FiniteDuration(5, "seconds")
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
   val PreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
@@ -95,6 +96,7 @@ object IndexServiceConfig {
   val DefaultContractPruningMaxRetries: Int = 10
   val DefaultContractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(2)
+  val DefaultMaxLookupLimit: Int = 1000
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {
     val numberOfThreads = Threading.detectNumberOfThreads(logger).value

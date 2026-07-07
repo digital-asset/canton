@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.sequencer
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -28,6 +27,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   Recipients,
 }
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.nonempty.NonEmpty
 import org.scalactic.source.Position
 import org.scalatest.Assertion
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
@@ -164,11 +164,11 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
       val ts = env.environment.clock.now
       val maxTs = ts.plusSeconds(300)
       val timestamps = SendRequestTimestamps(
-        topologyTimestamp = Some(ts.minusSeconds(5)),
+        topologyTimestamp = None,
         approximateTimestampForSigning = ts,
         maxSequencingTime = maxTs,
       )
-      val aggregationRule = AggregationRule(
+      val aggregationRule = AggregationRule.testing(
         NonEmpty(Seq, participant1.id, participant2.id),
         PositiveInt.tryCreate(2),
         testedProtocolVersion,

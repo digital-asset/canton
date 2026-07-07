@@ -5,13 +5,13 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.{BinaryFileUtil, ReassignmentTag}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.{ByteString, InvalidProtocolBufferException}
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -24,7 +24,8 @@ import scala.util.control.NonFatal
   * Parameters and concepts are explained in
   * [[https://github.com/DACH-NY/canton/blob/main/contributing/how-to-choose-BaseVersioningCompanion.md contributing guide]]
   */
-trait BaseVersioningCompanion[
+trait BaseVersioningCompanionF[
+    F[_],
     ValueClass <: HasRepresentativeProtocolVersion,
     Context,
     DeserializedValueClass <: HasRepresentativeProtocolVersion,
@@ -35,20 +36,15 @@ trait BaseVersioningCompanion[
   def name: String
 
   type Codec =
-    ProtoCodec[ValueClass, Context, DeserializedValueClass, this.type, Dependency]
+    ProtoCodec[F, ValueClass, Context, DeserializedValueClass, this.type, Dependency]
 
   type Deserializer =
     (Context, OriginalByteString, DataByteString) => ParsingResult[DeserializedValueClass]
 
   protected type ThisRepresentativeProtocolVersion = RepresentativeProtocolVersion[this.type]
 
-  type VersioningTable = SupportedProtoVersions[
-    ValueClass,
-    Context,
-    DeserializedValueClass,
-    this.type,
-    Dependency,
-  ]
+  type VersioningTable =
+    SupportedProtoVersions[F, ValueClass, Context, DeserializedValueClass, this.type, Dependency]
 
   protected type Invariants = Seq[Invariant[ValueClass, this.type]]
 
@@ -82,7 +78,7 @@ trait BaseVersioningCompanion[
     versioningTable.protocolVersionRepresentativeFor(protoVersion)
 
   def converterFor(
-      protocolVersion: RepresentativeProtocolVersion[BaseVersioningCompanion.this.type]
+      protocolVersion: RepresentativeProtocolVersion[BaseVersioningCompanionF.this.type]
   ): ParsingResult[Codec] = versioningTable.converterFor(protocolVersion)
 
   /** Return the Proto version corresponding to the representative protocol version
@@ -353,10 +349,11 @@ trait BaseVersioningCompanion[
     )
 }
 
-trait VersioningCompanionMemoization2[
-    ValueClass <: HasRepresentativeProtocolVersion,
-    DeserializedValueClass <: HasRepresentativeProtocolVersion,
-] extends BaseVersioningCompanion[
+trait VersioningCompanionMemoization2F[F[
+    _
+], ValueClass <: HasRepresentativeProtocolVersion, DeserializedValueClass <: HasRepresentativeProtocolVersion]
+    extends BaseVersioningCompanionF[
+      F,
       ValueClass,
       Unit, // Context
       DeserializedValueClass,
@@ -373,17 +370,10 @@ trait VersioningCompanionMemoization2[
       ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(_)(original))
 }
 
-trait VersioningCompanionContextMemoization2[
-    ValueClass <: HasRepresentativeProtocolVersion,
-    Context,
-    DeserializedValueClass <: HasRepresentativeProtocolVersion,
-    Dependency,
-] extends BaseVersioningCompanion[
-      ValueClass,
-      Context,
-      DeserializedValueClass,
-      Dependency,
-    ] {
+trait VersioningCompanionContextMemoization2F[F[
+    _
+], ValueClass <: HasRepresentativeProtocolVersion, Context, DeserializedValueClass <: HasRepresentativeProtocolVersion, Dependency]
+    extends BaseVersioningCompanionF[F, ValueClass, Context, DeserializedValueClass, Dependency] {
 
   protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
       p: scalapb.GeneratedMessageCompanion[Proto]
@@ -394,10 +384,11 @@ trait VersioningCompanionContextMemoization2[
       ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(ctx, _)(original))
 }
 
-trait VersioningCompanion2[
-    ValueClass <: HasRepresentativeProtocolVersion,
-    DeserializedValueClass <: HasRepresentativeProtocolVersion,
-] extends BaseVersioningCompanion[
+trait VersioningCompanion2F[F[
+    _
+], ValueClass <: HasRepresentativeProtocolVersion, DeserializedValueClass <: HasRepresentativeProtocolVersion]
+    extends BaseVersioningCompanionF[
+      F,
       ValueClass,
       Unit, // Context
       DeserializedValueClass,
@@ -432,16 +423,12 @@ trait VersioningCompanion2[
   }
 }
 
-trait VersioningCompanionContext2[
+trait VersioningCompanionContext2F[
+    F[_],
     ValueClass <: HasRepresentativeProtocolVersion,
     DeserializedValueClass <: HasRepresentativeProtocolVersion,
     Context,
-] extends BaseVersioningCompanion[
-      ValueClass,
-      Context,
-      DeserializedValueClass,
-      Unit,
-    ] {
+] extends BaseVersioningCompanionF[F, ValueClass, Context, DeserializedValueClass, Unit] {
 
   @nowarn("msg=parameter _original in anonymous function is never used")
   protected def supportedProtoVersion[Proto <: scalapb.GeneratedMessage](
@@ -460,10 +447,11 @@ trait VersioningCompanionContext2[
   * Replaces `.fromByteString(protocolVersion)((context, protocolVersion))(bytes)` with
   * `.fromByteString(context, protocolVersion)(bytes)`.
   */
-trait VersioningCompanionContextPVValidation2[
-    ValueClass <: HasRepresentativeProtocolVersion,
-    RawContext,
-] extends VersioningCompanionContext2[
+trait VersioningCompanionContextPVValidation2F[F[
+    _
+], ValueClass <: HasRepresentativeProtocolVersion, RawContext]
+    extends VersioningCompanionContext2F[
+      F,
       ValueClass,
       ValueClass,
       (RawContext, ProtocolVersion),
@@ -477,11 +465,11 @@ trait VersioningCompanionContextPVValidation2[
 /** Similar to [[VersioningCompanionContextPVValidation2]] but the deserialization context contains
   * a Source or Target of [[com.digitalasset.canton.version.ProtocolVersion]] for validation.
   */
-trait VersioningCompanionContextTaggedPVValidation2[
-    ValueClass <: HasRepresentativeProtocolVersion,
-    T[X] <: ReassignmentTag[X],
-    RawContext,
-] extends VersioningCompanionContext2[
+trait VersioningCompanionContextTaggedPVValidation2F[F[
+    _
+], ValueClass <: HasRepresentativeProtocolVersion, T[X] <: ReassignmentTag[X], RawContext]
+    extends VersioningCompanionContext2F[
+      F,
       ValueClass,
       ValueClass,
       (RawContext, T[ProtocolVersion]),

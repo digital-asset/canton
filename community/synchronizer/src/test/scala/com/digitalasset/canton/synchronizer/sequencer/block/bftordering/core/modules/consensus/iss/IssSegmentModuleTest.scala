@@ -2105,26 +2105,54 @@ class IssSegmentModuleTest
       }
     }
 
-    "receiving an internal block inactivity timeout" should {
-      "start ordering an empty block to avoid a view change" in {
-        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
-          new ProgrammableUnitTestContext
-        val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
-          otherNodes = otherIds.toSet,
-          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
-        )(epochInfo = SecondEpochInfo)
+    "receiving an internal block inactivity timeout" when {
 
-        consensus.receive(ConsensusSegment.Internal.BlockInactivityTimeout)
+      "not waiting for a reply from availability" should {
+        "start ordering an empty block to avoid a view change" in {
+          implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+            new ProgrammableUnitTestContext
+          val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+            otherNodes = otherIds.toSet,
+            cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          )(epochInfo = SecondEpochInfo)
 
-        context.runPipedMessages() should matchPattern {
-          case Seq(
-                MessageFromPipeToSelf(
-                  Some(PbftSignedNetworkMessage(SignedMessage(pp: PrePrepare, _))),
-                  _,
-                )
-              ) if pp.block.proofs.isEmpty =>
+          consensus.receive(ConsensusSegment.Internal.BlockInactivityTimeout)
+
+          context.runPipedMessages() should matchPattern {
+            case Seq(
+                  MessageFromPipeToSelf(
+                    Some(PbftSignedNetworkMessage(SignedMessage(pp: PrePrepare, _))),
+                    _,
+                  )
+                ) if pp.block.proofs.isEmpty =>
+          }
+          succeed
         }
-        succeed
+      }
+
+      "waiting for a reply from availability" should {
+        "re-schedule it to avoid being stuck if there is no traffic" in {
+          implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+            new ProgrammableUnitTestContext
+          val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+            otherNodes = otherIds.toSet,
+            cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          )(epochInfo = SecondEpochInfo)
+
+          // start message initiates a pull to availability which we start to wait for a response to
+          consensus.receive(ConsensusSegment.Start)
+
+          context.delayedMessages should contain(ConsensusSegment.Internal.BlockInactivityTimeout)
+
+          context.runDelayedMessages(consensus) {
+            case ConsensusSegment.Internal.BlockInactivityTimeout => true
+            case _ => false
+          }
+
+          context.delayedMessages should contain(ConsensusSegment.Internal.BlockInactivityTimeout)
+          context.sizeOfPipedMessages shouldBe 0
+          context.selfMessages shouldBe empty
+        }
       }
     }
 
@@ -2245,11 +2273,11 @@ class IssSegmentModuleTest
       parentModuleRef,
       availabilityModuleRef,
       p2pNetworkOutModuleRef,
-      config.consensusBlockCompletionTimeout,
       config.consensusEmptyBlockCreationTimeout,
       metrics,
       timeouts,
       loggerFactory,
+      traceContext,
     )
   }
 

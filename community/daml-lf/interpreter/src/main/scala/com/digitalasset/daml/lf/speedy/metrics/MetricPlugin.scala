@@ -9,6 +9,8 @@ trait MetricPlugin {
   def incrCount(ctx: MetricPlugin.Ctx*): Unit
 
   def totalCount: Result
+
+  def reset(): Unit
 }
 
 object MetricPlugin {

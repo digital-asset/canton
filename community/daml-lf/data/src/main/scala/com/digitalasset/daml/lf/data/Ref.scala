@@ -4,10 +4,10 @@
 package com.digitalasset.daml.lf
 package data
 
+import cats.instances.either.*
+import cats.instances.list.*
+import cats.syntax.traverse.*
 import com.daml.scalautil.Statement.discard
-import scalaz.Scalaz.eitherMonad
-import scalaz.std.list.*
-import scalaz.syntax.traverse.*
 
 object Ref {
 

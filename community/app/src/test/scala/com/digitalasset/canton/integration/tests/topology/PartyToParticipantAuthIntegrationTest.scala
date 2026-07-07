@@ -9,7 +9,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   HashingSchemeVersion,
   PrepareSubmissionResponse,
 }
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -30,11 +29,13 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.slf4j.event.Level
 
 import java.util.UUID
+import scala.concurrent.ExecutionContext
 
 trait PartyToParticipantAuthIntegrationTest
     extends CommunityIntegrationTest
@@ -1096,7 +1097,10 @@ trait PartyToParticipantAuthIntegrationTest
       fingerprints: Seq[Fingerprint],
       serial: PositiveInt = PositiveInt.one,
       topologyChangeOp: TopologyChangeOp = TopologyChangeOp.Replace,
-  )(implicit env: FixtureParam): SignedTopologyTransaction[TopologyChangeOp, TopologyMapping] = {
+  )(implicit
+      env: FixtureParam,
+      ec: ExecutionContext,
+  ): SignedTopologyTransaction[TopologyChangeOp, TopologyMapping] = {
     val tx =
       topologyTransaction(topologyMapping, serial = serial, topologyChangeOp = topologyChangeOp)
 
@@ -1128,13 +1132,13 @@ trait PartyToParticipantAuthIntegrationTest
   private def sign[Op <: TopologyChangeOp, M <: TopologyMapping](
       topologyTransaction: TopologyTransaction[Op, M],
       fingerprint: Fingerprint,
-  )(implicit env: FixtureParam): Signature =
+  )(implicit env: FixtureParam, ec: ExecutionContext): Signature =
     signBytes(topologyTransaction.hash.hash.getCryptographicEvidence, fingerprint)
 
   private def signBytes(
       bytes: ByteString,
       fingerprint: Fingerprint,
-  )(implicit env: FixtureParam): Signature =
+  )(implicit env: FixtureParam, ec: ExecutionContext): Signature =
     env.tryGlobalCrypto.privateCrypto
       .signBytes(
         bytes,
@@ -1148,7 +1152,7 @@ trait PartyToParticipantAuthIntegrationTest
       participant: ParticipantReference,
       partyId: PartyId,
       signingKey: SigningPublicKey,
-  )(implicit env: FixtureParam): ExecuteSubmissionAndWaitResponse = {
+  )(implicit env: FixtureParam, ec: ExecutionContext): ExecuteSubmissionAndWaitResponse = {
     val prepared: PrepareSubmissionResponse =
       participant.ledger_api.javaapi.interactive_submission.prepare(
         Seq(partyId),

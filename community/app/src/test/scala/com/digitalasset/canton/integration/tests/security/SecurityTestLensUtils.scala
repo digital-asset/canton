@@ -5,9 +5,6 @@ package com.digitalasset.canton.integration.tests.security
 
 import cats.instances.list.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmptyUtil.instances.*
-import com.daml.nonempty.catsinstances.*
-import com.daml.nonempty.{NonEmpty, NonEmptyF}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApi}
@@ -26,6 +23,8 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.util.SetsUtil.instances.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmptyUtil.instances.*
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyF}
 import monocle.function.Each
 import monocle.macros.{GenLens, GenPrism}
 import monocle.{Lens, Traversal}
@@ -117,7 +116,7 @@ trait SecurityTestLensUtils {
     )
 
   def firstViewCommonData: Lens[GenTransactionTree, ViewCommonData] =
-    GenTransactionTree.rootViewsUnsafe
+    GenTransactionTree.Optics.rootViewsUnsafe
       .andThen(firstElement[TransactionView])
       .andThen(TransactionView.Optics.viewCommonDataUnsafe)
       .andThen(MerkleTree.tryUnwrap[ViewCommonData])

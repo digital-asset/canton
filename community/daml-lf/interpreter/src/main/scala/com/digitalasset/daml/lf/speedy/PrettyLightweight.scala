@@ -4,17 +4,16 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.speedy.Speedy._
-import com.digitalasset.daml.lf.speedy.SExpr._
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.Speedy.*
 
 private[speedy] object PrettyLightweight { // lightweight pretty printer for CEK machine states
 
-  def ppMachine(m: Machine[_]): String = {
+  def ppMachine(m: Machine[?]): String =
     s"[${m.currentEnvBase}] ${ppEnv(m.currentEnv)} -- ${ppCtrl(m.currentControl)} -- ${ppKontStack(m)}"
-  }
 
-  def ppCtrl(control: Control[_]): String =
+  def ppCtrl(control: Control[?]): String =
     control match {
       case Control.Value(v) => s"V-${pp(v)}"
       case Control.Expression(e) => s"E-${pp(e)}"
@@ -24,20 +23,19 @@ private[speedy] object PrettyLightweight { // lightweight pretty printer for CEK
       case Control.WeAreUnset => "unset"
     }
 
-  def ppEnv(env: Env): String = {
+  def ppEnv(env: Env): String =
     s"#${env.size}={${commas(env.view.map(pp))}}"
-  }
 
-  def ppKontStack(m: Machine[_]): String = {
+  def ppKontStack(m: Machine[?]): String = {
     val depth = m.kontDepth()
     if (depth == 0) {
       s"[#0]"
     } else {
-      s"[${ppKont(m.peekKontStackEnd())}... #${depth}]" // head kont & size
+      s"[${ppKont(m.peekKontStackEnd())}... #$depth]" // head kont & size
     }
   }
 
-  def ppKont(k: Kont[_]): String = k.getClass.getSimpleName
+  def ppKont(k: Kont[?]): String = k.getClass.getSimpleName
 
   def pp(v: SELoc) = v match {
     case SELocS(n) => s"S#$n"
@@ -45,9 +43,8 @@ private[speedy] object PrettyLightweight { // lightweight pretty printer for CEK
     case SELocF(n) => s"F#$n"
   }
 
-  def pp(x: SDefinitionRef): String = {
+  def pp(x: SDefinitionRef): String =
     s"${x.ref.qualifiedName.name}"
-  }
 
   def pp(e: SExpr): String = e match {
     case SEValue(v) => s"(VALUE)${pp(v)}"

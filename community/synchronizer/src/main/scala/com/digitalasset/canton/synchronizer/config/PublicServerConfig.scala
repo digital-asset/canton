@@ -56,6 +56,8 @@ final case class PublicServerConfig(
     override val maxConcurrentCallsPerConnection: NonNegativeInt =
       ServerConfig.defaultMaxConcurrentCallsPerConnection,
     maxAuthTokensPerMember: PositiveInt = PublicServerConfig.defaultMaxAuthTokensPerMember,
+    maxAuthNoncesPerMember: PositiveInt = PublicServerConfig.defaultMaxAuthNoncesPerMember,
+    maxSubscriptionsPerMember: PositiveInt = PublicServerConfig.defaultMaxSubscriptionsPerMember,
     useExponentialRandomTokenExpiration: Boolean = false,
     overrideMaxRequestSize: Option[NonNegativeInt] = None,
     override val maxTokenLifetime: NonNegativeDuration = config.NonNegativeDuration(Duration.Inf),
@@ -92,6 +94,8 @@ final case class PublicServerConfig(
 
 object PublicServerConfig {
   private val defaultMaxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25)
+  private val defaultMaxAuthNoncesPerMember: PositiveInt = PositiveInt.tryCreate(25)
+  private val defaultMaxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5)
   private val defaultNonceExpirationInterval: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(1)
   private val defaultMaxTokenExpirationInterval: NonNegativeFiniteDuration =

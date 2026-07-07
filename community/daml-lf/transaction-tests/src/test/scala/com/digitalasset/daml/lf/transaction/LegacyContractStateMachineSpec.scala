@@ -6,6 +6,7 @@ package lf
 package transaction
 
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.CidOptionOps
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.{
   ActiveLedgerState,
   KeyActive,
@@ -13,26 +14,26 @@ import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.{
   KeyMapping,
   KeyResolver,
 }
-import com.digitalasset.daml.lf.transaction.LegacyContractStateMachineSpec._
-import com.digitalasset.daml.lf.transaction.Transaction.{
-  ChildrenRecursion,
-  KeyCreate,
-  KeyInput,
-  NegativeKeyLookup,
-}
+import com.digitalasset.daml.lf.transaction.LegacyContractStateMachineSpec.*
 import com.digitalasset.daml.lf.transaction.LegacyTransactionErrors.{
   DuplicateContractId,
   DuplicateContractKey,
   InconsistentContractKey,
   KeyInputError,
 }
-import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
+import com.digitalasset.daml.lf.transaction.Transaction.{
+  ChildrenRecursion,
+  KeyCreate,
+  KeyInput,
+  NegativeKeyLookup,
+}
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
   defaultPackageId,
   toIdentifier,
   toName,
   toParty,
 }
+import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.scalatest.matchers.should.Matchers
@@ -41,7 +42,10 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.language.implicitConversions
 
-class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
+class LegacyContractStateMachineSpec
+    extends AnyWordSpec
+    with Matchers
+    with TableDrivenPropertyChecks {
 
   val alice: Ref.Party = "Alice"
   val aliceS: Set[Ref.Party] = Set(alice)
@@ -64,10 +68,10 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
   }
 
   private def toKeyWithMaintainers(
-                                    templateId: Ref.TypeConId,
-                                    key: String,
-                                  ): GlobalKeyWithMaintainers =
-    GlobalKeyWithMaintainers.assertBuild(
+      templateId: Ref.TypeConId,
+      key: String,
+  ): GlobalKeyWithMaintainers =
+    GlobalKeyWithMaintainers(
       templateId,
       Value.ValueText(key),
       crypto.Hash.hashPrivateKey(key),
@@ -76,14 +80,14 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
     )
 
   private def toOptKeyWithMaintainers(
-                                       templateId: Ref.TypeConId,
-                                       key: String,
-                                     ): Option[GlobalKeyWithMaintainers] =
+      templateId: Ref.TypeConId,
+      key: String,
+  ): Option[GlobalKeyWithMaintainers] =
     if (key.isEmpty) None
     else Some(toKeyWithMaintainers(templateId, key))
 
   def gkey(key: String): GlobalKey =
-    GlobalKey.assertBuild(
+    GlobalKey(
       templateId,
       pkgName,
       Value.ValueText(key),
@@ -91,9 +95,9 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
     )
 
   def mkCreate(
-                contractId: ContractId,
-                key: String = "",
-              ): Node.Create =
+      contractId: ContractId,
+      key: String = "",
+  ): Node.Create =
     Node.Create(
       coid = contractId,
       packageName = pkgName,
@@ -106,11 +110,11 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
     )
 
   def mkExercise(
-                  contractId: ContractId,
-                  consuming: Boolean = true,
-                  key: String = "",
-                  byKey: Boolean = false,
-                ): Node.Exercise = {
+      contractId: ContractId,
+      consuming: Boolean = true,
+      key: String = "",
+      byKey: Boolean = false,
+  ): Node.Exercise =
     Node.Exercise(
       targetCoid = contractId,
       packageName = pkgName,
@@ -131,13 +135,12 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
       externalCallResults = ImmArray.empty,
       version = txVersion,
     )
-  }
 
   def mkFetch(
-               contractId: ContractId,
-               key: String = "",
-               byKey: Boolean = false,
-             ): Node.Fetch = {
+      contractId: ContractId,
+      key: String = "",
+      byKey: Boolean = false,
+  ): Node.Fetch =
     Node.Fetch(
       coid = contractId,
       packageName = pkgName,
@@ -150,17 +153,17 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
       version = txVersion,
       interfaceId = None,
     )
-  }
 
   def mkLookupByKey(
-                     key: String,
-                     contractId: Option[ContractId],
-                   ): Node.LookupByKey =
-    Node.LookupByKey(
+      key: String,
+      contractId: Option[ContractId],
+  ): Node.QueryByKey =
+    Node.QueryByKey(
       packageName = pkgName,
       templateId = templateId,
+      exhaustive = contractId.isEmpty,
       key = toKeyWithMaintainers(templateId, key),
-      result = contractId,
+      result = contractId.asCidVector,
       version = txVersion,
     )
 
@@ -793,35 +796,45 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
   }
 
   private def children(node: Node): ImmArray[NodeId] = node match {
-    case _: Node.Create | _: Node.Fetch | _: Node.LookupByKey => ImmArray.empty[NodeId]
+    case _: Node.Create | _: Node.Fetch | _: Node.QueryByKey => ImmArray.empty[NodeId]
     case exercise: Node.Exercise => exercise.children
     case rollback: Node.Rollback => rollback.children
   }
 
-  /** Visits the `root` node and all its children in execution order and updates the `state` accordingly,
-   * using the following methods on [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State]]:
-   * - [[com.digitalasset.daml.lf.transaction.Node.Create]] calls [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.visitCreate]]
-   * - [[com.digitalasset.daml.lf.transaction.Node.Fetch]] calls [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleFetch]]
-   * - [[com.digitalasset.daml.lf.transaction.Node.Exercise]] calls [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleExercise]]
-   *   before visiting the children
-   * - [[com.digitalasset.daml.lf.transaction.Node.LookupByKey]] calls [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleLookup]]
-   *   in mode [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]] and
-   *   [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleLookupWith]]
-   *   in modes [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]] using the `resolver`.
-   * - [[com.digitalasset.daml.lf.transaction.Node.Rollback]] calls [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.beginRollback]]
-   *   before visiting the children and
-   *   [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.endRollback]] after visiting the children.
-   *
-   * @param resolver The resolver used in modes [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]]
-   *                 for handling [[com.digitalasset.daml.lf.transaction.Node.LookupByKey]].
-   *                 Ignored in mode [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]].
-   */
+  /** Visits the `root` node and all its children in execution order and updates the `state`
+    * accordingly, using the following methods on
+    * [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State]]:
+    *   - [[com.digitalasset.daml.lf.transaction.Node.Create]] calls
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.visitCreate]]
+    *   - [[com.digitalasset.daml.lf.transaction.Node.Fetch]] calls
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleFetch]]
+    *   - [[com.digitalasset.daml.lf.transaction.Node.Exercise]] calls
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleExercise]]
+    *     before visiting the children
+    *   - [[com.digitalasset.daml.lf.transaction.Node.QueryByKey]] calls
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleLookup]] in
+    *     mode [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]] and
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.handleLookupWith]]
+    *     in modes [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]] using
+    *     the `resolver`.
+    *   - [[com.digitalasset.daml.lf.transaction.Node.Rollback]] calls
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.beginRollback]]
+    *     before visiting the children and
+    *     [[com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.State.endRollback]]
+    *     after visiting the children.
+    *
+    * @param resolver
+    *   The resolver used in modes
+    *   [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]] for handling
+    *   [[com.digitalasset.daml.lf.transaction.Node.QueryByKey]]. Ignored in mode
+    *   [[com.digitalasset.daml.lf.transaction.LegacyContractKeyUniquenessMode.Strict]].
+    */
   private def visitSubtree(
-                            nodes: Map[NodeId, Node],
-                            root: NodeId,
-                            resolver: KeyResolver,
-                            state: LegacyContractStateMachine.State[Unit],
-                          ): Either[KeyInputError, LegacyContractStateMachine.State[Unit]] = {
+      nodes: Map[NodeId, Node],
+      root: NodeId,
+      resolver: KeyResolver,
+      state: LegacyContractStateMachine.State[Unit],
+  ): Either[KeyInputError, LegacyContractStateMachine.State[Unit]] = {
     val node = nodes(root)
     for {
       next <- node match {
@@ -840,18 +853,19 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
     } yield exited
   }
 
-  /** Fully visits the trees rooted at `roots` in execution order.
-   * For each subtree visited, additionally visit this subtree starting from the initial state
-   * and check that advancing the current state yields the same resulting state
-   *
-   * @see visitSubtree for how visiting nodes updates the state
-   */
+  /** Fully visits the trees rooted at `roots` in execution order. For each subtree visited,
+    * additionally visit this subtree starting from the initial state and check that advancing the
+    * current state yields the same resulting state
+    *
+    * @see
+    *   visitSubtree for how visiting nodes updates the state
+    */
   private def visitSubtrees(
-                             nodes: Map[NodeId, Node],
-                             roots: Seq[NodeId],
-                             resolver: KeyResolver,
-                             state: LegacyContractStateMachine.State[Unit],
-                           ): Either[KeyInputError, LegacyContractStateMachine.State[Unit]] = {
+      nodes: Map[NodeId, Node],
+      roots: Seq[NodeId],
+      resolver: KeyResolver,
+      state: LegacyContractStateMachine.State[Unit],
+  ): Either[KeyInputError, LegacyContractStateMachine.State[Unit]] =
     roots match {
       case Seq() => Right(state)
       case root +: tail =>
@@ -881,36 +895,35 @@ class LegacyContractStateMachineSpec extends AnyWordSpec with Matchers with Tabl
         }
         directVisit.flatMap(next => visitSubtrees(nodes, tail, resolver, next))
     }
-  }
 }
 
 object LegacyContractStateMachineSpec {
 
-  import BackwardsCompatibilityImplicits._
+  import BackwardsCompatibilityImplicits.*
 
   type TestResult =
     Either[KeyInputError, (Map[GlobalKey, KeyInput], ActiveLedgerState[Unit], Set[ContractId])]
   case class TestCase(
-                       name: String,
-                       transaction: HasTxNodes[_],
-                       resolver: KeyResolver,
-                       expected: Map[LegacyContractKeyUniquenessMode, TestResult],
-                     )
+      name: String,
+      transaction: HasTxNodes[?],
+      resolver: KeyResolver,
+      expected: Map[LegacyContractKeyUniquenessMode, TestResult],
+  )
 
   object TestCase {
     def apply(
-               name: String,
-               transaction: HasTxNodes[_],
-               expected: Map[LegacyContractKeyUniquenessMode, TestResult],
-             ): TestCase = TestCase(name, transaction, resolverFromTx(transaction), expected)
+        name: String,
+        transaction: HasTxNodes[?],
+        expected: Map[LegacyContractKeyUniquenessMode, TestResult],
+    ): TestCase = TestCase(name, transaction, resolverFromTx(transaction), expected)
   }
 
-  def resolverFromTx(tx: HasTxNodes[_]): KeyResolver = {
+  def resolverFromTx(tx: HasTxNodes[?]): KeyResolver = {
     def updateKey(
-                   resolver: KeyResolver,
-                   mbKey: Option[GlobalKey],
-                   mapping: KeyMapping,
-                 ): KeyResolver = mbKey.fold(resolver) { gkey =>
+        resolver: KeyResolver,
+        mbKey: Option[GlobalKey],
+        mapping: KeyMapping,
+    ): KeyResolver = mbKey.fold(resolver) { gkey =>
       if (resolver.contains(gkey)) resolver else resolver.updated(gkey, mapping)
     }
 
@@ -924,7 +937,7 @@ object LegacyContractStateMachineSpec {
           case create: Node.Create => updateKey(s, create.gkeyOpt, KeyInactive)
           case fetch: Node.Fetch =>
             updateKey(s, fetch.gkeyOpt, KeyActive(fetch.coid))
-          case lookup: Node.LookupByKey =>
+          case lookup: Node.QueryByKey =>
             updateKey(s, Some(lookup.gkey), lookup.result.asCidOption)
         },
       rollbackBegin = (s, _, _) => s -> ChildrenRecursion.DoRecurse,

@@ -121,7 +121,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
   private def mkDeliver(
       ts: CantonTimestamp,
       batch: Batch[DefaultOpenEnvelope],
-  ): Deliver[DefaultOpenEnvelope] =
+  ): Deliver[Batch[DefaultOpenEnvelope]] =
     Deliver.create(
       None,
       ts,

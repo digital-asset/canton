@@ -990,6 +990,20 @@ class DecodeV2Spec
       }
     }
 
+    s"decode EXTERNAL_CALL iff version in ${LV.featureExternalCall}" in {
+      val proto = toProtoExpr(DamlLf2.BuiltinFunction.EXTERNAL_CALL)
+      val expected = Ast.EBuiltinFun(Ast.BExternalCall)
+
+      forEveryVersion { version =>
+        val result = Try(moduleDecoder(version).decodeExprForTest(proto, "test"))
+
+        if (LV.featureExternalCall.enabledIn(version))
+          result shouldBe Success(expected)
+        else
+          inside(result) { case Failure(error) => error shouldBe a[Error.Parsing] }
+      }
+    }
+
     s"decode interface update" in {
       val testCases = {
 
@@ -1343,7 +1357,7 @@ class DecodeV2Spec
         .setUpdate(update)
         .build()
 
-      forEveryVersionSuchThat(LV.featureNUCK.enabledIn(_)) { version =>
+      forEveryVersionSuchThat(LV.featureContractKeys.enabledIn(_)) { version =>
         val decoder = new DecodeV2(version.minor)
         val env = decoder.Env(
           packageId = Ref.PackageId.assertFromString("noPkgId"),
@@ -1373,14 +1387,14 @@ class DecodeV2Spec
         .setUpdate(update)
         .build()
 
-      forEveryVersionSuchThat(!LV.featureNUCK.enabledIn(_)) { version =>
+      forEveryVersionSuchThat(!LV.featureContractKeys.enabledIn(_)) { version =>
         val decoder = new DecodeV2(version.minor)
         val env = decoder.Env(
           packageId = Ref.PackageId.assertFromString("noPkgId"),
           internedDottedNames = ImmArraySeq("Mod", "T").map(Ref.DottedName.assertFromString),
         )
         inside(Try(env.decodeExprForTest(expr, "test"))) { case Failure(Error.Parsing(message)) =>
-          message should include("Non-unique contract keys is not supported by Daml-LF")
+          message should include("Contract Keys is not supported by Daml-LF")
         }
       }
     }

@@ -253,7 +253,7 @@ class ContractValidatorTest
         "using a changed key value" should {
           "fail authentication" in {
             val changeKey = keyWithMaintainers.copy(globalKey =
-              LfGlobalKey.assertBuild(
+              LfGlobalKey(
                 contractInstanceWithKey.templateId,
                 contractInstanceWithKey.inst.packageName,
                 ValueText("changed"),

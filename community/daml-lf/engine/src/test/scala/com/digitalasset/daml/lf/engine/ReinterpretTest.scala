@@ -4,23 +4,32 @@
 package com.digitalasset.daml.lf
 package engine
 
-import java.util.zip.ZipInputStream
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine => ContractStateMachine, FatContractInstance, Node, NodeId, SerializationVersion, SubmittedTransaction, Transaction}
-import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command.ReplayCommand
+import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  NextGenContractStateMachine as ContractStateMachine,
+  Node,
+  NodeId,
+  SerializationVersion,
+  SubmittedTransaction,
+  Transaction,
+}
 import com.digitalasset.daml.lf.value.ContractIdVersion
-import org.scalatest.prop.TableDrivenPropertyChecks
+import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.EitherValues
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
+import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.zip.ZipInputStream
 import scala.language.implicitConversions
 
 class ReinterpretTestV2 extends ReinterpretTest(LanguageVersion.Major.V2)
@@ -32,7 +41,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
     with EitherValues
     with SuppressingLogging {
 
-  import ReinterpretTest._
+  import ReinterpretTest.*
 
   private[this] val version = SerializationVersion.assign(hasKey = false)
 
@@ -67,7 +76,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
 
   private def freshEngine = new Engine(
     EngineConfig(
-      allowedLanguageVersions = language.LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = language.LanguageVersion.allLfVersions,
       forbidLocalContractIds = true,
     ),
     loggerFactory,
@@ -96,7 +105,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
         time,
         time,
         contractIdVersion,
-        contractStateMode,
+        InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
       )
       .consume(pcs = defaultContracts, pkgs = allPackages)
     res match {
@@ -187,7 +196,6 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
       ReplayCommand.Fetch(templateId, Some(interfaceId), toContractId("cid")) ->
         List(templatePkgId, interfacePkgId),
       ReplayCommand.FetchByKey(templateId, ValueUnit) -> List(templatePkgId),
-      ReplayCommand.LookupByKey(templateId, ValueUnit) -> List(templatePkgId),
     )
 
     forEvery(testCases) { (cmd, pkgIds) =>
@@ -219,7 +227,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
           time,
           time,
           contractIdVersion,
-          contractStateMode,
+          InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         )
         .consume(pkgs = trackPackageQueries)
       pkgIds.toSet shouldBe queriedPackageIds
@@ -249,14 +257,13 @@ object ReinterpretTest {
     final case class Create() extends Shape
 
     def ofTransaction(tx: Transaction): Top = {
-      def ofNid(nid: NodeId): Shape = {
+      def ofNid(nid: NodeId): Shape =
         tx.nodes(nid) match {
           case node: Node.Exercise => Exercise(node.children.toList.map(ofNid))
           case node: Node.Rollback => Rollback(node.children.toList.map(ofNid))
           case _: Node.Create => Create()
           case _ => sys.error(s"Shape.ofTransaction, unexpected tx node")
         }
-      }
       Top(tx.roots.toList.map(nid => ofNid(nid)))
     }
   }

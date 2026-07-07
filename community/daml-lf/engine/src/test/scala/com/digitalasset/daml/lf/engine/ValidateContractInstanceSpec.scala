@@ -20,17 +20,18 @@ import com.digitalasset.daml.lf.transaction.{
   Node,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.value.{Value => V}
-import org.scalatest.{EitherValues, Inside}
+import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatest.{EitherValues, Inside}
 
 import scala.collection.immutable.ArraySeq
 
-/** Tests for [[Engine.validateContractInstance]]. This method is a proxy for [fetchTemplate] which is
-  * already thoroughly tested in [[EngineTest]] and [[com.digitalasset.daml.lf.speedy.ValueTranslatorSpec]] so we only
-  * test here that things are properly wired. For instance, we don't test every single way a contract can be ill-typed.
+/** Tests for [[Engine.validateContractInstance]]. This method is a proxy for [fetchTemplate] which
+  * is already thoroughly tested in [[EngineTest]] and
+  * [[com.digitalasset.daml.lf.speedy.ValueTranslatorSpec]] so we only test here that things are
+  * properly wired. For instance, we don't test every single way a contract can be ill-typed.
   */
 class ValidateContractInstanceSpec
     extends AnyWordSpec
@@ -156,7 +157,7 @@ class ValidateContractInstanceSpec
   val compiledPkgs = PureCompiledPackages.build(Map(pkgId1 -> pkg1, pkgId2 -> pkg2), compilerConfig)
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.stableLfVersionsRange),
+    EngineConfig(LanguageVersion.stableLfVersions),
     loggerFactory,
   )
 
@@ -193,10 +194,10 @@ class ValidateContractInstanceSpec
   val cidMapping = Map(cid0 -> cid1).withDefault(identity)
 
   val expectedLegacyHash = Hash
-    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendly = false)
+    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendlyUnsafe = false)
     .value
   val expectedUpgradeFriendlyHash = Hash
-    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendly = true)
+    .hashContractInstance(templateId, createArg(cid1), packageName, upgradeFriendlyUnsafe = true)
     .value
   val expectedTypedNormalFormHash = SValueHash
     .hashContractInstance(
@@ -221,7 +222,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         ("hashingMethod", "expectedHash"),
         (Hash.HashingMethod.Legacy, expectedLegacyHash),
-        (Hash.HashingMethod.UpgradeFriendly, expectedUpgradeFriendlyHash),
+        (Hash.HashingMethod.UpgradeFriendlyUnsafe, expectedUpgradeFriendlyHash),
         (Hash.HashingMethod.TypedNormalForm, expectedTypedNormalFormHash),
       )
 
@@ -258,7 +259,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -281,7 +282,7 @@ class ValidateContractInstanceSpec
             .consume(pkgs = Map(targetPackageId -> targetPackage))
 
           inside(result) { case Right(res) =>
-            res shouldBe a[Left[_, _]]
+            res shouldBe a[Left[?, ?]]
           }
         }
       }
@@ -292,7 +293,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -308,7 +309,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId3 -> pkg3))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -318,7 +319,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -334,7 +335,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId4 -> pkg4))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -344,7 +345,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -360,7 +361,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId5 -> pkg5))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -370,7 +371,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -386,7 +387,7 @@ class ValidateContractInstanceSpec
           .consume(pkgs = Map(pkgId6 -> pkg6))
 
         inside(result) { case Right(res) =>
-          res shouldBe a[Left[_, _]]
+          res shouldBe a[Left[?, ?]]
         }
       }
     }
@@ -396,7 +397,7 @@ class ValidateContractInstanceSpec
       val hashes = Table(
         "hashingMethod",
         Hash.HashingMethod.Legacy,
-        Hash.HashingMethod.UpgradeFriendly,
+        Hash.HashingMethod.UpgradeFriendlyUnsafe,
         Hash.HashingMethod.TypedNormalForm,
       )
 
@@ -411,7 +412,7 @@ class ValidateContractInstanceSpec
           )
           .consume(pkgs = Map.empty) // We reply with "not found" to any NeedPackage question
 
-        result shouldBe a[Left[_, _]] // consume reports ResultError as a Left
+        result shouldBe a[Left[?, ?]] // consume reports ResultError as a Left
       }
     }
   }

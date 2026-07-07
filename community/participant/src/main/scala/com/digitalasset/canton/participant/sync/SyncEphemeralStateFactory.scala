@@ -89,10 +89,10 @@ class SyncEphemeralStateFactoryImpl(
       _ <- ledgerApiIndexer.value.ensureNoProcessingForSynchronizer(
         persistentState.synchronizerIdx.synchronizerId
       )
-      synchronizerIndex <- ledgerApiIndexer.value.ledgerApiStore.value
+      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
       _ = logger.info(
-        s"Computing starting points for ${persistentState.psid} with $synchronizerIndex"
+        s"Computing starting points for ${persistentState.psid} with $synchronizerIndex and predecessor $synchronizerPredecessor"
       )
       startingPoints <- SyncEphemeralStateFactory.startingPoints(
         persistentState.requestJournalStore,
@@ -104,12 +104,16 @@ class SyncEphemeralStateFactoryImpl(
       _ <- SyncEphemeralStateFactory.cleanupPersistentState(persistentState, synchronizerIndex)
 
       /*
-      Taking the approximation here is not a problem. What might happen is that crash recovery will start at an older
-      point in time and re-process the synchronizer announcement. This will update the record order publisher with the value
-      of the successor a second time.
+        The approximate timestamp is set to the sequenced time of the most recently stored topology transaction.
+        Hence, if we use the approximate snapshot after a restart that happens just after processing the LSU
+        announcement, then the LSU announcement would be missing from the snapshot. Moreover, in that scenario,
+        the node does not process the LSU announcement again.
+        Taking the head snapshot ensures that LSU announcement is not missed.
        */
-      approximateSnapshot <- synchronizerCrypto.ips.currentSnapshotApproximation
-      synchronizerSuccessorO <- approximateSnapshot.announcedLsu()
+      synchronizerSuccessorO <- synchronizerCrypto.ips.headSnapshot.announcedLsu()
+      _ = logger.info(
+        s"Initializing the record order publisher with successor $synchronizerSuccessorO"
+      )
 
       recordOrderPublisher = RecordOrderPublisher(
         persistentState.psid,
@@ -368,6 +372,17 @@ object SyncEphemeralStateFactory {
       .map(_.recordTime)
       .getOrElse(CantonTimestamp.MinValue)
 
+  def currentTimeOfChange(synchronizerIndexO: Option[SynchronizerIndex]): TimeOfChange =
+    synchronizerIndexO
+      .map { si =>
+        val recordTime = si.recordTime
+        val repairCounterO = si.repairIndex
+          .filter(ri => ri.timestamp == recordTime)
+          .map(_.counter)
+        TimeOfChange(recordTime, repairCounterO)
+      }
+      .getOrElse(TimeOfChange(CantonTimestamp.MinValue))
+
   def nextRepairCounter(synchronizerIndexO: Option[SynchronizerIndex]): RepairCounter =
     synchronizerIndexO
       .flatMap(si =>
@@ -395,7 +410,11 @@ object SyncEphemeralStateFactory {
       ts = currentRecordTime(synchronizerIndexO),
       counterO = Some(nextRepairCounter(synchronizerIndexO)),
     )
-    logger.debug("Deleting dirty requests")
+
+    logger.info(
+      s"Cleaning up persistent state since sequencer timestamp $nextSequencerTimestamp and ACS watermark $nextTimeOfChange"
+    )
+
     for {
       _ <- persistentState.requestJournalStore.deleteSinceRequestTimestamp(
         // The nextSequencerTimestamp is a lower bound (smaller or equal than to) for the requestTimestamp for the nextSequencerCounter
@@ -407,6 +426,11 @@ object SyncEphemeralStateFactory {
       _ <- persistentState.reassignmentStore.deleteCompletionsSince(nextSequencerTimestamp)
       _ = logger.debug("Deleting registered fresh requests")
       _ <- persistentState.submissionTrackerStore.deleteSince(nextSequencerTimestamp)
+      _ <- persistentState.partyReplicationIndexingStoreIfOnPREnabled.traverse {
+        partyReplicationIndexingStore =>
+          logger.debug("Deleting party replication indexing activation changes")
+          partyReplicationIndexingStore.deleteSince(nextTimeOfChange.timestamp)
+      }
     } yield ()
   }
 }

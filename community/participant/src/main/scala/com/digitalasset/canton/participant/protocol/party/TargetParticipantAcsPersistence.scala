@@ -6,8 +6,6 @@ package com.digitalasset.canton.participant.protocol.party
 import cats.Eval
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.ContractReassignment
@@ -25,17 +23,16 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
 /** Target participant ACS persistence functionality shared between the OnPR sequencer channel
   * target processor and the file-based ACS importer.
-  * @param partyId
-  *   The party that is being replicated
   * @param requestId
   *   the online party replication, party add request identifier
   * @param partyOnboardingAt
@@ -50,7 +47,6 @@ import scala.concurrent.ExecutionContext
   *   indexing store to add imported contract information to for subsequent Ledger API indexing
   */
 abstract class TargetParticipantAcsPersistence(
-    partyId: PartyId,
     requestId: AddPartyRequestId,
     psid: PhysicalSynchronizerId,
     partyOnboardingAt: EffectiveTime,
@@ -104,8 +100,18 @@ abstract class TargetParticipantAcsPersistence(
         .addReplicatedContracts(requestId, partyOnboardingAt.value, replicatedContracts)
         .leftMap(e => s"Failed to add contracts $replicatedContracts to ActiveContractStore: $e")
 
+      indexingWatermark = PartyReplicationIndexingStore.Watermark(
+        toc.timestamp,
+        // Indexing tracks activations at the contract-level rather than per batch to allow indexing
+        // in different batches from the batches used for import.
+        replicationProgress.processedContractCount,
+      )
+
       _ <- EitherT.right[String](
-        indexingStore.addImportedContractActivations(partyId, toc, validatedActivations)
+        indexingStore.addImportedContractActivations(
+          indexingWatermark,
+          validatedActivations,
+        )
       )
       updatedProcessedContractsCount =
         replicationProgress.processedContractCount + NonNegativeLong.size(contracts)

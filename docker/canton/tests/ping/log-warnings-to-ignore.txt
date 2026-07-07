@@ -1,0 +1,4 @@
+# Add one ripgrep extended-regex pattern per line to suppress known-benign
+# WARN/ERROR lines from service logs. Lines starting with '#' and blank lines
+# are stripped by the caller before being passed to rg, so both may be used
+# freely as comments and separators.

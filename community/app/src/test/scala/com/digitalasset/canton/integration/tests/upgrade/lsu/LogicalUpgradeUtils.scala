@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
@@ -218,6 +219,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
         sequencerLivenessMargin,
         SubmissionRequestAmplification.NoAmplification,
         SequencerConnectionPoolDelays.default,
+        SubscriptionLivenessLimits.default,
       ),
     )
   }

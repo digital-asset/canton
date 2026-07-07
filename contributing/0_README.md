@@ -15,3 +15,5 @@ Finally, read the introductory sections of every other file in [the current fold
 so you get an idea of the Canton development ecosystem.
 You do not have to read all the details yet,
 you can leave that to the moment when you actually need the information.
+
+If while making the contribution you have utilized AI tools, read our guidelines [AI_POLICY.md](AI_POLICY.md).

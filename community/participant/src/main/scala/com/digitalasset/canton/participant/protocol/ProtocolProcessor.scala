@@ -11,7 +11,6 @@ import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.TestingConfigInternal
@@ -76,10 +75,12 @@ import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
@@ -173,6 +174,11 @@ abstract class ProtocolProcessor[
 
     val recentSnapshot = crypto.create(topologySnapshot)
     val explicitMediatorGroupIndex = steps.explicitMediatorGroup(submissionParam)
+
+    logger.debug(
+      s"Topology snapshot timestamp at submission: ${recentSnapshot.ipsSnapshot.timestamp}"
+    )
+
     for {
       _ <- steps.validateSubmittersNotOnboarding(submissionParam, topologySnapshot, participantId)
 
@@ -187,9 +193,7 @@ abstract class ProtocolProcessor[
       )
       (submission, pendingSubmission) =
         submissionData
-      _ = logger.debug(
-        s"Topology snapshot timestamp at submission: ${recentSnapshot.ipsSnapshot.timestamp}"
-      )
+
       result <- {
         submission match {
           case untracked: steps.UntrackedSubmission =>
@@ -448,6 +452,16 @@ abstract class ProtocolProcessor[
 
   protected def metricsContextForSubmissionParam(submissionParam: SubmissionParam): MetricsContext
 
+  @unused("default implementation")
+  protected def validateLocalTrafficCost(
+      submissionParam: SubmissionParam
+  )(
+      trafficCost: Long,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[Unit] =
+    // TODO(#33681): Remove default implementation
+    FutureUnlessShutdown.unit
+
   /** Submit the batch to the sequencer. Also registers `submissionParam` as pending submission.
     */
   private def submitInternal(
@@ -497,6 +511,8 @@ abstract class ProtocolProcessor[
             maxSequencingTime = maxSequencingTime,
           ),
           messageId = messageId,
+          trafficCostValidator = (trafficCost: Long, traceContext: TraceContext) =>
+            validateLocalTrafficCost(submissionParam)(trafficCost, traceContext),
           amplify = true,
           callback = res => sendResultP.trySuccess(res).discard,
         )
@@ -945,7 +961,7 @@ abstract class ProtocolProcessor[
         snapshot.ipsSnapshot
           .participantsWithSupportedFeature(
             Set(participantId),
-            ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer,
+            ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
           )
           .map(_.headOption.nonEmpty)
       )
@@ -1059,6 +1075,7 @@ abstract class ProtocolProcessor[
     )
 
     val submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp
+
     for {
       submissionTopologySnapshotO <- EitherT.right(
         SubmissionTopologyHelper.getSubmissionTopologySnapshot(
@@ -1442,7 +1459,7 @@ abstract class ProtocolProcessor[
 
   override def processResult(
       counter: SequencerCounter,
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val content = event.event.content
     val ts = content.timestamp
@@ -1474,7 +1491,7 @@ abstract class ProtocolProcessor[
 
   @VisibleForTesting
   private[protocol] def processResultInternal1(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1574,7 +1591,7 @@ abstract class ProtocolProcessor[
     * confirmation result. The inner `EitherT` corresponds to the subsequent async stage.
     */
   private[this] def processResultInternal2(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       result: SignedProtocolMessage[ConfirmationResultMessage],
       requestId: RequestId,
       resultTs: CantonTimestamp,
@@ -1593,9 +1610,13 @@ abstract class ProtocolProcessor[
         pendingRequestData: PendingRequestData
     ): FutureUnlessShutdown[Boolean] =
       for {
-        snapshot <- crypto.awaitSnapshot(requestId.unwrap)
+        snapshot <- crypto.awaitSnapshot(
+          // use topologyTimestamp on pv34, otherwise use sequencing timestamp as aggregation
+          // will now only contain signatures from mediators valid at the sequencing timestamp of
+          // the verdict delivery
+          if (protocolVersion <= ProtocolVersion.v34) requestId.unwrap else resultTs
+        )
         res <- result.verifyMediatorSignatures(snapshot, pendingRequestData.mediator.group).value
-
       } yield {
         res match {
           case Left(err) =>
@@ -1695,7 +1716,7 @@ abstract class ProtocolProcessor[
   // Assigning the internal contract ids to the contracts requires that all the contracts are
   // already persisted in the contract store.
   private[this] def processResultInternal3(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       requestId: RequestId,
       resultTs: CantonTimestamp,

@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.{
   RichSynchronizerIdO,
   defaultStaticSynchronizerParameters,
@@ -23,6 +22,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
@@ -53,8 +53,10 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.{BaseTest, FutureHelpers, LfPackageId, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import org.slf4j.LoggerFactory
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.*
@@ -204,7 +206,7 @@ final case class TestingTopology(
       val existing = flags.getOrElse(participant, Seq.empty)
       flags.updated(
         participant,
-        (ParticipantTopologyFeatureFlag.EnableUnsafeMultiSynchronizer +: existing).distinct,
+        (ParticipantTopologyFeatureFlag.EnableMultiSynchronizer +: existing).distinct,
       )
     })
 
@@ -375,7 +377,7 @@ class TestingIdentityFactory(
       ips(availableUpToInclusive, currentSnapshotApproximationTimestamp),
       crypto,
       cryptoConfig,
-      None,
+      CommonMockMetrics.cryptoMetrics,
       CachingConfigs.defaultPublicKeyConversionCache,
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
@@ -1009,6 +1011,7 @@ class TestingOwnerWithKeys(
           .fromTrustedByteString(())(bytes)
           .leftMap(_.toString)
           .flatMap(_.select[Op, M].toRight("Parsed to different type"))
+          .leftMap(err => LoggerFactory.getLogger(getClass).error(s"Parse error $err"))
           .getOrElse(throw new IllegalArgumentException("Unable to parse topology tx"))
       }
     } else trans

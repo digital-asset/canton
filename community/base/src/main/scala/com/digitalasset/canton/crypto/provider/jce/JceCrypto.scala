@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.crypto.{Crypto, CryptoSchemes}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.CryptoMetrics
 import com.digitalasset.canton.util.EitherUtil
 
 import scala.concurrent.ExecutionContext
@@ -26,6 +27,7 @@ object JceCrypto {
       publicKeyConversionCacheConfig: CacheConfig,
       cryptoPrivateStore: CryptoPrivateStore,
       cryptoPublicStore: CryptoPublicStore,
+      cryptoMetrics: CryptoMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -46,6 +48,7 @@ object JceCrypto {
         sessionEncryptionKeyCacheConfig,
         publicKeyConversionCacheConfig,
         cryptoSchemes,
+        cryptoMetrics,
         loggerFactory,
       )
       privateCrypto =
@@ -54,6 +57,8 @@ object JceCrypto {
           signingSchemes = cryptoSchemes.signingSchemes,
           encryptionSchemes = cryptoSchemes.encryptionSchemes,
           store = cryptoPrivateStoreExtended,
+          signingMetrics = cryptoMetrics.signingMetrics,
+          decryptionMetrics = cryptoMetrics.decryptionMetrics,
           timeouts = timeouts,
           loggerFactory = loggerFactory,
         )
@@ -62,6 +67,7 @@ object JceCrypto {
         privateCrypto,
         cryptoPrivateStore,
         cryptoPublicStore,
+        cryptoMetrics,
         timeouts,
         loggerFactory,
       )

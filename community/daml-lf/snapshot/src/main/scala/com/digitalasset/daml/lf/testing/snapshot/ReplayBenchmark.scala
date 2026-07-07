@@ -5,12 +5,14 @@ package com.digitalasset.daml.lf
 package testing.snapshot
 
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.language.Ast
+import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import org.openjdk.jmh.annotations.*
 
-import java.nio.file.Paths
+import java.nio.file.{FileSystems, Files, Paths}
 import java.util.concurrent.TimeUnit
+import scala.jdk.CollectionConverters.*
 
 @State(Scope.Benchmark)
 class ReplayBenchmark {
@@ -20,15 +22,17 @@ class ReplayBenchmark {
 
   @Param(Array())
   // choiceName of the exercise to benchmark
-  // format: "ModuleName:TemplateName:ChoiceName"
+  // format:
+  // - "ModuleName:TemplateName:ChoiceName"
+  // - or "PackageId:ModuleName:TemplateName:ChoiceName"
   var choiceName: String = _
 
   @Param(Array("0"))
   var choiceIndex: Int = _
 
   @Param(Array(""))
-  // path of the darFile
-  var darFile: String = _
+  // directory containing Dar files
+  var darDir: String = _
 
   @Param(Array())
   // path of the ledger entries - i.e. path to file of saved transaction trees
@@ -38,11 +42,14 @@ class ReplayBenchmark {
   // the contract ID version to use for locally created contracts
   var contractIdVersion: String = _
 
+  @Param(Array(""))
+  var commit: String = sys.env.getOrElse("CIRCLE_SHA1", "unknown")
+
   private var benchmark: TransactionSnapshot = _
 
-  @Fork(value = 1, warmups = 1)
-  @Warmup(iterations = 1, time = 500, timeUnit = TimeUnit.MILLISECONDS)
-  @Measurement(iterations = 3, time = 200, timeUnit = TimeUnit.MILLISECONDS)
+  @Fork(value = 2, warmups = 3)
+  @Warmup(iterations = 7, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+  @Measurement(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -53,11 +60,17 @@ class ReplayBenchmark {
     val Right(metrics) = result
     counters.stepCount += metrics.totalCount[StepCount].get
     counters.transactionNodeCount += metrics.totalCount[TxNodeCount].get
+    counters.fetchNodeCount += metrics.totalCount[FetchNodeCount].get
+    metrics.reset()
   }
 
   @Setup(Level.Trial)
   def init(): Unit = {
-    val Array(modNameStr, tmplNameStr, name) = choiceName.split(":")
+    // Indexing from the end of the array allows the package ID to be optional in the choice name
+    val reversedChoiceNameParts = choiceName.split(":").reverse
+    val name = reversedChoiceNameParts(0)
+    val tmplNameStr = reversedChoiceNameParts(1)
+    val modNameStr = reversedChoiceNameParts(2)
     val choice = (
       Ref.QualifiedName(
         Ref.DottedName.assertFromString(modNameStr),
@@ -77,8 +90,17 @@ class ReplayBenchmark {
       contractIdVersion = contractIdVersionParsed,
       gasBudget = Some(Long.MaxValue).filter(_ => gasOn),
     )
-    if (darFile.nonEmpty) {
-      val loadedPackages = TransactionSnapshot.loadDar(Paths.get(darFile))
+    if (darDir.nonEmpty) {
+      val darFileMatcher =
+        FileSystems
+          .getDefault()
+          .getPathMatcher(s"glob:$darDir/*.dar")
+      val darFilesToLoad =
+        Files.list(Paths.get(darDir)).filter(darFileMatcher.matches).toList.asScala
+      val loadedPackages = darFilesToLoad.foldLeft(Map.empty[Ref.PackageId, Ast.Package]) {
+        case (pkgs, darFile) =>
+          pkgs ++ TransactionSnapshot.loadDar(darFile)
+      }
       benchmark = benchmark.copy(pkgs = loadedPackages)
     }
 
@@ -95,9 +117,12 @@ object ReplayBenchmark {
 
     var transactionNodeCount: Long = 0
 
+    var fetchNodeCount: Long = 0
+
     def reset(): Unit = {
       stepCount = 0
       transactionNodeCount = 0
+      fetchNodeCount = 0
     }
   }
 }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.implicits.{catsSyntaxAlternativeSeparate, toFoldableOps}
 import com.daml.metrics.Timed
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
 import com.digitalasset.canton.ledger.api.{Commands, PackageReference}
@@ -35,12 +34,13 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.{EngineMode, ProtocolVersion}
+import com.digitalasset.canton.version.{InterpretationConfig, ProtocolVersion}
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPackageVersion, LfPartyId}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine.Error.{Package, Preprocessing}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 
 import scala.collection.MapView
@@ -128,7 +128,7 @@ private[execution] class TapsCommandExecutionFactory(
         (packagePreferenceSet, protocolVersion) = packagePreferenceSetPV
 
         // TODO(#32356): Engine contract state mode selection for TAPS
-        mode = EngineMode.forProtocolVersion(protocolVersion)
+        interpretationConfig = InterpretationConfig.forProtocolVersion(protocolVersion)
 
         _ = logDebug(
           show"Using package preference set: $packagePreferenceSet, protocol version: $protocolVersion"
@@ -138,7 +138,7 @@ private[execution] class TapsCommandExecutionFactory(
         commandInterpretationResult: Either[ErrorCause, CommandInterpretationResult] <-
           commandInterpreter.interpret(
             commands.copy(packagePreferenceSet = packagePreferenceSet),
-            mode,
+            interpretationConfig,
             submissionSeed,
           )
 
@@ -198,17 +198,7 @@ private[execution] class TapsCommandExecutionFactory(
         partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
     )(implicit
         loggingContextWithTrace: LoggingContextWithTrace
-    ): FutureUnlessShutdown[NonEmpty[Map[PhysicalSynchronizerId, Set[LfPackageId]]]] = {
-      val packageIdMap = packageMetadataSnapshot.packageIdVersionMap
-      def toPackageReference(party: Party, pkgId: PackageId): Option[PackageReference] =
-        pkgId.toPackageReference(packageIdMap).tap { pkgRef =>
-          if (pkgRef.isEmpty) {
-            logger.debug(
-              show"Discarding package ID $pkgId from the vetting state of $party, as it doesn't exist in the participant's package store."
-            )
-          }
-        }
-
+    ): FutureUnlessShutdown[NonEmpty[Map[PhysicalSynchronizerId, Set[LfPackageId]]]] =
       for {
         partyVettingMap: Map[PhysicalSynchronizerId, Map[LfPartyId, Set[PackageId]]] <-
           syncService.computePartyVettingMap(
@@ -219,48 +209,31 @@ private[execution] class TapsCommandExecutionFactory(
             prescribedSynchronizer = commands.synchronizerId,
             routingSynchronizerState = routingSynchronizerState,
           )
-        filteredPartyVettingMap = partyVettingMap.map { case (syncId, partyVettingMap) =>
-          syncId -> partyVettingMap.map { case (party, packageIds) =>
-            val filteredPackageRefs =
-              if (requiredSubmitters.contains(party)) {
-                // Submitter: Keep all known packages. This covers the scenario of a package
-                // appearing during interpretation.
-                packageIds.flatMap(toPackageReference(party, _))
-              } else {
-                // Non-submitter: Keep only the packages that are explicitly required. This
-                // prevents the party from influencing the selection for packages it does not need.
-                val packageRequirements = partyPackageRequirements(party)
-                packageIds
-                  .flatMap(toPackageReference(party, _))
-                  .filter(packageRef => packageRequirements.contains(packageRef.packageName))
-              }
-            party -> filteredPackageRefs
-          }
-        }
 
         _ = logDebug(
           show"Computing per-synchronizer package preference sets using the party-package requirements ($partyPackageRequirements) and root package-names ($rootLevelPackageNames)"
         )
 
-        perSynchronizerCandidates: Map[PhysicalSynchronizerId, MapView[LfPackageName, Candidate[
-          SortedPreferences
-        ]]] =
-          PackagePreferenceBackend.computePerSynchronizerPackageCandidates(
-            synchronizersPartiesVettingState = filteredPartyVettingMap,
+        packageFilter = SupportedPackagesFilter(
+          supportedPackagesPerPackageName =
+            userSpecifiedPreference.view.mapValues(_.map(_.pkgId).toSet).toMap,
+          restrictionDescription = "Commands.package_id_selection_preference",
+        )
+        perSynchronizerCandidates = partyVettingMap.view.map { case (syncId, partiesVettingState) =>
+          val candidates = PackagePreferenceBackend.computePerSynchronizerPackageCandidates(
+            partiesVettingState = partiesVettingState,
             packageMetadataSnapshot = packageMetadataSnapshot,
-            packageFilter = SupportedPackagesFilter(
-              supportedPackagesPerPackageName =
-                userSpecifiedPreference.view.mapValues(_.map(_.pkgId).toSet).toMap,
-              restrictionDescription = "Commands.package_id_selection_preference",
-            ),
+            packageFilter = packageFilter,
             requirements = partyPackageRequirements,
+            synchronizerProtocolVersion = syncId.protocolVersion,
           )
+          syncId -> applyRootPackageNamesRestriction(candidates, rootLevelPackageNames)
+        }
 
-        (discardedSyncs, availableSyncs) =
-          applyRootPackageNamesRestriction(perSynchronizerCandidates, rootLevelPackageNames)
-            .map { case (sync, candidates) => candidates.map(sync -> _).left.map(sync -> _) }
-            .toSeq
-            .separate
+        (discardedSyncs, availableSyncs) = perSynchronizerCandidates
+          .map { case (sync, candidates) => candidates.map(sync -> _).left.map(sync -> _) }
+          .toSeq
+          .separate
 
         perSynchronizerPreferenceSet <-
           NonEmpty
@@ -274,45 +247,39 @@ private[execution] class TapsCommandExecutionFactory(
             )
             .toFutureUS(identity)
       } yield perSynchronizerPreferenceSet
-    }
 
     private def applyRootPackageNamesRestriction(
-        perSynchronizerCandidates: Map[PhysicalSynchronizerId, MapView[LfPackageName, Candidate[
-          SortedPreferences
-        ]]],
+        packageNameCandidates: MapView[LfPackageName, Candidate[SortedPreferences]],
         rootPackageNames: Set[LfPackageName],
     )(implicit
         loggingContextWithTrace: LoggingContextWithTrace
-    ): MapView[PhysicalSynchronizerId, Either[String, Set[LfPackageId]]] =
-      perSynchronizerCandidates.view
-        .mapValues {
-          (packageNameCandidates: MapView[LfPackageName, Candidate[SortedPreferences]]) =>
-            val unavailablePackageNames = rootPackageNames.diff(packageNameCandidates.keySet)
-            // Discard a synchronizer if there are unavailable package-names pertaining to root nodes
-            // This can happen if no one vetted any package from a specific package-name
-            if (unavailablePackageNames.nonEmpty) {
-              Left(
-                show"Unable to find some package-names used in command root nodes: $unavailablePackageNames. Either these packages are not known on this participant or they are not vetted by the required informee participants. Please upload and vet the missing packages to proceed."
-              )
-            } else {
-              packageNameCandidates.toSeq.foldM(Set.empty[LfPackageId]) {
-                case (acc, (_, Right(pkgIdCandidates))) =>
-                  Right(acc + pkgIdCandidates.last1.pkgId)
-                case (_, (pkgName, Left(pkgNameDiscardReason))) if rootPackageNames(pkgName) =>
-                  // Discard a synchronizer if there are package-names pertaining to root nodes that have no preferences
-                  // This can happen if a package-name had vetted packages for some party, but it has been discarded due to some restrictions
-                  Left(
-                    show"Failed to select package-id for package-name '$pkgName' appearing in a command root node due to: $pkgNameDiscardReason"
-                  )
-                case (acc, (pkgName, Left(pkgNameDiscardReason))) =>
-                  // If not a root-node package-name, just log the discard reason and continue
-                  logDebug(
-                    show"No vetted package selection possible for '$pkgName': $pkgNameDiscardReason"
-                  )
-                  Right(acc)
-              }
-            }
+    ): Either[String, Set[LfPackageId]] = {
+      val unavailablePackageNames = rootPackageNames.diff(packageNameCandidates.keySet)
+      // Discard a synchronizer if there are unavailable package-names pertaining to root nodes
+      // This can happen if no one vetted any package from a specific package-name
+      if (unavailablePackageNames.nonEmpty) {
+        Left(
+          show"Unable to find some package-names used in command root nodes: $unavailablePackageNames. Either these packages are not known on this participant or they are not vetted by the required informee participants. Please upload and vet the missing packages to proceed."
+        )
+      } else {
+        packageNameCandidates.toSeq.foldM(Set.empty[LfPackageId]) {
+          case (acc, (_, Right(pkgIdCandidates))) =>
+            Right(acc + pkgIdCandidates.last1.pkgId)
+          case (_, (pkgName, Left(pkgNameDiscardReason))) if rootPackageNames(pkgName) =>
+            // Discard a synchronizer if there are package-names pertaining to root nodes that have no preferences
+            // This can happen if a package-name had vetted packages for some party, but it has been discarded due to some restrictions
+            Left(
+              show"Failed to select package-id for package-name '$pkgName' appearing in a command root node due to: $pkgNameDiscardReason"
+            )
+          case (acc, (pkgName, Left(pkgNameDiscardReason))) =>
+            // If not a root-node package-name, just log the discard reason and continue
+            logDebug(
+              show"No vetted package selection possible for '$pkgName': $pkgNameDiscardReason"
+            )
+            Right(acc)
         }
+      }
+    }
 
     private def buildSelectionFailedError(
         prescribedSynchronizerIdO: Option[SynchronizerId],

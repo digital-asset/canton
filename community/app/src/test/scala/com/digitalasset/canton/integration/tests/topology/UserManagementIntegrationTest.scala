@@ -90,6 +90,7 @@ trait UserManagementIntegrationTest
         executeAs = Set.empty,
         readAsAnyParty = false,
         executeAsAnyParty = false,
+        actAsAnyParty = false,
         participantAdmin = true,
         identityProviderAdmin = false,
       )
@@ -123,6 +124,7 @@ trait UserManagementIntegrationTest
         executeAs = Set(charlie),
         readAsAnyParty = false,
         executeAsAnyParty = false,
+        actAsAnyParty = false,
         participantAdmin = true,
         identityProviderAdmin = false,
       )
@@ -267,6 +269,7 @@ trait UserManagementIntegrationTest
         executeAs = Set.empty,
         readAsAnyParty = false,
         executeAsAnyParty = false,
+        actAsAnyParty = false,
         participantAdmin = false,
         identityProviderAdmin = false,
       )
@@ -341,6 +344,7 @@ trait UserManagementIntegrationTest
         executeAs = Set(),
         readAsAnyParty = true,
         executeAsAnyParty = false,
+        actAsAnyParty = false,
         participantAdmin = false,
         identityProviderAdmin = false,
       )
@@ -369,6 +373,7 @@ trait UserManagementIntegrationTest
         executeAs = Set(),
         readAsAnyParty = false,
         executeAsAnyParty = false,
+        actAsAnyParty = false,
         participantAdmin = false,
         identityProviderAdmin = false,
       )
@@ -437,6 +442,7 @@ trait UserManagementIntegrationTest
         executeAs = Set(fiona),
         readAsAnyParty = false,
         executeAsAnyParty = false,
+        actAsAnyParty = false,
         participantAdmin = true,
         identityProviderAdmin = true,
       )

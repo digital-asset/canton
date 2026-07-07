@@ -114,12 +114,6 @@ object SkeletonToSymbolic {
           mkFreshkeyId(),
           mkFreshPartySet("m"),
         )
-      case Skel.LookupByKey(successful) =>
-        Sym.LookupByKey(
-          if (successful) Some(mkFreshContractId()) else None,
-          mkFreshkeyId(),
-          mkFreshPartySet("m"),
-        )
       case Skel.QueryByKey(exhaustive) =>
         Sym.QueryByKey(
           mkFreshBoundedContractIdList("qbk", maxQueryByKeyResults),

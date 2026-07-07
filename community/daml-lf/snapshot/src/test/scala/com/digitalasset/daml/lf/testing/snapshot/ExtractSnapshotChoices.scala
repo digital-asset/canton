@@ -13,23 +13,23 @@ import java.nio.file.{FileSystems, Files, Path}
 
 class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAfterAll {
 
-  private var snapshotBaseDir: Path = _
-  private var darFile: Path = _
-  private var scriptEntryPoint: Ref.QualifiedName = _
+  private lazy val minStepCount =
+    sys.env.get("MIN_STEP_COUNT").fold[Option[Long]](None)(n => Some(n.toLong))
+  private lazy val minTxNodeCount =
+    sys.env.get("MIN_TX_NODE_COUNT").fold[Option[Long]](None)(n => Some(n.toLong))
+  private lazy val minFetchNodeCount =
+    sys.env.get("MIN_FETCH_NODE_COUNT").fold[Option[Long]](None)(n => Some(n.toLong))
+  private var snapshotDir: Path = _
 
   override protected def beforeAll(): Unit = {
     assume(
-      Seq("DAR_FILE", "SCRIPT_NAME", "SNAPSHOT_DIR")
-        .forall(envVar => sys.env.contains(envVar)),
-      "The environment variables DAR_FILE, SCRIPT_NAME and SNAPSHOT_DIR all need to be set",
+      sys.env.contains("SNAPSHOT_DIR"),
+      "The environment variable SNAPSHOT_DIR needs to be set",
     )
 
-    snapshotBaseDir = Path.of(sys.env("SNAPSHOT_DIR"))
-    darFile = Path.of(sys.env("DAR_FILE"))
-    scriptEntryPoint = Ref.QualifiedName.assertFromString(sys.env("SCRIPT_NAME"))
+    snapshotDir = Path.of(sys.env("SNAPSHOT_DIR"))
   }
 
-  lazy val snapshotDir = snapshotBaseDir.resolve(s"${darFile.getFileName}/${scriptEntryPoint.name}")
   lazy val participantId = Ref.ParticipantId.assertFromString("participant1")
   lazy val snapshotFileMatcher =
     FileSystems
@@ -37,20 +37,40 @@ class ExtractSnapshotChoices extends AnyWordSpec with Matchers with BeforeAndAft
       .getPathMatcher(s"glob:$snapshotDir/snapshot-$participantId*.bin")
 
   private def runWhenEnvVarSet(name: String)(testFun: => Assertion): Unit =
-    if (sys.env.get("STANDALONE").nonEmpty) {
+    if (sys.env.contains("STANDALONE")) {
+      println(name)
       name.in(testFun)
     } else {
       name.ignore(testFun)
     }
 
-  runWhenEnvVarSet("Extract choices from snapshot data") {
-    println(s"Using snapshot data ${darFile.getFileName}/${scriptEntryPoint.name}")
+  private val filteringLabel = {
+    val filteringLabels = (
+      minStepCount.map(stepCount => s"step count >= $stepCount")
+        ++ minTxNodeCount.map(txNodeCount => s"tx node count >= $txNodeCount")
+        ++ minFetchNodeCount.map(fetchNodeCount => s"fetch node count >= $fetchNodeCount")
+    ).mkString(" and ")
 
+    if (filteringLabels.isEmpty) {
+      ""
+    } else {
+      s" - filtering with $filteringLabels"
+    }
+  }
+
+  runWhenEnvVarSet(s"Extract all top level choices from snapshot data $filteringLabel") {
     val snapshotFiles = Files.list(snapshotDir).filter(snapshotFileMatcher.matches).toList
     snapshotFiles.size() should be(1)
 
     val snapshotFile = snapshotFiles.get(0)
-    val choiceNames = TransactionSnapshot.getAllTopLevelChoiceNames(snapshotFile)
+    val choiceNames =
+      TransactionSnapshot.getAllTopLevelChoiceNames(
+        snapshotFile,
+        minStepCount,
+        minTxNodeCount,
+        minFetchNodeCount,
+        debug = true,
+      )
 
     noException should be thrownBy {
       Files.writeString(

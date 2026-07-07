@@ -11,13 +11,12 @@ import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref.{PackageId, QualifiedName}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.{Ast, Util as AstUtil}
+import scalaz.std.list.*
 import scalaz.std.map.*
 import scalaz.std.option.*
 import scalaz.syntax.monoid.*
 import scalaz.syntax.traverse.*
 import scalaz.{Enum as _, *}
-
-import scala.collection.immutable.Map
 
 object SignatureReader {
   import Errors.*
@@ -239,9 +238,9 @@ object SignatureReader {
       ctx: QualifiedName,
       fields: ImmArray[(Ref.Name, Ast.Type)],
   ): Error \/ ImmArraySeq[(Ref.Name, Type)] =
-    fields.toSeq traverse { case (fieldName, typ) =>
+    fields.toList traverse { case (fieldName, typ) =>
       toIfaceType(ctx, typ).map(x => fieldName -> x)
-    }
+    } map (_.to(ImmArraySeq))
 
   private[this] def interface(
       name: QualifiedName,
@@ -274,7 +273,7 @@ object SignatureReader {
           unserializableDataType(ctx, "arguments passed to a type parameter")
       case Ast.TTyCon(c) =>
         \/-(TypeCon(TypeConId(c), args.toImmArray.toSeq))
-      case AstUtil.TNumeric(Ast.TNat(n)) if args.empty =>
+      case AstUtil.TNumeric(Ast.TNat(n)) if args.isEmpty =>
         \/-(TypeNumeric(n))
       case Ast.TBuiltin(bt) =>
         primitiveType(ctx, bt, args.toImmArray.toSeq)

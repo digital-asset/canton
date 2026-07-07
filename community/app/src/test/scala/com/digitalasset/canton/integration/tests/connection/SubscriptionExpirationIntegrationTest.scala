@@ -63,7 +63,7 @@ sealed trait SubscriptionExpirationIntegrationTest
         loggerFactory.assertLogsSeq(
           SuppressionRule.LevelAndAbove(INFO) &&
             (SuppressionRule.forLogger[GrpcInternalSequencerConnection] ||
-              SuppressionRule.forLogger[SequencerSubscriptionImpl[?]])
+              SuppressionRule.forLogger[SequencerSubscriptionImpl])
         )(
           eventually() {
             Threading.sleep(500)

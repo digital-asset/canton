@@ -7,3 +7,16 @@ unpack_scaladoc_in_workspace:
         command: |
           mkdir -p /tmp/workspace/docs/scaladoc
           tar xzf "/tmp/workspace/scaladoc.tar.gz" -C "/tmp/workspace/docs/scaladoc"
+
+restore_generated_snippets:
+  # Restore the snippet JSON generated in parallel by `build_docs_snippets` into
+  # the location the docs build expects (`docs-open/target/snippet_json_data`).
+  # Assumes the workspace has already been attached at /tmp/workspace (e.g. by
+  # `unpack_scaladoc_in_workspace`).
+  steps:
+    - run:
+        name: Restore generated snippet JSON data from the workspace
+        command: |
+          mkdir -p docs-open/target
+          cp -r /tmp/workspace/snippet_json_data docs-open/target/snippet_json_data
+          echo "Restored $(find docs-open/target/snippet_json_data -name '*.json' | wc -l) snippet JSON files"

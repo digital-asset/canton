@@ -19,6 +19,7 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerLsuConfig,
   SequencerNodeParameters,
   TimeAdvancingTopologyConfig,
 }
@@ -47,6 +48,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         ProcessingTimeout()
       ),
       protocol = CantonNodeParameters.Protocol.Impl(
+        devVersionSupport = false,
         alphaVersionSupport = false,
         betaVersionSupport = true,
         dontWarnOnDeprecatedPV = false,
@@ -55,6 +57,10 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
+      enableRejectDeliveredAggregationsOnPv35 = Seq("MED", "PAR"),
+      disableAggregationRuleSizeCheckForTesting = true, // remove after PV34 is gone
+      lsuConfig = SequencerLsuConfig(),
+      enablePrevalidation = true,
     )
 
   override final def createSequencer(crypto: SynchronizerCryptoClient)(implicit
@@ -74,7 +80,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         testedProtocolVersion,
         sequencerId,
         params,
-        SequencerTestMetrics,
+        SequencerTestMetrics(this.getClass.getSimpleName),
         new ExecutorServiceMetrics(NoOpMetricsFactory),
         loggerFactory,
         None,

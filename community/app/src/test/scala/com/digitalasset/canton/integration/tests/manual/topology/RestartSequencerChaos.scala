@@ -12,12 +12,12 @@ import com.digitalasset.canton.util.FutureInstances.*
 import scala.concurrent.Future
 import scala.concurrent.duration.*
 
-class RestartSequencersChaos(val logger: TracedLogger)
+class RestartSequencerChaos(val logger: TracedLogger)
     extends TopologyOperations
     with IdleTimeSupport {
 
   override def name: String = "RestartSequencersChaos"
-  override def companion: TopologyOperationsCompanion = RestartSequencersChaos
+  override def companion: TopologyOperationsCompanion = RestartSequencerChaos
 
   def restartSequencer(
       node: LocalSequencerReference
@@ -40,7 +40,7 @@ class RestartSequencersChaos(val logger: TracedLogger)
   }
 }
 
-object RestartSequencersChaos extends TopologyOperationsCompanion {
+object RestartSequencerChaos extends TopologyOperationsCompanion {
   override def acceptableLogEntries: Seq[String] = Seq(
     "Is the server running",
     "Failed to process request RequestRefused",

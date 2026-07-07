@@ -8,6 +8,8 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
@@ -27,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.tracing.TraceContext
 import slick.jdbc.{GetResult, SetParameter}
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
 class DbOutputMetadataStore(
@@ -43,6 +46,14 @@ class DbOutputMetadataStore(
 
   private val profile = storage.profile
   private val converters = storage.converters
+
+  private val lastBlockStoredCache = new AtomicReference[Option[OutputBlockMetadata]](None)
+  private def updateLastBlockStoredCache(latest: OutputBlockMetadata): Unit =
+    lastBlockStoredCache.getAndUpdate {
+      case None => Some(latest)
+      case Some(current) if (latest.blockNumber) > current.blockNumber => Some(latest)
+      case other => other
+    }.discard
 
   private implicit val readBlock: GetResult[OutputBlockMetadata] =
     GetResult { r =>
@@ -103,7 +114,7 @@ class DbOutputMetadataStore(
                  ${metadata.blockNumber},
                  ${metadata.blockBftTime}
                )
-               on conflict (block_number) do nothing"""
+               on conflict (epoch_number, block_number) do nothing"""
       case _: H2 =>
         sqlu"""merge into
                      ord_metadata_output_blocks using dual on (
@@ -122,7 +133,8 @@ class DbOutputMetadataStore(
                          ${metadata.blockBftTime}
                        )"""
     }
-    val future = () => storage.update_(query, functionFullName)
+    val future = () =>
+      storage.update_(query, functionFullName).map(_ => updateLastBlockStoredCache(metadata))
     PekkoFutureUnlessShutdown(name, future, orderingStage = Some(functionFullName))
   }
 
@@ -301,7 +313,17 @@ class DbOutputMetadataStore(
             limit 1
         """.as[OutputBlockMetadata].headOption
     } yield lastBlockStored
-    val future = () => storage.query(query, functionFullName)
+    val future = () =>
+      lastBlockStoredCache.get() match {
+        case None =>
+          storage
+            .query(query, functionFullName)
+            .map { latest =>
+              latest.foreach(updateLastBlockStoredCache)
+              latest
+            }
+        case lastBlock => FutureUnlessShutdown.pure(lastBlock)
+      }
     PekkoFutureUnlessShutdown(
       lastNonSequentialBlockMetadataStoredName,
       future,
@@ -371,38 +393,40 @@ class DbOutputMetadataStore(
   ): PekkoFutureUnlessShutdown[Either[String, Unit]] = PekkoFutureUnlessShutdown(
     saveLowerBoundName(epoch),
     () =>
-      storage.queryAndUpdate(
-        ((for {
-          existingLowerBoundEpoch <- dbEitherT[String](
-            sql"select epoch_number from ord_output_lower_bound".as[Long].headOption
-          ).map(_.map(EpochNumber(_)))
-          _ <- EitherT.fromEither[DBIO](
-            existingLowerBoundEpoch
-              .filter(_ > epoch)
-              .map(existing => s"Cannot save lower bound $epoch earlier than existing $existing")
-              .toLeft(())
-          )
-          block <-
-            dbEitherT(
-              getSingleBlockDBIO(epoch, "asc")
-                .map {
-                  case None =>
-                    Left(
-                      s"Cannot save lower bound at epoch $epoch because there are no blocks saved at this epoch"
-                    )
-                  case Some(blockNumber) => Right(blockNumber)
-                }
+      storage
+        .queryAndUpdate(
+          ((for {
+            existingLowerBoundEpoch <- dbEitherT[String](
+              sql"select epoch_number from ord_output_lower_bound".as[Long].headOption
+            ).map(_.map(EpochNumber(_)))
+            _ <- EitherT.fromEither[DBIO](
+              existingLowerBoundEpoch
+                .filter(_ > epoch)
+                .map(existing => s"Cannot save lower bound $epoch earlier than existing $existing")
+                .toLeft(())
             )
-          _ <- dbEitherT[String](
-            existingLowerBoundEpoch.fold(
-              sqlu"insert into ord_output_lower_bound (epoch_number, block_number) values ($epoch, ${block.blockNumber})"
-            )(_ =>
-              sqlu"update ord_output_lower_bound set epoch_number = $epoch, block_number = ${block.blockNumber}"
+            block <-
+              dbEitherT(
+                getSingleBlockDBIO(epoch, "asc")
+                  .map {
+                    case None =>
+                      Left(
+                        s"Cannot save lower bound at epoch $epoch because there are no blocks saved at this epoch"
+                      )
+                    case Some(blockNumber) => Right(blockNumber)
+                  }
+              )
+            count <- dbEitherT[String](
+              existingLowerBoundEpoch.fold(
+                sqlu"insert into ord_output_lower_bound (epoch_number, block_number) values ($epoch, ${block.blockNumber})"
+              )(_ =>
+                sqlu"update ord_output_lower_bound set epoch_number = $epoch, block_number = ${block.blockNumber}"
+              )
             )
-          )
-        } yield ()).value),
-        functionFullName,
-      ),
+          } yield count).value),
+          functionFullName,
+        )
+        .map(_.map(_ => ())),
     orderingStage = Some(functionFullName),
   )
 

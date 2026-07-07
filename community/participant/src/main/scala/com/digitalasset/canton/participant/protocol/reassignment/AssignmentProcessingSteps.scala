@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
@@ -49,6 +48,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, EitherTUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -324,7 +324,7 @@ private[reassignment] class AssignmentProcessingSteps(
   }
 
   override def createSubmissionResult(
-      deliver: Deliver[Envelope[?]],
+      deliver: Deliver[Batch[Envelope[?]]],
       pendingSubmission: PendingSubmissionData,
   ): SubmissionResult =
     SubmissionResult(pendingSubmission.value.reassignmentCompletion.future)
@@ -424,8 +424,6 @@ private[reassignment] class AssignmentProcessingSteps(
   ] = {
     val reassignmentId = parsedRequest.reassignmentId
     val sourceSynchronizer = parsedRequest.fullViewTree.sourceSynchronizer
-    val isReassigningParticipant =
-      parsedRequest.fullViewTree.isReassigningParticipant(participantId)
 
     for {
       reassignmentDataE <- EitherT.right[ReassignmentProcessorError](
@@ -447,20 +445,6 @@ private[reassignment] class AssignmentProcessingSteps(
             "Not sending a verdict because the list of hosted confirming parties is empty"
           )
           FutureUnlessShutdown.pure(None)
-        } else if (
-          assignmentValidationResult.reassigningParticipantValidationResult.isUnassignmentDataNotFound && isReassigningParticipant
-        ) {
-          logger.info(
-            s"Sending an abstain verdict for ${assignmentValidationResult.hostedConfirmingReassigningParties} because unassignment data is not found in the reassignment store"
-          )
-          val confirmationResponses = createAbstainResponse(
-            parsedRequest.requestId,
-            assignmentValidationResult.rootHash,
-            s"Unassignment data not found when processing assignment $reassignmentId.",
-            assignmentValidationResult.hostedConfirmingReassigningParties,
-          )
-
-          FutureUnlessShutdown.pure(confirmationResponses)
         } else {
           createConfirmationResponses(
             parsedRequest.requestId,
@@ -515,7 +499,7 @@ private[reassignment] class AssignmentProcessingSteps(
   }
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       verdict: Verdict,
       pendingRequestData: PendingAssignment,
       pendingSubmissionMap: PendingSubmissions,
@@ -568,7 +552,9 @@ private[reassignment] class AssignmentProcessingSteps(
         .getOrElse(errorDetails)
 
     for {
-      rejectionFromPhase3 <- EitherT.right(checkPhase7Validations(assignmentValidationResult))
+      rejectionFromPhase3 <- EitherT.right(
+        checkPhase7Validations(assignmentValidationResult.commonValidationResult)
+      )
 
       // Additional validation requested during security audit as DIA-003-013.
       // Activeness of the mediator already gets checked in Phase 3,

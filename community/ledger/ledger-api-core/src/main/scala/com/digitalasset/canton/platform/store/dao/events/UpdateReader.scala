@@ -13,10 +13,11 @@ import com.daml.ledger.api.v2.reassignment.{
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.daml.ledger.api.v2.transaction.Transaction
-import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.AcsRangeInfo
+import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
@@ -45,7 +46,6 @@ import com.digitalasset.canton.platform.store.dao.{
 }
 import com.digitalasset.canton.platform.{FatContract, InternalUpdateFormat, TemplatePartiesFilter}
 import com.digitalasset.canton.util.MonadUtil
-import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Span
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.{Done, NotUsed}
@@ -86,9 +86,9 @@ private[dao] final class UpdateReader(
       skipPruningChecks: Boolean = false,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
+  ): Source[(Offset, UpdateResponse), NotUsed] = {
     val futureSource =
-      getEventSeqIdRange(startInclusive, endInclusive)
+      getEventSeqIdRange(startInclusive, endInclusive, skipPruningChecks = skipPruningChecks)
         .map(queryRange =>
           updatesStreamReader.streamUpdates(
             queryRange = queryRange,
@@ -160,16 +160,9 @@ private[dao] final class UpdateReader(
   private def getEventSeqIdRange(
       startInclusive: Offset,
       endInclusive: Offset,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] =
-    queryValidRange.withRangeNotPruned(
-      minOffsetInclusive = startInclusive,
-      maxOffsetInclusive = endInclusive,
-      errorPruning = (prunedOffset: Offset) =>
-        s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
-      errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-        s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
-            .fold(0L)(_.unwrap)}",
-    )(dispatcher.executeSql(dbMetrics.getEventSeqIdRange) { connection =>
+      skipPruningChecks: Boolean,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] = {
+    def calculateRange() = dispatcher.executeSql(dbMetrics.getEventSeqIdRange) { connection =>
       EventsRange(
         startInclusiveOffset = startInclusive,
         startInclusiveEventSeqId =
@@ -178,8 +171,22 @@ private[dao] final class UpdateReader(
         endInclusiveEventSeqId =
           eventStorageBackend.maxEventSequentialId(Some(endInclusive))(connection),
       )
-    })
+    }
 
+    if (skipPruningChecks) {
+      calculateRange()
+    } else {
+      queryValidRange.withRangeNotPruned(
+        minOffsetInclusive = startInclusive,
+        maxOffsetInclusive = endInclusive,
+        errorPruning = (prunedOffset: Offset) =>
+          s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+        errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
+          s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
+              .fold(0L)(_.unwrap)}",
+      )(calculateRange())
+    }
+  }
 }
 
 private[dao] object UpdateReader {
@@ -412,8 +419,9 @@ private[dao] object UpdateReader {
             synchronizerId = first.synchronizerId,
             traceContext = Some(DamlTraceContext.parseFrom(first.traceContext)),
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
-            externalTransactionHash = first.externalTransactionHash.map(ByteString.copyFrom),
+            externalTransactionHash = first.transactionHash,
             paidTrafficCost = first.trafficCost,
+            transactionHash = first.transactionHash,
           )
         }
       )

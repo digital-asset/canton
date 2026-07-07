@@ -17,9 +17,15 @@ import com.digitalasset.canton.store.PendingOperationStoreTest.{
   op1Modified,
   op2,
   op3,
+  op4,
 }
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  PhysicalSynchronizerId,
+  Synchronizer,
+  SynchronizerId,
+}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
@@ -43,6 +49,157 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
       store: Option[PendingOperationStore[TestPendingOperationMessage, SynchronizerId]] = None,
       corruptOperationBytes: Option[ByteString] = None,
   ): Future[Unit]
+
+  def genericPendingOperationStore(
+      mk: () => (
+          GenericPendingOperationStore,
+          PendingOperationStore[TestPendingOperationMessage, SynchronizerId],
+          PendingOperationStore[TestPendingOperationMessage, PhysicalSynchronizerId],
+      )
+  ): Unit = {
+    def withManyStore(
+        testCode: (
+            GenericPendingOperationStore,
+            PendingOperationStore[TestPendingOperationMessage, SynchronizerId],
+            PendingOperationStore[TestPendingOperationMessage, PhysicalSynchronizerId],
+        ) => Future[
+          Assertion
+        ]
+    ): Future[Assertion] = {
+      val (genericStore, lStore, pStore) = mk()
+      testCode(genericStore, lStore, pStore)
+    }
+
+    "support getAll with various filters" in withManyStore { (genericStore, lStore, pStore) =>
+      for {
+        _ <- lStore.insert(op1).value
+        _ <- lStore.insert(op2).value
+        _ <- lStore.insert(op3).value
+        _ <- pStore.insert(op4).value
+        allOps <- genericStore.getAllMetadata(None, None, None)
+        byName <- genericStore.getAllMetadata(operationName =
+          Some(NonEmptyString.tryCreate("opName1"))
+        )
+        byLogicalSynchronizer <- genericStore.getAllMetadata(synchronizerId =
+          Some(DefaultTestIdentities.synchronizerId)
+        )
+        byPhysicalSynchronizer <- genericStore.getAllMetadata(synchronizerId =
+          Some(DefaultTestIdentities.physicalSynchronizerId)
+        )
+        byKey <- genericStore.getAllMetadata(operationKey = Some("opKey4"))
+
+      } yield {
+        allOps shouldBe Set(
+          op1.toMetadata(),
+          op2.toMetadata(),
+          op3.toMetadata(),
+          op4.toMetadata(),
+        )
+        byName shouldBe Set(PendingOperationMetadata(op1.name, op1.key, op1.synchronizer))
+        byLogicalSynchronizer shouldBe Set(
+          op1.toMetadata(),
+          op2.toMetadata(),
+          op3.toMetadata(),
+          op4.toMetadata(),
+        )
+        byPhysicalSynchronizer shouldBe Set(
+          op4.toMetadata()
+        )
+        byKey shouldBe Set(op4.toMetadata())
+      }
+    }
+
+    "support delete with various filters" in withManyStore { (genericStore, lStore, pStore) =>
+      for {
+        _ <- lStore.insert(op1).value
+        _ <- lStore.insert(op2).value
+        _ <- lStore.insert(op3).value
+        _ <- pStore.insert(op4).value
+        allOps <- genericStore.getAllMetadata(None, None, None)
+        _ <- genericStore.delete(op1.synchronizer, op1.key, op1.name)
+        allOps1 <- genericStore.getAllMetadata(None, None, None)
+        _ <- genericStore.delete(op4.synchronizer, op1.key, op2.name)
+        allOps2 <- genericStore.getAllMetadata(None, None, None)
+        _ <- genericStore.delete(op4.synchronizer, op4.key, op4.name)
+        allOps3 <- genericStore.getAllMetadata(None, None, None)
+        _ <- genericStore.delete(op2.synchronizer, op2.key, op2.name)
+        allOps4 <- genericStore.getAllMetadata(None, None, None)
+        _ <- genericStore.delete(op3.synchronizer, op3.key, op3.name)
+        allOps5 <- genericStore.getAllMetadata(None, None, None)
+      } yield {
+        allOps shouldBe Set(
+          op1.toMetadata(),
+          op2.toMetadata(),
+          op3.toMetadata(),
+          op4.toMetadata(),
+        )
+        allOps1 shouldBe Set(
+          op2.toMetadata(),
+          op3.toMetadata(),
+          op4.toMetadata(),
+        )
+        allOps2 shouldBe Set(
+          op2.toMetadata(),
+          op3.toMetadata(),
+          op4.toMetadata(),
+        )
+        allOps3 shouldBe Set(
+          op2.toMetadata(),
+          op3.toMetadata(),
+        )
+        allOps4 shouldBe Set(
+          op3.toMetadata()
+        )
+        allOps5 shouldBe Set.empty
+      }
+    }
+  }
+
+  def genericPendingOperationStoreFail(
+      mk: () => (
+          GenericPendingOperationStore,
+          PendingOperationStore[TestPendingOperationMessage, SynchronizerId],
+      )
+  ): Unit = {
+    def withManyStore(
+        testCode: (
+            GenericPendingOperationStore,
+            PendingOperationStore[TestPendingOperationMessage, SynchronizerId],
+        ) => Future[
+          Assertion
+        ]
+    ): Future[Assertion] = {
+      val (genericStore, specificStore) = mk()
+      testCode(genericStore, specificStore)
+    }
+
+    "getAll should return unsupported error" in withManyStore { (genericStore, _) =>
+      for {
+        result <- genericStore.getAllMetadata().failed
+      } yield {
+        result shouldBe a[UnsupportedOperationException]
+        result.getMessage shouldBe
+          "getAllMetadata is not supported in InMemoryGenericPendingOperationStore"
+      }
+    }
+
+    "delete should return unsupported error" in withManyStore { (genericStore, _) =>
+      val name = NonEmptyString.tryCreate("testName")
+      for {
+        result <- genericStore
+          .delete(
+            DefaultTestIdentities.physicalSynchronizerId,
+            "testKey",
+            name,
+          )
+          .failed
+      } yield {
+        result shouldBe a[UnsupportedOperationException]
+        result.getMessage shouldBe
+          "delete is not supported in InMemoryGenericPendingOperationStore"
+      }
+    }
+  }
 
   def pendingOperationsStore(
       mk: () => PendingOperationStore[TestPendingOperationMessage, SynchronizerId]
@@ -193,7 +350,8 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
     }
 
     "succeed in inserting an operation with an empty key" in withStore { store =>
-      val opWithEmptyKey = createOp(name = "opName1", key = "", data = "data")
+      val opWithEmptyKey =
+        createOp(name = "opName1", key = "", data = "data", DefaultTestIdentities.synchronizerId)
       for {
         _ <- store.insert(opWithEmptyKey).value
         retrieved <- store
@@ -278,12 +436,12 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
 
 object PendingOperationStoreTest {
 
-  private def createOp(
+  private def createOp[SId <: Synchronizer](
       name: String,
       key: String,
       data: String,
-      synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId,
-  ): PendingOperation[TestPendingOperationMessage, SynchronizerId] =
+      synchronizerId: SId,
+  ): PendingOperation[TestPendingOperationMessage, SId] =
     PendingOperation
       .create(
         name = name,
@@ -311,18 +469,15 @@ object PendingOperationStoreTest {
     )
 
   protected val op1: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
-    createOp("opName1", "opKey1", "operation-1-data")
+    createOp("opName1", "opKey1", "operation-1-data", DefaultTestIdentities.synchronizerId)
   protected val op2: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
-    createOp("opName2", "opKey2", "operation-2-data")
+    createOp("opName2", "opKey2", "operation-2-data", DefaultTestIdentities.synchronizerId)
   protected val op3: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
-    createOp("opName3", "opKey3", "operation-3-data")
+    createOp("opName3", "opKey3", "operation-3-data", DefaultTestIdentities.synchronizerId)
+  protected val op4: PendingOperation[TestPendingOperationMessage, PhysicalSynchronizerId] =
+    createOp("opName4", "opKey4", "operation-4-data", DefaultTestIdentities.physicalSynchronizerId)
   protected val op1Modified: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
     op1.copy(operation = createMessage("modified-data"))
-
-  private def protocolVersionRepresentative(
-      pv: ProtocolVersion
-  ): RepresentativeProtocolVersion[TestPendingOperationMessage.type] =
-    TestPendingOperationMessage.protocolVersionRepresentativeFor(pv)
 
   final case class TestPendingOperationMessage(data: String)(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[
@@ -352,7 +507,9 @@ object PendingOperationStoreTest {
       createMessage(message.msg).asRight
 
     def createMessage(data: String): TestPendingOperationMessage =
-      TestPendingOperationMessage(data)(protocolVersionRepresentative(ProtocolVersion.minimum))
+      TestPendingOperationMessage(data)(
+        TestPendingOperationMessage.protocolVersionRepresentativeFor(ProtocolVersion.minimum)
+      )
   }
 }
 

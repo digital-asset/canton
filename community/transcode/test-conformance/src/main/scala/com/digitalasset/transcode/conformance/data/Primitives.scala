@@ -88,3 +88,8 @@ trait Primitives extends TestCase:
     contractId(constructor(RoundtripId, record("party" -> party))),
     DV.ContractId("0" * 2 + "1" * 136),
   )
+  private val Void = ctor(unknown)
+  addCase(
+    contractId(Void),
+    DV.ContractId("0" * 2 + "1" * 136),
+  )

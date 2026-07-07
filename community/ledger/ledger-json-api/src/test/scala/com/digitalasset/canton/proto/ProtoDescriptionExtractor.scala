@@ -30,7 +30,8 @@ object ProtoDescriptionExtractor {
             fileName.stripPrefix(s"${ProtoParser.ledgerApiProtoLocation}/")
           } else fileName
 
-        def unnest(m: Message): Seq[Message] = m +: m.getMessages.asScala.toSeq.flatMap(unnest)
+        def unnest(m: Message): Seq[Message] =
+          m +: m.getMessages.asScala.toSeq.filterNot(_.isMapEntry).flatMap(unnest)
 
         val messages = proto.getMessages.asScala
           .flatMap(unnest)

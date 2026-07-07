@@ -7,6 +7,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 
 trait NodeConfig {
   def clientAdminApi: ClientConfig
+  def httpHealthClientConfig: Option[HttpHealthServerConfig]
 }
 
 trait LocalNodeConfig extends NodeConfig {
@@ -24,6 +25,8 @@ trait LocalNodeConfig extends NodeConfig {
 
   def parameters: LocalNodeParametersConfig
 
+  override def httpHealthClientConfig: Option[HttpHealthServerConfig] = monitoring.httpHealthServer
+
 }
 
 trait LocalNodeParametersConfig {
@@ -31,6 +34,7 @@ trait LocalNodeParametersConfig {
 
   /** Various cache sizes */
   def caching: CachingConfigs
+  def devVersionSupport: Boolean
   def alphaVersionSupport: Boolean
   def watchdog: Option[WatchdogConfig]
 }

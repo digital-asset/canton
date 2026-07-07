@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.crashrecovery
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.console.{CommandFailure, RemoteParticipantReference}
 import com.digitalasset.canton.error.TransactionRoutingError.AutomaticReassignmentForTransactionFailure
+import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -14,7 +15,6 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.SynchronizerRouterIntegrationTestSetup
-import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
@@ -60,8 +60,7 @@ class AutomaticReassignmentCrashIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition
       .addConfigTransforms(
-        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds),
-        ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
+        ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory)
       )
       .withSetup { implicit env =>
         import env.*

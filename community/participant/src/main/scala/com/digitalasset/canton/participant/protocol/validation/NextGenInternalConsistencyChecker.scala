@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.FullTransactionViewTree
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.LLState
 import com.digitalasset.daml.lf.transaction.{ErrOr, NextGenContractStateMachine, TransactionError}
+import com.digitalasset.nonempty.NonEmpty
 
 class NextGenInternalConsistencyChecker(
     override val participantId: ParticipantId,
@@ -25,15 +25,14 @@ class NextGenInternalConsistencyChecker(
 
   override def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext
   ): Either[ErrorWithInternalConsistencyCheck, Unit] =
     for {
-      _ <- checkRollbackScopes(rootViewTrees)
       _ <- checkContractState(rootViewTrees)
-      _ <- checkKeyState(hostedKeys, Seq(mergedTransaction))
+      _ <- checkKeyState(hostedKeys, unmergedTransactionsWithoutToplevelRollbackNodes)
     } yield ()
 
   private[validation] def checkContractState(

@@ -5,10 +5,7 @@ package com.digitalasset.canton.testing.modelbased.tool
 
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.testing.modelbased.generators.ConcreteGenerators
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver
-import com.digitalasset.canton.testing.modelbased.solver.SymbolicSolver.KeyMode
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
-import com.digitalasset.daml.lf.language.LanguageVersion
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.*
@@ -19,8 +16,8 @@ import scala.concurrent.duration.*
   * Repeatedly generates concrete scenarios via `ConcreteGenerators`, then prints each scenario to
   * stdout.
   *
-  * All generator parameters (language version, number of parties, key mode, etc.) are configurable
-  * via command-line flags. Run with `--help` to see the full list.
+  * All generator parameters (language version, number of parties, etc.) are configurable via
+  * command-line flags. Run with `--help` to see the full list.
   *
   * Intended as a development aid to quickly observe the effect of generator changes and get a sense
   * of performance.
@@ -28,10 +25,8 @@ import scala.concurrent.duration.*
 object SampleScenarios {
 
   final case class Config(
-      languageVersion: LanguageVersion = LanguageVersion.assertFromString("2.dev"),
+      contractKeys: Boolean = true,
       readOnlyRollbacks: Boolean = true,
-      generateQueryByKey: Boolean = true,
-      keyMode: KeyMode = SymbolicSolver.KeyMode.NonUniqueContractKeys,
       numParties: Int = 3,
       numPackages: Int = 1,
       numParticipants: Int = 3,
@@ -49,49 +44,15 @@ object SampleScenarios {
     }
 
     discard {
-      opt[String]("language-version")
-        .valueName("<version>")
-        .text("Daml-LF language version (default: 2.dev)")
-        .action((v, c) =>
-          c.copy(languageVersion =
-            LanguageVersion
-              .fromString(v)
-              .fold(
-                err => throw new IllegalArgumentException(err),
-                identity,
-              )
-          )
-        )
+      opt[Boolean]("contract-keys")
+        .text("Enable contract keys (default: true)")
+        .action((v, c) => c.copy(contractKeys = v))
     }
 
     discard {
       opt[Boolean]("read-only-rollbacks")
         .text("Enable read-only rollbacks (default: true)")
         .action((v, c) => c.copy(readOnlyRollbacks = v))
-    }
-
-    discard {
-      opt[Boolean]("generate-query-by-key")
-        .text("Generate query-by-key nodes (default: true)")
-        .action((v, c) => c.copy(generateQueryByKey = v))
-    }
-
-    discard {
-      opt[String]("key-mode")
-        .valueName("<uck|nuck>")
-        .text(
-          "Key mode: 'uck' (unique contract keys) or 'nuck' (non-unique contract keys, default)"
-        )
-        .validate(v =>
-          if (v == "uck" || v == "nuck") success
-          else failure(s"key-mode must be 'uck' or 'nuck', got '$v'")
-        )
-        .action((v, c) =>
-          c.copy(keyMode =
-            if (v == "uck") SymbolicSolver.KeyMode.UniqueContractKeys
-            else SymbolicSolver.KeyMode.NonUniqueContractKeys
-          )
-        )
     }
 
     discard {
@@ -172,10 +133,8 @@ object SampleScenarios {
 
   private def run(config: Config): Unit = {
     val generators = new ConcreteGenerators(
-      languageVersion = config.languageVersion,
+      contractKeys = config.contractKeys,
       readOnlyRollbacks = config.readOnlyRollbacks,
-      generateQueryByKey = config.generateQueryByKey,
-      keyMode = config.keyMode,
     )
 
     val generator = generators.validScenarioGenerator(

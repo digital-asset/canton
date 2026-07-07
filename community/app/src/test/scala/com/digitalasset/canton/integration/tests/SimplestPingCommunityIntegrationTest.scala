@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.version.ReleaseVersion
 
 sealed trait SimplestPingCommunityIntegrationTest
     extends CommunityIntegrationTest
@@ -32,10 +33,12 @@ sealed trait SimplestPingCommunityIntegrationTest
     sequencer1.health.status shouldBe NodeStatus.NotInitialized(
       active = true,
       Some(WaitingForInitialization),
+      Some(ReleaseVersion.current),
     )
     mediator1.health.status shouldBe NodeStatus.NotInitialized(
       active = true,
       Some(WaitingForInitialization),
+      Some(ReleaseVersion.current),
     )
 
     bootstrap.synchronizer(

@@ -4,10 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data
 
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  BlockNumber,
-  EpochNumber,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.tracing.TraceContext
@@ -22,9 +19,15 @@ trait EpochStoreReader[E <: Env[E]] {
     s"Load epoch $epochNumber info"
 
   def loadOrderedBlocks(
-      initialBlockNumber: BlockNumber
+      initialEpochNumber: EpochNumber,
+      limit: Int,
   )(implicit traceContext: TraceContext): E#FutureUnlessShutdownT[Seq[OrderedBlockForOutput]]
+  protected def loadOrderedBlocksActionName(initialEpochNumber: EpochNumber, limit: Int): String =
+    s"Load ordered blocks starting from epoch $initialEpochNumber (limit $limit)"
 
-  protected def loadOrderedBlocksActionName(initialBlockNumber: BlockNumber): String =
-    s"Load ordered blocks starting from $initialBlockNumber"
+  def lastEpochWithCompletedBlock(lowerBound: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): E#FutureUnlessShutdownT[Option[EpochNumber]]
+  protected def lastEpochWithCompletedBlockActionName: String =
+    "Load epoch which has a completed block"
 }

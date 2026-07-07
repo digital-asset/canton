@@ -11,7 +11,7 @@ import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.ledger.api.DisclosedContract
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state
-import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStore}
+import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
@@ -23,7 +23,12 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
-import com.digitalasset.canton.protocol.{CantonContractIdVersion, LfFatContractInst}
+import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
+import com.digitalasset.canton.protocol.{
+  CantonContractIdVersion,
+  LfFatContractInst,
+  LfInterpretationConfig,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -37,7 +42,6 @@ import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   NeedKeyProgression,
-  NextGenContractStateMachine,
   Node,
   SubmittedTransaction,
   Transaction,
@@ -55,7 +59,7 @@ private[apiserver] trait CommandInterpreter {
 
   def interpret(
       commands: api.Commands,
-      mode: NextGenContractStateMachine.Mode,
+      interpretationConfig: LfInterpretationConfig,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -78,6 +82,7 @@ final class StoreBackedCommandInterpreter(
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
     timeProvider: TimeProvider,
+    externalCallHandler: ExternalCallHandler,
 )(implicit
     ec: ExecutionContext
 ) extends CommandInterpreter
@@ -87,7 +92,7 @@ final class StoreBackedCommandInterpreter(
 
   override def interpret(
       commands: api.Commands,
-      mode: NextGenContractStateMachine.Mode,
+      interpretationConfig: LfInterpretationConfig,
       submissionSeed: crypto.Hash,
   )(implicit
       loggingContext: LoggingContextWithTrace,
@@ -107,7 +112,12 @@ final class StoreBackedCommandInterpreter(
         }
         .value
         .map(_.toOption)
-      submissionResult <- submitToEngine(commands, mode, submissionSeed, interpretationTimeNanos)
+      submissionResult <- submitToEngine(
+        commands,
+        interpretationConfig,
+        submissionSeed,
+        interpretationTimeNanos,
+      )
       submission <- consume(
         commands.actAs,
         commands.readAs,
@@ -165,6 +175,7 @@ final class StoreBackedCommandInterpreter(
             commands.deduplicationPeriod,
             commands.submissionId.map(_.unwrap),
             externallySignedSubmission = None,
+            transactionHash = None,
           ),
           optSynchronizerId = prescribedSynchronizerIdO,
           transactionMeta = state.TransactionMeta(
@@ -184,7 +195,6 @@ final class StoreBackedCommandInterpreter(
           transaction = updateTx,
           dependsOnLedgerTime = meta.dependsOnTime,
           interpretationTimeNanos = interpretationTimeNanos,
-          globalKeyMapping = meta.globalKeyMapping,
           processedDisclosedContracts = usedDisclosedContracts.map(_.fatContractInstance),
         )
       }
@@ -192,7 +202,7 @@ final class StoreBackedCommandInterpreter(
 
   private def submitToEngine(
       commands: api.Commands,
-      mode: NextGenContractStateMachine.Mode,
+      interpretationConfig: LfInterpretationConfig,
       submissionSeed: crypto.Hash,
       interpretationTimeNanos: AtomicLong,
   )(implicit
@@ -218,35 +228,10 @@ final class StoreBackedCommandInterpreter(
           submissionSeed = submissionSeed,
           prefetchKeys = commands.prefetchKeys,
           contractIdVersion = ContractIdVersion.V1,
-          contractStateMode = mode,
+          interpretationConfig = interpretationConfig,
         )
       })),
     )
-
-  /** recursively prefetch contract ids up to a certain level */
-  private def recursiveLoad(
-      depth: Int,
-      loaded: Set[ContractId],
-      fresh: Set[ContractId],
-  )(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Set[ContractId]] = if (fresh.isEmpty || depth <= 0) {
-    Future.successful(loaded)
-  } else {
-    Future
-      .sequence(fresh.map(contractStore.lookupContractState))
-      .map(_.foldLeft(Set.empty[ContractId]) {
-        case (acc, ContractState.NotFound) => acc
-        case (acc, ContractState.Archived) => acc
-        case (acc, ContractState.Active(ci)) =>
-          ci.collectCids(acc)
-      })
-      .flatMap { found =>
-        val newLoaded = loaded ++ fresh
-        val nextFresh = found.diff(newLoaded)
-        recursiveLoad(depth - 1, newLoaded, nextFresh)
-      }
-  }
 
   // TODO(#30398): add unit testing of the NUCK lookups (especially the intersection with explicit disclosure)
   private def consume[A](
@@ -361,11 +346,25 @@ final class StoreBackedCommandInterpreter(
 
         case ResultNeedKey(key, limit, continuationToken, resume) =>
           disclosedOrStoreNKeyLookup(key, limit, continuationToken)
-            .flatMap { case (cids, token) =>
+            .flatMap { case (fcis, token) =>
+              val entries: Vector[ResultNeedKey.Response.ContractEntry] = fcis.map { fci =>
+                CantonContractIdVersion.extractCantonContractIdVersion(fci.contractId) match {
+                  case Right(version) =>
+                    ResultNeedKey.Response.AuthenticableFatContractInstance(
+                      fci,
+                      version.contractHashingMethod,
+                      hash => contractAuthenticator(fci, hash).isRight,
+                    )
+                  case Left(_) =>
+                    ResultNeedKey.Response.UnsupportedContractIdVersion(fci.contractId)
+                }
+              }
               resolveStep(
                 Tracked.value(
                   metrics.execution.engineRunning,
-                  trackSyncExecution(interpretationTimeNanos)(resume(cids, token)),
+                  trackSyncExecution(interpretationTimeNanos)(
+                    resume(ResultNeedKey.Response(entries, token))
+                  ),
                 )
               )
             }
@@ -443,29 +442,45 @@ final class StoreBackedCommandInterpreter(
           val initialCids = coids.toSet.diff(disclosedCids)
           import com.digitalasset.canton.util.FutureInstances.*
           // load all contracts
-          val initialLoadCidF =
-            initialCids.toSeq
-              .parTraverse(contractStore.lookupContractState)
-              .map(_.foldLeft(Set.empty[ContractId]) {
-                case (acc, ContractState.Active(ci)) => ci.collectCids(acc)
-                case (acc, _) => acc
-              })
-          // TODO(#31845): restore the prefetching of keys
-          val initialLoadKeyF = Future.successful(Seq.empty[ContractId])
-          // then prefetch the found referenced or key contracts recursively
-          val loadContractsF = initialLoadCidF.flatMap { referencedCids =>
-            initialLoadKeyF.flatMap { keyCids =>
-              recursiveLoad(
-                prefetchingRecursionLevel.value - 1,
-                disclosedCids ++ initialCids,
-                referencedCids ++ keyCids,
-              )
-            }
-          }
+
+          val loadContractsF = for {
+            contractsById <- initialCids.toSeq
+              .parTraverse(contractStore.lookupContractState(_))
+              .map(_.flatMap(_.toContractOption.toList))
+            contractsByKey <- keys.toSeq
+              .parTraverse { case (key, limit) =>
+                contractStore.lookupContractKey(Set.empty, key, None, limit)
+              }
+              .map(_.flatMap(_.contracts))
+            contracts = contractsById ++ contractsByKey
+            res <- recursiveLoad(
+              prefetchingRecursionLevel.value - 1,
+              disclosedCids,
+              contracts,
+            )
+          } yield res
 
           FutureUnlessShutdown
             .outcomeF(loadContractsF)
             .flatMap(_ => resolveStep(resume()))
+
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          externalCallHandler
+            .handleExternalCall(
+              extensionId,
+              functionId,
+              configHash,
+              input,
+              ExternalCallMode.Submission,
+            )
+            .flatMap { result =>
+              resolveStep(
+                Tracked.value(
+                  metrics.execution.engineRunning,
+                  trackSyncExecution(interpretationTimeNanos)(resume(result)),
+                )
+              )
+            }
       }
 
     resolveStep(result).thereafter { _ =>
@@ -481,6 +496,27 @@ final class StoreBackedCommandInterpreter(
         .update(interpretationTimeNanos.get(), TimeUnit.NANOSECONDS)
     }
   }
+
+  /** recursively prefetch contract ids up to a certain level */
+  private def recursiveLoad(
+      depth: Int,
+      loaded: Set[ContractId],
+      justLoaded: Seq[LfFatContractInst],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Set[ContractId]] =
+    if (justLoaded.isEmpty || depth <= 0) {
+      Future.successful(loaded)
+    } else {
+      import com.digitalasset.canton.util.FutureInstances.*
+      val found =
+        justLoaded.foldLeft(Set.empty[ContractId])((acc, contract) => contract.collectCids(acc))
+      val fresh = found -- loaded
+      fresh.toSeq
+        .parTraverse(contractStore.lookupContractState)
+        .map(_.flatMap(_.toContractOption.toList))
+        .flatMap(recursiveLoad(depth - 1, loaded ++ fresh, _))
+    }
 
   private def trackSyncExecution[T](atomicNano: AtomicLong)(computation: => T): T = {
     val start = System.nanoTime()
@@ -600,7 +636,7 @@ object StoreBackedCommandInterpreter {
           metrics.execution.lookupNContractKey,
           FutureUnlessShutdown.outcomeF(
             contractStore
-              .lookupNonUniqueContractKey(
+              .lookupContractKey(
                 readers = readers,
                 key = key,
                 pageToken = continuationToken.token,

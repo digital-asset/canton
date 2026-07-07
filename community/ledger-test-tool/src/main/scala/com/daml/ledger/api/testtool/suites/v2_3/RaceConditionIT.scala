@@ -19,8 +19,8 @@ import com.daml.ledger.test.java.keys.racetests.{
   FetchWrapper,
   LookupWrapper,
 }
-import com.daml.timer.Delayed
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.util.DelayUtil
 
 import scala.annotation.nowarn
 import scala.concurrent.duration.*
@@ -88,7 +88,7 @@ final class RaceConditionIT extends LedgerTestSuite {
      */
     for {
       contract <- ledger.create(alice, new ContractWithKey(alice))
-      _ <- Delayed.by(500.millis)(())
+      _ <- DelayUtil.delay(500.millis)
       createFuture = ledger.create(alice, new ContractWithKey(alice)).transform(Success(_))
       exerciseFuture = ledger
         .exercise(alice, contract.exerciseContractWithKey_Archive())

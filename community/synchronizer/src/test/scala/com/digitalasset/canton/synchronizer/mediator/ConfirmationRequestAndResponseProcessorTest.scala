@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -40,6 +39,7 @@ import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTra
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{ProtocolVersionChecksAsyncWordSpec, *}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import org.scalatest.Assertion
@@ -271,6 +271,8 @@ class ConfirmationRequestAndResponseProcessorTest
       result.asScala.map(_.batch).toList
     }
 
+    private val clock = mock[Clock]
+
     val verdictSender: TestVerdictSender =
       new TestVerdictSender(
         syncCryptoApi,
@@ -284,8 +286,8 @@ class ConfirmationRequestAndResponseProcessorTest
     val mediatorState = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
       new InMemoryMediatorDeduplicationStore(loggerFactory, timeouts),
-      mock[Clock],
-      MediatorTestMetrics,
+      clock,
+      MediatorTestMetrics(this.getClass.getSimpleName),
       testedProtocolVersion,
       timeouts,
       loggerFactory,
@@ -296,10 +298,6 @@ class ConfirmationRequestAndResponseProcessorTest
       syncCryptoApi,
       timeTracker,
       mediatorState,
-      // this test calls processRequest and processResponses directly,
-      // which is not affected by the asynchronous processing flag, which is handled in the enclosing scope
-      // calling these methods
-      asynchronousProcessing = true,
       loggerFactory,
       timeouts,
       BatchingConfig(),
@@ -1048,6 +1046,7 @@ class ConfirmationRequestAndResponseProcessorTest
                     actualVersion,
                     Right(_states),
                     _,
+                    _,
                   )
                 ) =>
               actualRequestId shouldBe requestId
@@ -1075,6 +1074,7 @@ class ConfirmationRequestAndResponseProcessorTest
             _,
             `ts1`,
             Right(states),
+            _,
             _,
           ) = updatedState.value
           assert(
@@ -1161,7 +1161,7 @@ class ConfirmationRequestAndResponseProcessorTest
           .value
       } yield {
         inside(finalState) {
-          case Some(FinalizedResponse(`requestId`, `informeeMessage`, `ts2`, verdict)) =>
+          case Some(FinalizedResponse(`requestId`, `informeeMessage`, `ts2`, verdict, _)) =>
             assert(verdict === Approve(testedProtocolVersion))
         }
       }
@@ -1313,6 +1313,7 @@ class ConfirmationRequestAndResponseProcessorTest
                   _request,
                   _version,
                   Verdict.ParticipantReject(reasons),
+                  _,
                 )
               ) =>
             // TODO(#5337) These are only the rejections for the first view because this view happens to be finalized first.
@@ -1471,6 +1472,7 @@ class ConfirmationRequestAndResponseProcessorTest
                   _request,
                   _version,
                   Verdict.ParticipantReject(reasons),
+                  _,
                 )
               ) =>
             reasons.length shouldEqual 1
@@ -1593,6 +1595,7 @@ class ConfirmationRequestAndResponseProcessorTest
                   _request,
                   _version,
                   Verdict.ParticipantReject(reasons),
+                  _,
                 )
               ) =>
             reasons.length shouldEqual 2

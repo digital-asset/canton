@@ -39,7 +39,7 @@ object ConfigErrors extends ConfigErrorGroup {
       override val cause: String,
       override val throwableO: Option[Throwable] = None,
   )(implicit override val code: ErrorCode)
-      extends ContextualizedCantonError {}
+      extends ContextualizedCantonError
 
   sealed abstract class ExceptionBasedConfigError(
       override val cause: String,

@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.api.validation
 
 import cats.implicits.{catsSyntaxTuple2Semigroupal, toTraverseOps}
 import com.daml.ledger.api.v2.update_service.{
+  GetUpdateByHashRequest,
   GetUpdateByIdRequest,
   GetUpdateByOffsetRequest,
   GetUpdatesPageRequest,
@@ -13,7 +14,10 @@ import com.daml.ledger.api.v2.update_service.{
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.update
 import com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
-import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
+import com.digitalasset.canton.ledger.api.validation.ValidationErrors.{
+  invalidArgument,
+  missingField,
+}
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -115,6 +119,26 @@ object UpdateServiceRequestValidator {
     } yield {
       update.GetUpdateByIdRequest(
         updateId = updateId,
+        updateFormat = updateFormat,
+      )
+    }
+
+  def validateUpdateByHash(
+      req: GetUpdateByHashRequest
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Result[update.GetUpdateByHashRequest] =
+    for {
+      _ <- Either.cond(
+        !req.transactionHash.isEmpty,
+        (),
+        missingField("transaction_hash"),
+      )
+      updateFormatProto <- requirePresence(req.updateFormat, "update_format")
+      updateFormat <- FormatValidator.validate(updateFormatProto)
+    } yield {
+      update.GetUpdateByHashRequest(
+        hash = req.transactionHash,
         updateFormat = updateFormat,
       )
     }

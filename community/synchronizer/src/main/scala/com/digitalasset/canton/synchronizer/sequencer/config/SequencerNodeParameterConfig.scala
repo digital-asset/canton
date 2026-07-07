@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.config
 
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,9 +29,12 @@ final case class AsyncWriterConfig(
 
 /** Various parameters for non-standard sequencer settings
   *
-  * @param alphaVersionSupport
-  *   if true, then dev version will be turned on, but we will brick this sequencer node if it is
+  * @param devVersionSupport
+  *   if true, then support for the dev protocol version is enabled and the dev database schemas are
+  *   applied, which does not provide data continuity guarantees and must not be used in production
   *   used for production.
+  * @param alphaVersionSupport
+  *   if true, then support for alpha protocol versions will be turned on.
   * @param dontWarnOnDeprecatedPV
   *   if true, then this sequencer will not emit a warning when configured to use protocol version
   *   2.0.0.
@@ -49,8 +53,28 @@ final case class AsyncWriterConfig(
   *   Configures behavior of sendAsync requests until the traffic is initialized during LSU: If
   *   true, the sequencer will delay processing of the requests. If false, the sequencer will
   *   synchronously reject the requests with an error.
+  * @param enableRejectDeliveredAggregationsOnPv35
+  *   No effect on pv34. On pv36 enabled for all node types. On pv35, the sequencer will reject
+  *   aggregations that have already been completed eagerly for all configured member types, default
+  *   is MED.
+  * @param disableSubmissionChecksForTesting
+  *   If true, disable checks on the write path of the sequencer in order to allow testing the same
+  *   checks on the post-processing path (malicious sequencer node tests). Only to be used for
+  *   testing purposes.
+  * @param disableAggregationRuleSizeCheckForTesting
+  *   Whether to disable the aggregation rule size check for testing purposes. This should only be
+  *   used in tests and should eventually be removed as the tests are based on a feature that is not
+  *   intended to be used in production.
+  * @param disableReleaseVersionHandshakeCheck
+  *   If true, then we won't check whether the client binaries are really supported during
+  *   handshake. This is normally only useful for unstable protocol versions to avoid accidental
+  *   ledger forks.
+  * @param enablePrevalidation
+  *   If true (as of 3.6), we will use pre-validation to move the signature validation into a
+  *   separate parallel stage instead of the sequential step.
   */
 final case class SequencerNodeParameterConfig(
+    override val devVersionSupport: Boolean = false,
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,
@@ -64,7 +88,13 @@ final case class SequencerNodeParameterConfig(
     // TODO(#30769) remove this flag once the feature is complete
     producePostOrderingTopologyTicks: Boolean = true,
     lsuRepair: LsuRepair = LsuRepair(),
+    lsu: SequencerLsuConfig = SequencerLsuConfig(),
     delayRequestsBeforeLsuTrafficInit: Boolean = false,
+    enableRejectDeliveredAggregationsOnPv35: Seq[String] = Seq("MED"),
+    disableSubmissionChecksForTesting: Boolean = false,
+    disableAggregationRuleSizeCheckForTesting: Boolean = false,
+    disableReleaseVersionHandshakeCheck: Boolean = false,
+    enablePrevalidation: Boolean = true,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 
@@ -81,6 +111,19 @@ final case class SequencerNodeParameterConfig(
 final case class LsuRepair(
     lsuSequencingBoundsOverride: Option[LsuSequencingBoundsOverride] = None,
     globalMaxSequencingTimeExclusive: Option[CantonTimestamp] = None,
+)
+
+/** Config for LSU.
+  *
+  * @param contactSuccessorRetry
+  *   Config for the retries of the contact of the successor
+  */
+final case class SequencerLsuConfig(
+    contactSuccessorRetry: ExponentialBackoffConfig = ExponentialBackoffConfig(
+      initialDelay = config.NonNegativeFiniteDuration.ofSeconds(15),
+      maxDelay = config.NonNegativeDuration.ofMinutes(1),
+      maxRetries = Int.MaxValue,
+    )
 )
 
 /** Used to override values usually derived from the LSU announcement. MUST be used only for roll

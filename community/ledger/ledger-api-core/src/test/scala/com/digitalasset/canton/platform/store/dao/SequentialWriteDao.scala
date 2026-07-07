@@ -6,13 +6,17 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.Update
+import com.digitalasset.canton.ledger.participant.state.{
+  SequencedUpdate,
+  SynchronizerUpdate,
+  Update,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   IngestionStorageBackend,
+  LedgerEnd,
   ParameterStorageBackend,
   UpdateToDbDto,
 }
@@ -42,7 +46,7 @@ object SequentialWriteDao {
       metrics: LedgerApiServerMetrics,
       compressionStrategy: CompressionStrategy,
       ledgerEndCache: MutableLedgerEndCache,
-      stringInterningView: StringInterning with InternizingStringInterningView,
+      stringInterningView: StringInterning & InternizingStringInterningView,
       ingestionStorageBackend: IngestionStorageBackend[?],
       parameterStorageBackend: ParameterStorageBackend,
       loggerFactory: NamedLoggerFactory,
@@ -75,7 +79,7 @@ private[dao] final case class SequentialWriteDaoImpl[DbBatch](
     parameterStorageBackend: ParameterStorageBackend,
     updateToDbDtos: Offset => Update => Iterator[DbDto],
     ledgerEndCache: MutableLedgerEndCache,
-    stringInterningView: StringInterning with InternizingStringInterningView,
+    stringInterningView: StringInterning & InternizingStringInterningView,
 ) extends SequentialWriteDao {
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -167,22 +171,27 @@ private[dao] final case class SequentialWriteDaoImpl[DbBatch](
         .pipe(ingestionStorageBackend.insertBatch(connection, _))
 
       parameterStorageBackend.updateLedgerEnd(
-        ParameterStorageBackend.LedgerEnd(
+        LedgerEnd(
           lastOffset = offset,
           lastEventSeqId = lastEventSeqId,
           lastStringInterningId = lastStringInterningId,
           lastPublicationTime = CantonTimestamp.MinValue,
+          synchronizerIndices = update match {
+            case Some(u: SequencedUpdate) => Map(u.synchronizerId -> u.synchronizerIndex)
+            case _ => Map()
+          },
         )
       )(connection)
 
-      ledgerEndCache.set(
-        Some(
-          LedgerEnd(
-            lastOffset = offset,
-            lastEventSeqId = lastEventSeqId,
-            lastStringInterningId = lastStringInterningId,
-            lastPublicationTime = CantonTimestamp.MinValue,
-          )
+      ledgerEndCache.update(
+        LedgerEnd(
+          lastOffset = offset,
+          lastEventSeqId = lastEventSeqId,
+          lastStringInterningId = lastStringInterningId,
+          lastPublicationTime = CantonTimestamp.MinValue,
+          synchronizerIndices = update.toList.collect { case u: SynchronizerUpdate =>
+            u.synchronizerId -> u.synchronizerIndex
+          }.toMap,
         )
       )
     })

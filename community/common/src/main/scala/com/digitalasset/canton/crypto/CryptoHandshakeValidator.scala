@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.crypto
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.nonempty.NonEmpty
 
 object CryptoHandshakeValidator {
 
-  private def validateScheme[S](
+  private def validateScheme[S <: CryptoSpec](
       required: NonEmpty[Set[S]],
       scheme: CryptoScheme[S],
   ): Either[String, Unit] = {

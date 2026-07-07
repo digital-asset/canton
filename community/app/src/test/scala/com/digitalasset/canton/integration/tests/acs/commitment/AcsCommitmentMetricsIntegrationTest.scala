@@ -482,13 +482,18 @@ trait AcsCommitmentMetricsIntegrationTest
 
   "Can get max long value when we have never received a counter commitment" in { implicit env =>
     import env.*
-    val iou = IouSyntax
-      .createIou(participant1, Some(daId))(alice, bob)
-    val iou2 = IouSyntax
-      .createIou(participant1, Some(daId))(alice, charlie)
-    logger.info(s"deploying two IOU contract")
+    val iou = IouSyntax.createIou(participant1, Some(daId))(alice, bob)
+    val iou2 = IouSyntax.createIou(participant1, Some(daId))(alice, charlie)
+    // Create an Iou contract that involves only the admin party of participant1. This ensures that
+    // the stakeholder group containing only the admin party always exists. Otherwise, this stakeholder group
+    // may or may not be active depending on how often we advance the sim clock and
+    // how the pings align with the reconciliation intervals.
+    val iou3 = IouSyntax
+      .createIou(participant1, Some(daId))(participant1.adminParty, participant1.adminParty)
+    logger.info(s"deploying three IOU contract")
     deployAndCheckContractOnParticipants(iou, Seq(participant1, participant2))
     deployAndCheckContractOnParticipants(iou2, Seq(participant1, participant3))
+    deployAndCheckContractOnParticipants(iou3, Seq(participant1))
     val simClock = environment.simClock.value
 
     logger.info(
@@ -674,12 +679,14 @@ trait AcsCommitmentMetricsIntegrationTest
         .value shouldBe 0
     }
 
-    participant1.metrics
-      .get_long_point(
-        s"$metricsPrefix.active-stakeholder-groups",
-        metricsSynchronizerContext,
-      )
-      .value shouldBe 3L
+    eventually() {
+      participant1.metrics
+        .get_long_point(
+          s"$metricsPrefix.active-stakeholder-groups",
+          metricsSynchronizerContext,
+        )
+        .value shouldBe 3L
+    }
   }
 
   "no wait participants does not affect default latency metric" onlyRunWhen (!isInMemory) in {

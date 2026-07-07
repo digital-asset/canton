@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, MigrationMode, PostgresTest}
 import com.digitalasset.canton.topology.UniqueIdentifier
@@ -11,7 +11,12 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}
 import org.scalatest.wordspec.AsyncWordSpec
 
-trait InitializationStoreTest extends AsyncWordSpec with BaseTest with FailOnShutdown {
+trait InitializationStoreTest
+    extends AsyncWordSpec
+    with BaseTest
+    with FailOnShutdown
+    with FlagCloseable
+    with HasCloseContext {
 
   val uid = UniqueIdentifier.tryFromProtoPrimitive("da::default")
   val uid2 = UniqueIdentifier.tryFromProtoPrimitive("two::default")
@@ -29,6 +34,7 @@ trait InitializationStoreTest extends AsyncWordSpec with BaseTest with FailOnShu
           id <- store.uid
         } yield id shouldBe Some(uid)
       }
+
       "fail when trying to set two different ids" in {
         val store = mk()
         for {
@@ -38,19 +44,6 @@ trait InitializationStoreTest extends AsyncWordSpec with BaseTest with FailOnShu
             _.getMessage shouldBe s"Unique id of node is already defined as $uid and can't be changed to $uid2!",
           )
         } yield succeed
-      }
-
-      "support dev version" in {
-        val store = mk()
-        myMigrationMode match {
-          case MigrationMode.Standard =>
-            // query should fail with an exception
-            store.throwIfNotDev.failed.map { _ =>
-              succeed
-            }
-          case MigrationMode.DevVersion =>
-            store.throwIfNotDev.map(_ shouldBe true)
-        }
       }
     }
 }

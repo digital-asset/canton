@@ -8,13 +8,14 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   CreationTime,
   FatContractInstance,
-  TransactionCoder,
   Versioned,
 }
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
 
 /** Wraps a [[com.digitalasset.daml.lf.transaction.FatContractInstance]] and ensures the following
   * invariants via smart constructors:
@@ -93,28 +94,6 @@ object ContractInstance {
         .leftMap(err => s"Failed parsing disclosed contract authentication data: $err")
     else Left("Missing authentication data in provided disclosed contract")
 
-  def toSerializableContract(inst: LfFatContractInst): Either[String, SerializableContract] =
-    for {
-      contractIdVersion <- CantonContractIdVersion
-        .extractCantonContractIdVersion(inst.contractId)
-        .leftMap(err => s"Invalid disclosed contract id: ${err.toString}")
-      authenticationData <- contractAuthenticationData(contractIdVersion, inst)
-      metadata <- ContractMetadata.create(
-        signatories = inst.signatories,
-        stakeholders = inst.stakeholders,
-        maybeKeyWithMaintainersVersioned =
-          inst.contractKeyWithMaintainers.map(Versioned(inst.version, _)),
-      )
-      serializable <- SerializableContract(
-        contractId = inst.contractId,
-        contractInstance = inst.toCreateNode.versionedCoinst,
-        metadata = metadata,
-        ledgerTime = CantonTimestamp(inst.createdAt.time),
-        authenticationData = authenticationData,
-      ).leftMap(err => s"Failed creating serializable contract from disclosed contract: $err")
-
-    } yield serializable
-
   def create[Time <: CreationTime](
       inst: FatContractInstance { type CreatedAtTime <: Time }
   ): Either[String, GenContractInstance { type InstCreatedAtTime <: Time }] =
@@ -131,20 +110,9 @@ object ContractInstance {
       )
     } yield ContractInstanceImpl[inst.CreatedAtTime](inst, metadata, serialization)
 
-  def fromSerializable(serializable: SerializableContract): Either[String, ContractInstance] = {
-    val inst = FatContractInstance.fromCreateNode(
-      serializable.toLf,
-      serializable.ledgerCreateTime,
-      serializable.authenticationData.toLfBytes,
-    )
-    for {
-      serialization <- encodeInst(inst)
-    } yield ContractInstanceImpl(inst, serializable.metadata, serialization)
-  }
-
   def decode(bytes: ByteString): Either[String, GenContractInstance] =
     for {
-      decoded <- TransactionCoder
+      decoded <- ContractInstanceCoder
         .decodeFatContractInstance(bytes)
         .leftMap(e => s"Failed to decode contract instance: $e")
       contract <- create[decoded.CreatedAtTime](decoded)
@@ -170,7 +138,7 @@ object ContractInstance {
     }
 
   private def encodeInst(inst: FatContractInstance): Either[String, ByteString] =
-    TransactionCoder
+    ContractInstanceCoder
       .encodeFatContractInstance(inst)
       .leftMap(e => s"Failed to encode contract instance: $e")
 
@@ -195,4 +163,26 @@ object ContractInstance {
       serialization = serialization,
     )
 
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
+  @VisibleForTesting
+  object Optics {
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    def instUnsafe: Lens[GenContractInstance, FatContractInstance] =
+      Lens[GenContractInstance, FatContractInstance](_.inst) { fatContractInst => genContractInst =>
+        val castedFatContractInst = fatContractInst.asInstanceOf[
+          FatContractInstance { type CreatedAtTime = genContractInst.InstCreatedAtTime }
+        ]
+        // Retrieve created at to trigger ClassCastException in case of incorrect type parameter
+        val _ = castedFatContractInst.createdAt
+
+        // As only `serialization` is transmitted / persisted, we must change it as well;
+        // otherwise, any changes would be lost.
+        // To achieve that we call create instead of copy.
+        create(castedFatContractInst).valueOr(err =>
+          throw new IllegalArgumentException(
+            s"Unable to create a GenContractInstance from the provided FatContractInstance: $err\n$fatContractInst"
+          )
+        )
+      }
+  }
 }

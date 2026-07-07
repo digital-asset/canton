@@ -31,6 +31,7 @@ object Pickler extends PicklerHelper:
     .addConcreteType[Constructor]
     .addConcreteType[Application]
     .addConcreteType[Variable]
+    .addConcreteType[Unknown.type]
 
   // Schema's specialized types
   given Pickler[Choice[Descriptor]] = generatePickler[Choice[Descriptor]]

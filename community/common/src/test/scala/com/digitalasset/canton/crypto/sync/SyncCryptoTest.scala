@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.sync
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.KmsConfig.Driver
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -28,6 +27,7 @@ import com.digitalasset.canton.crypto.{
   TestHash,
 }
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
@@ -43,6 +43,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigValueFactory
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.BeforeAndAfterAll
@@ -139,6 +140,7 @@ trait SyncCryptoTest
       testedReleaseProtocolVersion,
       futureSupervisor,
       wallClock,
+      CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
       BatchingConfig(),

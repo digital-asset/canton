@@ -7,8 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout, TopologyConfig}
@@ -74,6 +72,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, config}
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.unused
@@ -123,7 +122,12 @@ class SynchronizerTopologyManager(
 
     def makeChecks(lookup: TopologyStateLookup): TopologyMappingChecks = {
       val required =
-        RequiredTopologyMappingChecks(Some(staticSynchronizerParameters), lookup, loggerFactory)
+        RequiredTopologyMappingChecks(
+          Some(staticSynchronizerParameters),
+          staticSynchronizerParameters.protocolVersion,
+          lookup,
+          loggerFactory,
+        )
 
       if (!disableOptionalTopologyChecks)
         new TopologyMappingChecks.All(
@@ -451,6 +455,8 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     *   the mapping that should be added
     * @param signingKeys
     *   the keys which should be used to sign
+    * @param namespacesToSignFor
+    *   the namespaces for which to sign
     * @param protocolVersion
     *   the protocol version corresponding to the transaction
     * @param expectFullAuthorization
@@ -466,6 +472,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       mapping: TopologyMapping,
       serial: Option[PositiveInt],
       signingKeys: Seq[Fingerprint],
+      namespacesToSignFor: Seq[Namespace],
       protocolVersion: ProtocolVersion,
       expectFullAuthorization: Boolean,
       forceChanges: ForceFlags = ForceFlags.none,
@@ -490,6 +497,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       signedTx <- signTransaction(
         tx,
         signingKeys,
+        namespacesToSignFor,
         isProposal = !expectFullAuthorization,
         protocolVersion,
         existingTransaction,
@@ -553,7 +561,12 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
                 .Failure(transactionHash, effective, tooManyActiveTransactionsWithSameHash)
             )
         })
-      extendedTransaction <- extendSignature(existingTransaction, signingKeys, forceChanges)
+      extendedTransaction <- extendSignature(
+        existingTransaction,
+        signingKeys,
+        namespacesToSignFor = Seq.empty,
+        forceChanges,
+      )
       _ <- add(
         Seq(extendedTransaction),
         expectFullAuthorization = expectFullAuthorization,
@@ -631,6 +644,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
   private def signTransaction[Op <: TopologyChangeOp, M <: TopologyMapping](
       transaction: TopologyTransaction[Op, M],
       signingKeys: Seq[Fingerprint],
+      namespacesToSignFor: Seq[Namespace],
       isProposal: Boolean,
       protocolVersion: ProtocolVersion,
       existingTransaction: Option[GenericSignedTopologyTransaction],
@@ -644,7 +658,12 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     val transactionMapping = transaction.mapping
     for {
       // find signing keys.
-      keysToUseForSigning <- determineKeysToUse(transaction, signingKeys, forceChanges)
+      keysToUseForSigning <- determineKeysToUse(
+        transaction,
+        signingKeys,
+        namespacesToSignFor,
+        forceChanges,
+      )
       // If the same operation and mapping is proposed repeatedly, insist that
       // new keys are being added. Otherwise, reject consistently with daml 2.x-based topology management.
       _ <- existingTransactionTuple match {
@@ -678,13 +697,19 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
   def extendSignature[Op <: TopologyChangeOp, M <: TopologyMapping](
       transaction: SignedTopologyTransaction[Op, M],
       signingKeys: Seq[Fingerprint],
+      namespacesToSignFor: Seq[Namespace],
       forceFlags: ForceFlags,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]] =
     for {
       // find signing keys
-      keys <- determineKeysToUse(transaction.transaction, signingKeys, forceFlags)
+      keys <- determineKeysToUse(
+        transaction.transaction,
+        signingKeys,
+        namespacesToSignFor,
+        forceFlags,
+      )
       keysWithNoExistingSignature = keys.diff(transaction.signatures.map(_.authorizingLongTermKey))
       updatedSignedTransaction <- NonEmpty.from(keysWithNoExistingSignature) match {
         case Some(keysWithNoExistingSignatureNE) =>
@@ -712,6 +737,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
   private def determineKeysToUse(
       transaction: GenericTopologyTransaction,
       signingKeysToUse: Seq[Fingerprint],
+      namespacesToSignFor: Seq[Namespace],
       forceFlags: ForceFlags,
   )(implicit
       traceContext: TraceContext
@@ -723,6 +749,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         for {
           requiredAuthAndUsableKeys <- loadValidSigningKeys(
             transaction,
+            namespacesToSignFor,
             returnAllValidKeys = true,
           )
           (requiredAuth, usableKeys) = requiredAuthAndUsableKeys
@@ -750,6 +777,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         for {
           requiredAuthAndDetectedKeysToUse <- loadValidSigningKeys(
             transaction,
+            namespacesToSignFor,
             returnAllValidKeys = false,
           )
           (requiredAuth, detectedKeysToUse) = requiredAuthAndDetectedKeysToUse
@@ -764,6 +792,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
 
   private def loadValidSigningKeys(
       transaction: GenericTopologyTransaction,
+      namespacesToSignFor: Seq[Namespace],
       returnAllValidKeys: Boolean,
   )(implicit traceContext: TraceContext) =
     for {
@@ -785,6 +814,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
           ts,
           transaction,
           existing.headOption.map(_.transaction), // there should be at most one entry
+          namespacesToSignFor,
           returnAllValidKeys,
         )
     } yield result
@@ -1184,7 +1214,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       .map(_ => ())
 
   override protected def onClosed(): Unit =
-    LifeCycle.close(sequentialQueue, processor, store)(logger)
+    LifeCycle.close(sequentialQueue, processor)(logger)
 
   override def toString: String = s"TopologyManager[${store.storeId}]"
 }

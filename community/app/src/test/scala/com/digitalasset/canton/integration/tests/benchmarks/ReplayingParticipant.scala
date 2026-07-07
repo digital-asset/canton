@@ -9,7 +9,6 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.{
   RichSynchronizerIdO,
   defaultStaticSynchronizerParameters,
@@ -54,6 +53,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.{Member, ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, TracingConfig}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 import org.scalatest.{EitherValues, OptionValues}
 
@@ -191,6 +191,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
             loggerFactory,
           ),
           synchronizerUpgradeTime = None,
+          sequencerSnapshotTimestamp = None,
           NoPackageDependencies,
           CachingConfigs(),
           // turn off consistency checks for performance tests
@@ -199,7 +200,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           timeouts,
           futureSupervisor,
           extendedLoggerFactory,
-        )()
+        )
         .futureValueUS
     val synchronizerCryptoClient =
       SynchronizerCryptoClient.create(
@@ -229,7 +230,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
       RequestSigner(synchronizerCryptoClient, extendedLoggerFactory),
       synchronizerCryptoClient.currentSnapshotApproximation.futureValueUS,
       clock,
-      SequencerTestMetrics.sequencerClient,
+      SequencerTestMetrics(this.getClass.getSimpleName).sequencerClient,
       timeouts,
       extendedLoggerFactory,
     )
@@ -266,6 +267,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
         testedReleaseProtocolVersion,
         futureSupervisor,
         clock,
+        CommonMockMetrics.cryptoMetrics,
         executionContext,
         timeouts,
         BatchingConfig(),

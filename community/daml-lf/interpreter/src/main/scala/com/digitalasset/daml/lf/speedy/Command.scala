@@ -5,14 +5,16 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Identifier}
-import com.digitalasset.daml.lf.speedy.SValue._
+import com.digitalasset.daml.lf.speedy.SValue.*
 
 // ---------------------
 // Preprocessed commands
 // ---------------------
 private[lf] sealed abstract class Command extends Product with Serializable
 
-/** Marker trait for preprocessed commands that can result from [[com.digitalasset.daml.lf.command.ApiCommand]]s */
+/** Marker trait for preprocessed commands that can result from
+  * [[com.digitalasset.daml.lf.command.ApiCommand]]s
+  */
 private[lf] sealed trait ApiCommand extends Command
 
 private[lf] object Command {
@@ -31,8 +33,8 @@ private[lf] object Command {
       argument: SValue,
   ) extends ApiCommand
 
-  /** Exercise an interface choice. This is used for exercising an interface
-    * on the ledger api, where the template id is unknown.
+  /** Exercise an interface choice. This is used for exercising an interface on the ledger api,
+    * where the template id is unknown.
     */
   final case class ExerciseInterface(
       interfaceId: Identifier,
@@ -71,12 +73,6 @@ private[lf] object Command {
       choiceId: ChoiceName,
       choiceArgument: SValue,
   ) extends ApiCommand
-
-  final case class LookupByKey(
-      templateId: Identifier,
-      contractKey: SValue,
-  ) extends Command
-
 }
 
 final case class InterfaceView(

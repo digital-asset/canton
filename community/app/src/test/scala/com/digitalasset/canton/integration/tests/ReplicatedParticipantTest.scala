@@ -58,7 +58,7 @@ trait ReplicatedNodeHelper { self: CommunityIntegrationTest =>
       node.health.status match {
         case NodeStatus.Success(nodeStatus) => checkFn(nodeStatus.active)
         case NodeStatus.Failure(msg) => fail(s"Node ${node.name} status unavailable: $msg")
-        case NodeStatus.NotInitialized(active, _) =>
+        case NodeStatus.NotInitialized(active, _, _) =>
           if (allowNonInit) checkFn(active) else fail(s"Node ${node.name} not initialized.")
       }
     }

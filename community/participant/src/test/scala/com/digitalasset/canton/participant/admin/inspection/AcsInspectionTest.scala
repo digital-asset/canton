@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.inspection
 import cats.Eval
 import cats.data.OptionT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -25,6 +24,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfPartyId, LfTimestamp, LfValue, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.nonempty.NonEmpty
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -139,7 +139,6 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
       signatories = stakeholders.take(1),
       stakeholders = stakeholders,
       createdAt = CreationTime.CreatedAt(LfTimestamp.Epoch),
-      version = LfSerializationVersion.VDev,
       packageName = Ref.PackageName.assertFromString("pkg-name"),
       templateId = Ref.Identifier.assertFromString("pkg:Mod:Template"),
       argument = LfValue.ValueNil,
@@ -196,9 +195,9 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
     val mockStore = mock[LedgerApiStore]
     when(
       mockStore
-        .cleanSynchronizerIndex(same(fakeSynchronizerId))(any[TraceContext], any[ExecutionContext])
+        .cleanSynchronizerIndex(same(fakeSynchronizerId))
     )
-      .thenAnswer(FutureUnlessShutdown.pure(Some(MaxSynchronizerIndex)))
+      .thenAnswer(Some(MaxSynchronizerIndex))
     mockStore
   }
 

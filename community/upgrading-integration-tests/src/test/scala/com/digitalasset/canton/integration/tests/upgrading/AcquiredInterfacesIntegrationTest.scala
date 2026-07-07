@@ -52,7 +52,7 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.Interp
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.Preprocessing.PreprocessingFailed
 import com.digitalasset.canton.networking.grpc.RecordingStreamObserver
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.NotConnectedToAnySynchronizer
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.util.SetupPackageVetting
 import com.digitalasset.canton.util.ShowUtil.*
@@ -82,13 +82,13 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
     participant1.synchronizers.connect_local(sequencer1, alias = daName)
   }
 
-  private def tokenV1(assetId: String)(implicit party: PartyId) =
+  private def tokenV1(assetId: String)(implicit party: Party) =
     new TokenV1(party.toProtoPrimitive, assetId)
-  private def tokenV2(assetId: String)(implicit party: PartyId) =
+  private def tokenV2(assetId: String)(implicit party: Party) =
     new TokenV2(party.toProtoPrimitive, assetId)
-  private def tokenV3(assetId: String)(implicit party: PartyId) =
+  private def tokenV3(assetId: String)(implicit party: Party) =
     new TokenV3(party.toProtoPrimitive, assetId, Optional.of(Instant.ofEpochSecond(1337L)))
-  private def tokenV4(assetId: String)(implicit party: PartyId) =
+  private def tokenV4(assetId: String)(implicit party: Party) =
     new TokenV4(party.toProtoPrimitive, assetId, Optional.of(Instant.ofEpochSecond(1338L)))
 
   private implicit val viewDecoders: Map[data.Identifier, data.Value => Any] = Map(
@@ -125,8 +125,10 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
           (
             NoVettedInterfaceImplementationPackage,
             (_: String) should include regex
-              s"""No vetted package for rendering the interface view for package-name '${TokenV1.PACKAGE_NAME}'.*Reason: No synchronizer satisfies the vetting requirements.*No vetted package candidate satisfies the package-id filter 'Package-ids with interface instances for the requested interface'=${TokenV1.PACKAGE_NAME} -> ${TokenV2.PACKAGE_ID.toPackageId.show}.*
-                 |Candidates: ${TokenV1.PACKAGE_ID.toPackageId.show}.*""".stripMargin,
+              s"""No vetted package for rendering the interface view for package-name '${TokenV1.PACKAGE_NAME}'.*Reason: No synchronizer satisfies the vetting requirements.*No vetted package candidate satisfies the package-id filter 'Package-ids with interface instances for the requested interface'=${TokenV1.PACKAGE_NAME} -> ${toShow(
+                  TokenV2.PACKAGE_ID.toPackageId
+                ).show}.*
+                 |Candidates: ${toShow(TokenV1.PACKAGE_ID.toPackageId).show}.*""".stripMargin,
           )
         assertViews(createdEvent)(
           HoldingV1.TEMPLATE_ID_WITH_PACKAGE_ID -> Left(expectedFailure)
@@ -515,30 +517,30 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
     finally env.participant1.synchronizers.reconnect(env.daName)
   }
 
-  private def withNewParty[T](f: FixtureParam => PartyId => T): FixtureParam => T =
-    env => {
-      import env.*
+  private def withNewParty[T](f: FixtureParam => Party => T): FixtureParam => T = { implicit env =>
+    import env.*
 
-      val partyHint = s"alice-${partyHintSuffixRef.getAndIncrement()}"
-      val party = PartiesAllocator(
-        participants = Set(participant1)
-      )(
-        newParties = Seq(partyHint -> participant1.id),
-        targetTopology = Map(
-          partyHint -> Map(
-            synchronizer1Id -> (PositiveInt.one, Set(
-              participant1.id -> ParticipantPermission.Submission
-            ))
-          )
-        ),
-      ).headOption.valueOrFail("Expected Alice to be allocated")
-      f(env)(party)
-    }
+    val partyHint = s"alice-${partyHintSuffixRef.getAndIncrement()}"
+    val party = PartiesAllocator(
+      participants = Set(participant1),
+      enableExternalParties = true,
+    )(
+      newParties = Seq(partyHint -> participant1.id),
+      targetTopology = Map(
+        partyHint -> Map(
+          synchronizer1Id -> (PositiveInt.one, Set(
+            participant1.id -> ParticipantPermission.Submission
+          ))
+        )
+      ),
+    ).headOption.valueOrFail("Expected Alice to be allocated")
+    f(env)(party)
+  }
 
   private def create(
       templateInstance: Template,
       userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
-  )(implicit env: FixtureParam, party: PartyId): Unit =
+  )(implicit env: FixtureParam, party: Party): Unit =
     env.participant1.ledger_api.javaapi.commands
       .submit(
         Seq(party),
@@ -582,7 +584,7 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
       interfaceIds: Seq[data.Identifier],
       includeInterfaceView: Boolean = true,
       completeAfter: Int = 1,
-  )(implicit env: FixtureParam, party: PartyId): Seq[UpdateService.UpdateWrapper] = {
+  )(implicit env: FixtureParam, party: Party): Seq[UpdateService.UpdateWrapper] = {
     import env.*
 
     participant1.ledger_api.updates.transactions_with_tx_format(
@@ -593,7 +595,7 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
   }
 
   private def updateFormat(interfaceIds: Seq[Identifier], includeInterfaceView: Boolean = true)(
-      implicit party: PartyId
+      implicit party: Party
   ) =
     UpdateFormat(
       includeTransactions = Some(

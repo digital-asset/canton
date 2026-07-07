@@ -42,7 +42,7 @@ class QueueBasedSynchronizerOutbox(
     maybeObserverCloseable: Option[AutoCloseable] = None,
 )(implicit executionContext: ExecutionContext)
     extends SynchronizerOutbox
-    with QueueBasedSynchronizerOutboxDispatchHelper
+    with SynchronizerOutboxDispatchHelper
     with FlagCloseable {
   protected def awaitTransactionObserved(
       transaction: GenericSignedTopologyTransaction,
@@ -123,13 +123,9 @@ class QueueBasedSynchronizerOutbox(
   protected def notAlreadyPresent(
       transactions: Seq[GenericSignedTopologyTransaction]
   )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = {
-    val doesNotAlreadyExistPredicate = (tx: GenericSignedTopologyTransaction) =>
-      targetStore.providesAdditionalSignatures(tx)
-    filterTransactions(transactions, doesNotAlreadyExistPredicate)
-  }
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
+    targetStore.filterProvidesAdditionalSignatures(transactions)
 
   def startup()(implicit
       traceContext: TraceContext
@@ -230,19 +226,15 @@ class QueueBasedSynchronizerOutbox(
           notPresent <- EitherT.right(pendingAndApplicableF)
 
           _ = lastDispatched.set(notPresent.lastOption)
-          // Try to convert if necessary the topology transactions for the required protocol version of the synchronizer
-          convertedTxs <- synchronizeWithClosing(functionFullName) {
-            convertTransactions(notPresent)
-          }
           // dispatch to synchronizer
-          _ <- dispatch(synchronizerAlias, transactions = convertedTxs)
+          _ <- dispatch(synchronizerAlias, transactions = notPresent)
           observed <- EitherT.right[String](
             // for all transactions in a submission batch, we either receive
             // * TopologyTransactionsBroadcast.State.Accepted: SendTracker returned Success
             // * TopologyTransactionsBroadcast.State.Failed: SendTracker returned Timeout or Error
             // Failed submissions are turned into a Left in dispatch. Therefore, it's safe to await
             // without additional checks on the state.
-            convertedTxs.headOption
+            notPresent.headOption
               .map(
                 awaitTransactionObserved(
                   _,

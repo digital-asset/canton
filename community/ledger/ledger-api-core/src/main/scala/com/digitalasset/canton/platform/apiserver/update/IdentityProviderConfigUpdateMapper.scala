@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.update
 
 import com.daml.jwt.JwksUrl
-import com.digitalasset.canton.ledger.localstore.api.IdentityProviderConfigUpdate
+import com.digitalasset.canton.user.IdentityProviderConfigUpdate
 
 object IdentityProviderConfigUpdateMapper extends UpdateMapperBase {
 

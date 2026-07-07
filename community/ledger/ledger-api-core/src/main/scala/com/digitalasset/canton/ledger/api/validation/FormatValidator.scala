@@ -124,7 +124,13 @@ object FormatValidator {
       includeTransactions <- validateOptional(protoUpdateFormat.includeTransactions)(validate)
       includeReassignments <- validateOptional(protoUpdateFormat.includeReassignments)(validate)
       includeTopologyEvents <- validateOptional(protoUpdateFormat.includeTopologyEvents)(validate)
-    } yield UpdateFormat(includeTransactions, includeReassignments, includeTopologyEvents)
+    } yield UpdateFormat(
+      includeTransactions = includeTransactions,
+      includeReassignments = includeReassignments,
+      includeTopologyEvents = includeTopologyEvents,
+      includeAcsCommitments = None,
+      includeAcsChanges = None,
+    )
 
   // Allow using deprecated Protobuf fields for backwards compatibility
   private def validateFilters(filters: Filters)(implicit

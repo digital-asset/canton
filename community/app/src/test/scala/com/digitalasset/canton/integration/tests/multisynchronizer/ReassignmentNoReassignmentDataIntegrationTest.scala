@@ -70,7 +70,7 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
     EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
-        ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
       )
       .withSetup { implicit env =>
         import env.*
@@ -285,9 +285,7 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
             participant3.id -> Seq("LocalApprove"),
           )
 
-          status.message should include(
-            s"Cannot perform all validations: Unassignment data not found when processing assignment"
-          )
+          status.message should include("unassignment data not found")
         }
     }
 

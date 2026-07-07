@@ -72,6 +72,7 @@ object LateLsuRequest {
       _ <- checkInvariants(
         currentPsid = currentPsid,
         successorPsid = successorPsid,
+        successorConfig = successorConfig,
       ).leftMap(InvariantViolation(None, _))
 
     } yield LateLsuRequest(
@@ -85,6 +86,7 @@ object LateLsuRequest {
   private def checkInvariants(
       currentPsid: PhysicalSynchronizerId,
       successorPsid: PhysicalSynchronizerId,
+      successorConfig: SynchronizerConnectionConfig,
   ): Either[String, Unit] = for {
     _ <- Either.cond(
       currentPsid.logical == successorPsid.logical,
@@ -96,6 +98,12 @@ object LateLsuRequest {
       currentPsid < successorPsid,
       (),
       s"Current physical synchronizer id must be smaller than the successor. Found: $currentPsid and $successorPsid",
+    )
+
+    _ <- Either.cond(
+      successorConfig.psid.forall(_ == successorPsid),
+      (),
+      s"Config synchronizer ID (${successorConfig.psid}) does not match the requested successor ID ($successorPsid)",
     )
   } yield ()
 }

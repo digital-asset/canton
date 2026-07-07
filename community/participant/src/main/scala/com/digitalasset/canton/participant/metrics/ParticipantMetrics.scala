@@ -37,6 +37,8 @@ class ParticipantHistograms(val parent: MetricName)(implicit
 
   private[metrics] val dbStorage: DbStorageHistograms =
     new DbStorageHistograms(parent)
+  private[metrics] val signing: SigningHistograms = new SigningHistograms(parent)
+  private[metrics] val decryption: DecryptionHistograms = new DecryptionHistograms(parent)
   private[metrics] val sequencerClient: SequencerClientHistograms = new SequencerClientHistograms(
     parent
   )
@@ -84,17 +86,6 @@ class ParticipantMetrics(
 
   private implicit val mc: MetricsContext = MetricsContext.Empty
 
-  // The metrics documentation generation requires all metrics to be registered in the factory.
-  // However, the following metric is registered on-demand during normal operation. Therefore,
-  // we use this environment variable approach to guard against instantiation in production; but
-  // register the metric for the documentation generation.
-  if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
-    new ConnectedSynchronizerMetrics(
-      inventory.connectedSynchronizer,
-      openTelemetryMetricsFactory,
-    )
-  }
-
   override val prefix: MetricName = inventory.prefix
 
   override val declarativeApiMetrics: DeclarativeApiMetrics =
@@ -102,8 +93,19 @@ class ParticipantMetrics(
   override def grpcMetrics: GrpcServerMetricsX = (ledgerApiServer.grpc, ledgerApiServer.requests)
   override def healthMetrics: HealthMetrics = ledgerApiServer.health
   override def storageMetrics: DbStorageMetrics = dbStorage
-  val dbStorage = new DbStorageMetrics(inventory.dbStorage, openTelemetryMetricsFactory)
-  val kmsMetrics: KmsMetrics = new KmsMetrics(prefix, openTelemetryMetricsFactory)
+
+  val dbStorage: DbStorageMetrics =
+    new DbStorageMetrics(inventory.dbStorage, openTelemetryMetricsFactory)
+
+  override def cryptoMetrics: CryptoMetrics = crypto
+
+  val crypto: CryptoMetrics =
+    new CryptoMetrics(
+      new SigningMetrics(inventory.signing, openTelemetryMetricsFactory),
+      new DecryptionMetrics(inventory.decryption, openTelemetryMetricsFactory),
+      Some(new KmsMetrics(prefix, openTelemetryMetricsFactory)),
+    )
+
   val phase: Timer = openTelemetryMetricsFactory.timer(inventory.phase.info)
 
   // Private constructor to avoid being instantiated multiple times by accident
@@ -150,9 +152,7 @@ class ParticipantMetrics(
           new ConnectedSynchronizerMetrics(
             inventory.connectedSynchronizer,
             openTelemetryMetricsFactory,
-          )(
-            mc.withExtraLabels("synchronizer" -> alias.unwrap)
-          )
+          )(mc.withExtraLabels("synchronizer" -> alias.unwrap))
         ),
       )
       .value
@@ -253,7 +253,7 @@ class ParticipantMetrics(
       description = """The value represents the progress of LSU from the participant point of view.
           |0: Unset / initial
           |1: LSU announcement received
-          |2: Relevant sequencer successors known
+          |2: Threshold many sequencer successors known
           |3: Handshake with successor done
           |4: Topology local copy done
           |5: LSU is done (node ready to connect to new synchronizer)
@@ -264,6 +264,23 @@ class ParticipantMetrics(
     ),
     initial = value,
   )(mc)
+
+  // The metrics documentation generation requires all metrics to be registered in the factory.
+  // However, the following metric is registered on-demand during normal operation. Therefore,
+  // we use this environment variable approach to guard against instantiation in production; but
+  // register the metric for the documentation generation.
+  if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
+    val dummyPsid = PhysicalSynchronizerId.tryFromString(
+      "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1::34-0"
+    )
+
+    resetLsuStatus(dummyPsid)
+
+    new ConnectedSynchronizerMetrics(
+      inventory.connectedSynchronizer,
+      openTelemetryMetricsFactory,
+    )
+  }
 }
 
 object ParticipantMetrics {

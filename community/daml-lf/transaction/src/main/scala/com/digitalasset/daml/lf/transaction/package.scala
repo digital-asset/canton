@@ -11,10 +11,12 @@ import scala.collection.BuildFrom
 
 package object transaction {
 
-  /** This traversal fails the identity law so is unsuitable for [[scalaz.Traverse]].
-    * It is, nevertheless, what is meant sometimes.
+  val MaxContractKeyFetches: Int = 1_000_000
+
+  /** This traversal fails the identity law so is unsuitable for a lawful `traverse`. It is,
+    * nevertheless, what is meant sometimes.
     */
-  private[transaction] def sequence[A, B, That](
+  private[lf] def sequence[A, B, That](
       seq: Iterable[Either[A, B]]
   )(implicit cbf: BuildFrom[seq.type, B, That]): Either[A, That] =
     seq collectFirst { case Left(e) =>

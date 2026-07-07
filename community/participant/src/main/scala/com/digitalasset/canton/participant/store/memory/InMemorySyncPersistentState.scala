@@ -79,8 +79,11 @@ class InMemoryLogicalSyncPersistentState(
 
   override val partyReplicationIndexingStoreIfOnPREnabled
       : Option[InMemoryPartyReplicationIndexingStore] =
-    Option.when(parameters.alphaOnlinePartyReplicationSupport.nonEmpty)(
-      new InMemoryPartyReplicationIndexingStore()
+    parameters.alphaOnlinePartyReplicationSupport.map(cfg =>
+      new InMemoryPartyReplicationIndexingStore(
+        cfg.pauseSynchronizerIndexingDuringPartyReplication,
+        loggerFactory,
+      )
     )
 
   override def close(): Unit = ()
@@ -103,7 +106,7 @@ class InMemoryPhysicalSyncPersistentState(
   val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
   val connectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
   val sendTrackerStore = new InMemorySendTrackerStore()
-  val submissionTrackerStore = new InMemorySubmissionTrackerStore(loggerFactory)
+  val submissionTrackerStore = new InMemorySubmissionTrackerStore(psid, loggerFactory, timeouts)
 
   override val topologyStore =
     new InMemoryTopologyStore(

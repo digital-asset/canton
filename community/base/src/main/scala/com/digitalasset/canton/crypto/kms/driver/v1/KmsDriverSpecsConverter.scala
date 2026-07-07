@@ -49,21 +49,25 @@ object KmsDriverSpecsConverter {
 
   def convertToDriverSigningAlgoSpec(
       scheme: crypto.SigningAlgorithmSpec
-  ): SigningAlgoSpec =
+  ): Either[String, SigningAlgoSpec] =
     scheme match {
-      case crypto.SigningAlgorithmSpec.Ed25519 => SigningAlgoSpec.Ed25519
-      case crypto.SigningAlgorithmSpec.EcDsaSha256 => SigningAlgoSpec.EcDsaSha256
-      case crypto.SigningAlgorithmSpec.EcDsaSha384 => SigningAlgoSpec.EcDsaSha384
+      case crypto.SigningAlgorithmSpec.Ed25519 => Right(SigningAlgoSpec.Ed25519)
+      case crypto.SigningAlgorithmSpec.EcDsaSha256 => Right(SigningAlgoSpec.EcDsaSha256)
+      case crypto.SigningAlgorithmSpec.EcDsaSha384 => Right(SigningAlgoSpec.EcDsaSha384)
+      case crypto.SigningAlgorithmSpec.MlDsa65 =>
+        Left("KMS Driver v1 does not support ML-DSA signing algorithm")
     }
 
   def convertToDriverSigningKeySpec(
       keySpec: crypto.SigningKeySpec
-  ): SigningKeySpec =
+  ): Either[String, SigningKeySpec] =
     keySpec match {
-      case crypto.SigningKeySpec.EcCurve25519 => SigningKeySpec.EcCurve25519
-      case crypto.SigningKeySpec.EcP256 => SigningKeySpec.EcP256
-      case crypto.SigningKeySpec.EcP384 => SigningKeySpec.EcP384
-      case crypto.SigningKeySpec.EcSecp256k1 => SigningKeySpec.EcSecp256k1
+      case crypto.SigningKeySpec.EcCurve25519 => Right(SigningKeySpec.EcCurve25519)
+      case crypto.SigningKeySpec.EcP256 => Right(SigningKeySpec.EcP256)
+      case crypto.SigningKeySpec.EcP384 => Right(SigningKeySpec.EcP384)
+      case crypto.SigningKeySpec.EcSecp256k1 => Right(SigningKeySpec.EcSecp256k1)
+      case crypto.SigningKeySpec.MlDsa65 =>
+        Left("KMS Driver v1 does not support ML-DSA signing keys")
     }
 
   def convertToDriverEncryptionAlgoSpec(

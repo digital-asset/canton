@@ -11,14 +11,10 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   ListKnownPartiesRequest,
   PartyDetails as ApiPartyDetails,
 }
-import com.digitalasset.canton.ledger.api.{
-  IdentityProviderId,
-  ObjectMeta,
-  ParticipantId,
-  PartyDetails,
-}
+import com.digitalasset.canton.ledger.api.{ParticipantId, PartyDetails}
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
 import scalaz.OneAnd

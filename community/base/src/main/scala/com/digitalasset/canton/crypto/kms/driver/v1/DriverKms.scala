@@ -8,7 +8,6 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto
@@ -32,6 +31,7 @@ import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.opentelemetry.context.Context
 
@@ -121,9 +121,13 @@ class DriverKms(
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, KmsKeyId] =
     for {
+      driverSigningKeySpec <- KmsDriverSpecsConverter
+        .convertToDriverSigningKeySpec(signingKeySpec)
+        .leftMap(err => KmsError.KmsCreateKeyError(err))
+        .toEitherT[FutureUnlessShutdown]
       keyId <- monitor("generate-signing-key", KmsError.KmsCreateKeyError.apply) {
         driver.generateSigningKeyPair(
-          KmsDriverSpecsConverter.convertToDriverSigningKeySpec(signingKeySpec),
+          driverSigningKeySpec,
           name.map(_.unwrap),
         )
       }
@@ -305,11 +309,15 @@ class DriverKms(
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString] =
     for {
+      driverSigningAlgoSpec <- KmsDriverSpecsConverter
+        .convertToDriverSigningAlgoSpec(signingAlgorithmSpec)
+        .leftMap(err => KmsError.KmsSignError(keyId, err))
+        .toEitherT[FutureUnlessShutdown]
       signature <- monitor("sign", KmsError.KmsSignError(keyId, _, _)) {
         driver.sign(
           data.unwrap.toByteArray,
           keyId.unwrap,
-          KmsDriverSpecsConverter.convertToDriverSigningAlgoSpec(signingAlgorithmSpec),
+          driverSigningAlgoSpec,
         )
       }
     } yield ByteString.copyFrom(signature)
@@ -373,10 +381,11 @@ class DriverKms(
     val nextCheckTime = now.add(checkPeriod.unwrap)
     logger.debug(s"Scheduling the next health check at $nextCheckTime")
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      clock.scheduleAt(
+      clock.scheduleAtCancelledOnShutdown(
         checkHealth,
+        s"${getClass.getName}: scheduling health check",
         nextCheckTime,
-      ),
+      )(executionContext, closeContext),
       "failed to schedule next health check",
       closeContext = Some(closeContext),
     )

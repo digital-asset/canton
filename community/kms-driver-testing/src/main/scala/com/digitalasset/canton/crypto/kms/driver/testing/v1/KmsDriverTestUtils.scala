@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.kms.driver.testing.v1
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{CachingConfigs, CryptoParallelismConfig}
 import com.digitalasset.canton.crypto.kms.driver.api.v1.{
   EncryptionAlgoSpec,
@@ -24,7 +23,9 @@ import com.digitalasset.canton.crypto.{
   SymmetricKeyScheme,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.{FutureHelpers, crypto}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
@@ -73,6 +74,8 @@ object KmsDriverTestUtils extends FutureHelpers {
         )
         .valueOrFail("no supported encryption algo specs")
 
+    val cryptoMetrics = CommonMockMetrics.cryptoMetrics
+
     new JcePureCrypto(
       defaultSymmetricKeyScheme = SymmetricKeyScheme.Aes128Gcm,
       signingAlgorithmSpecs = CryptoScheme
@@ -85,6 +88,9 @@ object KmsDriverTestUtils extends FutureHelpers {
       privateKeyConversionCacheTtl = None,
       signatureVerificationParallelism =
         CryptoParallelismConfig.defaultSignatureVerificationParallelism,
+      encryptionParallelism = CryptoParallelismConfig.defaultEncryptionParallelism,
+      signingMetrics = cryptoMetrics.signingMetrics,
+      decryptionMetrics = cryptoMetrics.decryptionMetrics,
       loggerFactory = NamedLoggerFactory.root,
     )
   }

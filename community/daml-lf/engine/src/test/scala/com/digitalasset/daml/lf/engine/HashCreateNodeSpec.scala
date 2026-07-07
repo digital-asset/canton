@@ -15,7 +15,7 @@ import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{Node, SerializationVersion}
-import com.digitalasset.daml.lf.value.{Value => V}
+import com.digitalasset.daml.lf.value.Value as V
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -23,13 +23,17 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.collection.immutable.ArraySeq
 
 /** Tests for [[Engine.hashCreateNode]]. */
-class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers with SuppressingLogging {
+class HashCreateNodeSpec
+    extends AnyWordSpec
+    with EitherValues
+    with Matchers
+    with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default[this.type]
 
   val pkgId = defaultParserParameters.defaultPackageId
-  val pkg = {
+  val pkg =
     p""" metadata ( 'test-pkg' : '1.0.0' )
         module M {
           record @serializable T = { p: Party, cid : ContractId M:T, trailer : Option Int64 };
@@ -40,13 +44,12 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           };
         }
     """
-  }
 
   val compilerConfig = Compiler.Config.Default
   val compiledPkgs = PureCompiledPackages.build(Map(pkgId -> pkg), compilerConfig)
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.stableLfVersionsRange),
+    EngineConfig(LanguageVersion.stableLfVersions),
     loggerFactory,
   )
 
@@ -89,7 +92,7 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           templateId,
           createArg(cid1),
           packageName,
-          upgradeFriendly = false,
+          upgradeFriendlyUnsafe = false,
         )
         .value
 
@@ -106,12 +109,16 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           templateId,
           createArg(cid1),
           packageName,
-          upgradeFriendly = true,
+          upgradeFriendlyUnsafe = true,
         )
         .value
 
       newEngine
-        .hashCreateNode(createNode(createArg(cid0)), cidMapping, HashingMethod.UpgradeFriendly)
+        .hashCreateNode(
+          createNode(createArg(cid0)),
+          cidMapping,
+          HashingMethod.UpgradeFriendlyUnsafe,
+        )
         .consume() shouldBe Right(
         expectedHash
       )
@@ -142,7 +149,7 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[_, _]]
+        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[?, ?]]
     }
 
     "contract with trailing nones is reported as a SResultError" in {
@@ -152,7 +159,7 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[_, _]]
+        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[?, ?]]
     }
 
     "missing package is reported as a SResultError" in {
@@ -162,7 +169,7 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers wit
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map.empty) shouldBe a[Left[_, _]]
+        .consume(pkgs = Map.empty) shouldBe a[Left[?, ?]]
     }
   }
 

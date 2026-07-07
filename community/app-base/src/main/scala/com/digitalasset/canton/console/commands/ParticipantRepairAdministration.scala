@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands
 import com.digitalasset.canton.admin.api.client.data.{
+  PendingOperationMetadata,
   SequencerConnectionValidation,
   SynchronizerConnectionConfig,
 }
@@ -32,7 +33,12 @@ import com.digitalasset.canton.participant.admin.data.{
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  PartyId,
+  PhysicalSynchronizerId,
+  Synchronizer,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -119,6 +125,63 @@ class ParticipantRepairAdministration(
         )
       }
     }
+
+  object pending_operations {
+    @Help.Summary("List all pending operation for the given filters", FeatureFlag.Repair)
+    @Help.Description(
+      """Lists pending operations matching the provided filters.
+        |
+        |Parameters:
+        |- filterOperationName: Optional filter, restricts results to a specific operation type.
+        |- filterSynchronizer: Optional filter, restricts results to a specific synchronizer.
+        |- filterOperationKey: Optional filter, restricts results to a specific operation key.
+        |
+        |Returns:
+        |- A sequence of pending operation metadata entries.
+    """
+    )
+    def list(
+        filterOperationName: Option[String] = None,
+        filterSynchronizer: Option[Synchronizer] = None,
+        filterOperationKey: Option[String] = None,
+    ): Seq[PendingOperationMetadata] =
+      check(FeatureFlag.Repair) {
+        consoleEnvironment.run {
+          runner.adminCommand(
+            ParticipantAdminCommands.ParticipantRepairManagement
+              .ListPendingOperations(filterOperationName, filterSynchronizer, filterOperationKey)
+          )
+        }
+      }
+
+    @Help.Summary("Delete pending operation for the given filters", FeatureFlag.Repair)
+    @Help.Description(
+      """Delete pending operation matching the provided filters.
+        |
+        |Parameters:
+        |- operationName: restricts results to a specific operation type. Mandatory parameter.
+        |- synchronizer: restricts results to a specific synchronizer. Mandatory parameter.
+        |- operationKey: restricts results to a specific operation key. Mandatory parameter.
+        |
+        |Returns:
+        |- Unit if the pending operation was successfully deleted, otherwise an error is raised.
+    """
+    )
+    def delete(
+        operationName: String,
+        synchronizer: Synchronizer,
+        operationKey: String,
+    ): Unit =
+      check(FeatureFlag.Repair) {
+        consoleEnvironment.run {
+          runner.adminCommand(
+            ParticipantAdminCommands.ParticipantRepairManagement
+              .DeletePendingOperation(operationName, synchronizer, operationKey)
+          )
+        }
+      }
+
+  }
 
   @Help.Summary("Change assignation of contracts from one synchronizer to another")
   @Help.Description(
@@ -271,7 +334,12 @@ class ParticipantRepairAdministration(
       |the synchronizer where the contract is assigned to, the whole import process
       |fails depending on the value of `contractImportMode`.
       |
-      |By default `contractImportMode` is set to `ContractImportMode.Validation`.
+      |This operation assumes the provided snapshot file (located at `importFilePath`)
+      |contains the complete and untampered ACS originating from a trusted source participant.
+      |Because the target participant cannot independently verify the historical provenance
+      |of the imported contracts, validation is performed on a best-effort basis,
+      |even if `contractImportMode` is `Validation`.
+      |Use only when the provided snapshot file comes from a known, trusted authority.
       |
       |Expert only: As validation of contract IDs may lengthen the import significantly,
       |you have the option to simply accept the contract IDs as they are using the
@@ -518,7 +586,6 @@ class ParticipantRepairAdministration(
       }
     }
 
-  // TODO(#28972) Remove preview flag
   @Help.Summary("Perform a late logical synchronizer upgrade")
   @Help.Description(
     """This command allows to perform an offline logical synchronizer upgrade.
@@ -539,7 +606,7 @@ class ParticipantRepairAdministration(
       announcedUpgradeTime: CantonTimestamp,
       successorConfig: SynchronizerConnectionConfig,
       validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
-  ): Unit = check(FeatureFlag.Preview) {
+  ): Unit =
     check(FeatureFlag.Repair) {
       consoleEnvironment.run {
         runner.adminCommand(
@@ -554,5 +621,27 @@ class ParticipantRepairAdministration(
         )
       }
     }
-  }
+
+  @Help.Summary("""Delete a synchronizer configuration""")
+  @Help.Description(
+    """The synchronizer configuration to be deleted is uniquely specified by
+      |the physicalSynchronizerId.
+      |
+      |WARNING: This command should not be executed under normal operational circumstances.
+      |In rare occasions, it can be necessary to bring the synchronizer configuration into
+      |a consistent state by deleting a configuration (for example, after a failed LSU attempt
+      |with the wrong successor synchronizer id).
+      |
+      |Parameters:
+      |- physicalSynchronizerId: the physical synchronizer id of the synchronizer"""
+  )
+  def delete_synchronizer_config(physicalSynchronizerId: PhysicalSynchronizerId): Unit =
+    check(FeatureFlag.Repair) {
+      consoleEnvironment.run(
+        runner.adminCommand(
+          ParticipantAdminCommands.ParticipantRepairManagement
+            .DeleteSynchronizerConfig(physicalSynchronizerId)
+        )
+      )
+    }
 }

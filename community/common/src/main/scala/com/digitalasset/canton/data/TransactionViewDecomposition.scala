@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.annotation.tailrec
 
@@ -59,7 +59,7 @@ object TransactionViewDecomposition {
       param("root node template", _.rootNode.templateId),
       param("view confirmation parameters", _.viewConfirmationParameters),
       param("node ID", _.nodeId),
-      param("rollback context", _.rbContext),
+      param("in rollback", _.rbContext.inRollback),
       param("tail nodes", _.tailNodes),
     )
   }
@@ -76,7 +76,7 @@ object TransactionViewDecomposition {
     override protected def pretty: Pretty[SameView] = prettyOfClass(
       param("lf node template", _.lfNode.templateId),
       param("node ID", _.nodeId),
-      param("rollback context", _.rbContext),
+      param("in rollback", _.rbContext.inRollback),
     )
   }
 

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.CantonRequireTypes.String300
@@ -32,6 +31,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Status
 
@@ -116,6 +116,7 @@ class GrpcVaultService(
     val result = for {
       keys <- EitherT.right(crypto.cryptoPublicStore.publicKeysWithName)
       publicKeys <-
+        // TODO(#33650) - replace with unboundedFilterA; safe because number of PKs in store is bounded "naturally"
         keys.toList.parFilterA(pk =>
           crypto.cryptoPrivateStore
             .existsPrivateKey(pk.publicKey.id, pk.publicKey.purpose)
@@ -129,6 +130,8 @@ class GrpcVaultService(
       keysMetadata <-
         crypto.cryptoPrivateStore.toExtended match {
           case Some(extended) =>
+            // TODO(#33650) - replace with unboundedTraverse; safe because number of filtered PKs is bounded "naturally
+            //  encrypted is not implemented as a single query; given a low number this should be fine
             filteredPublicKeys.parTraverse { pk =>
               for {
                 encrypted <- extended
@@ -141,6 +144,8 @@ class GrpcVaultService(
               } yield PrivateKeyMetadata(pk, encrypted, None).toProtoV30
             }
           case None =>
+            // TODO(#33650) - replace with unboundedTraverse; safe because number of filtered PKs bounded "naturally";
+            //  queryKmsKeyId is in-memory
             filteredPublicKeys.parTraverse { pk =>
               crypto.cryptoPrivateStore
                 .queryKmsKeyId(pk.id)

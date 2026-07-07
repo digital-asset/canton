@@ -12,6 +12,7 @@ import com.digitalasset.canton.ledger.api.validation.UpdateServiceRequestValidat
 import com.digitalasset.canton.ledger.api.{UpdateFormat, ValidationLogger}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse.ProtoUpdate
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{
@@ -25,6 +26,7 @@ import com.digitalasset.canton.platform.config.UpdateServiceConfig
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.tracing.TraceContextGrpc
+import com.digitalasset.canton.util.HexString
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.stub.StreamObserver
@@ -58,8 +60,9 @@ final class ApiUpdateService(
         ErrorLoggingContext(logger, loggingContextWithTrace)
 
       logger.debug(s"Received new update request $request.")
-      Source.future(updateService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
-        val validation = UpdateServiceRequestValidator.validate(request, ledgerEnd)
+      Source.single(updateService.currentLedgerEnd()).flatMapConcat { ledgerEnd =>
+        val validation =
+          UpdateServiceRequestValidator.validate(request, ledgerEnd.map(_.lastOffset))
 
         validation.fold(
           t => Source.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
@@ -84,6 +87,9 @@ final class ApiUpdateService(
                 req.descendingOrder,
                 skipPruningChecks = false,
               )
+              .collect { case ProtoUpdate(update) =>
+                update
+              }
               .via(logger.enrichedDebugStream("Responding with updates.", updatesLoggable))
               .via(logger.logErrorsOnStream)
               .via(StreamMetrics.countElements(metrics.lapi.streams.updates))
@@ -173,14 +179,14 @@ final class ApiUpdateService(
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext(logger, loggingContextWithTrace)
     logger.debug(s"Received new update request $request.")(loggingContextWithTrace.traceContext)
+    val ledgerEnd = updateService.currentLedgerEnd()
+    val validation = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+      req = request,
+      ledgerEnd = ledgerEnd.map(_.lastOffset),
+      participantId = participantId,
+      updateServiceConfig = updateServiceConfig,
+    )
     for {
-      ledgerEnd <- updateService.currentLedgerEnd()
-      validation = UpdateServiceRequestValidator.validateUpdatesPageRequest(
-        req = request,
-        ledgerEnd = ledgerEnd,
-        participantId = participantId,
-        updateServiceConfig = updateServiceConfig,
-      )
       res <- validation.fold(
         t =>
           Future.failed(
@@ -251,4 +257,47 @@ final class ApiUpdateService(
       logging.workflowId(workflowId),
       logging.offset(offset),
     )
+
+  override def getUpdateByHash(request: GetUpdateByHashRequest): Future[GetUpdateResponse] = {
+    val loggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext(logger, loggingContextWithTrace)
+
+    UpdateServiceRequestValidator
+      .validateUpdateByHash(request)(errorLoggingContext)
+      .fold(
+        t =>
+          Future.failed(
+            ValidationLogger.logFailureWithTrace(logger, request, t)(loggingContextWithTrace)
+          ),
+        validatedRequest => {
+          implicit val enrichedLoggingContext: LoggingContextWithTrace =
+            LoggingContextWithTrace.enriched(
+              logging.updateFormat(validatedRequest.updateFormat)
+            )(loggingContextWithTrace)
+          logger.info(
+            s"Received request for update by hash."
+          )(loggingContextWithTrace.traceContext)
+          logger.trace(s"Update by hash request: $validatedRequest")(
+            loggingContextWithTrace.traceContext
+          )
+
+          OptionT(
+            updateService.getUpdateBy(
+              LookupKey.ByHash(validatedRequest.hash),
+              validatedRequest.updateFormat,
+            )(enrichedLoggingContext)
+          ).getOrElseF(
+            Future.failed(
+              RequestValidationErrors.NotFound.Update
+                .RejectWithHash(HexString.toHexString(validatedRequest.hash))
+                .asGrpcError
+            )
+          ).thereafter(
+            logger.logErrorsOnCall[GetUpdateResponse](loggingContextWithTrace.traceContext)
+          )
+        },
+      )
+  }
 }

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.block
 
 import cats.data.{Chain, EitherT}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.TestHash
@@ -15,10 +14,13 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregationBySender,
+  AggregationId,
+  AggregationRule,
+}
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumed
 import com.digitalasset.canton.synchronizer.block.data.{BlockInfo, SequencerBlockStore}
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.{
   AggregatedSender,
   FreshInFlightAggregation,
@@ -29,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficCons
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.FixtureAsyncWordSpecLike
 import org.scalatest.{Assertion, FutureOutcome}
 
@@ -146,7 +149,7 @@ class BlockSequencerStateAsyncWriterTest
   private lazy val fresh =
     FreshInFlightAggregation(
       CantonTimestamp.Epoch,
-      AggregationRule(
+      AggregationRule.testing(
         eligibleSenders = NonEmpty.mk(Seq, member): NonEmpty[Seq[Member]],
         threshold = PositiveInt.one,
         protocolVersion = testedProtocolVersion,
@@ -282,6 +285,7 @@ class BlockSequencerStateAsyncWriterTest
       val trafficWriteP = PromiseUnlessShutdown.unsupervised[Unit]()
       val boooh = new Exception("booh")
       trafficConsumed.updateAndGet(_.copy(writeReturn = Seq(trafficWriteP.futureUS))).discard
+      writer.health.getState.isOk shouldBe true
       unwrap(for {
         _ <- syncWrite(trafficConsumed)(writer.append(Seq(tc1), Map(), EitherT.pure(())))
         _ = loggerFactory.assertLogs(
@@ -296,6 +300,7 @@ class BlockSequencerStateAsyncWriterTest
               // then the future will complete immediately.
               ret.value.isCompleted shouldBe true
               ret.failOnShutdown.value.failed.futureValue.getCause shouldBe boooh
+              writer.health.getState.isFatal shouldBe true
             }
           },
           _.errorMessage should include("Background write failed"),

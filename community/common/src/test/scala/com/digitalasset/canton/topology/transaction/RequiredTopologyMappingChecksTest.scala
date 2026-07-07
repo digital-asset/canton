@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.transaction
 import cats.implicits.catsSyntaxOptionId
 import cats.instances.order.*
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeysWithThreshold, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -40,12 +39,15 @@ import com.digitalasset.canton.topology.transaction.checks.{
   TopologyMappingChecks,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.LoggerUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
   HasExecutionContext,
   ProtocolVersionChecksAnyWordSpec,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.annotation.nowarn
@@ -186,6 +188,7 @@ class RequiredTopologyMappingChecksTest
   ): RequiredTopologyMappingChecks =
     RequiredTopologyMappingChecks(
       Some(defaultStaticSynchronizerParameters),
+      defaultStaticSynchronizerParameters.protocolVersion,
       new TopologyStateLookup {
         override def makeCopy(): TopologyStateLookup = ???
         override def lookupHistoryForUid(
@@ -751,7 +754,6 @@ class RequiredTopologyMappingChecksTest
 
         // we don't need to explicitly check threshold > 1, because we already reject the PTP if participants.size > 1
         // and the threshold can never be higher than the number of participants
-
         val unhappyCases = invalidParticipantPermission ++ Seq(
           foreignParticipant,
           invalidNumberOfHostingParticipants,
@@ -792,6 +794,33 @@ class RequiredTopologyMappingChecksTest
           )
           checkTransaction(checks, ptp) shouldBe Either.unit
         }
+      }
+
+      "handle PTP with duplicate participant records" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc, p2_otk, p2_dtc)
+        val mapping = PartyToParticipant.uncheckedCreate(
+          party1,
+          PositiveInt.three,
+          Seq(
+            HostingParticipant(participant1, ParticipantPermission.Submission),
+            HostingParticipant(participant1, ParticipantPermission.Confirmation),
+            HostingParticipant(participant2, ParticipantPermission.Confirmation),
+            HostingParticipant(participant2, ParticipantPermission.Confirmation),
+          ),
+          None,
+        )
+
+        val tx = factory.mkAdd(mapping)
+        // we manipulate here the signed topo tx so that we get the faulty mapping
+        val invalid = tx.copy(transaction =
+          TopologyTransaction(tx.operation, tx.serial, mapping, testedProtocolVersion)
+        )
+        checkTransaction(checks, invalid) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate participants ids: ${LoggerUtil.limitForLogging(Seq(participant1, participant2))}"
+          )
+        )
       }
 
     }
@@ -973,7 +1002,7 @@ class RequiredTopologyMappingChecksTest
         checkTransaction(checks, mds2, Some(mds1)) shouldBe Either.unit
       }
 
-      "bail if mediator has no keys" in {
+      "bail if mediator has no keys" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
         import DefaultTestIdentities.mediatorId
         val (checks, store) = mk()
         val mds1 = factory.mkAdd(
@@ -993,6 +1022,78 @@ class RequiredTopologyMappingChecksTest
         checkTransaction(checks, mds1) shouldBe Left(
           TopologyTransactionRejection.RequiredMapping.InsufficientKeys(
             Seq(mediatorId)
+          )
+        )
+
+      }
+
+      "handle if mediator is mentioned twice" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
+        val (checks, store) = mk()
+        val (Seq(med1, med2), transactions) = generateMemberIdentities(2, MediatorId(_))
+        addToStore(store, transactions*)
+        def create(
+            active: Seq[MediatorId],
+            observers: Seq[MediatorId],
+            threshold: PositiveInt = PositiveInt.one,
+        ) = {
+          def mapping(ts: PositiveInt, withObs: Boolean) = MediatorSynchronizerState
+            .uncheckedCreate(
+              synchronizerId = synchronizerId,
+              group = NonNegativeInt.zero,
+              threshold = ts,
+              active = NonEmpty.from(active).value,
+              observers = if (withObs) observers else Seq.empty,
+            )
+          val tx = factory
+            .mkAdd(
+              mapping(PositiveInt.one, withObs = false),
+              // the signing key is not relevant for the test
+              signingKey = factory.SigningKeys.key1,
+              serial = PositiveInt.one,
+            )
+          // we need to force the mapping as the parsing will otherwise drop the extra ids.
+          // you cannot really create an invalid transaction, but that logic is buried in the factory
+          // method (and is half correct). To make it easier to reason about the state, we added
+          // this additional logic into the mapping (which is now duplicated but dropping it from the
+          // parser can only be done once we are sure that here are no pathological txs in the topo state
+          tx.copy(transaction =
+            TopologyTransaction(
+              tx.operation,
+              tx.serial,
+              mapping(threshold, withObs = true),
+              testedProtocolVersion,
+            )
+          )
+        }
+
+        val tx = create(Seq(med1, med1), Seq.empty)
+        checkTransaction(checks, tx) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate active ids: ${LoggerUtil.limitForLogging(Seq(med1))}"
+          )
+        )
+        checkTransaction(
+          checks,
+          create(Seq(med1), Seq(med2, med2)),
+        ) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate observers ids: ${LoggerUtil.limitForLogging(Seq(med2))}"
+          )
+        )
+        checkTransaction(
+          checks,
+          create(Seq(med1), Seq.empty, threshold = PositiveInt.two),
+        ) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Threshold 2 is larger than num active 1"
+          )
+        )
+        checkTransaction(
+          checks,
+          create(Seq(med1), Seq(med1), threshold = PositiveInt.one),
+        ) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate across active and observers ids: ${LoggerUtil.limitForLogging(Seq(med1))}"
           )
         )
 
@@ -1083,7 +1184,7 @@ class RequiredTopologyMappingChecksTest
       }
 
       "bail if sequencer has no keys" in {
-        val (checks, store) = mk()
+        val (checks, _) = mk()
         val sss = factory.mkAdd(
           SequencerSynchronizerState
             .create(
@@ -1107,7 +1208,6 @@ class RequiredTopologyMappingChecksTest
 
       "report sequencers defined both as active and observers" in {
         val (Seq(seq1, seq2), _transactions) = generateMemberIdentities(2, SequencerId(_))
-
         SequencerSynchronizerState
           .create(
             synchronizerId,
@@ -1116,6 +1216,70 @@ class RequiredTopologyMappingChecksTest
             observers = Seq(seq1),
           ) shouldBe Left(
           s"the following sequencers were defined both as active and observer: $seq1"
+        )
+      }
+
+      "bail if sequencers are used twice" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
+        val (checks, store) = mk()
+        val (Seq(seq1, seq2), transactions) = generateMemberIdentities(2, SequencerId(_))
+        // TODO(#33949) the below checks have some workarounds. the create methods are sanitizing the input
+        //   which is bad as the effectively drop invalid stuff and make it half valid
+        //   unfortunately, the method itself is broken and can't be fixed with pv < 36.
+        //   So we do the following: fix it as a mapping check, wait until we can be sure that
+        //   there is no transaction that is invalid. Once we can sure about this, we can
+        //   remove the sanitization
+        addToStore(store, transactions*)
+        def create(
+            active: Seq[SequencerId],
+            observers: Seq[SequencerId],
+            threshold: PositiveInt = PositiveInt.one,
+        ) = {
+          def mapping(ts: PositiveInt, observers: Seq[SequencerId]) = SequencerSynchronizerState
+            .uncheckedCreate(
+              synchronizerId,
+              ts,
+              active = NonEmpty.from(active).value,
+              // bypass create checks so we can reach the mapping checks
+              observers = observers,
+            )
+          val tx = factory.mkAdd(
+            mapping(PositiveInt.one, Seq.empty),
+            // the signing key is not relevant for the test
+            signingKey = factory.SigningKeys.key1,
+            serial = PositiveInt.one,
+          )
+          tx.copy(transaction =
+            TopologyTransaction(
+              tx.operation,
+              tx.serial,
+              mapping(threshold, observers),
+              testedProtocolVersion,
+            )
+          )
+        }
+        checkTransaction(checks, create(Seq(seq1, seq1), Seq.empty), None) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate active ids: ${LoggerUtil.limitForLogging(Seq(seq1))}"
+          )
+        )
+        checkTransaction(checks, create(Seq(seq1), Seq(seq2, seq2)), None) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate observers ids: ${LoggerUtil.limitForLogging(Seq(seq2))}"
+          )
+        )
+        checkTransaction(checks, create(Seq(seq1), Seq(seq1)), None) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Duplicate across active and observers ids: ${LoggerUtil.limitForLogging(Seq(seq1))}"
+          )
+        )
+        checkTransaction(
+          checks,
+          create(Seq(seq1), Seq.empty, threshold = PositiveInt.two),
+          None,
+        ) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            "Threshold 2 is larger than num active 1"
+          )
         )
       }
 

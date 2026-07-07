@@ -30,9 +30,9 @@ class ActionBasedSQLInterpolation(val s: StringContext) extends AnyVal {
 
   /** Build an Action for an UPDATE statement via string interpolation */
   def sqlu(
-            params: TypedParameter[?]*
-          ): SqlStreamingAction[Vector[Int], Int, Effect.Write]#ResultAction[Int, NoStream, Effect.Write] =
-    sql(params *).asUpdate
+      params: TypedParameter[?]*
+  ): SqlStreamingAction[Vector[Int], Int, Effect.Write]#ResultAction[Int, NoStream, Effect.Write] =
+    sql(params*).asUpdate
 }
 
 object ActionBasedSQLInterpolation {

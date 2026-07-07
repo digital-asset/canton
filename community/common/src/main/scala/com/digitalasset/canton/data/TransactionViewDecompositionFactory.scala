@@ -6,9 +6,9 @@ package com.digitalasset.canton.data
 import cats.data.Chain
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
+import com.digitalasset.canton.data.TransactionViewDecompositionFactory.RollbackState.firstChild
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -16,11 +16,33 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.LfTransactionUtil
+import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.daml.lf.transaction.NodeId
 
 import scala.concurrent.ExecutionContext
 
 case object TransactionViewDecompositionFactory {
+
+  object RollbackState {
+    private val firstChild: PositiveInt = PositiveInt.one
+    val empty: RollbackState = RollbackState(Vector.empty, firstChild)
+  }
+
+  final case class RollbackState(path: Vector[PositiveInt], nextChild: PositiveInt) {
+
+    def enterRollback: RollbackState = RollbackState(path :+ nextChild, firstChild)
+
+    def tryExitRollback: RollbackState = {
+      val lastChild =
+        path.lastOption.getOrElse(
+          throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
+        )
+
+      RollbackState(path.dropRight(1), lastChild.increment)
+    }
+
+    def inRollback: Boolean = path.nonEmpty
+  }
 
   /** Keeps track of the state of the transaction view tree.
     *
@@ -36,31 +58,31 @@ case object TransactionViewDecompositionFactory {
       views: Chain[V] = Chain.empty,
       informees: Set[LfPartyId] = Set.empty,
       quorums: Chain[Quorum] = Chain.empty,
-      rollbackContext: RollbackContext = RollbackContext.empty,
+      rollbackState: RollbackState,
   ) {
 
     def withViews(
         views: Chain[V],
         informees: Set[LfPartyId],
         quorums: Chain[Quorum],
-        rollbackContext: RollbackContext,
+        rollbackState: RollbackState,
     ): BuildState[V] =
       BuildState[V](
         this.views ++ views,
         this.informees ++ informees,
         this.quorums ++ quorums,
-        rollbackContext,
+        rollbackState,
       )
 
-    def withNewView(view: V, rollbackContext: RollbackContext): BuildState[V] =
+    def withNewView(view: V, rollbackContext: RollbackState): BuildState[V] =
       BuildState[V](this.views :+ view, this.informees, this.quorums, rollbackContext)
 
     def childState: BuildState[TransactionViewDecomposition] =
-      BuildState(Chain.empty, Set.empty, Chain.empty, rollbackContext)
+      BuildState(Chain.empty, Set.empty, Chain.empty, rollbackState)
 
-    def enterRollback(): BuildState[V] = copy(rollbackContext = rollbackContext.enterRollback)
+    def enterRollback(): BuildState[V] = copy(rollbackState = rollbackState.enterRollback)
 
-    def exitRollback(): BuildState[V] = copy(rollbackContext = rollbackContext.exitRollback)
+    def exitRollback(): BuildState[V] = copy(rollbackState = checked(rollbackState.tryExitRollback))
   }
 
   final private case class ActionNodeInfo(
@@ -75,6 +97,7 @@ case object TransactionViewDecompositionFactory {
   final private case class Builder(
       nodesM: Map[LfNodeId, LfNode],
       actionNodeInfoM: Map[LfNodeId, ActionNodeInfo],
+      factory: RollbackContextFactory,
   ) {
 
     private def node(nodeId: LfNodeId): LfNode = nodesM.getOrElse(
@@ -82,6 +105,7 @@ case object TransactionViewDecompositionFactory {
       throw new IllegalStateException(s"Did not find $nodeId in node map"),
     )
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     private def build(
         nodeId: LfNodeId,
         state: BuildState[NewView],
@@ -126,12 +150,13 @@ case object TransactionViewDecompositionFactory {
         info.seed,
         nodeId,
         childState.views.toList,
-        state.rollbackContext,
+        factory.fromRollbackState(state.rollbackState),
       )
 
-      state.withNewView(newView, childState.rollbackContext)
+      state.withNewView(newView, childState.rollbackState)
     }
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     private def buildChildView(
         nodeId: LfNodeId,
         currentParticipants: Set[ParticipantId],
@@ -155,7 +180,7 @@ case object TransactionViewDecompositionFactory {
             val sameView = SameView(
               LfTransactionUtil.lightWeight(actionNode),
               nodeId,
-              state.rollbackContext,
+              factory.fromRollbackState(state.rollbackState),
             )
             val childState = info.children.foldLeft(state.childState) { (bs, nId) =>
               buildChildView(nId, currentParticipants, bs)
@@ -166,7 +191,7 @@ case object TransactionViewDecompositionFactory {
                 sameView +: childState.views,
                 info.informees.keySet ++ childState.informees,
                 info.quorum +: childState.quorums,
-                childState.rollbackContext,
+                childState.rollbackState,
               )
           } else
             buildNewView(nodeId, actionNode, info, state)
@@ -185,10 +210,12 @@ case object TransactionViewDecompositionFactory {
       transaction: WellFormedTransaction[WithoutSuffixes],
       viewRbContext: RollbackContext,
       submittingAdminPartyO: Option[LfPartyId],
+      factory: RollbackContextFactory,
   )(implicit ec: ExecutionContext, tc: TraceContext): FutureUnlessShutdown[Seq[NewView]] = {
 
     val tx: LfVersionedTransaction = transaction.unwrap
     val rootNodes = tx.roots.toSeq
+    val rollbackState = factory.toRollbackState(viewRbContext)
 
     val policyMapF: Iterable[FutureUnlessShutdown[(NodeId, ActionNodeInfo)]] =
       tx.nodes.collect { case (nodeId, node: LfActionNode) =>
@@ -212,8 +239,8 @@ case object TransactionViewDecompositionFactory {
       }
 
     FutureUnlessShutdown.sequence(policyMapF).map(_.toMap).map { policyMap =>
-      Builder(tx.nodes, policyMap)
-        .builds(rootNodes, BuildState[NewView](rollbackContext = viewRbContext))
+      Builder(tx.nodes, policyMap, factory)
+        .builds(rootNodes, BuildState[NewView](rollbackState = rollbackState))
         .views
         .toList
     }

@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
@@ -20,7 +19,10 @@ import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, Synchroni
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.ReplayAction.SequencerSends
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
-import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
+import com.digitalasset.canton.sequencing.client.pool.{
+  HasAcceptableSequencers,
+  SequencerConnectionPool,
+}
 import com.digitalasset.canton.sequencing.client.transports.replay.ReplayClientImpl
 import com.digitalasset.canton.sequencing.protocol.{GetTrafficStateForMemberRequest, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.{EventCostCalculator, TrafficStateController}
@@ -31,6 +33,7 @@ import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
@@ -80,7 +83,7 @@ object SequencerClientFactory {
       exitOnFatalErrors: Boolean,
       namedLoggerFactory: NamedLoggerFactory,
   ): SequencerClientFactory =
-    new SequencerClientFactory with NamedLogging {
+    new SequencerClientFactory with NamedLogging with HasAcceptableSequencers {
       override protected def loggerFactory: NamedLoggerFactory = namedLoggerFactory
 
       override def create(
@@ -140,9 +143,16 @@ object SequencerClientFactory {
             ts: CantonTimestamp
         ): EitherT[FutureUnlessShutdown, CreateError, Option[TrafficState]] =
           for {
+            syncCrypto <- EitherT.liftF(syncCryptoApi.currentSnapshotApproximation)
+            acceptableSequencersO <- EitherT.right(getAcceptableSequencers(syncCrypto.ipsSnapshot))
             connections <- EitherT.fromEither[FutureUnlessShutdown](
               NonEmpty
-                .from(connectionPool.getOneConnectionPerSequencer("get-traffic-state"))
+                .from(
+                  connectionPool.getOneConnectionPerSequencer(
+                    "get-traffic-state",
+                    acceptableO = acceptableSequencersO,
+                  )
+                )
                 .toRight(
                   NonRetryableError(
                     s"No connection available to retrieve traffic state from synchronizer for $member"
@@ -186,6 +196,7 @@ object SequencerClientFactory {
           sequencerConnections.sequencerLivenessMargin,
           sequencerConnections.submissionRequestAmplification,
           sequencerConnections.sequencerConnectionPoolDelays,
+          sequencerConnections.subscriptionLivenessLimits,
         )
         for {
           // Reinitialize the sequencer counter allocator to ensure that passive->active replica transitions
@@ -233,11 +244,13 @@ object SequencerClientFactory {
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
           trafficInitTimestampO = latestSequencedTimestampO
-            .orElse(
-              synchronizerPredecessor.map(
-                _.upgradeTime
-              )
-            )
+            .orElse(synchronizerPredecessor.map(_.upgradeTime))
+            /*
+            Mediator nodes don't expose traffic.
+            This also prevent them from connecting to the sequencer during LSU before upgrade time, which
+            is needed for the test sequencing messages.
+             */
+            .filter(_ => member.code != MediatorId.Code)
 
           _ = logger.info(
             s"Initializing traffic state at timestamp: $trafficInitTimestampO"

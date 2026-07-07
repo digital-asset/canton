@@ -7,7 +7,6 @@ import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRespons
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
-import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -31,6 +30,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
   UpdateStreamingQueries,
 }
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
+import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
@@ -39,6 +39,7 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.FullIdentifier
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.common.annotations.VisibleForTesting
+import com.google.protobuf.ByteString
 
 import java.sql.Connection
 import javax.sql.DataSource
@@ -91,7 +92,7 @@ trait IngestionStorageBackend[DbBatch] {
     * @param connection
     *   to be used when inserting the batch
     */
-  def deletePartiallyIngestedData(ledgerEnd: Option[ParameterStorageBackend.LedgerEnd])(
+  def deletePartiallyIngestedData(ledgerEnd: Option[LedgerEnd])(
       connection: Connection
   ): Unit
 }
@@ -105,28 +106,18 @@ trait ParameterStorageBackend {
     *   to be used when updating the parameters table
     */
   def updateLedgerEnd(
-      ledgerEnd: ParameterStorageBackend.LedgerEnd,
-      lastSynchronizerIndex: Map[SynchronizerId, SynchronizerIndex] = Map.empty,
+      ledgerEnd: LedgerEnd
   )(connection: Connection): Unit
 
-  /** Query the current ledger end, read from the parameters table. No significant CPU load, mostly
-    * blocking JDBC communication with the database backend.
+  /** Query the current ledger end, read from the parameters table and clean syncrhonizer index
+    * table. No significant CPU load, mostly blocking JDBC communication with the database backend.
     *
     * @param connection
     *   to be used to get the LedgerEnd
     * @return
     *   the current LedgerEnd
     */
-  def ledgerEnd(connection: Connection): Option[ParameterStorageBackend.LedgerEnd]
-
-  /** The latest SynchronizerIndex for a synchronizerId until all events are processed fully and
-    * published to the Ledger API DB. The Update which from this SynchronizerIndex originate has
-    * smaller or equal offset than the current LedgerEnd: LedgerEnd and SynchronizerIndexes are
-    * persisted consistently in one transaction.
-    */
-  def cleanSynchronizerIndex(synchronizerId: SynchronizerId)(
-      connection: Connection
-  ): Option[SynchronizerIndex]
+  def ledgerEnd(connection: Connection): Option[LedgerEnd]
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related
     * database operations
@@ -166,41 +157,29 @@ trait ParameterStorageBackend {
   /** Fetches the current state of the Active Contracts Head Snapshot (ACHS) from the database, or
     * None if it hasn't been initialized yet.
     */
-  def fetchACHSState(connection: Connection): Option[AchsState]
+  def fetchAchsState(connection: Connection): Option[AchsState]
 
   /** Inserts the state of the Active Contracts Head Snapshot (ACHS) in the database. Assumes that
     * the ACHS state is not yet present.
     */
-  def insertACHSState(achsState: AchsState)(connection: Connection): Unit
+  def insertAchsState(achsState: AchsState)(connection: Connection): Unit
 
   /** Updates the validAt of the state of the Active Contracts Head Snapshot (ACHS) in the database.
     * Throws an IllegalStateException if the update was not successful.
     */
-  def updateACHSValidAt(validAt: Long)(connection: Connection): Unit
+  def updateAchsValidAt(validAt: Long)(connection: Connection): Unit
 
   /** Updates the lastRemoved and the lastPopulated of the state of the Active Contracts Head
     * Snapshot (ACHS) in the database. Throws an IllegalStateException if the update was not
     * successful.
     */
-  def updateACHSLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
-
-  def clearACHSState(connection: Connection): Unit
+  def updateAchsLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
 
   /** Clears all ACHS data (both the state row and the filter data table). */
-  def clearAchsData(connection: Connection): Unit
+  def clearAchsStateAndData(connection: Connection): Unit
 }
 
 object ParameterStorageBackend {
-  final case class LedgerEnd(
-      lastOffset: Offset,
-      lastEventSeqId: Long,
-      lastStringInterningId: Int,
-      lastPublicationTime: CantonTimestamp,
-  )
-
-  object LedgerEnd {
-    val beforeBegin: Option[ParameterStorageBackend.LedgerEnd] = None
-  }
   final case class IdentityParams(participantId: ParticipantId)
 
   final case class PruneUptoInclusiveAndLedgerEnd(
@@ -232,6 +211,13 @@ object ParameterStorageBackend {
       param("validAt", _.validAt),
       param("lastRemoved", _.lastPointers.lastRemoved),
       param("lastPopulated", _.lastPointers.lastPopulated),
+    )
+  }
+
+  object AchsState {
+    val empty: AchsState = AchsState(
+      validAt = 0,
+      lastPointers = AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
     )
   }
 
@@ -287,7 +273,7 @@ trait CompletionStorageBackend {
   def commandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse]
@@ -307,16 +293,6 @@ trait CompletionStorageBackend {
 
 trait ContractStorageBackend {
 
-  /** Batch lookup of key states
-    *
-    * If the backend does not support batch lookups, the implementation will fall back to sequential
-    * lookups
-    */
-  def keyStates(keys: Seq[Key], validAtEventSeqId: Long)(connection: Connection): Map[Key, Long]
-
-  /** Sequential lookup of key states */
-  def keyState(key: Key, validAtEventSeqId: Long)(connection: Connection): Option[Long]
-
   def activeContracts(internalContractIds: Seq[Long], beforeEventSeqId: Long)(
       connection: Connection
   ): Map[Long, Boolean]
@@ -328,30 +304,50 @@ trait ContractStorageBackend {
   /** Returns true if the batch lookup is implemented */
   def supportsBatchKeyStateLookups: Boolean
 
-  def nonUniqueContractKey(keyPageQuery: ContractStorageBackend.KeysPageQuery)(
+  def contractKey(keyPageQuery: ContractStorageBackend.KeyLookupPageQuery)(
       connection: Connection
-  ): ContractStorageBackend.KeysPageResult
+  ): ContractStorageBackend.KeyLookupPageResult
+
+  def contractKeysPlain(
+      keyPageQueries: Seq[ContractStorageBackend.KeyLookupPageQuery],
+      validAtEventSeqId: Long,
+  )(
+      connection: Connection
+  ): Seq[ContractStorageBackend.KeyLookupPageResult]
 }
 
 object ContractStorageBackend {
-  final case class KeysPageQuery(
+  final case class KeyLookupPageQuery(
       key: Key,
       limit: Int,
       nextPageToken: Option[Long],
       validAtEventSeqId: Long,
   )
 
-  /** @param internalContractIds
-    *   in reverse event sequential ID order starting from nextPageToken (exclusive) or
-    *   validAtEventSeqId (inclusive) from the KeysPageQuery
-    * @param nextPageToken
-    *   If available, this is the event sequential ID of the last (earliest) contract If not
-    *   available, this is the last page from the page-sequence
+  /** @param internalContractId
+    *   the internal contract ID of an activation event
+    * @param eventSequentialId
+    *   the event sequential ID of the activation event
     */
-  final case class KeysPageResult(
-      internalContractIds: Vector[Long],
-      nextPageToken: Option[Long],
+  final case class ContractRef(
+      internalContractId: Long,
+      eventSequentialId: Long,
   )
+
+  /** @param contractRefs
+    *   contract activations in reverse event sequential ID order starting from nextPageToken
+    *   (exclusive) or validAtEventSeqId (inclusive) from the KeyLookupPageQuery
+    * @param nextPageToken
+    *   If available, this is the event sequential ID of the last (earliest) contract. If not
+    *   available, this is the last page from the page-sequence.
+    */
+  final case class KeyLookupPageResult(
+      contractRefs: Vector[ContractRef],
+      nextPageToken: Option[Long],
+  ) {
+    def internalContractIds: Vector[Long] = contractRefs.map(_.internalContractId)
+    def eventSequentialIds: Vector[Long] = contractRefs.map(_.eventSequentialId)
+  }
 }
 
 trait EventStorageBackend {
@@ -393,6 +389,18 @@ trait EventStorageBackend {
     * eligible for pruning.
     */
   def cleanPruningCandidates()(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit
+
+  /** Adds contracts to contract pruning candidates lapi_pruning_contract_candidate after the
+    * defined exclusive bound. This function intended for indexer crash recovery, where during
+    * initialization before the events getting cleaned after ledger-end watermark, the related new
+    * contracts are marked for pruning. This function is not pruning the contracts, only adds them
+    * as candidates, which will be validated and potentially pruned as part of the next pruning
+    * Index DB pruning.
+    */
+  def addContractPruningCandidatesAfter(eventSeqIdExclusive: Long)(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit
@@ -457,6 +465,12 @@ trait EventStorageBackend {
       recordTime: CantonTimestamp,
   )(connection: Connection): Option[Offset]
 
+  def fetchAcsCommitments(
+      eventSequentialIds: SequentialIdBatch,
+      synchronizerId: SynchronizerId,
+      descendingOrder: Boolean,
+  )(connection: Connection): Vector[RawAcsCommitment]
+
   def fetchEventPayloadsAcsDelta(target: EventPayloadSourceForUpdatesAcsDelta)(
       eventSequentialIds: SequentialIdBatch,
       requestingPartiesForTx: Option[Set[Party]],
@@ -498,6 +512,12 @@ trait EventStorageBackend {
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit
 
+  /** Removes entries from Active Contracts Head Snapshot above the specified event sequential ID
+    */
+  def deletePartiallyIngestedAchsData(fromExclusiveEventSeqId: Long)(
+      connection: Connection
+  ): Unit
+
   def lockExclusivelyPruningProcessingTable(connection: Connection): Unit
 
   def lockExclusivelyContractPruningProcessingTable(connection: Connection): Unit
@@ -510,6 +530,10 @@ trait EventStorageBackend {
   def writeLockInternalContractIds(whereInternalContractIdExprs: CompositeSql)(
       connection: Connection
   ): Unit
+
+  def archiveDeactivations(transactionOffsets: Iterable[Offset])(
+      connection: Connection
+  ): Map[Offset, Vector[DeactivatedContractInfo]]
 }
 
 object EventStorageBackend {
@@ -557,8 +581,8 @@ object EventStorageBackend {
 
   sealed trait RawTransactionEvent extends RawEvent with RawUpdateEvent {
     def transactionProperties: TransactionProperties
-    final def externalTransactionHash: Option[Array[Byte]] =
-      transactionProperties.externalTransactionHash
+    final def transactionHash: Option[ByteString] =
+      transactionProperties.transactionHash
 
     def ledgerEffectiveTime: Timestamp
 
@@ -598,7 +622,7 @@ object EventStorageBackend {
   final case class TransactionProperties(
       commonEventProperties: CommonEventProperties,
       commonUpdateProperties: CommonUpdateProperties,
-      externalTransactionHash: Option[Array[Byte]],
+      transactionHash: Option[ByteString],
   )
 
   final case class ReassignmentProperties(
@@ -787,6 +811,16 @@ object EventStorageBackend {
       authorizationEvent: AuthorizationEvent,
       recordTime: Timestamp,
       synchronizerId: String,
+      traceContext: Array[Byte],
+  )
+
+  final case class RawAcsCommitment(
+      offset: Offset,
+      eventSequentialId: Long,
+      updateId: String,
+      synchronizerId: String,
+      recordTime: Timestamp,
+      payload: Array[Byte],
       traceContext: Array[Byte],
   )
 

@@ -20,16 +20,17 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
-  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 
 import scala.jdk.CollectionConverters.*
 
 sealed abstract class InterfaceResolutionIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
+
+  @volatile private var alice: Party = _
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -42,19 +43,14 @@ sealed abstract class InterfaceResolutionIntegrationTest
         participant1.dars.upload(UpgradingBaseTest.UpgradeV1)
         participant1.dars.upload(UpgradingBaseTest.UpgradeV2)
 
-        participant1.parties.enable("alice")
+        alice = participant1.parties.testing.enable("alice")
       }
-
-  private def party(name: String)(implicit env: TestConsoleEnvironment): PartyId =
-    env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
 
   "interface resolution" when {
 
-    def setupInterface(implicit env: FixtureParam): (PartyId, UpgradeItInterface.ContractId) = {
+    def setupInterface(implicit env: FixtureParam): (Party, UpgradeItInterface.ContractId) = {
 
       import env.participant1
-
-      val alice = party("alice")
 
       val templateTx = participant1.ledger_api.javaapi.commands.submit(
         Seq(alice),

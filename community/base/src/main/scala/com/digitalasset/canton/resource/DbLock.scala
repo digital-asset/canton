@@ -359,7 +359,9 @@ trait DbLock extends NamedLogging with FlagCloseable with HasCloseContext {
 
     logger.trace(s"At $now schedule next health check for $checkAt")(TraceContext.empty)
 
-    clock.scheduleAt(checkLock, checkAt).discard
+    clock
+      .scheduleAtCancelledOnShutdown(checkLock, s"${getClass.getName}: checking lock", checkAt)
+      .discard
   }
 
   protected implicit def ec: ExecutionContext
@@ -585,9 +587,9 @@ object DbLock {
 
 }
 
-sealed trait DbLockConfigError extends Product with Serializable with PrettyPrinting {}
+sealed trait DbLockConfigError extends Product with Serializable with PrettyPrinting
 
-sealed trait DbLockError extends Product with Serializable with PrettyPrinting {}
+sealed trait DbLockError extends Product with Serializable with PrettyPrinting
 
 object DbLockError {
 

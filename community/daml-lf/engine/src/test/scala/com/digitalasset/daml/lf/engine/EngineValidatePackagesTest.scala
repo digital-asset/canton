@@ -5,10 +5,9 @@ package com.digitalasset.daml.lf
 package engine
 
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.archive.Dar
-import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.daml.lf.archive.{Dar, DarDecoder}
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.parser
@@ -19,12 +18,17 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.zip.ZipInputStream
 
-class EngineValidatePackagesTest extends AnyWordSpec with Matchers with Inside with SuppressingLogging {
+class EngineValidatePackagesTest
+    extends AnyWordSpec
+    with Matchers
+    with Inside
+    with SuppressingLogging {
 
   // TODO(#30144): extend with a (set of) compat dar(s), script-test-v2.dev.dar is
   // tested here as placeholder https://github.com/digital-asset/daml/pull/22101
   val stream = getClass.getClassLoader.getResourceAsStream("Exceptions-nokey.dar")
-  val dar: Dar[(Ref.PackageId, Package)] = DarDecoder.readArchive("Exceptions-nokey.dar", new ZipInputStream(stream)).toOption.get
+  val dar: Dar[(Ref.PackageId, Package)] =
+    DarDecoder.readArchive("Exceptions-nokey.dar", new ZipInputStream(stream)).toOption.get
 
   val langVersion = LanguageVersion.latestStableLfVersion
 
@@ -72,7 +76,7 @@ class EngineValidatePackagesTest extends AnyWordSpec with Matchers with Inside w
   )
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.allLfVersionsRange),
+    EngineConfig(LanguageVersion.allLfVersions),
     loggerFactory,
   )
 

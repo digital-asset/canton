@@ -95,7 +95,7 @@ object TypedSignedProtocolMessageContent
             confirmationResultMessageBytes,
           )
         case Sm.AcsCommitment(acsCommitmentBytes) =>
-          AcsCommitment.fromByteString(expectedProtocolVersion, acsCommitmentBytes)
+          LegacyAcsCommitment.fromByteString(expectedProtocolVersion, acsCommitmentBytes)
         case Sm.SetTrafficPurchased(setTrafficPurchasedBytes) =>
           SetTrafficPurchasedMessage.fromByteString(
             expectedProtocolVersion,

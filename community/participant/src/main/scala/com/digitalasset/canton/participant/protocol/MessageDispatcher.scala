@@ -10,7 +10,6 @@ import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.{Foldable, Monoid}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.ViewType.{
@@ -65,6 +64,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.rpc.status.Status
 import io.opentelemetry.api.trace.Tracer
@@ -116,7 +116,8 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
   )(implicit traceContext: TraceContext): ProcessingResult = {
-    val acsCommitments = envelopes.mapFilter(select[SignedProtocolMessage[messages.AcsCommitment]])
+    val acsCommitments =
+      envelopes.mapFilter(select[SignedProtocolMessage[messages.LegacyAcsCommitment]])
     if (acsCommitments.nonEmpty) {
       // When a participant receives an ACS commitment from a counter-participant, the counter-participant
       // expects to receive the corresponding commitment from the local participant.
@@ -185,7 +186,7 @@ trait MessageDispatcher { this: NamedLogging =>
     */
   protected def processBatch(
       sequencerCounter: SequencerCounter,
-      eventE: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      eventE: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
   )(implicit traceContext: TraceContext): ProcessingResult = {
     val deliver = eventE.event.content
     // TODO(#13883) Validate the topology timestamp
@@ -256,7 +257,7 @@ trait MessageDispatcher { this: NamedLogging =>
     )
 
   private def processTransactionAndReassignmentMessages(
-      event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
+      event: WithOpeningErrors[SignedContent[Deliver[Batch[DefaultOpenEnvelope]]]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
       envelopes: Seq[DefaultOpenEnvelope],
@@ -680,11 +681,12 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       msgId: Option[MessageId],
-      err: WithOpeningErrors[SequencedEvent[DefaultOpenEnvelope]],
+      err: WithOpeningErrors[DecompressedSequencedEvent[DefaultOpenEnvelope]],
   )(implicit traceContext: TraceContext): Unit =
     logger.info(
       show"Skipping faulty event at sc=$sc, ts=$ts${withMsgId(msgId)}, with errors=${err.openingErrors
-          .map(_.message)} and contents=${err.event.envelopes
+          .map(_.message)} and contents=${SequencedEvent
+          .envelopesOf(err.event)
           .map(_.protocolMessage)}"
     )
 
@@ -692,16 +694,17 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       msgId: Option[MessageId],
-      evt: SignedContent[SequencedEvent[DefaultOpenEnvelope]],
-  )(implicit traceContext: TraceContext): Unit =
+      evt: SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]],
+  )(implicit traceContext: TraceContext): Unit = {
+    val envelopes = SequencedEvent.envelopesOf(evt.content)
     if (logger.underlying.isDebugEnabled)
       logger.debug(
-        show"Processing event at sc=$sc, ts=$ts${withMsgId(msgId)}, with contents=${evt.content.envelopes
+        show"Processing event at sc=$sc, ts=$ts${withMsgId(msgId)}, with contents=${envelopes
             .map(_.protocolMessage)}"
       )
     else {
       val maxDisplay = 10 // whoever needs more should use debug logging
-      val dense = evt.content.envelopes.take(maxDisplay).map(c => (c, c.protocolMessage)).map {
+      val dense = envelopes.take(maxDisplay).map(c => (c, c.protocolMessage)).map {
         case (env, message: UnsignedProtocolMessage) =>
           message match {
             case RootHashMessage(rootHash, _, _, _, _) => s"root-hash=$rootHash"
@@ -714,20 +717,21 @@ trait MessageDispatcher { this: NamedLogging =>
           }
         case (_, SignedProtocolMessage(typedMessage, _)) =>
           typedMessage.content match {
-            case messages.AcsCommitment(_, sender, _, period, _) =>
+            case messages.LegacyAcsCommitment(_, sender, _, period, _) =>
               s"commitment=$sender for ts=${period.toInclusive}"
             case ConfirmationResultMessage(_, viewType, requestId, _, verdict) =>
               s"verdict=$requestId, type=$viewType, is=$verdict"
             case other => other.toString
           }
       }
-      val numEnvs = evt.content.envelopes.size
+      val numEnvs = envelopes.size
       logger.info(
         show"Processing event at sc=$sc, ts=$ts${withMsgId(msgId)}, with $numEnvs envelopes"
           + (if (dense.nonEmpty) "\n  " + dense.mkString("\n  ") else "")
           + (if (numEnvs > maxDisplay) "\n  ..." else "")
       )
     }
+  }
 
   protected def logDeliveryError(
       sc: SequencerCounter,

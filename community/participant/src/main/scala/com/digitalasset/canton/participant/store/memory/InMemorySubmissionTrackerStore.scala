@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -10,6 +12,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SubmissionTrackerStore
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
+import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
@@ -19,7 +22,9 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 
 class InMemorySubmissionTrackerStore(
-    override protected val loggerFactory: NamedLoggerFactory
+    override val psid: PhysicalSynchronizerId,
+    override protected val loggerFactory: NamedLoggerFactory,
+    override val timeouts: ProcessingTimeout,
 )(implicit
     val ec: ExecutionContext
 ) extends SubmissionTrackerStore
@@ -28,8 +33,6 @@ class InMemorySubmissionTrackerStore(
   // Actual persisted submission tracker. Entries are original requests submitted by this participant.
   private val freshSubmittedTransactions: concurrent.Map[RootHash, (RequestId, CantonTimestamp)] =
     TrieMap[RootHash, (RequestId, CantonTimestamp)]()
-
-  override def close(): Unit = ()
 
   override def registerFreshRequest(
       rootHash: RootHash,
@@ -73,6 +76,16 @@ class InMemorySubmissionTrackerStore(
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     freshSubmittedTransactions.clear()
     FutureUnlessShutdown.unit
+  }
+
+  override def deleteDataChunk(
+      chunkSize: PositiveInt
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] = {
+
+    val keysToDelete = freshSubmittedTransactions.take(chunkSize.unwrap).keySet
+    keysToDelete.foreach(freshSubmittedTransactions.remove(_).discard)
+
+    FutureUnlessShutdown.pure(keysToDelete.nonEmpty)
   }
 
   @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))

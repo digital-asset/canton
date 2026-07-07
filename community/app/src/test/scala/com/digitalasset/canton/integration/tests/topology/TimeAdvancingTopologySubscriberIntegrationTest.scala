@@ -30,9 +30,10 @@ import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
 }
 import com.digitalasset.canton.sequencing.protocol.{
   AllMembersOfSynchronizer,
+  Batch,
   ClosedEnvelope,
+  DecompressedSequencedEvent,
   Deliver,
-  SequencedEvent,
   TimeProof,
 }
 import com.digitalasset.canton.synchronizer.sequencer.time.TimeAdvancingTopologySubscriber.TimeAdvanceBroadcastMessageIdPrefix
@@ -70,6 +71,8 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
         ConfigTransforms.updateAllSequencerConfigs_(
           _.focus(_.parameters.producePostOrderingTopologyTicks)
             .replace(false)
+            .focus(_.parameters.disableAggregationRuleSizeCheckForTesting)
+            .replace(true)
         ),
       )
       // Do not use a static time because this test requires a non-zero topology change delay
@@ -91,7 +94,6 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
             )
           )
         }
-
         connect(participant1, sequencer1)
         connect(participant2, sequencer2)
       }
@@ -136,18 +138,19 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
         )
         .value
       p1SequencerClientInterceptor.setDelayPolicy(new SequencedEventDelayPolicy {
-        private def isBroadcastEvent(event: SequencedEvent[ClosedEnvelope]): Boolean =
+        private def isBroadcastEvent(event: DecompressedSequencedEvent[ClosedEnvelope]): Boolean =
           event match {
-            case deliver: Deliver[ClosedEnvelope] =>
-              deliver.envelopes.exists(
+            case deliver: Deliver[Batch[ClosedEnvelope]] =>
+              deliver.batch.envelopes.exists(
                 _.recipients.allRecipients.contains(AllMembersOfSynchronizer)
               )
             case _ => false
           }
 
         override def apply(event: SequencedSerializedEvent): DelaySequencerClient = {
-          if (isBroadcastEvent(event.underlying.value.content))
+          if (isBroadcastEvent(event.underlying.value.content)) {
             broadcastsObservedByP1.getAndUpdate(_ :+ event).discard
+          }
           DelayedSequencerClient.Immediate
         }
       })
@@ -175,6 +178,7 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
 
 class TimeAdvancingTopologySubscriberBftOrderingIntegrationTestPostgres
     extends TimeAdvancingTopologySubscriberIntegrationTest {
+
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))

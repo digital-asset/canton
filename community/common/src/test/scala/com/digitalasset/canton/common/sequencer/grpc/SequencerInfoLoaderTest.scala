@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.common.sequencer.grpc
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient.SynchronizerClientBootstrapInfo
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.{
   LoadSequencerEndpointInformationResult,
@@ -21,6 +20,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnectionPoolDelays,
   SequencerConnectionValidation,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -37,6 +37,7 @@ import com.digitalasset.canton.{
   SequencerAlias,
   SynchronizerAlias,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
 import org.scalatest.Assertion
@@ -311,6 +312,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
         sequencerLivenessMargin = NonNegativeInt.zero,
         SubmissionRequestAmplification.NoAmplification,
         SequencerConnectionPoolDelays.default,
+        SubscriptionLivenessLimits.default,
         SequencerConnectionValidation.All,
         None,
       )(mapArgs(args))
@@ -361,6 +363,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
       ProcessingTimeout(),
       ClientChannelParams.ForTesting,
       clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(
+        includeDevVersion = true,
         includeAlphaVersions = true,
         includeBetaVersions = true,
         release = ReleaseVersion.current,

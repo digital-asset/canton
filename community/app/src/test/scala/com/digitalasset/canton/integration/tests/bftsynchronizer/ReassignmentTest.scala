@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.topology.{ForceFlag, Party, PhysicalSynchronizerId}
 import com.digitalasset.canton.{SynchronizerAlias, config}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.jdk.CollectionConverters.*
 
@@ -28,7 +28,7 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P5S4M4_Manual
-      .addConfigTransform(ConfigTransforms.enableUnsafeMutiSynchronizerTopologyFeatureFlag)
+      .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
 
   protected val sequencerGroups: MultiSynchronizer = MultiSynchronizer(
     Seq(

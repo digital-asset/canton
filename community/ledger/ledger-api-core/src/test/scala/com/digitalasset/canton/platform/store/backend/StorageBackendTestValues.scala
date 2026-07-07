@@ -34,6 +34,8 @@ import com.digitalasset.daml.lf.data.Ref.{
 }
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
+import com.digitalasset.daml.lf.transaction.GlobalKey
+import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import org.scalatest.OptionValues
@@ -51,8 +53,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
 
   /** Produces offsets that are ordered the same as the input value */
   def offset(x: Long): Offset = Offset.tryFromLong(x)
-  def ledgerEnd(o: Long, e: Long): ParameterStorageBackend.LedgerEnd =
-    ParameterStorageBackend.LedgerEnd(offset(o), e, 0, CantonTimestamp.now())
+  def ledgerEnd(o: Long, e: Long): LedgerEnd =
+    LedgerEnd(offset(o), e, 0, CantonTimestamp.now(), Map())
   def updateIdFromOffset(x: Offset): UpdateId = TestUpdateId(x.toDecimalString)
   def updateIdArrayFromOffset(x: Offset): Array[Byte] = updateIdFromOffset(
     x
@@ -71,6 +73,12 @@ private[store] object StorageBackendTestValues extends OptionValues {
   val someRepresentativePackageId: Ref.PackageId =
     Ref.PackageId.assertFromString("representative-pkg")
   val someTemplateId2: NameTypeConRef = NameTypeConRef.assertFromString("#pkg-name:Mod:Template2")
+  val someContractKey: GlobalKey = GlobalKey(
+    templateId = someTemplateIdFull.toIdentifier,
+    packageName = Ref.PackageName.assertFromString("pkg-name"),
+    key = Value.ValueUnit,
+    hash = Hash.hashPrivateKey("someKey"),
+  )
   val someIdentityParams: ParameterStorageBackend.IdentityParams =
     ParameterStorageBackend.IdentityParams(someParticipantId)
   val someChoice: Ref.ChoiceName = Ref.ChoiceName.assertFromString("choice")
@@ -102,8 +110,10 @@ private[store] object StorageBackendTestValues extends OptionValues {
   val someExternalTransactionHash: CantonHash =
     CantonHash
       .digest(HashPurpose.PreparedSubmission, ByteString.copyFromUtf8("mock_hash"), Sha256)
+  val someExternalTransactionHashBinaryByteString: ByteString =
+    someExternalTransactionHash.getCryptographicEvidence
   val someExternalTransactionHashBinary: Array[Byte] =
-    someExternalTransactionHash.getCryptographicEvidence.toByteArray
+    someExternalTransactionHashBinaryByteString.toByteArray
   val reassignmentId: Array[Byte] =
     ReassignmentId.create("0012345678").toOption.get.toBytes.toByteArray
 
@@ -147,7 +157,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
       // contract related columns
       notPersistedContractId: ContractId = hashCid("c1"),
       internal_contract_id: Long = 10,
-      create_key_hash: Option[String] = Some("keyhash"),
+      create_key_hash: Option[String] = Some(someContractKey.hash.toHexString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   )(
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
       template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
@@ -170,6 +181,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       notPersistedContractId = notPersistedContractId,
       internal_contract_id = internal_contract_id,
       create_key_hash = create_key_hash,
+      notPersistedContractKey = notPersistedContractKey,
     )(
       stakeholders = stakeholders,
       template_id = template_id,
@@ -199,7 +211,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
       // contract related columns
       notPersistedContractId: ContractId = hashCid("c1"),
       internal_contract_id: Long = 10,
-      create_key_hash: Option[String] = Some("keyhash"),
+      create_key_hash: Option[String] = Some(someContractKey.hash.toHexString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   )(
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
       template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
@@ -223,6 +236,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       notPersistedContractId = notPersistedContractId,
       internal_contract_id = internal_contract_id,
       create_key_hash = create_key_hash,
+      notPersistedContractKey = notPersistedContractKey,
     )(
       stakeholders = stakeholders,
       template_id = template_id,
@@ -267,6 +281,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       package_id: PackageId = PackageId.assertFromString("package"),
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
       ledger_effective_time: Long = 123456,
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   ): Seq[DbDto] = DbDto
     .consumingExerciseDbDtos(
       event_offset = event_offset,
@@ -297,6 +312,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       package_id = package_id,
       stakeholders = stakeholders,
       ledger_effective_time = ledger_effective_time,
+      notPersistedContractKey = notPersistedContractKey,
     )
     .toSeq
 
@@ -327,6 +343,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       template_id: NameTypeConRef = NameTypeConRef.assertFromString("#tem:pl:ate"),
       package_id: PackageId = PackageId.assertFromString("package"),
       stakeholders: Set[Party] = Set("stakeholder1", "stakeholder2").map(Party.assertFromString),
+      notPersistedContractKey: Option[GlobalKey] = Some(someContractKey),
   ): Seq[DbDto] = DbDto
     .unassignDbDtos(
       event_offset = event_offset,
@@ -350,6 +367,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       template_id = template_id,
       package_id = package_id,
       stakeholders = stakeholders,
+      notPersistedContractKey = notPersistedContractKey,
     )
     .toSeq
 
@@ -493,6 +511,24 @@ private[store] object StorageBackendTestValues extends OptionValues {
     )
   }
 
+  def dtoAcsCommitment(
+      offset: Offset,
+      eventSequentialId: Long,
+      synchronizerId: SynchronizerId = someSynchronizerId,
+      recordTime: Timestamp = someTime,
+      payload: ByteString = ByteString.copyFromUtf8("some-acs-commitment-payload"),
+      traceContext: Array[Byte] = serializableTraceContext,
+  ): DbDto.AcsCommitment =
+    DbDto.AcsCommitment(
+      event_sequential_id = eventSequentialId,
+      event_offset = offset.unwrap,
+      update_id = updateIdArrayFromOffset(offset),
+      synchronizer_id = synchronizerId,
+      record_time = recordTime.micros,
+      payload = payload.toByteArray,
+      trace_context = traceContext,
+    )
+
   def dtoCompletion(
       offset: Offset,
       submitters: Set[Party] = Set(Party.assertFromString("signatory")),
@@ -510,6 +546,10 @@ private[store] object StorageBackendTestValues extends OptionValues {
       publicationTime: Timestamp = someTime,
       isTransaction: Boolean = true,
       trafficCost: Long = 0L,
+      transactionHash: Option[Array[Byte]] = None,
+      rejectionStatusCode: Option[Int] = None,
+      rejectionStatusMessage: Option[String] = None,
+      rejectionStatusDetails: Option[Array[Byte]] = None,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.unwrap,
@@ -519,9 +559,9 @@ private[store] object StorageBackendTestValues extends OptionValues {
       submitters = submitters,
       command_id = commandId,
       update_id = updateId.filter(_.isEmpty).map(_ => updateIdArrayFromOffset(offset)),
-      rejection_status_code = None,
-      rejection_status_message = None,
-      rejection_status_details = None,
+      rejection_status_code = rejectionStatusCode,
+      rejection_status_message = rejectionStatusMessage,
+      rejection_status_details = rejectionStatusDetails,
       submission_id = submissionId,
       deduplication_offset = deduplicationOffset,
       deduplication_duration_seconds = deduplicationDurationSeconds,
@@ -531,6 +571,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       is_transaction = isTransaction,
       trace_context = traceContext,
       traffic_cost = trafficCost,
+      transaction_hash = transactionHash,
     )
 
   def dtoTransactionMeta(
@@ -541,6 +582,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       udpateId: Option[Array[Byte]] = None,
       synchronizerId: SynchronizerId = someSynchronizerId,
       publicationTime: Timestamp = someTime,
+      transactionHash: Option[Array[Byte]] = None,
   ): DbDto.TransactionMeta = DbDto.TransactionMeta(
     update_id = udpateId.getOrElse(updateIdArrayFromOffset(offset)),
     event_offset = offset.unwrap,
@@ -549,6 +591,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
     synchronizer_id = synchronizerId,
     event_sequential_id_first = event_sequential_id_first,
     event_sequential_id_last = event_sequential_id_last,
+    transaction_hash = transactionHash,
   )
 
   def dtoInterning(
@@ -592,6 +635,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
     synchronizer_id = someSynchronizerId,
     event_sequential_id_first = dtoEventSeqId(dbDto),
     event_sequential_id_last = dtoEventSeqId(dbDto),
+    transaction_hash = None,
   )
 
   def meta(
@@ -658,6 +702,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
           publication_time = publication_time,
           event_sequential_id_first = dtoEventSeqId(dbDtosInOrder.headOption.value),
           event_sequential_id_last = dtoEventSeqId(dbDtosInOrder.lastOption.value),
+          transaction_hash = None,
         )
       )
 }

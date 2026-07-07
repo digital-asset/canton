@@ -30,7 +30,7 @@ object SerializationVersion {
   )
 
   // FCI instead of lv, if key => v2 else v1, vdev is never returned by this function for now
-  private[lf] def assign(hasKey: Boolean):  SerializationVersion =
+  private[lf] def assign(hasKey: Boolean): SerializationVersion =
     if (hasKey) SerializationVersion.V2 else SerializationVersion.V1
 
   private[this] val fromIntMapping = All.view.map(v => v.idx -> v).toMap
@@ -79,7 +79,7 @@ object SerializationVersion {
   private[lf] val minExternalCallResults: SerializationVersion = VDev
 
   private[lf] def txVersion(tx: Transaction): SerializationVersion = {
-    import scala.Ordering.Implicits._
+    import scala.Ordering.Implicits.*
     tx.nodes.valuesIterator.foldLeft(SerializationVersion.minVersion) {
       case (acc, action: Node.Action) => acc max action.version
       case (acc, _: Node.Rollback) => acc
@@ -91,7 +91,6 @@ object SerializationVersion {
   ): VersionedTransaction =
     VersionedTransaction(txVersion(tx), tx.nodes, tx.roots)
 
-  val StableVersions: VersionRange.Inclusive[SerializationVersion] = {
+  val StableVersions: VersionRange.Inclusive[SerializationVersion] =
     VersionRange.Inclusive(SerializationVersion.V1, SerializationVersion.V2)
-  }
 }

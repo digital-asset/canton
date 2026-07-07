@@ -4,7 +4,6 @@
 package com.digitalasset.canton.performance.util
 
 import cats.data.EitherT
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
@@ -13,9 +12,8 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
-  DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParametersWithValidity,
-  StaticSynchronizerParameters,
+  SequencingParametersWithValidity,
 }
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.*
@@ -27,15 +25,18 @@ import com.digitalasset.canton.topology.client.{
 }
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   LsuSequencerConnectionSuccessor,
   ParticipantAttributes,
   SynchronizerTrustCertificate,
+  TopologyTransaction,
   VettedPackage,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HasToByteString
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.collection.immutable
@@ -43,8 +44,7 @@ import scala.concurrent.ExecutionContext
 
 class FixedSyncCryptoApiForSigning(
     member: Member,
-    crypto: Crypto,
-    staticSynchronizerParameters: StaticSynchronizerParameters,
+    crypto: SynchronizerCrypto,
     signingKey: SigningPublicKey,
     override val loggerFactory: NamedLoggerFactory,
     timestampOverride: CantonTimestamp = CantonTimestamp.MinValue,
@@ -52,8 +52,7 @@ class FixedSyncCryptoApiForSigning(
     extends SyncCryptoApi
     with NamedLogging {
 
-  override def pureCrypto: SynchronizerCryptoPureApi =
-    new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto)
+  override def pureCrypto: SynchronizerCryptoPureApi = crypto.pureCrypto
 
   private val signer = new SyncCryptoSignerWithLongTermKeys(
     member,
@@ -222,7 +221,7 @@ class FixedSyncCryptoApiForSigning(
 
     override def findDynamicSequencingParameters()(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Either[String, DynamicSequencingParametersWithValidity]] =
+    ): FutureUnlessShutdown[Either[String, SequencingParametersWithValidity]] =
       notImplementedUS
 
     override def listDynamicSynchronizerParametersChanges()(implicit
@@ -235,12 +234,15 @@ class FixedSyncCryptoApiForSigning(
 
     override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] = notImplementedUS
+    ): FutureUnlessShutdown[
+      Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
+    ] = notImplementedUS
 
     override def loadUnvettedPackagesOrDependencies(
         participantId: ParticipantId,
         packages: Set[PackageId],
         ledgerTime: CantonTimestamp,
+        checkDependencyVetting: Boolean,
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages] =
       notImplementedUS
 

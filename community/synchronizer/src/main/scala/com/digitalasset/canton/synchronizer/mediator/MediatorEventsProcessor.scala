@@ -7,7 +7,6 @@ import cats.syntax.alternative.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.semigroup.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError
@@ -18,6 +17,7 @@ import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
@@ -112,8 +112,12 @@ private[mediator] class MediatorEventsProcessor(
   ): NonEmpty[Seq[(TracedProtocolEvent, Seq[DefaultOpenEnvelope])]] =
     events.map { tracedProtocolEvent =>
       implicit val traceContext: TraceContext = tracedProtocolEvent.traceContext
+      val rawEnvelopes = tracedProtocolEvent.value match {
+        case d: Deliver[Batch[DefaultOpenEnvelope]] => d.batch.envelopes
+        case _: DeliverError => Seq.empty
+      }
       val synchronizerEnvelopes = ProtocolMessage.filterSynchronizerEnvelopes(
-        tracedProtocolEvent.value.envelopes,
+        rawEnvelopes,
         tracedProtocolEvent.value.synchronizerId,
       ) { wrongMessages =>
         val wrongSynchronizerIds = wrongMessages.map(_.protocolMessage.psid)

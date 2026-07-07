@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
-import com.digitalasset.canton.LfGlobalKeyMapping
 import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -80,10 +79,6 @@ trait SubmissionSyncService {
     * @param _estimatedInterpretationCost
     *   Estimated cost of interpretation that may be used for handling submitted transactions
     *   differently.
-    * @param keyResolver
-    *   Input key mapping inferred by interpretation. The map should contain all contract keys that
-    *   were used during interpretation. A value of None means no contract was found with this
-    *   contract key.
     * @param processedDisclosedContracts
     *   Explicitly disclosed contracts used during interpretation.
     */
@@ -95,7 +90,6 @@ trait SubmissionSyncService {
       transactionMeta: TransactionMeta,
       // TODO(#25385): Consider removing since it's currently not used
       _estimatedInterpretationCost: Long,
-      keyResolver: LfGlobalKeyMapping,
       processedDisclosedContracts: ImmArray[LfFatContractInst],
   )(implicit
       traceContext: TraceContext

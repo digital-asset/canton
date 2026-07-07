@@ -4,11 +4,10 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.Party
-import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.SExpr
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -16,8 +15,6 @@ import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.FatContractInstance
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.value.Value.ContractId.V1.`V1 Order`
-import com.digitalasset.daml.lf.value.Value.ContractId.`Cid Order`
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
@@ -25,8 +22,13 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ArraySeq
 
-class CompilerTest extends AnyWordSpec with TableDrivenPropertyChecks with Matchers with Inside with SuppressingLogging {
-  import CompilerTest._
+class CompilerTest
+    extends AnyWordSpec
+    with TableDrivenPropertyChecks
+    with Matchers
+    with Inside
+    with SuppressingLogging {
+  import CompilerTest.*
 
   "unsafeCompile" should {
     "handle 10k commands" in {
@@ -120,9 +122,6 @@ class CompilerTest extends AnyWordSpec with TableDrivenPropertyChecks with Match
 object CompilerTest {
   implicit val parserParameters: ParserParameters[this.type] = ParserParameters.default
   val pkgId = parserParameters.defaultPackageId
-
-  implicit val contractIdOrder: Ordering[ContractId] = `Cid Order`.toScalaOrdering
-  implicit val contractIdV1Order: Ordering[ContractId.V1] = `V1 Order`.toScalaOrdering
 
   val recordCon: Ref.Identifier =
     Ref.Identifier(pkgId, Ref.QualifiedName.assertFromString("Module:Record"))

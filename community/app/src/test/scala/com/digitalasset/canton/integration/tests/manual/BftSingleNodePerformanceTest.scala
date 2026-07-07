@@ -15,6 +15,7 @@ import com.digitalasset.canton.console.{
   LocalSequencerReference,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -128,7 +129,11 @@ class BftSingleNodePerformanceTest
             mediators = allMediators_,
             overrideMediatorToSequencers = Some(
               allMediators_.map { mediator =>
-                mediator -> (Seq(sequencer1), PositiveInt.one, NonNegativeInt.zero)
+                mediator -> MediatorSequencersConfiguration(
+                  Seq(sequencer1),
+                  trustThreshold = PositiveInt.one,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               }.toMap
             ),
             mediatorThreshold = PositiveInt.one,

@@ -60,7 +60,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableAlphaVersionSupport
+    ) ++ ConfigTransforms.enableDevVersionSupport
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

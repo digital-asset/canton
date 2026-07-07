@@ -10,11 +10,13 @@ import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.version.ReleaseVersion
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Flyway SQL migrations should not be changed after we have Canton GA as that will break existing
-  * deployments. These tests enforce this desired read-only property/immutability of the Flyway
-  * migration scripts by computing a SHA256 checksum of each migration script and checking that it
+/** Flyway SQL and Scala-based migrations should not be changed after we have Canton GA as that will
+  * break existing deployments. These tests enforce this desired read-only property/immutability of
+  * the Flyway migrations by computing a SHA256 checksum of each migration and checking that it
   * hasn't changed compared to the saved SHA256 checksum. Checksum for new Flyway SQL migration
-  * files are added during the release process.
+  * files are added during the release process. Scala-based migrations carry no Flyway checksum of
+  * their own, so we guard them the same way: each `.scala` migration file is accompanied by a
+  * `.sha256` digest, and a missing or mismatching digest fails this test.
   */
 final class FlywayChecksumsTest extends AnyWordSpec {
 
@@ -27,6 +29,12 @@ final class FlywayChecksumsTest extends AnyWordSpec {
   "H2 flyway migration files" should {
     "always have a valid SHA-256 digest file accompanied" in {
       compareChecksums(DbConfig.h2MigrationsPathStable)
+    }
+  }
+
+  "Scala-based flyway migration files" should {
+    "always have a valid SHA-256 digest file accompanied" in {
+      assertScalaChecksums()
     }
   }
 
@@ -116,5 +124,39 @@ final class FlywayChecksumsTest extends AnyWordSpec {
           s"Sha256 checksum of migration file $sqlFileName has changed!",
         )
       }
+
+  /** Scala-based migrations live in the source tree (not on the classpath as resources).
+    */
+  private def assertScalaChecksums(): Unit = {
+    val repoRoot = Iterator
+      .iterate(File(sys.props("user.dir")))(_.parent)
+      .take(64)
+      .find(dir => (dir / "build.sbt").exists)
+      .getOrElse(sys.error("Unable to locate the repository root (no build.sbt found)"))
+    val scalaMigrationDir =
+      repoRoot / "community" / "common" / "src" / "main" / "scala" / "db" / "migration" / "canton"
+    assert(
+      scalaMigrationDir.isDirectory,
+      s"Expected Scala migration directory at $scalaMigrationDir",
+    )
+
+    val scalaFiles = scalaMigrationDir.listRecursively.filter(_.extension.contains(".scala")).toSeq
+    assert(scalaFiles.nonEmpty, s"No Scala migration files found under $scalaMigrationDir")
+
+    scalaFiles.foreach { scalaFile =>
+      val sha256File = File(s"${scalaFile.pathAsString.stripSuffix(".scala")}.sha256")
+      assert(
+        sha256File.exists,
+        s"Missing .sha256 digest for Scala migration ${scalaFile.name}. Run recompute-sha256sums.sh.",
+      )
+      val prevSha256Value = sha256File.contentAsString.replace("\n", "").toLowerCase
+      val currSha256Value = scalaFile.sha256.toLowerCase
+      assert(
+        prevSha256Value == currSha256Value,
+        s"Sha256 checksum of Scala migration ${scalaFile.name} has changed! Frozen migrations must " +
+          "not be modified; if this change is intentional and not yet released, run recompute-sha256sums.sh.",
+      )
+    }
+  }
 
 }

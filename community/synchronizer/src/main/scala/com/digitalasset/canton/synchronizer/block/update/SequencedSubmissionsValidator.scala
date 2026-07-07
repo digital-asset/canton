@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.block.update
 
 import cats.data.EitherT
-import cats.syntax.functor.*
+import com.digitalasset.canton.crypto.SyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -14,17 +14,17 @@ import com.digitalasset.canton.sequencing.protocol.{
   MemberRecipientOrBroadcast,
   SubmissionRequest,
 }
+import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGenerator.AccumulatedStateProcessingBlocks
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 
 import scala.concurrent.ExecutionContext
 
-import BlockUpdateGeneratorImpl.{PrevalidationOutcome, SequencedPreValidatedSubmissionResult, State}
+import BlockUpdateGeneratorImpl.{PrevalidationOutcome, SequencedPreValidatedSubmissionResult}
 import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 import SubmissionRequestValidator.{SubmissionRequestValidationResult, TrafficConsumption}
 
@@ -46,7 +46,7 @@ private[update] final class SequencedSubmissionsValidator(
 ) extends NamedLogging {
 
   def sequentialApplySubmissionsAndEmitOutcomes(
-      state: State,
+      state: AccumulatedStateProcessingBlocks,
       height: Long,
       sequencedValidatedSubmissions: Seq[SequencedPreValidatedSubmissionResult],
   )(implicit ec: ExecutionContext): FutureUnlessShutdown[SequencedSubmissionsValidationResult] =
@@ -147,7 +147,7 @@ private[update] final class SequencedSubmissionsValidator(
       trafficConsumption: TrafficConsumption,
       errorOrPrevalidationOutcome: Either[SubmissionOutcome, PrevalidationOutcome],
       latestSequencerEventTimestamp: Option[CantonTimestamp],
-      sequencingTopologySnapshot: TopologySnapshot,
+      sequencingTopologySnapshot: SyncCryptoApi,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -159,6 +159,7 @@ private[update] final class SequencedSubmissionsValidator(
             prevalidationOutcome,
             inFlightAggregations,
             sequencingTimestamp,
+            latestSequencerEventTimestamp,
             signedSubmissionRequest.content,
             sequencingTopologySnapshot,
           ).leftMap { errorSubmissionOutcome =>
@@ -181,7 +182,7 @@ private[update] final class SequencedSubmissionsValidator(
       orderingSequencerId,
       sequencingTimestamp,
       latestSequencerEventTimestamp,
-      sequencingTopologySnapshot,
+      sequencingTopologySnapshot.ipsSnapshot,
     )
   }
 
@@ -192,8 +193,9 @@ private[update] final class SequencedSubmissionsValidator(
       prevalidationOutcome: PrevalidationOutcome,
       inFlightAggregations: InFlightAggregations,
       sequencingTimestamp: CantonTimestamp,
+      latestSequencerEventTimestamp: Option[CantonTimestamp],
       submissionRequest: SubmissionRequest,
-      sequencingTopologySnapshot: TopologySnapshot,
+      sequencingTopologySnapshot: SyncCryptoApi,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -205,6 +207,7 @@ private[update] final class SequencedSubmissionsValidator(
     .computeAggregationUpdateAndSubmissionOutcome(
       submissionRequest,
       sequencingTimestamp,
+      latestSequencerEventTimestamp,
       sequencingTopologySnapshot,
       aggregationInfo = prevalidationOutcome.aggregationInfo,
       inFlightAggregations = inFlightAggregations,

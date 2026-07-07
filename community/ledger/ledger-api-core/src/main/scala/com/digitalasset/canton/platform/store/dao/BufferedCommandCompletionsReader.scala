@@ -24,7 +24,7 @@ class BufferedCommandCompletionsReader(
   override def getCommandCompletions(
       startInclusive: Offset,
       endInclusive: Offset,
-      userId: UserId,
+      userId: Option[UserId],
       parties: Set[Party],
   )(implicit
       loggingContext: LoggingContextWithTrace
@@ -43,28 +43,30 @@ class BufferedCommandCompletionsReader(
   private def filterCompletions(
       transactionLogUpdate: TransactionLogUpdate,
       parties: Set[Party],
-      userId: String,
+      userId: Option[UserId],
   ): Option[CompletionStreamResponse] = (transactionLogUpdate match {
     case accepted: TransactionLogUpdate.TransactionAccepted => accepted.completionStreamResponseO
     case rejected: TransactionLogUpdate.TransactionRejected =>
       Some(rejected.completionStreamResponse)
     case u: TransactionLogUpdate.ReassignmentAccepted => u.completionStreamResponseO
     case _: TransactionLogUpdate.TopologyTransactionEffective => None
+    case _: TransactionLogUpdate.ReceivedAcsCommitment => None
   }).flatMap(toApiCompletion(_, parties, userId))
 
   private def toApiCompletion(
       completionStreamResponse: CompletionStreamResponse,
       parties: Set[Party],
-      userId: String,
+      userId: Option[UserId],
   ): Option[CompletionStreamResponse] = {
     val completion = {
       val originalCompletion = completionStreamResponse.completionResponse.completion
         .getOrElse(throw new RuntimeException("No completion in completion stream response"))
-      originalCompletion.withActAs(originalCompletion.actAs.filter(parties.map(_.toString)))
+      if (parties.isEmpty) originalCompletion
+      else originalCompletion.withActAs(originalCompletion.actAs.filter(parties.map(_.toString)))
     }
 
     val visibilityPredicate =
-      completion.userId == userId &&
+      userId.forall(_.toString == completion.userId) &&
         completion.actAs.nonEmpty
 
     Option.when(visibilityPredicate)(
@@ -75,7 +77,7 @@ class BufferedCommandCompletionsReader(
 
 object BufferedCommandCompletionsReader {
   private[dao] type Parties = Set[Party]
-  private[dao] type CompletionsFilter = (UserId, Parties)
+  private[dao] type CompletionsFilter = (Option[UserId], Parties)
 
   def apply(
       delegate: LedgerDaoCommandCompletionsReader,
@@ -88,7 +90,7 @@ object BufferedCommandCompletionsReader {
           startInclusive: Offset,
           endInclusive: Offset,
           descendingOrder: Boolean,
-          filter: (UserId, Parties),
+          filter: (Option[UserId], Parties),
           skipPruningChecks: Boolean,
       )(implicit
           loggingContext: LoggingContextWithTrace

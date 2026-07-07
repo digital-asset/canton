@@ -5,17 +5,20 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState, HealthComponent}
 import com.digitalasset.canton.lifecycle.{HasRunOnClosing, HasUnlessClosing}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
   ApplicationHandlerException,
   ApplicationHandlerPassive,
   ApplicationHandlerShutdown,
 }
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.HandlerException
+import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandlerTrait.SubscriptionLivenessStatus
 import com.digitalasset.canton.sequencing.client.{
   Fatal,
   InternallyCompletedSequencerSubscription,
@@ -25,10 +28,10 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.handlers.HasReceivedEvent
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
-import com.digitalasset.canton.sequencing.{ProcessingSerializedEvent, SequencedEventHandler}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil}
 import org.apache.pekko.stream.AbruptStageTerminationException
 
 import scala.concurrent.ExecutionContext
@@ -42,6 +45,23 @@ trait SequencerSubscription[HandlerError]
   def connection: SequencerConnection
 
   def start()(implicit traceContext: TraceContext): Either[String, Unit]
+
+  /** Check the liveness of the subscription.
+    *
+    * @param eventAndOrdinal
+    *   The latest event and ordinal emitted by the sequencer aggregator
+    * @param maxTimestampDelta
+    *   The maximum time difference allowed between the latest event received by the subscription
+    *   and `eventAndOrdinal`
+    * @param maxOrdinalDelta
+    *   The maximum ordinal difference allowed between the latest received by the subscription and
+    *   `eventAndOrdinal`
+    */
+  def checkLiveness(
+      eventAndOrdinal: EventAndOrdinal,
+      maxTimestampDelta: NonNegativeFiniteDuration,
+      maxOrdinalDelta: NonNegativeInt,
+  )(implicit traceContext: TraceContext): Unit
 
   private[sequencing] def health: HealthComponent
 }
@@ -60,16 +80,16 @@ trait SequencerSubscription[HandlerError]
   *   component whose closing indicates the subscriptions will be closed soon; used to shortcut
   *   errors and avoid warning logs when shutting down
   */
-class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
+class SequencerSubscriptionImpl private[sequencing] (
     override val connection: SequencerConnection,
     member: Member,
     startingTimestampO: Option[CantonTimestamp],
-    handler: SequencedEventHandler[HandlerError],
+    handler: SubscriptionHandlerTrait,
     parent: HasUnlessClosing,
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends SequencerSubscription[HandlerError] {
+    extends SequencerSubscription[SequencerClientSubscriptionError] {
   private val retryPolicy = connection.subscriptionRetryPolicy
 
   override private[sequencing] val health: AtomicHealthComponent = new AtomicHealthComponent() {
@@ -93,7 +113,7 @@ class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
     val protocolVersion = connection.attributes.staticParameters.protocolVersion
     val request = SubscriptionRequest(member, startingTimestampO, protocolVersion)
 
-    val (hasReceivedEvent, wrappedHandler) = HasReceivedEvent(handler)
+    val (hasReceivedEvent, wrappedHandler) = HasReceivedEvent(handler.handleEvent)
 
     connection
       .subscribe(request, wrappedHandler, timeouts.network.duration)
@@ -117,7 +137,7 @@ class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
               )
             if (canRetry) {
               logger.debug(s"Closing sequencer subscription due to error: $subscriptionError.")
-              restartConnection(connection, subscriptionError.toString)
+              restartConnection(subscriptionError.toString)
             } else {
               // Permanently close the connection to this sequencer
               giveUp(error)
@@ -131,7 +151,7 @@ class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
 
             if (canRetry) {
               logger.warn(s"Closing sequencer subscription due to exception: $exn.", exn)
-              restartConnection(connection, exn.toString)
+              restartConnection(exn.toString)
             } else {
               // Permanently close the connection to this sequencer
               giveUp(Failure(exn))
@@ -146,9 +166,7 @@ class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
       }
   }
 
-  private def restartConnection(connection: SequencerConnection, reason: String)(implicit
-      traceContext: TraceContext
-  ): Unit =
+  private def restartConnection(reason: String)(implicit traceContext: TraceContext): Unit =
     // Stop the connection non-fatally and let the subscription pool start a new subscription.
     connection.fail(reason)
   // TODO(i28761): Warn after some delay or number of failures
@@ -156,7 +174,7 @@ class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
 
   // stop the current subscription, do not retry, and propagate the reason upstream
   private def giveUp(
-      reason: Try[SubscriptionCloseReason[HandlerError]]
+      reason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
   )(implicit traceContext: TraceContext): Unit = {
     // We need to complete the promise first, otherwise the `fatal()` will result in the close reason being
     // completed with 'Closed'.
@@ -218,13 +236,51 @@ class SequencerSubscriptionImpl[HandlerError] private[sequencing] (
   }
 
   override def toString: String = s"Subscription over ${connection.name}"
+
+  override def checkLiveness(
+      eventAndOrdinal: EventAndOrdinal,
+      maxTimestampDelta: NonNegativeFiniteDuration,
+      maxOrdinalDelta: NonNegativeInt,
+  )(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    val statusO = handler.getLivenessStatus(eventAndOrdinal)
+
+    val limitsAreExceeded = statusO match {
+      case Some(SubscriptionLivenessStatus(timestampDelta, ordinalDelta)) =>
+        logger.debug(
+          s"Checking liveness: " +
+            s"timestampDelta = ${LoggerUtil.roundDurationForHumans(timestampDelta)} ; ordinalDelta = $ordinalDelta ; " +
+            s"configuration = (${LoggerUtil.roundDurationForHumans(maxTimestampDelta.duration)}, $maxOrdinalDelta)}"
+        )
+
+        (timestampDelta.compareTo(maxTimestampDelta.duration) > 0)
+        && (ordinalDelta > maxOrdinalDelta.unwrap)
+
+      case None =>
+        logger.debug(
+          s"Checking liveness: no event yet ; " +
+            s"configuration = (${LoggerUtil.roundDurationForHumans(maxTimestampDelta.duration)}, $maxOrdinalDelta)}"
+        )
+
+        // We have not received any event yet -- use the aggregated event's ordinal only, implying our ordinal is 0
+        eventAndOrdinal.ordinal > maxOrdinalDelta
+    }
+
+    if (limitsAreExceeded) {
+      val message = "Subscription inactivity exceeded configured limits: " +
+        s"$statusO vs. (${LoggerUtil.roundDurationForHumans(maxTimestampDelta.duration)}, $maxOrdinalDelta)"
+      logger.warn(s"$message -- closing subscription")
+      restartConnection(reason = message)
+    }
+  }
 }
 
 trait SequencerSubscriptionFactory {
   def create(
       connection: SequencerConnection,
       member: Member,
-      preSubscriptionEventO: Option[ProcessingSerializedEvent],
+      preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
       parent: HasUnlessClosing,
   )(implicit
@@ -242,7 +298,7 @@ class SequencerSubscriptionFactoryImpl(
   override def create(
       connection: SequencerConnection,
       member: Member,
-      preSubscriptionEventO: Option[ProcessingSerializedEvent],
+      preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
       parent: HasUnlessClosing,
   )(implicit
@@ -250,7 +306,7 @@ class SequencerSubscriptionFactoryImpl(
       ec: ExecutionContext,
   ): SequencerSubscription[SequencerClientSubscriptionError] = {
     val loggerWithConnection = loggerFactory.append("connection", connection.name)
-    val startingTimestampO = preSubscriptionEventO.map(_.timestamp)
+    val startingTimestampO = preSubscriptionEventO.map(_.event.timestamp)
 
     val eventValidator = eventValidatorFactory.create(loggerWithConnection)
 
@@ -269,7 +325,7 @@ class SequencerSubscriptionFactoryImpl(
       connection = connection,
       member = member,
       startingTimestampO = startingTimestampO,
-      handler = subscriptionHandler.handleEvent,
+      handler = subscriptionHandler,
       parent = parent,
       timeouts = timeouts,
       loggerFactory = loggerWithConnection,

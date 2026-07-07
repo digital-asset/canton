@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
-import com.daml.timer.Delayed
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -16,7 +15,7 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   CompletionsObserver,
   ObservedCompletions,
 }
-import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.util.{DelayUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
@@ -119,7 +118,7 @@ class WeightedUserIdsAndSubmittersITSpec
     FutureUtil.doNotAwait(
       // EC passed explicitly, because otherwise scalac reports a false positive unused warning/error,
       // but when trying to disable with @nowarn, complains that the latter does not suppress any warnings.
-      Delayed.by(t = Duration(5, TimeUnit.SECONDS))(observer.cancel())(ec),
+      DelayUtil.delay(Duration(5, TimeUnit.SECONDS)).map(_ => observer.cancel()),
       s"Failed to cancel observer $observer",
     )
     apiServices.commandCompletionService.completions(

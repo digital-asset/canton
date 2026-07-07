@@ -1,0 +1,5 @@
+
+module Com.Digitalasset.Transcode.Conformance.Data.Primitives where
+
+
+data Void

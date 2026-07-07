@@ -7,6 +7,8 @@ checksum()
 
 ORB_PATH="$(eval echo "${ORB_PATH}")"
 ORB_KEY="$(eval echo "${ORB_KEY}")"
+ORB_KEY="${ORB_KEY//#/_}" # '#' breaks azcopy URLs (treated as fragment delimiter)
+ORB_KEY="${ORB_KEY//%/_}" # '%' breaks azcopy URLs (treated as percent-encoding prefix)
 ORB_CONTAINER="$(circleci env subst "${CONTAINER_URL}")"
 TEMP_FILE_NAME="compressed_cache.tar.gz"
 AZURE_TAR_NAME="${ORB_KEY}.tar.gz"

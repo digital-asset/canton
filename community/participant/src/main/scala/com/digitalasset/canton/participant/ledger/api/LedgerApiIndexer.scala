@@ -27,6 +27,7 @@ import com.digitalasset.canton.platform.indexer.parallel.{
 }
 import com.digitalasset.canton.platform.indexer.{
   IndexerConfig,
+  IndexerParams,
   IndexerQueueProxy,
   IndexerState,
   JdbcIndexer,
@@ -49,6 +50,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   IndexingFutureQueue,
   RecoveringFutureQueueImpl,
   RecoveringQueueMetrics,
+  ShutdownInProgress,
 }
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -179,9 +181,9 @@ object LedgerApiIndexer {
         postProcessor,
         sequentialPostProcessor,
         contractStore.value,
-      ).initialized().map { indexer => (repairMode: Boolean) => (commit: Commit) =>
-        val result = indexer(repairMode)(commit)
-        result.onComplete {
+      ).initialized().map { indexer => (params: IndexerParams) =>
+        val result = indexer(params)
+        result.flatMap(identity).onComplete {
           case Success(indexer) =>
             healthStatusRef.set(Healthy)
             indexer.futureQueue.done.onComplete(_ => healthStatusRef.set(Unhealthy))
@@ -191,10 +193,23 @@ object LedgerApiIndexer {
         }
         result
       }
-      normalIndexerCreateFunction = indexerCreateFunction(false)
+      normalIndexerCreateFunction =
+        (commit: Commit) =>
+          (shutdownRequested: ShutdownInProgress) =>
+            indexerCreateFunction(
+              IndexerParams(
+                repairMode = false,
+                commit = commit,
+                shutdownRequested = shutdownRequested,
+              )
+            )
       repairIndexerCreateFunction =
         // for repair indexer no commit functionality, and forcing repair instantiation
-        () => indexerCreateFunction(true)(_ => ())
+        // also ACHS is skipped in repair mode, so no need to provide shutdownRequested probe
+        () =>
+          indexerCreateFunction(
+            IndexerParams(repairMode = true, commit = _ => (), shutdownRequested = () => false)
+          ).flatMap(identity)
       recoveringQueueFactory = () => {
         new RecoveringFutureQueueImpl[Update](
           maxBlockedOffer = ledgerApiIndexerConfig.indexerConfig.queueMaxBlockedOffer,
@@ -212,9 +227,9 @@ object LedgerApiIndexer {
           uncommittedWarnTreshold =
             ledgerApiIndexerConfig.indexerConfig.queueUncommittedWarnThreshold,
           recoveringQueueMetrics = RecoveringQueueMetrics(
-            blockedMeter = metrics.indexer.indexerQueueBlocked,
-            bufferedMeter = metrics.indexer.indexerQueueBuffered,
-            uncommittedMeter = metrics.indexer.indexerQueueUncommitted,
+            blockedGauge = metrics.indexer.indexerQueueBlocked,
+            bufferedGauge = metrics.indexer.indexerQueueBuffered,
+            uncommittedGauge = metrics.indexer.indexerQueueUncommitted,
           ),
           consumerFactory = normalIndexerCreateFunction,
         )

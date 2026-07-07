@@ -63,9 +63,10 @@ import com.digitalasset.canton.participant.pruning.{
   OpenCommitmentHelper,
 }
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
   CommitmentPeriodState,
+  Digest,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, LfVersionedTransaction}
@@ -73,9 +74,13 @@ import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.transaction.GrpcConnection
+import com.digitalasset.canton.topology.transaction.{
+  GrpcConnection,
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyMapping,
+}
 import com.digitalasset.canton.topology.{
-  ConfiguredPhysicalSynchronizerId,
   ParticipantId,
   PartyId,
   PhysicalSynchronizerId,
@@ -189,6 +194,7 @@ private[console] object ParticipantCommands {
           SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays: SequencerConnectionPoolDelays =
           SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits: SubscriptionLivenessLimits = SubscriptionLivenessLimits.default,
     )(implicit consoleEnvironment: ConsoleEnvironment): SynchronizerConnectionConfig =
       SynchronizerConnectionConfig(
         synchronizerAlias,
@@ -200,6 +206,7 @@ private[console] object ParticipantCommands {
           sequencerLivenessMargin,
           submissionRequestAmplification,
           sequencerConnectionPoolDelays,
+          subscriptionLivenessLimits,
         ),
         manualConnect = manualConnect,
         psid,
@@ -248,7 +255,7 @@ private[console] object ParticipantCommands {
         config: SynchronizerConnectionConfig,
         performHandshake: Boolean,
         validation: SequencerConnectionValidation,
-    )(implicit consoleEnvironment: ConsoleEnvironment): ConsoleCommandResult[Unit] =
+    ): ConsoleCommandResult[Unit] =
       runner.adminCommand(
         ParticipantAdminCommands.SynchronizerConnectivity
           .RegisterSynchronizer(
@@ -262,10 +269,12 @@ private[console] object ParticipantCommands {
         runner: AdminCommandRunner,
         config: SynchronizerConnectionConfig,
         validation: SequencerConnectionValidation,
-    )(implicit consoleEnvironment: ConsoleEnvironment): ConsoleCommandResult[Unit] =
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+          Seq.empty,
+    ): ConsoleCommandResult[Unit] =
       runner.adminCommand(
         ParticipantAdminCommands.SynchronizerConnectivity
-          .ConnectSynchronizer(config.toInternal, validation.toInternal)
+          .ConnectSynchronizer(config.toInternal, validation.toInternal, onboardingTransactions)
       )
 
     def reconnect(
@@ -801,7 +810,7 @@ class LocalCommitmentsAdministrationGroup(
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
-  ): Iterable[SignedProtocolMessage[AcsCommitment]] =
+  ): Iterable[SignedProtocolMessage[LegacyAcsCommitment]] =
     access(node =>
       node.sync.stateInspection
         .findReceivedCommitments(
@@ -818,7 +827,7 @@ class LocalCommitmentsAdministrationGroup(
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
-  ): Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.HashedCommitmentType)] =
+  ): Iterable[(LegacyCommitmentPeriod, ParticipantId, Digest.HashedDigestType)] =
     access { node =>
       node.sync.stateInspection.findComputedCommitments(
         synchronizerAlias,
@@ -833,7 +842,7 @@ class LocalCommitmentsAdministrationGroup(
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
-  ): Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)] =
+  ): Iterable[(LegacyCommitmentPeriod, ParticipantId, CommitmentPeriodState)] =
     access { node =>
       node.sync.stateInspection.outstandingCommitments(
         synchronizerAlias,
@@ -891,7 +900,7 @@ class CommitmentsAdministrationGroup(
       """
   )
   def open_commitment(
-      commitment: AcsCommitment.HashedCommitmentType,
+      commitment: Digest.HashedDigestType,
       physicalSynchronizerId: PhysicalSynchronizerId,
       timestamp: CantonTimestamp,
       counterParticipant: ParticipantId,
@@ -1555,7 +1564,7 @@ class CommitmentsAdministrationGroup(
       synchronizerIds: Seq[SynchronizerId],
       counterParticipants: Seq[ParticipantId],
       partyIds: Seq[PartyId],
-      timeout: NonNegativeDuration,
+      timeout: config.NonNegativeDuration,
   ): Seq[CommitmentReinitializationInfo] = consoleEnvironment.run(
     runner.adminCommand(
       ReinitializeCommitments(
@@ -1596,10 +1605,7 @@ class ParticipantReplicationAdministrationGroup(
 /** Administration commands supported by a participant.
   */
 trait ParticipantAdministration extends FeatureFlagFilter {
-  this: AdminCommandRunner
-    with LedgerApiCommandRunner
-    with LedgerApiAdministration
-    with NamedLogging =>
+  this: AdminCommandRunner & LedgerApiCommandRunner & LedgerApiAdministration & NamedLogging =>
 
   import ConsoleEnvironment.Implicits.*
   implicit protected val consoleEnvironment: ConsoleEnvironment
@@ -1948,10 +1954,18 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   object synchronizers extends Helpful {
 
     @Help.Summary("Returns the id of the given synchronizer alias")
+    @Help.Description(
+      """Fails if there is no active connection for the alias,
+        |or the active connection does not have a known synchronizer id."""
+    )
     def id_of(synchronizerAlias: SynchronizerAlias): SynchronizerId =
       physical_id_of(synchronizerAlias).logical
 
     @Help.Summary("Returns the physical id of the given synchronizer alias")
+    @Help.Description(
+      """Fails if there is no active connection for the alias,
+        |or the active connection does not have a known physical synchronizer id."""
+    )
     def physical_id_of(synchronizerAlias: SynchronizerAlias): PhysicalSynchronizerId =
       consoleEnvironment.run {
         adminCommand(
@@ -2230,6 +2244,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays: SequencerConnectionPoolDelays =
           SequencerConnectionPoolDelays.default,
+        subscriptionLivenessLimits: SubscriptionLivenessLimits = SubscriptionLivenessLimits.default,
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
     ): Unit = {
       val config = SynchronizerConnectionConfig.tryGrpc(
@@ -2242,6 +2257,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         sequencerLivenessMargin = sequencerLivenessMargin,
         submissionRequestAmplification = submissionRequestAmplification,
         sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
+        subscriptionLivenessLimits = subscriptionLivenessLimits,
       )
       connect_by_config(config, validation, synchronize)
     }
@@ -2261,6 +2277,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |Parameters:
         |- validation: Whether to validate the connectivity and ids of the given sequencers
         |  (default all)
+        |- onboardingTransactions: Optional onboarding topology transactions used for
+        |  onboarding. They should be a SynchronizerTrustCertificate, an OwnerToKeyMapping
+        |  and at least one NamespaceDelegation, each serialized with the synchronizer's
+        |  protocol version and signed. If empty, the participant uses the ones it
+        |  automatically generates and persists.
         """
     )
     def connect_by_config(
@@ -2269,6 +2290,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.unbounded
         ),
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+          Seq.empty,
     ): Unit = {
       val current = this.config(config.synchronizerAlias)
 
@@ -2276,7 +2299,12 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         // architecture-handbook-entry-begin: OnboardParticipantConnect
         // connect to the new synchronizer
         consoleEnvironment.run {
-          ParticipantCommands.synchronizers.connect(runner, config, validation)
+          ParticipantCommands.synchronizers.connect(
+            runner,
+            config,
+            validation,
+            onboardingTransactions,
+          )
         }
         // architecture-handbook-entry-end: OnboardParticipantConnect
       } else {
@@ -2555,20 +2583,26 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       adminCommand(ParticipantAdminCommands.SynchronizerConnectivity.ListConnectedSynchronizers())
     }
 
-    @Help.Summary("List the configured synchronizer of this participant")
+    @Help.Summary("List the configured active synchronizers of this participant")
     @Help.Description(
       """For each returned synchronizer, the boolean indicates whether the participant is
         |currently connected to the synchronizer."""
     )
     def list_registered()
-        : Seq[(SynchronizerConnectionConfig, ConfiguredPhysicalSynchronizerId, Boolean)] = {
-      val result = consoleEnvironment.run {
-        adminCommand(ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers)
+        : Seq[(SynchronizerConnectionConfig, ConfiguredPhysicalSynchronizerId, Boolean)] =
+      consoleEnvironment.run {
+        adminCommand(
+          ParticipantAdminCommands.SynchronizerConnectivity.ListActiveRegisteredSynchronizers
+        )
       }
-      result.map { case (internalConfig, psid, connected) =>
-        (SynchronizerConnectionConfig.fromInternal(internalConfig), psid, connected)
+
+    @Help.Summary("List all the configured synchronizers of this participant")
+    def list_all_registered(): Seq[RegisteredSynchronizer] =
+      consoleEnvironment.run {
+        adminCommand(
+          ParticipantAdminCommands.SynchronizerConnectivity.ListAllRegisteredSynchronizers
+        )
       }
-    }
 
     @Help.Summary("Returns true if a synchronizer is registered using the given alias")
     def is_registered(synchronizerAlias: SynchronizerAlias): Boolean =
@@ -2596,14 +2630,18 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         case (config, id, _) if id.toOption.contains(physicalSynchronizerId) => config
       }
 
-    @Help.Summary("Modify existing synchronizer connection")
+    @Help.Summary("Modify an existing active synchronizer connection")
     @Help.Description(
-      """Parameters:
+      """If a logical synchronizer upgrade has been announced, the config for the successor
+        |synchronizer gets updated automatically on the basis of the provided config for the
+        |active synchronizer.
+        |Parameters:
         |- synchronizerAlias: Alias of the synchronizer
         |- modifier: The change to be applied to the config.
         |- validation: The validations which need to be done to the connection.
-        |- physicalSynchronizerId: Physical id of the synchronizer. If empty, the active one will
-        |  be updated (if none is active, an error is returned).
+        |- physicalSynchronizerId: Physical id of the synchronizer. If empty, the currently
+        |  active connection will be updated (if none is active, an error is returned).
+        |  If not empty, the active synchronizer must match the provided physical synchronizer id.
         """
     )
     def modify(
@@ -2615,14 +2653,21 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       consoleEnvironment.runE {
         for {
           registeredSynchronizers <- adminCommand(
-            ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers
+            ParticipantAdminCommands.SynchronizerConnectivity.ListActiveRegisteredSynchronizers
           ).toEither
           cfg <- registeredSynchronizers
             .collectFirst {
-              case (config, _, _) if config.synchronizerAlias == synchronizerAlias =>
-                SynchronizerConnectionConfig.fromInternal(config)
+              case (config, knownPsid, _)
+                  if config.synchronizerAlias == synchronizerAlias &&
+                    physicalSynchronizerId
+                      .forall(requestedPsid => knownPsid.toOption.contains(requestedPsid)) =>
+                config
             }
-            .toRight(s"No such synchronizer $synchronizerAlias configured")
+            .toRight(
+              s"No active synchronizer $synchronizerAlias configured" + physicalSynchronizerId
+                .map(psid => s" with physical synchronizer id $psid")
+                .getOrElse("")
+            )
           newConfig <- Try(modifier(cfg)).toEither.leftMap(_.toString)
           _ <- Either.cond(
             newConfig.synchronizerAlias == cfg.synchronizerAlias,
@@ -2718,7 +2763,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     ): Unit = consoleEnvironment.run {
       adminCommand(
         ParticipantAdminCommands.SynchronizerConnectivity
-          .PerformManualLsu(currentPsid, successorPsid, upgradeTime, Right(config.toInternal))
+          .PerformManualLsu(currentPsid, successorPsid, upgradeTime, Right(config))
       )
     }
   }
@@ -2868,7 +2913,10 @@ class ParticipantHealthAdministration(
       |
       |This command is in particular useful to re-assure oneself that there are currently no
       |in-flight submissions or transactions present for the selected synchronizer. Such
-      |re-assurance is then helpful to proceed with repair operations, for example."""
+      |re-assurance is then helpful to proceed with repair operations, for example.
+      |
+      |The command fails if there is no active connection for the alias,
+      |or the active connection does not have a known physical synchronizer id."""
   )
   def count_in_flight(synchronizerAlias: SynchronizerAlias): InFlightCount = {
     val synchronizerId = consoleEnvironment.run {

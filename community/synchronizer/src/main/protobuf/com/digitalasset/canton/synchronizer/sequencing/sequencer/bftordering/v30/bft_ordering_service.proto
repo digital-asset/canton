@@ -84,6 +84,7 @@ message StoreResponse {
 
 message BatchRequest {
   bytes batch_id = 1;
+  int64 epoch_number = 2;
 }
 
 message BatchResponse {

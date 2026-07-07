@@ -14,7 +14,8 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
   StreamTracker,
   SubmissionTracker,
 }
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{AchsState, LedgerEnd}
+import com.digitalasset.canton.platform.store.backend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsState
 import com.digitalasset.canton.platform.store.cache.{
   AchsStateCache,
   ContractStateCaches,
@@ -144,10 +145,7 @@ object InMemoryState {
     val initialLedgerEnd = LedgerEnd.beforeBegin
 
     for {
-      dispatcherState <- DispatcherState.owner(
-        apiStreamShutdownTimeout,
-        loggerFactory,
-      )
+      dispatcherState <- DispatcherState.owner(apiStreamShutdownTimeout, loggerFactory)
       transactionSubmissionTracker <- SubmissionTracker.owner(
         maxCommandsInFlight,
         metrics,

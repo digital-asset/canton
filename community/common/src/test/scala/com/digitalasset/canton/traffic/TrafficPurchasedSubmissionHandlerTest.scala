@@ -6,7 +6,6 @@ package com.digitalasset.canton.traffic
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown
@@ -18,6 +17,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SynchronizerParameters}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
@@ -35,6 +35,7 @@ import com.digitalasset.canton.time.{SimClock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.rpc.status.Status
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.clearInvocations
@@ -96,6 +97,7 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         aggregationRuleCapture.capture(),
         callbackCapture.capture(),
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -116,7 +118,7 @@ class TrafficPurchasedSubmissionHandlerTest
       Try(callbackCapture.getValue).isSuccess shouldBe true
     }
     callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
-      UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Envelope[?]]]))
+      UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Batch[Envelope[?]]]]))
     )
     timestampsCapture.getValue.maxSequencingTime shouldBe clock.now.plusSeconds(
       trafficParams.setBalanceRequestSubmissionWindowSize.duration.toSeconds
@@ -175,6 +177,7 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -199,7 +202,7 @@ class TrafficPurchasedSubmissionHandlerTest
     }
     callbackCapture.getAllValues.asScala.foreach {
       _.asInstanceOf[SendCallback.CallbackFuture](
-        UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Envelope[?]]]))
+        UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Batch[Envelope[?]]]]))
       )
     }
 
@@ -231,6 +234,7 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -265,6 +269,7 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
@@ -325,6 +330,7 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
+        any[TrafficCostValidator],
         amplify = any[Boolean],
         useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])

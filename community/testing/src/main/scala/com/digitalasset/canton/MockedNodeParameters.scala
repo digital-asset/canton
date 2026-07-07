@@ -23,7 +23,7 @@ object MockedNodeParameters {
 
     override def enablePreviewFeatures: Boolean = ???
 
-    override def enableTestingFeatures: Boolean = ???
+    override def enableTestingFeatures: Boolean = true
 
     override def enableAdditionalConsistencyChecks: Boolean = _enableAdditionalConsistencyChecks
 
@@ -40,6 +40,8 @@ object MockedNodeParameters {
     override def nonStandardConfig: Boolean = _nonStandardConfig
 
     override def loggingConfig: LoggingConfig = _loggingConfig
+
+    override def devVersionSupport: Boolean = ???
 
     override def alphaVersionSupport: Boolean = ???
 

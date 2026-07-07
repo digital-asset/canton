@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.topology
 import cats.Monad
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functor.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   SynchronizerPredecessor,
@@ -17,7 +16,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.LsuConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
-import com.digitalasset.canton.participant.sync.{SyncPersistentStateManager, SyncServiceError}
+import com.digitalasset.canton.participant.sync.{
+  LogicalSynchronizerUpgrade,
+  SyncPersistentStateManager,
+  SyncServiceError,
+}
 import com.digitalasset.canton.participant.synchronizer.{
   PendingLsuOperation,
   SynchronizerRegistryHelpers,
@@ -36,10 +39,10 @@ import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, PhysicalSy
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
-import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
+import scala.util.chaining.*
 
 /** Listens to topology changes and creates a synchronizer connection config in the synchronizer
   * connection config store if the following requirements are satisfied:
@@ -67,7 +70,14 @@ class SequencerConnectionSuccessorListener(
 
   private val configStore = syncPersistentStateManager.synchronizerConnectionConfigStore
 
-  def init()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  /** If enough successors are known, registers the config for the successors. Overwrite any
+    * existing config to take into account all known successors.
+    *
+    * Uses the approximate topology snapshot for the successors.
+    */
+  def checkAndCreateSynchronizerConfig()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
     checkAndCreateSynchronizerConfig(topologyClient.approximateTimestamp)
 
   override def observed(
@@ -85,54 +95,34 @@ class SequencerConnectionSuccessorListener(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val resultOT = for {
       snapshot <- OptionT.liftF(topologyClient.awaitSnapshot(snapshotTs))
-      activeConfig <- OptionT.fromOption[FutureUnlessShutdown](
-        configStore.get(topologyClient.psid).toOption
-      )
-      configuredSequencers =
-        activeConfig.config.sequencerConnections.aliasToConnection.forgetNE.toSeq.flatMap {
-          case (sequencerAlias, connection) =>
-            connection.sequencerId.map(_ -> sequencerAlias)
-        }.toMap
-      configuredSequencerIds = configuredSequencers.keySet
 
       (synchronizerSuccessor, _) <- OptionT(snapshot.announcedLsu())
       SynchronizerSuccessor(successorPsid, upgradeTime) = synchronizerSuccessor
 
-      _ = logger.info(
-        s"Checking whether the participant can migrate $alias config from ${activeConfig.configuredPsid} to $successorPsid"
-      )
-      _ = logger.info(s"Configured sequencer connections: $configuredSequencerIds")
-
-      sequencerSuccessors <- OptionT.liftF(
-        snapshot.sequencerConnectionSuccessors(successorPsid = successorPsid)
-      )
-
-      _ = logger.info(s"Successors are currently known for: $sequencerSuccessors")
-
-      configuredSequencersWithoutSuccessor = configuredSequencerIds
-        .diff(sequencerSuccessors.keySet)
-      _ = if (configuredSequencersWithoutSuccessor.nonEmpty)
-        logger.info(
-          s"Some sequencer have not yet announced their endpoints on the successor synchronizer: $configuredSequencersWithoutSuccessor"
+      sequencerSuccessors <- OptionT
+        .liftF(
+          snapshot.sequencerConnectionSuccessors(successorPsid = successorPsid)
         )
-      _ <- OptionT
-        .when[FutureUnlessShutdown, Unit](configuredSequencersWithoutSuccessor.isEmpty)(())
+        .map(_.fmap(_.mapping))
+
+      successorConfig <- LogicalSynchronizerUpgrade
+        .prepareNewSynchronizerConnectionConfig(
+          psid = topologyClient.psid,
+          successorPsid = successorPsid,
+          sequencerSuccessors = sequencerSuccessors,
+          configStore = configStore,
+          warnOnIncomplete = false,
+        )
+        .fold(
+          err => {
+            logger.info(s"Unable to prepare new synchronizer config: $err")
+            None
+          },
+          config => Option(config),
+        )
+        .pipe(OptionT(_))
 
       _ = metrics.setLsuStatus(ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown, successorPsid)
-
-      successorConnections <- OptionT.fromOption[FutureUnlessShutdown](
-        NonEmpty.from(sequencerSuccessors.flatMap { case (successorSequencerId, successorConfig) =>
-          configuredSequencers.get(successorSequencerId).map { sequencerAlias =>
-            successorConfig.toGrpcSequencerConnection(sequencerAlias)
-          }
-        }.toSeq)
-      )
-
-      _ = logger.info(s"New set of sequencer connections for successors: $successorConnections")
-
-      sequencerConnections <- OptionT.fromOption[FutureUnlessShutdown](
-        activeConfig.config.sequencerConnections.modifyConnections(successorConnections).toOption
-      )
 
       predecessor =
         SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)
@@ -140,20 +130,16 @@ class SequencerConnectionSuccessorListener(
       currentSuccessorConfigO =
         configStore.get(alias, KnownPhysicalSynchronizerId(successorPsid)).toOption
 
-      successorConfig = activeConfig.config.copy(
-        synchronizerId = Some(successorPsid),
-        sequencerConnections = sequencerConnections,
-      )
-
       updatedSuccessorConfig <- configStore
         .upsert(
           psid = successorPsid,
           insert =
             (successorConfig, SynchronizerConnectionConfigStore.LsuTarget, Some(predecessor)),
-          transform = _.focus(_.synchronizerId)
-            .replace(Some(successorPsid))
-            .focus(_.sequencerConnections)
-            .replace(sequencerConnections),
+          /*
+          Overwriting the sequencer connections is fine because we always reconstruct from topology state and
+          current config.
+           */
+          overrideSequencerConnections = Some(successorConfig.sequencerConnections),
         )
         .tapLeft(err =>
           logger.warn(s"Unable to upsert synchronizer config of $successorPsid: $err")
@@ -200,6 +186,10 @@ class SequencerConnectionSuccessorListener(
         .handshakeWithSuccessor(pendingOperation)
         .value
         .flatMap {
+          /*
+            This branch is usually not expected to run because handshakeWithSuccessor above is
+            retried until a right is returned by default. This can be changed through config.
+           */
           case Left(error) =>
             val isRetryable = error.retryable.isDefined
 
@@ -257,7 +247,7 @@ class SequencerConnectionSuccessorListener(
           syncPersistentStateManager,
           metrics,
         )
-    } yield logger.info(s"Successfully copied topology from predecessor to $successorPsid"))
+    } yield ())
       .valueOr { error =>
         logger.warn(s"Failed to copy topology from predecessor to $successorPsid: $error")
       }

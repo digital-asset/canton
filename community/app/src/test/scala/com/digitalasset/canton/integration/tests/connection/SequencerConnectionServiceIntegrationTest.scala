@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -28,11 +29,14 @@ import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnectionPool,
   SequencerSubscriptionPool,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
 
 import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 sealed trait SequencerConnectionServiceIntegrationTest
     extends CommunityIntegrationTest
@@ -58,8 +62,11 @@ sealed trait SequencerConnectionServiceIntegrationTest
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
-                mediator1 -> (Seq(sequencer1, sequencer2),
-                /* trust threshold */ PositiveInt.one, /* liveness margin */ NonNegativeInt.zero)
+                mediator1 -> MediatorSequencersConfiguration(
+                  Seq(sequencer1, sequencer2),
+                  trustThreshold = PositiveInt.one,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               )
             ),
           )
@@ -122,6 +129,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
             old.sequencerLivenessMargin,
             old.submissionRequestAmplification,
             old.sequencerConnectionPoolDelays,
+            old.subscriptionLivenessLimits,
           )
         }
 
@@ -148,6 +156,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
               old.sequencerLivenessMargin,
               old.submissionRequestAmplification,
               old.sequencerConnectionPoolDelays,
+              old.subscriptionLivenessLimits,
             )
           },
           _.commandFailureMessage should include(
@@ -171,8 +180,8 @@ sealed trait SequencerConnectionServiceIntegrationTest
             // We possibly need to retry, because if participant1 has a single subscription on sequencer2, it will not detect
             // that sequencer1 is down until it first sends to it, and could therefore still pick it for the first send.
             // An alternative would be to use amplification.
-            eventually(timeUntilSuccess = 1.minute) {
-              participant1.health.maybe_ping(participant1.id, timeout = 2.seconds) shouldBe defined
+            eventually(timeUntilSuccess = 3.minute) {
+              participant1.health.maybe_ping(participant1.id, timeout = 10.seconds) shouldBe defined
             }
           },
           (
@@ -197,7 +206,14 @@ class SequencerConnectionServiceIntegrationTestDefault
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      consensusBlockCompletionTimeout = 1.second,
+      sequencingParameters = Some(
+        SequencingParameters.create(
+          pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
+          segmentLength = SequencingParameters.DefaultSegmentLength,
+          blacklistLeaderSelectionPolicyConfig =
+            SequencingParameters.DefaultLeaderSelectionPolicyConfig,
+        )(testedProtocolVersion)
+      ),
     )
   )
 }

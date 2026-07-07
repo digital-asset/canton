@@ -8,13 +8,11 @@ import cats.implicits.toFoldableOps
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
-import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -28,7 +26,14 @@ import com.digitalasset.canton.protocol.{DynamicSynchronizerParametersWithValidi
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.handlers.DiscardIgnoredEvents
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, OpenEnvelope, SequencedEvent}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  Deliver,
+  DeliverError,
+  OpenEnvelope,
+  SequencedEvent,
+}
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
@@ -51,6 +56,7 @@ import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, FutureUnlessShutdownUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -94,10 +100,9 @@ private[mediator] class Mediator(
     val synchronizerOutboxHandle: SynchronizerOutboxHandle,
     val timeTracker: SynchronizerTimeTracker,
     val state: MediatorState,
-    asynchronousProcessing: Boolean,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
-    parameters: CantonNodeParameters,
+    parameters: MediatorNodeParameters,
     clock: Clock,
     val metrics: MediatorMetrics,
     protected val loggerFactory: NamedLoggerFactory,
@@ -107,15 +112,17 @@ private[mediator] class Mediator(
     with FlagCloseableAsync
     with HasCloseContext {
 
-  val lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorAfterUpgradeTime =
-    new Mediator.LsuSuccessorAfterUpgradeTime {
-      override def apply(ts: CantonTimestamp)(implicit
-          traceContext: TraceContext
-      ): FutureUnlessShutdown[Option[SynchronizerSuccessor]] = for {
-        snapshot <- syncCrypto.awaitSnapshot(ts)
-        lsuO <- snapshot.ipsSnapshot.announcedLsu()
-        activeSuccessor = lsuO.collect { case (s, _) if s.upgradeTime <= ts => s }
-      } yield activeSuccessor
+  val lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorLookup =
+    new Mediator.LsuSuccessorLookup {
+      def getKnownSuccessor(
+          at: CantonTimestamp
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[SynchronizerSuccessor]] =
+        for {
+          snapshot <- syncCrypto.ips.awaitSnapshot(at)
+          lsuO <- snapshot.announcedLsu()
+
+        } yield lsuO.map { case (successor, _) => successor }
+
     }
 
   def psid: PhysicalSynchronizerId = sequencerClient.psid
@@ -161,7 +168,13 @@ private[mediator] class Mediator(
     )
 
   private val verdictSender =
-    VerdictSender(sequencerClient, syncCrypto, mediatorId, parameters.batchingConfig, loggerFactory)
+    VerdictSender(
+      sequencerClient,
+      syncCrypto,
+      mediatorId,
+      parameters.verdictSenderParameters,
+      loggerFactory,
+    )
 
   private val processor = new ConfirmationRequestAndResponseProcessor(
     mediatorId,
@@ -169,7 +182,6 @@ private[mediator] class Mediator(
     syncCrypto,
     timeTracker,
     state,
-    asynchronousProcessing = asynchronousProcessing,
     loggerFactory,
     timeouts,
     parameters.batchingConfig,
@@ -222,15 +234,29 @@ private[mediator] class Mediator(
       newTracedPrehead: Traced[SequencerCounterCursorPrehead]
   ): Unit = newTracedPrehead.withTraceContext { implicit traceContext => newPrehead =>
     // Update the in memory clean pre-head
-    cleanPreheadTimestamp.set(newPrehead.timestamp)
-    // Advance the in-memory watermark and unblock any inspection service streams waiting on it.
-    recordOrderTimeAwaiter.notifyAwaitedFutures(newPrehead.timestamp)
-    FutureUtil.doNotAwait(
-      synchronizeWithClosing("prune mediator deduplication store")(
-        state.deduplicationStore.prune(newPrehead.timestamp)
-      ).onShutdown(logger.info("Not pruning the mediator deduplication store due to shutdown")),
-      "pruning the mediator deduplication store failed",
+    val newCleanPreheadTimestamp = cleanPreheadTimestamp.updateAndGet {
+      /* From the perspective of this handler, it can be called with out-of-order pre-head timestamps
+       * due to concurrent future execution, so take the max out of both new and current.
+       * See [[com.digitalasset.canton.sequencing.handlers.CleanSequencerCounterTracker]]
+       */
+      _.max(newPrehead.timestamp)
+    }
+
+    logger.debug(
+      s"Advanced cached clean prehead timestamp for verdicts watermark to $newCleanPreheadTimestamp (received newPrehead was ${newPrehead.timestamp})"
     )
+
+    // We only need to run this if the prehead was in fact updated to a newer timestamp
+    if (newCleanPreheadTimestamp == newPrehead.timestamp) {
+      // Advance the in-memory watermark and unblock any inspection service streams waiting on it.
+      recordOrderTimeAwaiter.notifyAwaitedFutures(newPrehead.timestamp)
+      FutureUtil.doNotAwait(
+        synchronizeWithClosing("prune mediator deduplication store")(
+          state.deduplicationStore.prune(newPrehead.timestamp)
+        ).onShutdown(logger.info("Not pruning the mediator deduplication store due to shutdown")),
+        "pruning the mediator deduplication store failed",
+      )
+    }
   }
 
   /** Prune all unnecessary data from the mediator state and sequenced events store. Will validate
@@ -318,10 +344,9 @@ private[mediator] class Mediator(
       override def name: String = s"mediator-$mediatorId"
 
       override def subscriptionStartsAt(
-          start: SubscriptionStart,
-          synchronizerTimeTracker: SynchronizerTimeTracker,
+          start: SubscriptionStart
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        topologyTransactionProcessor.subscriptionStartsAt(start, synchronizerTimeTracker)
+        topologyTransactionProcessor.subscriptionStartsAt(start)
 
       private def sendMalformedRejection(
           rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
@@ -329,7 +354,6 @@ private[mediator] class Mediator(
           verdict: MediatorVerdict.MediatorReject,
       )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] = {
         val requestId = RequestId(timestamp)
-
         for {
           snapshot <- syncCrypto.awaitSnapshot(timestamp)
           synchronizerParameters <- snapshot.ipsSnapshot
@@ -348,7 +372,7 @@ private[mediator] class Mediator(
       }
 
       override def apply(
-          tracedEvents: Traced[Seq[BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]]]
+          tracedEvents: Traced[Seq[OrdinarySequencedEvent[Batch[ClosedEnvelope]]]]
       ): HandlerResult =
         tracedEvents.withTraceContext { implicit traceContext => events =>
           // update the delay logger using the latest event we've been handed
@@ -371,7 +395,12 @@ private[mediator] class Mediator(
                 val alarm = MediatorError.MalformedMessage.Reject(cause)
                 alarm.report()
 
-                val rootHashMessages = openEvent.envelopes.mapFilter(
+                val openEnvelopes = openEvent match {
+                  case d: Deliver[Batch[OpenEnvelope[ProtocolMessage]] @unchecked] =>
+                    d.batch.envelopes
+                  case _: DeliverError => Seq.empty
+                }
+                val rootHashMessages = openEnvelopes.mapFilter(
                   ProtocolMessage.select[RootHashMessage[SerializedRootHashMessagePayload]]
                 )
 
@@ -429,13 +458,13 @@ private[mediator] class Mediator(
 
 private[mediator] object Mediator {
 
-  /** LsuSuccessorAfterUpgradeTime gives us the successor to the current physical synchronizer id,
-    * iff the provided timestamp is past the upgrade time. Otherwise it returns None.
-    */
-  trait LsuSuccessorAfterUpgradeTime {
-    def apply(at: CantonTimestamp)(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Option[SynchronizerSuccessor]]
+  trait LsuSuccessorLookup {
+
+    /** Returns the known successor to the current physical synchronizer id.
+      */
+    def getKnownSuccessor(
+        at: CantonTimestamp
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[SynchronizerSuccessor]]
   }
 
   sealed trait PruningError {

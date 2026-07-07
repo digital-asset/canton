@@ -64,6 +64,8 @@ object Consensus {
     final case class GetOrderingTopologyResponse(
         epochNumber: EpochNumber,
         nodes: Set[BftNodeId],
+        leaders: Seq[BftNodeId],
+        blacklisted: Seq[BftNodeId],
         sequencingParameters: SequencingParameters,
     )
 
@@ -375,6 +377,11 @@ object Consensus {
   ) extends Message[E]
 
   final case object SegmentCancelledEpoch extends Message[Nothing]
+
+  sealed trait Internal extends Message[Nothing]
+  object Internal {
+    case object WarnWaitingForNewEpochTopology extends Internal
+  }
 }
 
 trait Consensus[E <: Env[E]] extends Module[E, Consensus.Message[E]] {

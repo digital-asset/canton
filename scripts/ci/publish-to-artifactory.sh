@@ -95,7 +95,7 @@ if [[ "$nightly_release" == "false" || $(date +"%u") -eq 2 ]]; then
   echo "Done publishing internal jar lib artifacts"
 
   # publish external jar artifacts
-  list=("community/kms-driver-api kms-driver-api kms-driver-api" "kms-driver-testing-lib kms-driver-testing kms-driver-testing-lib" "community/mock-kms-driver mock-kms-driver mock-kms-driver")
+  list=("community/mock-kms-driver mock-kms-driver mock-kms-driver")
   for i in "${list[@]}"
   do
     set -- $i # convert the "tuple" into the param args $1 $2...
@@ -166,13 +166,14 @@ if [[ "$nightly_release" == "false" || $(date +"%u") -eq 2 ]]; then
   #        "${artifactory_url}/assembly/canton/${current_version}/canton-reliability-tests-${current_version}.csv" \
   #        "${current_version}"
 
-  echo "Publishing protos to artifactory/assembly/canton/${current_version}/..."
-  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-protobuf.tar.gz" \
-          "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-protobuf.tar.gz" \
-          "${current_version}"
-  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-protobuf.zip" \
-            "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-protobuf.zip" \
-            "${current_version}"
+# Publishing to artifactory is phased out - added as comment to show intent
+#  echo "Publishing API definitions to artifactory/assembly/canton/${current_version}/..."
+#  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-api.tar.gz" \
+#          "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-api.tar.gz" \
+#          "${current_version}"
+#  publish "/tmp/workspace/community/app/target/release/canton-open-source-${current_version}-api.zip" \
+#            "${artifactory_url}/assembly/canton/${current_version}/canton-open-source-${current_version}-api.zip" \
+#            "${current_version}"
 
   echo "Publishing canton versions to info.json"
   jo -p canton_version=$current_version $(cat /tmp/workspace/info.properties) | tee /tmp/workspace/info.json

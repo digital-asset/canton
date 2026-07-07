@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.NoPreferredPackagesFound
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
@@ -48,7 +48,7 @@ class HeterogeneousDependenciesVettingIntegrationTest
 
   @volatile var registryParticipant1, registryParticipant2, sellerParticipant,
       buyerParticipant: LocalParticipantReference = _
-  @volatile var registry, seller, buyer: PartyId = _
+  @volatile var registry, seller, buyer: Party = _
   @volatile var assetFactoryV1PkgId, assetFactoryV2PkgId: LfPackageId = _
   private val AllDars = Set(
     UpgradingBaseTest.DvpAssetFactoryV1,
@@ -85,7 +85,8 @@ class HeterogeneousDependenciesVettingIntegrationTest
         // Setup the party topology state
         inside(
           PartiesAllocator(
-            Set(registryParticipant1, registryParticipant2, sellerParticipant, buyerParticipant)
+            Set(registryParticipant1, registryParticipant2, sellerParticipant, buyerParticipant),
+            enableExternalParties = true,
           )(
             newParties = Seq(
               // In a real DvP setup, there would be two registries: one for Share and one for IOU
@@ -387,7 +388,7 @@ class HeterogeneousDependenciesVettingIntegrationTest
     )
 
     val iouDisclosedContracts = ledger_api_utils
-      .fetchContractsAsDisclosed(registryParticipant1, registry, IouV1.TEMPLATE_ID)
+      .fetchContractsAsDisclosed(registryParticipant1, registry.partyId, IouV1.TEMPLATE_ID)
       .values
 
     val createOfferEvent = buyerParticipant.ledger_api.javaapi.commands
@@ -415,8 +416,8 @@ class HeterogeneousDependenciesVettingIntegrationTest
       .preferred_packages(
         Map(
           LfPackageName
-            .assertFromString(DvpOfferV2.PACKAGE_NAME) -> Set(seller, buyer),
-          LfPackageName.assertFromString(ShareV1.PACKAGE_NAME) -> Set(registry),
+            .assertFromString(DvpOfferV2.PACKAGE_NAME) -> Set(seller.partyId, buyer.partyId),
+          LfPackageName.assertFromString(ShareV1.PACKAGE_NAME) -> Set(registry.partyId),
         )
       )
 
@@ -480,7 +481,7 @@ class HeterogeneousDependenciesVettingIntegrationTest
 
     val assetFactoryV2Supported =
       registryParticipant1.ledger_api.interactive_submission
-        .preferred_packages(Map(dvpAssetFactoryPkgName -> Set(registry)))
+        .preferred_packages(Map(dvpAssetFactoryPkgName -> Set(registry.partyId)))
         .packageReferences
         .find(_.packageName == dvpAssetFactoryPkgName)
         .value
@@ -504,7 +505,10 @@ class HeterogeneousDependenciesVettingIntegrationTest
     lazy val issueAssetsSupportsV2Assets =
       registryParticipant1.ledger_api.interactive_submission
         .preferred_packages(
-          Map(dvpAssetFactoryPkgName -> Set(registry), dvpAssetsPkgName -> Set(seller, buyer))
+          Map(
+            dvpAssetFactoryPkgName -> Set(registry.partyId),
+            dvpAssetsPkgName -> Set(seller.partyId, buyer.partyId),
+          )
         )
         .packageReferences
         .find(_.packageName == dvpAssetFactoryPkgName)
@@ -512,14 +516,14 @@ class HeterogeneousDependenciesVettingIntegrationTest
         .packageId == assetFactoryV2PkgId
 
     val buyerSupportsV2Assets = buyerParticipant.ledger_api.interactive_submission
-      .preferred_packages(Map(dvpAssetsPkgName -> Set(buyer)))
+      .preferred_packages(Map(dvpAssetsPkgName -> Set(buyer.partyId)))
       .packageReferences
       .find(_.packageName == dvpAssetsPkgName)
       .value
       .packageId == IouV2.PACKAGE_ID
 
     val sellerSupportsV2Assets = sellerParticipant.ledger_api.interactive_submission
-      .preferred_packages(Map(dvpAssetsPkgName -> Set(seller)))
+      .preferred_packages(Map(dvpAssetsPkgName -> Set(seller.partyId)))
       .packageReferences
       .find(_.packageName == dvpAssetsPkgName)
       .value

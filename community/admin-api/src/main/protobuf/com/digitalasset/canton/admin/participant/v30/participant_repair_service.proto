@@ -8,6 +8,7 @@ package com.digitalasset.canton.admin.participant.v30;
 import "com/digitalasset/canton/admin/participant/v30/acs_import.proto";
 import "com/digitalasset/canton/admin/participant/v30/synchronizer_connectivity_service.proto";
 import "com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto";
+import "com/digitalasset/canton/topology/admin/v30/common.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -23,6 +24,13 @@ service ParticipantRepairService {
   rpc ExportAcs(ExportAcsRequest) returns (stream ExportAcsResponse);
 
   // Import an existing export into the participant
+  //
+  //  This operation assumes the provided snapshot
+  //  contains the complete and untampered ACS originating from a trusted source participant.
+  //  Because the target participant cannot independently verify the historical provenance
+  //  of the imported contracts, validation is performed on a best-effort basis,
+  //  even if `contractImportMode` is `Validation`.
+  //  Use only when the provided snapshot comes from a known, trusted authority.
   rpc ImportAcs(stream ImportAcsRequest) returns (ImportAcsResponse);
 
   // Remove the given contracts from the participant
@@ -58,6 +66,21 @@ service ParticipantRepairService {
      This includes manually repairing the ACS to account for missed activity on both the old and new synchronizer.
   */
   rpc PerformLateLsu(PerformLateLsuRequest) returns (PerformLateLsuResponse);
+
+  // Deletes the synchronizer configuration specified by the physical synchronizer id.
+  // WARNING: this should not be executed under normal circumstances, but can be necessary to bring the synchronizer
+  // configuration into a consistent state (e.g. after a failed LSU attempt with the wrong successor synchronizer id).
+  rpc DeleteSynchronizerConnectionConfig(DeleteSynchronizerConnectionConfigRequest) returns (DeleteSynchronizerConnectionConfigResponse);
+
+  // List metadata for pending operations matching the provided filters.
+  //
+  // This endpoint returns only metadata, not the serialized operation payloads.
+  rpc ListPendingOperations(ListPendingOperationsRequest) returns (ListPendingOperationsResponse);
+
+  // Delete any pending operation found by input params.
+  //
+  // Returns empty response if the pending operation was successfully deleted or no matching pending operation was found.
+  rpc DeletePendingOperation(DeletePendingOperationRequest) returns (DeletePendingOperationResponse);
 }
 
 message PurgeContractsRequest {
@@ -301,3 +324,58 @@ message PerformLateLsuRequest {
 }
 
 message PerformLateLsuResponse {}
+
+message DeleteSynchronizerConnectionConfigRequest {
+  // The physical synchronizer id of the synchronizer for which to delete the config
+  // Required
+  string physical_synchronizer_id = 1;
+}
+
+message DeleteSynchronizerConnectionConfigResponse {}
+
+message ListPendingOperationsRequest {
+  // Name of the pending operation type to list.
+  // Optional.
+  optional string operation_name = 1;
+
+  // Restrict results to operations for the specified synchronizer.
+  // Optional.
+  optional com.digitalasset.canton.topology.admin.v30.Synchronizer filter_synchronizer = 2;
+
+  // Restrict results to the specified operation key.
+  // Optional.
+  optional string filter_operation_key = 3;
+}
+
+message ListPendingOperationsResponse {
+  // Metadata entries for all pending operations matching the request filters.
+  repeated PendingOperationMetadata pending_operations = 1;
+}
+
+// All fields are populated for each response item.
+message PendingOperationMetadata {
+  // Name of the pending operation type.
+  string operation_name = 1;
+
+  // Unique key of the pending operation.
+  string operation_key = 2;
+
+  // Synchronizer associated with the pending operation.
+  com.digitalasset.canton.topology.admin.v30.Synchronizer synchronizer = 3;
+}
+
+message DeletePendingOperationRequest {
+  // Name of the pending operation type to delete.
+  // Required.
+  string operation_name = 1;
+
+  // Restrict delete to the specified synchronizer.
+  // Required.
+  com.digitalasset.canton.topology.admin.v30.Synchronizer synchronizer = 2;
+
+  // Restrict delete to the specified operation key.
+  // Required.
+  string operation_key = 3;
+}
+
+message DeletePendingOperationResponse {}

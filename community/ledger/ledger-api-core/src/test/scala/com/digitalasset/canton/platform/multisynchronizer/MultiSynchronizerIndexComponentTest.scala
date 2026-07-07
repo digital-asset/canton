@@ -7,12 +7,8 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.ledger.api.{
-  AcsContinuationToken,
-  AcsRangeInfo,
-  CumulativeFilter,
-  EventFormat,
-}
+import com.digitalasset.canton.ledger.api.messages.state.{AcsContinuationToken, AcsRangeInfo}
+import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
   ReassignmentInfo,
@@ -20,7 +16,8 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.platform.{IndexComponentTest, Party}
+import com.digitalasset.canton.platform.Party
+import com.digitalasset.canton.platform.component.IndexComponentTest
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,
@@ -284,7 +281,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
   }
 
   private def setupLedgerWithIncompleteOffsets(updates: (Update, Vector[ContractInstance])*) = {
-    val ledgerEndOpt = index.currentLedgerEnd().futureValue
+    val ledgerEndOpt = index.currentLedgerEnd().map(_.lastOffset)
     val ledgerEnd = ledgerEndOpt.map(_.increment).getOrElse(Offset.firstOffset)
     val incompleteOffsetAcc = updates.map(_._1).foldLeft(ledgerEnd -> Seq[Offset]()) {
       case ((currentOffset, acc), _u: Update.ReassignmentAccepted) =>
@@ -329,20 +326,19 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       case Left(error) =>
         fail(s"Failed to decode continuation token: ${error.getStatus.getDescription}")
       case Right(continuationPointer) =>
-        for {
-          ledgerEnd <- index.currentLedgerEnd()
-          responses <- index
-            .getActiveContracts(
-              eventFormat,
-              ledgerEnd,
-              AcsRangeInfo(
-                continuationPointer = continuationPointer,
-                requestChecksum = AcsContinuationToken.emptyChecksum,
-                limit = limit.map(_.toLong),
-              ),
-            )
-            .runWith(Sink.collection)
-        } yield responses.toVector
+        val ledgerEnd = index.currentLedgerEnd()
+        index
+          .getActiveContracts(
+            eventFormat,
+            ledgerEnd.map(_.lastOffset),
+            AcsRangeInfo(
+              continuationPointer = continuationPointer,
+              requestChecksum = AcsContinuationToken.emptyChecksum,
+              limit = limit.map(_.toLong),
+            ),
+          )
+          .runWith(Sink.collection)
+          .map(_.toVector)
     }
 
   private def recordTime() = CantonTimestamp(Time.Timestamp.now())
@@ -372,6 +368,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
           assignmentExclusivity = None,
           reassignmentCounter = 15L,
           nodeId = 0,
+          keyOpt = None,
         ),
         contracIds.tail.map(contractId =>
           Reassignment.Unassign(
@@ -382,6 +379,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
             assignmentExclusivity = None,
             reassignmentCounter = 15L,
             nodeId = 0,
+            keyOpt = None,
           )
         )*
       ),

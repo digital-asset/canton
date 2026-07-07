@@ -5,9 +5,9 @@ package com.digitalasset.daml.lf
 package crypto
 
 import com.daml.crypto.{MacPrototype, MessageDigestPrototype}
-
-import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicLong
+import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.crypto.HashUtils.{HashTracer, formatByteToHexString}
+import com.digitalasset.daml.lf.data.Ref.Name
 import com.digitalasset.daml.lf.data.{
   Bytes,
   FrontStack,
@@ -17,20 +17,18 @@ import com.digitalasset.daml.lf.data.{
   Time,
   Utf8,
 }
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
-import com.daml.scalautil.Statement.discard
-import com.digitalasset.daml.lf.crypto.HashUtils.{HashTracer, formatByteToHexString}
-import com.digitalasset.daml.lf.data.Ref.Name
-import com.digitalasset.daml.lf.transaction._
 import com.digitalasset.daml.lf.value.Value.ContractId
-import scalaz.Order
 
+import java.nio.ByteBuffer
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import scala.collection.immutable.{SortedMap, SortedSet}
-import scala.util.{Failure, Success, Try}
 import scala.util.control.NoStackTrace
+import scala.util.{Failure, Success, Try}
 
 final class Hash private (val bytes: Bytes) {
 
@@ -52,18 +50,21 @@ object Hash {
   sealed trait HashingMethod
   object HashingMethod {
 
-    /** The hashing method used for hashing values in versions <=3.2 of Canton. Hashes untyped values in an
-      * upgrade-incompatible way.
+    /** The hashing method used for hashing values in versions <=3.2 of Canton. Hashes untyped
+      * values in an upgrade-incompatible way.
       */
     object Legacy extends HashingMethod
 
-    /** The upgrade-friendly method for hashing values introduced in Canton 3.3. Hashes untyped values in an
-      * upgrade-friendly way.
+    /** The upgrade-friendly method for hashing values introduced in Canton 3.3. Hashes untyped
+      * values in an upgrade-friendly way.
+      *
+      * Do not use this anymore as it has security limitations that are hard to work around. See
+      * https://github.com/DACH-NY/canton/issues/32688
       */
-    object UpgradeFriendly extends HashingMethod
+    object UpgradeFriendlyUnsafe extends HashingMethod
 
-    /** The upgrade-friendly method for hashing values introduced in Canton 3.3. Hashes typed values in normal form
-      * (i.e. no trailing Nones).
+    /** The upgrade-friendly method for hashing values introduced in Canton 3.3. Hashes typed values
+      * in normal form (i.e. no trailing Nones).
       */
     object TypedNormalForm extends HashingMethod
   }
@@ -108,7 +109,7 @@ object Hash {
     Either.cond(
       bs.length == underlyingHashLength,
       new Hash(bs),
-      s"hash should have ${underlyingHashLength} bytes, got ${bs.length}",
+      s"hash should have $underlyingHashLength bytes, got ${bs.length}",
     )
 
   def assertFromBytes(bs: Bytes): Hash =
@@ -131,8 +132,6 @@ object Hash {
   implicit val ordering: Ordering[Hash] =
     Ordering.by(_.bytes)
 
-  implicit val order: Order[Hash] = Order.fromScalaOrdering
-
   private[lf] val aCid2Bytes: Value.ContractId => Bytes =
     cid => cid.toBytes
 
@@ -149,7 +148,9 @@ object Hash {
       numericToBytes: data.Numeric => Bytes
   ) {
 
-    /** @param context Used by `HashTracer`s to provide contextualized information about what the encoded value represents
+    /** @param context
+      *   Used by `HashTracer`s to provide contextualized information about what the encoded value
+      *   represents
       */
     protected def update(a: ByteBuffer, context: => String): Unit
 
@@ -237,12 +238,11 @@ object Hash {
       iterateOver(ss.iterator, ss.size)(_ addString _)
     }
 
-    final def addOptional[S](opt: Option[S], hashS: this.type => S => this.type): this.type = {
+    final def addOptional[S](opt: Option[S], hashS: this.type => S => this.type): this.type =
       opt match {
         case None => addByte(0.toByte, "None")
         case Some(value) => hashS(addByte(1.toByte, "Some"))(value)
       }
-    }
   }
 
   object TransactionMetadataBuilderV1 {
@@ -265,7 +265,7 @@ object Hash {
   def hashTransactionMetadataV1(
       metadata: TransactionMetadataBuilderV1.Metadata,
       hashTracer: HashTracer = HashTracer.NoOp,
-  ): Hash = {
+  ): Hash =
     // Do not enforce node seed for create nodes here as we hash disclosed events which do not have a seed
     new NodeBuilderV1(Purpose.MetadataHash, hashTracer, enforceNodeSeedForCreateNodes = false)
       .addHashVersion(NodeHashVersion.V1)
@@ -300,18 +300,17 @@ object Hash {
         )
       )
       .build
-  }
 
-  /** Class with additional methods to hash nodes. Uses a single MessageDigest to hash the entire node including all its values.
+  /** Class with additional methods to hash nodes. Uses a single MessageDigest to hash the entire
+    * node including all its values.
     */
   private sealed abstract class NodeBuilder(
       purpose: Purpose,
       hashTracer: HashTracer,
   ) extends LegacyBuilder(purpose, aCid2Bytes, stringNumericToBytes, hashTracer) {
 
-    def addHashVersion(version: NodeHashVersion): this.type = {
+    def addHashVersion(version: NodeHashVersion): this.type =
       addByte(version.id, s"${formatByteToHexString(version.id)} (Node Encoding Version)")
-    }
 
     private[crypto] def hashNode(
         node: Node,
@@ -362,7 +361,7 @@ object Hash {
     private[lf] def assertHashingVersionSupportsLfVersion(
         version: SerializationVersion,
         nodeHashVersion: NodeHashVersion,
-    ): Unit = {
+    ): Unit =
       if (
         !HashingVersionToSupportedLFVersionMapping
           // This really shouldn't happen, unless someone removed an entry from the HashingVersionToSupportedLFVersionMapping map
@@ -372,7 +371,6 @@ object Hash {
           )
           .contains(version)
       ) throw NodeHashingError.UnsupportedSerializationVersion(nodeHashVersion, version)
-    }
   }
 
   private sealed class NodeBuilderV1(
@@ -476,15 +474,15 @@ object Hash {
             exerciseResult,
             keyOpt,
             byKey,
-            // TODO(https://github.com/digital-asset/canton/issues/513)
-            // handle external calls
-            _,
+            externalCallResults,
             version,
           ) =>
         if (choiceAuthorizers.nonEmpty)
           notSupported("choiceAuthorizers in Exercise node") // 2.dev feature
         if (keyOpt.nonEmpty) notSupported("keyOpt in Exercise node") // 2.dev feature
         if (byKey == true) notSupported("byKey in Exercise node") // 2.dev feature
+        if (externalCallResults.nonEmpty)
+          notSupported("externalCallResults in Exercise node") // 2.dev feature
         addContext("Exercise Node")
           .withContext("Node Version")(_.addString(SerializationVersion.toProtoValue(version)))
           .addByte(NodeBuilder.NodeTag.ExerciseTag.tag, "Node Tag")
@@ -502,7 +500,7 @@ object Hash {
           .withContext("Exercise Result")(
             _.addOptional[Value](
               exerciseResult,
-              { builder => value => builder.addTypedValue(value) },
+              builder => value => builder.addTypedValue(value),
             )
           )
           .withContext("Choice Observers")(_.addStringSet(choiceObservers))
@@ -536,7 +534,7 @@ object Hash {
         addExerciseNode(nodes, nodeSeed, nodeSeeds)(exercise)
       case (_: Node.Exercise, None) => missingNodeSeed(node)
       case (rollback: Node.Rollback, _) => addRollbackNode(nodes, nodeSeeds)(rollback)
-      case (_: Node.LookupByKey, _) =>
+      case (_: Node.QueryByKey, _) =>
         notSupported(s"LookupByKey node")
     }
 
@@ -552,7 +550,8 @@ object Hash {
   }
 
   /** Deterministically hash a versioned transaction using the Version 1 of the hashing algorithm.
-    * @param hashTracer tracer that can be used to debug encoding of the transaction.
+    * @param hashTracer
+    *   tracer that can be used to debug encoding of the transaction.
     */
   @throws[NodeHashingError]
   @throws[HashingError]
@@ -560,7 +559,7 @@ object Hash {
       versionedTransaction: VersionedTransaction,
       nodeSeeds: Map[NodeId, Hash],
       hashTracer: HashTracer = HashTracer.NoOp,
-  ): Hash = {
+  ): Hash =
     new NodeBuilderV1(Purpose.TransactionHash, hashTracer, enforceNodeSeedForCreateNodes = true)
       .withContext("Serialization Version")(
         _.addString(SerializationVersion.toProtoValue(versionedTransaction.version))
@@ -569,10 +568,10 @@ object Hash {
         _.addNodesFromNodeIds(versionedTransaction.roots, versionedTransaction.nodes, nodeSeeds)
       )
       .build
-  }
 
   /** Deterministically hash a node using the Version 1 of the hashing algorithm.
-    * @param hashTracer tracer that can be used to debug encoding of the node.
+    * @param hashTracer
+    *   tracer that can be used to debug encoding of the node.
     */
   @throws[NodeHashingError]
   @throws[HashingError]
@@ -583,10 +582,9 @@ object Hash {
       subNodes: Map[NodeId, Node] = Map.empty,
       hashTracer: HashTracer = HashTracer.NoOp,
       enforceNodeSeedForCreateNodes: Boolean = true,
-  ): Hash = {
+  ): Hash =
     new NodeBuilderV1(Purpose.TransactionHash, hashTracer, enforceNodeSeedForCreateNodes)
       .hashNode(node, nodeSeed, subNodes, nodeSeeds)
-  }
 
   // Only for testing
   private[crypto] def valueBuilderForV1Node(
@@ -620,9 +618,8 @@ object Hash {
 
     protected val md = MessageDigestPrototype.Sha256.newDigest
 
-    def addContext(context: => String): this.type = {
+    def addContext(context: => String): this.type =
       withContext(context)(identity)
-    }
 
     def withContext(context: => String)(f: this.type => this.type): this.type = {
       hashTracer.context(s"# $context")
@@ -654,10 +651,9 @@ object Hash {
     override protected def doFinal(buf: Array[Byte]): Unit =
       assert(md.digest(buf, 0, underlyingHashLength) == underlyingHashLength)
 
-    def addVersion: this.type = {
+    def addVersion: this.type =
       addByte(version.id, s"${formatByteToHexString(version.id)} (Value Encoding Version)")
         .addByte(purpose.id, s"${formatByteToHexString(purpose.id)} (Value Encoding Purpose)")
-    }
   }
 
   // TODO #20203 Rename to a better suited name
@@ -739,7 +735,10 @@ object Hash {
       }
   }
 
-  private final class UpgradeFriendlyBuilder(
+  /** Do not use this anymore as it has security limitations that are hard to work around. See
+    * #32688
+    */
+  private final class UpgradeFriendlyBuilderUnsafe(
       purpose: Purpose,
       cid2Bytes: Value.ContractId => Bytes,
       numericToBytes: data.Numeric => Bytes,
@@ -861,7 +860,7 @@ object Hash {
 
     // we add non-default fields together with their 1-based field index,
     // we end using 0 delimiter.
-    def addRecord(value: ImmArray[(_, Value)]): this.type = {
+    def addRecord(value: ImmArray[(?, Value)]): this.type = {
       value.iterator.zipWithIndex.foreach[Unit] { case ((_, value), i) =>
         def addField: this.type = addInt(i)
         value match {
@@ -963,15 +962,14 @@ object Hash {
   private[crypto] def builder(
       purpose: Purpose,
       cid2Bytes: Value.ContractId => Bytes,
-      upgradeFriendly: Boolean,
+      upgradeFriendlyUnsafe: Boolean,
       numeric2Bytes: data.Numeric => Bytes = bigIntNumericToBytes,
       hashTracer: HashTracer = HashTracer.NoOp,
-  ): ValueHashBuilder = {
-    if (upgradeFriendly)
-      new UpgradeFriendlyBuilder(purpose, cid2Bytes, numeric2Bytes, hashTracer).addVersion
+  ): ValueHashBuilder =
+    if (upgradeFriendlyUnsafe)
+      new UpgradeFriendlyBuilderUnsafe(purpose, cid2Bytes, numeric2Bytes, hashTracer).addVersion
     else
       new LegacyBuilder(purpose, cid2Bytes, numeric2Bytes, hashTracer).addVersion
-  }
 
   private[crypto] def hMacBuilder(key: Hash): Builder = new HashMacBuilder(key)
 
@@ -994,18 +992,19 @@ object Hash {
     data.assertRight(fromString(s))
 
   def hashPrivateKey(s: String): Hash =
-    builder(Purpose.PrivateKey, noCid2String, upgradeFriendly = true).addString(s).build
+    // Ok to enable upgradeFriendlyUnsafe, as addString does not have known security limitations.
+    builder(Purpose.PrivateKey, noCid2String, upgradeFriendlyUnsafe = true).addString(s).build
 
   // This function assumes that key is well typed, i.e. :
   // 1 - `templateId` is the identifier for a template with a key of type τ
   // 2 - `key` is a value of type τ
   @throws[HashingError]
-  def assertHashContractKey(
+  def assertHashContractKeyUnsafe(
       templateId: Ref.Identifier,
       packageName: Ref.PackageName,
       key: Value,
   ): Hash = {
-    val hashBuilder = builder(Purpose.LegacyContractKey, noCid2String, upgradeFriendly = true)
+    val hashBuilder = builder(Purpose.LegacyContractKey, noCid2String, upgradeFriendlyUnsafe = true)
     hashBuilder
       .addQualifiedName(templateId.qualifiedName)
       .addString(packageName)
@@ -1013,12 +1012,12 @@ object Hash {
       .build
   }
 
-  def hashContractKey(
+  def hashContractKeyUnsafe(
       templateId: Ref.Identifier,
       packageName: Ref.PackageName,
       key: Value,
   ): Either[HashingError, Hash] =
-    handleError(assertHashContractKey(templateId, packageName: Ref.PackageName, key))
+    handleError(assertHashContractKeyUnsafe(templateId, packageName: Ref.PackageName, key))
 
   // This function assumes that `arg` is well typed, i.e. :
   // 1 - `packageName` is the package name defined in the metadata of the package containing template `templateId`
@@ -1030,40 +1029,32 @@ object Hash {
       templateId: Ref.Identifier,
       arg: Value,
       packageName: Ref.PackageName,
-      upgradeFriendly: Boolean = false,
-  ): Hash = {
-    builder(Purpose.ThinContractInstance, aCid2Bytes, upgradeFriendly)
+      upgradeFriendlyUnsafe: Boolean = false,
+  ): Hash =
+    builder(Purpose.ThinContractInstance, aCid2Bytes, upgradeFriendlyUnsafe)
       .addString(packageName)
       .addIdentifier(templateId)
       .addTypedValue(arg)
       .build
-  }
 
   def hashContractInstance(
       templateId: Ref.Identifier,
       arg: Value,
       packageName: Ref.PackageName,
-      upgradeFriendly: Boolean = false,
-  ): Either[String, Hash] = {
-    Try(assertHashContractInstance(templateId, arg, packageName, upgradeFriendly)) match {
+      upgradeFriendlyUnsafe: Boolean = false,
+  ): Either[String, Hash] =
+    Try(assertHashContractInstance(templateId, arg, packageName, upgradeFriendlyUnsafe)) match {
       case Success(hash) => Right(hash)
-      case Failure(exception) => Left(s"Failed to hash contract instance: ${exception}")
+      case Failure(exception) => Left(s"Failed to hash contract instance: $exception")
     }
-  }
-
-  def hashContractInstance(
-      packageName: Ref.PackageName,
-      templateId: Ref.Identifier,
-      arg: Value,
-  ): Either[HashingError, Hash] =
-    handleError(assertHashContractInstance(templateId, arg, packageName, upgradeFriendly = true))
 
   def hashChangeId(
       userId: Ref.UserId,
       commandId: Ref.CommandId,
       actAs: Set[Ref.Party],
   ): Hash =
-    builder(Purpose.ChangeId, noCid2String, upgradeFriendly = true)
+    // Ok to enable upgradeFriendlyUnsafe, as addString and addStringSet do not have known security limitations.
+    builder(Purpose.ChangeId, noCid2String, upgradeFriendlyUnsafe = true)
       .addString(userId)
       .addString(commandId)
       .addStringSet(actAs)
@@ -1100,7 +1091,8 @@ object Hash {
       keyHash: Hash,
       maintainer: Ref.Party,
   ): Hash =
-    builder(Purpose.MaintainerContractKeyUUID, noCid2String, upgradeFriendly = true)
+    // Ok to enable upgradeFriendlyUnsafe, as addHash and addString do not have known security limitations.
+    builder(Purpose.MaintainerContractKeyUUID, noCid2String, upgradeFriendlyUnsafe = true)
       .addHash(keyHash, "Key Hash")
       .addString(maintainer)
       .build

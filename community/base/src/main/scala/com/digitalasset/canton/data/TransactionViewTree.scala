@@ -105,6 +105,6 @@ object TransactionViewTree {
   } yield ()
 
   /** Indicates an attempt to create an invalid [[TransactionViewTree]]. */
-  final case class InvalidTransactionViewTree(message: String) extends RuntimeException(message) {}
+  final case class InvalidTransactionViewTree(message: String) extends RuntimeException(message)
 
 }

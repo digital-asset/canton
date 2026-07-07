@@ -61,6 +61,7 @@ trait SecurityTags extends CreatesUsers with CreatesParties with BeforeAndAfterA
   protected val randomPartyActUser: String = "actAs-" + randomParty
   protected val readAsAnyPartyUser: String = "readAsAnyParty-" + UUID.randomUUID.toString
   protected val executeAsAnyPartyUser: String = "executeAsAnyParty-" + UUID.randomUUID.toString
+  protected val actAsAnyPartyUser: String = "actAsAnyParty-" + UUID.randomUUID.toString
 
   protected def prerequisiteParties: List[String] = List(randomParty)
   protected def prerequisiteUsers: List[PrerequisiteUser] = List(
@@ -68,6 +69,7 @@ trait SecurityTags extends CreatesUsers with CreatesParties with BeforeAndAfterA
     PrerequisiteUser(randomPartyActUser, actAsParties = List(randomParty)),
     PrerequisiteUser(readAsAnyPartyUser, readAsAnyParty = true),
     PrerequisiteUser(executeAsAnyPartyUser, executeAsAnyParty = true),
+    PrerequisiteUser(actAsAnyPartyUser, actAsAnyParty = true),
   )
 
   override def beforeAll(): Unit = {
@@ -146,5 +148,15 @@ trait SecurityTags extends CreatesUsers with CreatesParties with BeforeAndAfterA
 
   protected def canExecuteAsAnyParty: ServiceCallContext = ServiceCallContext(
     Option(toHeader(standardToken(executeAsAnyPartyUser)))
+  )
+
+  protected def canActAsAnyParty: ServiceCallContext = ServiceCallContext(
+    Option(toHeader(standardToken(actAsAnyPartyUser)))
+  )
+  protected def canActAsAnyPartyExpired: ServiceCallContext = ServiceCallContext(
+    Option(toHeader(expiringIn(Duration.ofDays(-1), standardToken(actAsAnyPartyUser))))
+  )
+  protected def canActAsAnyPartyExpiresInAnHour: ServiceCallContext = ServiceCallContext(
+    Option(toHeader(expiringIn(Duration.ofHours(1), standardToken(actAsAnyPartyUser))))
   )
 }

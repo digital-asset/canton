@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.util
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -21,6 +20,7 @@ import com.digitalasset.canton.util.BatchAggregatorImpl.ItemsAndCompletionPromis
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.TryUtil.ForFailedOps
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.{IterableOps, immutable}

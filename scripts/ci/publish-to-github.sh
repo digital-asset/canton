@@ -42,8 +42,8 @@ else
       "v$version" \
       --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version".tar.gz \
       --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version".zip \
-      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-protobuf.tar.gz \
-      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-protobuf.zip \
+      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-api.tar.gz \
+      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-api.zip \
       --message "canton v$version" \
       --message "$release_notes" || true # we don't want to fail: let's do as much as we can
 
@@ -66,8 +66,8 @@ else
       --commitish main \
       --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version".tar.gz \
       --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version".zip \
-      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-protobuf.tar.gz \
-      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-protobuf.zip \
+      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-api.tar.gz \
+      --attach /tmp/workspace/community/app/target/release/canton-open-source-"$version"-api.zip \
       --message "canton v${version}" \
       --message "$release_notes" || true # we don't want to fail: let's do as much as we can
 fi

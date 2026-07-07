@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.block.update
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
@@ -11,6 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.collection.immutable.SortedMap
@@ -18,7 +18,7 @@ import scala.collection.immutable.SortedMap
 class InFlightAggregationsTest extends BaseTestWordSpec {
 
   private def mkRule(senders: Seq[Member]): AggregationRule =
-    AggregationRule(
+    AggregationRule.testing(
       eligibleSenders = NonEmpty.from(senders).value,
       threshold = PositiveInt.one,
       protocolVersion = testedProtocolVersion,

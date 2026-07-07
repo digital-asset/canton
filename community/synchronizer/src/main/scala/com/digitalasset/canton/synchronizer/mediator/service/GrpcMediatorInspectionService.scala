@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.mediator.service
 import cats.syntax.functor.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.grpc.adapter.server.pekko.ServerAdapter
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor, TransactionView}
@@ -20,7 +19,8 @@ import com.digitalasset.canton.synchronizer.mediator.store.FinalizedResponseStor
 import com.digitalasset.canton.synchronizer.mediator.{FinalizedResponse, Mediator}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.FutureUtil
-import io.grpc.Status
+import com.digitalasset.canton.util.GrpcStreamingUtils.withServerCallStreamObserver
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
@@ -46,7 +46,7 @@ class GrpcMediatorInspectionService(
     getCurrentWatermark: () => CantonTimestamp,
     awaitWatermark: CantonTimestamp => TraceContext => Option[FutureUnlessShutdown[Unit]],
     batchSize: PositiveInt,
-    lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorAfterUpgradeTime,
+    lsuSuccessorAfterUpgradeTime: Mediator.LsuSuccessorLookup,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory, materializer: Materializer)
     extends mediatorV30.MediatorInspectionServiceGrpc.MediatorInspectionService
@@ -105,57 +105,80 @@ class GrpcMediatorInspectionService(
           .asGrpcError,
     )
 
-    val doneF = Source
-      .unfoldAsync(
-        (
-          QueryRange(CantonTimestamp.MinValue, queryRange.fromRequestExclusive),
-          Seq.empty[FinalizedResponse],
-          false, // do not stop the stream
-        )
-      ) { case (queryRange, previousResponses, stop) =>
-        val resultFUS =
-          if (stop) FutureUnlessShutdown.pure(None)
-          else
-            for {
-              nextTimeStamps <- determineNextTimestamps(
-                previousResponses,
-                queryRange.toRequestInclusive,
+    lsuSuccessorAfterUpgradeTime
+      // using the current watermark to find the successor, because we know that we have a topology snapshot for this timestamp
+      .getKnownSuccessor(getCurrentWatermark())
+      .flatMap {
+        // If fromRequestExclusive == upgradeTime.immediatePredecessor, the next possible timestamp would be exactly upgradeTime.
+        // But no request can be sequenced at upgrade time, therefore we can immediately return the completion signal and close the
+        // response stream.
+        case Some(successor)
+            if queryRange.fromRequestExclusive >= successor.upgradeTime.immediatePredecessor =>
+          logger.info(
+            s"The next event after fromRequestExclusive=${queryRange.fromRequestExclusive} would be at or after LSU upgrade time ${successor.upgradeTime}. Immediately completing the response stream."
+          )
+          FutureUnlessShutdown.outcomeF(
+            Source
+              .single(buildCompletedPassedLsu(successor))
+              .runWith(sink)
+          )
+        case _ =>
+          val doneF = Source
+            .unfoldAsync(
+              (
+                QueryRange(CantonTimestamp.MinValue, queryRange.fromRequestExclusive),
+                Seq.empty[FinalizedResponse],
+                false, // do not stop the stream
               )
-              QueryRange(fromRequestTimeExclusive, toRequestTimeInclusive) = nextTimeStamps
-              _ = logger.debug(
-                s"Loading verdicts between ]$fromRequestTimeExclusive, $toRequestTimeInclusive]"
-              )
+            ) { case (previousQueryRange, previousResponses, stop) =>
+              val resultFUS =
+                if (stop) FutureUnlessShutdown.pure(None)
+                else
+                  for {
+                    nextTimeStamps <- determineNextTimestamps(
+                      previousResponses,
+                      previousQueryRange.toRequestInclusive,
+                    )
+                    QueryRange(fromRequestTimeExclusive, toRequestTimeInclusive) = nextTimeStamps
+                    _ = logger.debug(
+                      s"Loading verdicts between ]$fromRequestTimeExclusive, $toRequestTimeInclusive]"
+                    )
 
-              finalizedResponses <- finalizedResponseStore
-                .readFinalizedVerdicts(
-                  fromRequestTimeExclusive,
-                  toRequestTimeInclusive,
-                  batchSize,
-                )
+                    finalizedResponses <- finalizedResponseStore
+                      .readFinalizedVerdicts(
+                        fromRequestTimeExclusive,
+                        toRequestTimeInclusive,
+                        batchSize,
+                      )
 
-              successorO <- lsuSuccessorAfterUpgradeTime(toRequestTimeInclusive)
-            } yield {
-              val (shouldStop, verdicts) = successorO match {
-                case Some(successor) =>
-                  logger.info(
-                    s"We have passed the LSU upgrade time of ${successor.upgradeTime} so send Complete and close stream"
-                  )
-                  (
-                    true,
-                    buildVerdictResponses(finalizedResponses) :+ buildCompletedPassedLsu(successor),
-                  )
-                case None =>
-                  (false, buildVerdictResponses(finalizedResponses))
-              }
+                    successorO <- lsuSuccessorAfterUpgradeTime.getKnownSuccessor(
+                      toRequestTimeInclusive
+                    )
+                  } yield {
+                    val (shouldStop, verdicts) = successorO match {
+                      case Some(successor) if successor.upgradeTime <= toRequestTimeInclusive =>
+                        logger.info(
+                          s"We have passed the LSU upgrade time of ${successor.upgradeTime} so send Complete and close stream"
+                        )
+                        (
+                          true,
+                          buildVerdictResponses(finalizedResponses) :+ buildCompletedPassedLsu(
+                            successor
+                          ),
+                        )
+                      case _ =>
+                        (false, buildVerdictResponses(finalizedResponses))
+                    }
 
-              Some((nextTimeStamps, finalizedResponses, shouldStop) -> verdicts)
+                    Some((nextTimeStamps, finalizedResponses, shouldStop) -> verdicts)
+                  }
+              resultFUS.onShutdown(None)
             }
-        resultFUS.onShutdown(None)
-      }
-      .mapConcat(identity)
-      .runWith(sink)
+            .mapConcat(identity)
+            .runWith(sink)
 
-    FutureUnlessShutdown.outcomeF(doneF)
+          FutureUnlessShutdown.outcomeF(doneF)
+      }
   }
 
   private def determineNextTimestamps(
@@ -250,6 +273,7 @@ class GrpcMediatorInspectionService(
             request @ InformeeMessage(fullInformeeTree, _),
             finalizationTime,
             verdict,
+            _,
           ) =>
         val (flattened, rootNodes) = flattenForrest[TransactionView, mediatorV30.TransactionView](
           fullInformeeTree.tree.rootViews.unblindedElements,
@@ -291,26 +315,6 @@ class GrpcMediatorInspectionService(
       viewHash = view.viewHash.toRootHash.getCryptographicEvidence,
     )
   }
-
-  /** Ensure observer is a ServerCallStreamObserver
-    *
-    * @param observer
-    *   underlying observer
-    * @param handler
-    *   handler requiring a ServerCallStreamObserver
-    */
-  private def withServerCallStreamObserver[R](
-      observer: StreamObserver[R]
-  )(handler: ServerCallStreamObserver[R] => Unit)(implicit traceContext: TraceContext): Unit =
-    observer match {
-      case serverCallStreamObserver: ServerCallStreamObserver[R] =>
-        handler(serverCallStreamObserver)
-      case _ =>
-        val statusException =
-          Status.INTERNAL.withDescription("Unknown stream observer request").asException()
-        logger.warn(statusException.getMessage)
-        observer.onError(statusException)
-    }
 
 }
 

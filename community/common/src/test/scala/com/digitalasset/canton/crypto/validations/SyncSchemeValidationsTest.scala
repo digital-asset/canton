@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.validations
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -48,6 +49,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
       testedReleaseProtocolVersion,
       futureSupervisor,
       wallClock,
+      CommonMockMetrics.cryptoMetrics,
       executorService,
       timeouts,
       BatchingConfig(),
@@ -121,6 +123,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
   "Fail signature verification with disallowed synchronizer schemes" in {
     // unsupported signing algorithm specifications
     (CryptoProvider.Jce.signingAlgorithms.supported
+      -- Set(SigningAlgorithmSpec.MlDsa65) // Exclude experimental PQC specs
       -- restrictedStaticSynchronizerParameters.requiredSigningSpecs.algorithms)
       .foreach { unsupported =>
         val unsupportedSignature = Signature.create(
@@ -150,6 +153,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
 
     // unsupported signing key specifications
     (CryptoProvider.Jce.signingKeys.supported
+      -- Set(SigningKeySpec.MlDsa65) // Exclude experimental PQC specs
       -- restrictedStaticSynchronizerParameters.requiredSigningSpecs.keys)
       .foreach { unsupported =>
         val signingKey = p1.crypto.privateCrypto

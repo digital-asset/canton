@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_3
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.{
   Participant,
   Participants,
@@ -12,6 +13,7 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.{
 import com.daml.ledger.api.testtool.infrastructure.Assertions.{assertGrpcError, futureAssertions}
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.v2.commands
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3
 import com.daml.ledger.javaapi.data.PrefetchContractKey
 import com.daml.ledger.test.java.keys.da.types.Tuple2
 import com.daml.ledger.test.java.keys.test.{TextKey, TextKeyOperations, WithKey}
@@ -28,9 +30,9 @@ object PrefetchContractKeysIT {
   }
 }
 
-class PrefetchContractKeysIT extends LedgerTestSuite {
-  import ContractKeysCompanionImplicits.*
+class PrefetchContractKeysIT(testDars: TestDars) extends LedgerTestSuite {
   import PrefetchContractKeysIT.*
+  import testDars.contractKeysCompanionImplicits.*
 
   test(
     "CSprefetchContractKeysBasic",
@@ -47,7 +49,7 @@ class PrefetchContractKeysIT extends LedgerTestSuite {
     } yield {
       assert(active.sizeIs == 1)
       val dummyTemplateId = active.flatMap(_.templateId.toList).headOption.value
-      assert(dummyTemplateId == WithKey.TEMPLATE_ID_WITH_PACKAGE_ID.toV1)
+      assert(dummyTemplateId == withKeyCompanion.TEMPLATE_ID_WITH_PACKAGE_ID.toV1)
     }
   })
 
@@ -59,6 +61,7 @@ class PrefetchContractKeysIT extends LedgerTestSuite {
     val prefetch = WithKey.byKey(party).toPrefetchKey().toProtoInner
     val request = ledger
       .prepareSubmissionRequest(party, new WithKey(party).create.commands)
+      .update(_.hashingSchemeVersion := HASHING_SCHEME_VERSION_V3)
       .update(_.prefetchContractKeys := Seq(prefetch))
     for {
       prepareResponse <- ledger.prepareSubmission(request)

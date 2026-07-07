@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend.common
 import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
 import cats.syntax.all.*
+import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
@@ -34,6 +35,7 @@ import com.digitalasset.canton.platform.store.backend.{
   RowDef,
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
+import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ContractId, Party}
@@ -48,6 +50,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   NameTypeConRefConverter,
 }
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.google.protobuf.ByteString
 
 import java.sql.{Connection, PreparedStatement}
 import scala.util.Using
@@ -83,8 +86,8 @@ object EventStorageBackendTemplate {
         submitters(stringInterning).?,
       ).mapN(filteredCommandId(_, _, allQueryingPartiesO))
 
-    val externalTransactionHash: RowDef[Option[Array[Byte]]] =
-      column("external_transaction_hash", byteArray(_).?)
+    val transactionHash: RowDef[Option[ByteString]] =
+      column("external_transaction_hash", byteArray).?.map(_.map(ByteString.copyFrom(_)))
 
     def trafficCost(
         stringInterning: StringInterning,
@@ -224,7 +227,7 @@ object EventStorageBackendTemplate {
       (
         commonEventPropertiesParser(stringInterning),
         commonUpdatePropertiesParser(stringInterning, allQueryingPartiesO),
-        externalTransactionHash,
+        transactionHash,
       ).mapN(TransactionProperties.apply)
 
     def reassignmentPropertiesParser(
@@ -405,6 +408,32 @@ object EventStorageBackendTemplate {
         stringInterning: StringInterning
     ): RowDef[SynchronizerOffset] =
       synchronizerOffsetParser("event_offset", stringInterning)
+
+    val payload: RowDef[Array[Byte]] = column("payload", byteArray(_))
+
+    def acsCommitmentEventParser(
+        stringInterning: StringInterning
+    ): RowDef[RawAcsCommitment] =
+      (
+        eventOffset,
+        eventSequentialId,
+        updateIdDef,
+        synchronizerId(stringInterning).map(_.toProtoPrimitive),
+        recordTime,
+        payload,
+        traceContext,
+      ).mapN(
+        RawAcsCommitment.apply
+      )
+
+    def deactivatedContractInfoParser(
+        stringInterning: StringInterning
+    ): RowDef[DeactivatedContractInfo] =
+      (
+        contractIdDef,
+        column("stakeholders", parties(stringInterning)(_).map(_.toSet)),
+        reassignmentCounter.map(ReassignmentCounter(_)),
+      ).mapN(DeactivatedContractInfo.apply)
   }
 
   val EventSequentialIdFirstLast: RowParser[(Long, Long)] =
@@ -424,7 +453,7 @@ object EventStorageBackendTemplate {
       )
       .toSet
 
-  private def submittersInQueryingParties(
+  def submittersInQueryingParties(
       allQueryingPartiesO: Option[Set[Party]],
       submitters: Option[Seq[Party]],
   ): Boolean = allQueryingPartiesO match {
@@ -473,6 +502,31 @@ abstract class EventStorageBackendTemplate(
 
   override def eventReaderQueries: EventReaderQueries =
     new EventReaderQueries(stringInterning)
+
+  override def archiveDeactivations(transactionOffsets: Iterable[Offset])(
+      connection: Connection
+  ): Map[Offset, Vector[DeactivatedContractInfo]] =
+    if (transactionOffsets.isEmpty) Map.empty
+    else
+      // TODO(#33578) revisit this query when the handling of duplicates / invalid cases is finalized
+      SQL"""
+       SELECT
+         deactivate.event_offset AS event_offset,
+         deactivate.contract_id AS contract_id,
+         deactivate.stakeholders AS stakeholders,
+         activate.reassignment_counter AS reassignment_counter
+       FROM lapi_events_deactivate_contract deactivate
+       JOIN lapi_events_activate_contract activate
+         ON activate.event_sequential_id = deactivate.deactivated_event_sequential_id
+       WHERE
+         deactivate.event_offset ${queryStrategy.anyOf(transactionOffsets.map(_.unwrap))}"""
+        .asVectorOf(
+          (
+            RowDefs.eventOffset,
+            RowDefs.deactivatedContractInfoParser(stringInterning),
+          ).tupled.rowParser
+        )(connection)
+        .groupMap(_._1)(_._2)
 
   override def pruneEvents(
       previousPruneUpToInclusiveOffset: Option[Offset],
@@ -754,6 +808,15 @@ abstract class EventStorageBackendTemplate(
           ${QueryStrategy.offsetIsGreater("event_offset", previousPruneUpToInclusiveOffset)}"""
       }
 
+      // prune acs commitments table
+      pruneWithLogging("Pruning lapi_events_acs_commitments table") {
+        SQL"""
+        DELETE FROM lapi_events_acs_commitments
+        WHERE
+          event_sequential_id <= $pruningToInclusiveEventSeqId AND
+          event_sequential_id > $pruningFromExclusiveEventSeqId"""
+      }
+
       logger.info("Truncate table for storing pruning candidates")
       SQL"""TRUNCATE TABLE lapi_pruning_candidate_deactivated;""".execute().discard
 
@@ -821,6 +884,10 @@ abstract class EventStorageBackendTemplate(
       connection: Connection,
       traceContext: TraceContext,
   ): Unit = {
+    logger.info("Lock contract pruning processing table for serialized pruning")
+    lockExclusivelyContractPruningProcessingTable(connection)
+    logger.info("Locked contract pruning processing table for serialized pruning")
+
     // Please note: these queries are deliberately not constraint by the ledger end watermark, as the actively
     // inserted events must be also considered for pruning.
     logger.info(s"Start removing pruning contract candidates")
@@ -849,6 +916,81 @@ abstract class EventStorageBackendTemplate(
     logger.info(s"Removed $removedWitnessed contract pruning candidates used by witnessed events")
     logger.info("Analyze lapi_pruning_contract_candidate table")
     SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+  }
+
+  override def addContractPruningCandidatesAfter(eventSeqIdExclusive: Long)(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit = {
+    logger.info("Lock contract pruning processing table for serialized pruning")
+    lockExclusivelyContractPruningProcessingTable(connection)
+    logger.info("Locked contract pruning processing table for serialized pruning")
+
+    val addedFromActivate = SQL"""
+      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+      SELECT DISTINCT lapi_events_activate_contract.internal_contract_id
+      FROM lapi_events_activate_contract
+      WHERE
+        lapi_events_activate_contract.event_sequential_id > $eventSeqIdExclusive
+        -- only insert new contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate c2
+          WHERE c2.internal_contract_id = lapi_events_activate_contract.internal_contract_id
+        )
+        -- only if no other activation event defines it before or at eventSeqIdExclusive
+        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract activates
+          WHERE activates.event_sequential_id <= $eventSeqIdExclusive
+          AND activates.internal_contract_id = lapi_events_activate_contract.internal_contract_id
+        )
+        -- only if no other witnessed event defines it above pruning
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed witnessed
+          WHERE witnessed.event_sequential_id <= $eventSeqIdExclusive
+          AND witnessed.internal_contract_id = lapi_events_activate_contract.internal_contract_id
+        )
+      """.executeUpdate()
+    logger.info(
+      s"Added $addedFromActivate contract pruning candidates from lapi_events_activate_contract - for activate events"
+    )
+    val addedFromWitnessed = SQL"""
+      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+      SELECT DISTINCT lapi_events_various_witnessed.internal_contract_id
+      FROM lapi_events_various_witnessed
+      WHERE
+        lapi_events_various_witnessed.event_sequential_id > $eventSeqIdExclusive
+        AND lapi_events_various_witnessed.internal_contract_id IS NOT NULL
+        -- only insert new contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_pruning_contract_candidate c2
+          WHERE c2.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+        -- only if no other activation event defines it before or at eventSeqIdExclusive
+        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract activates
+          WHERE activates.event_sequential_id <= $eventSeqIdExclusive
+          AND activates.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+        -- only if no other witnessed event defines it above pruning
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed witnessed
+          WHERE witnessed.event_sequential_id <= $eventSeqIdExclusive
+          AND witnessed.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+        )
+      """.executeUpdate()
+    logger.info(
+      s"Added $addedFromWitnessed contract pruning candidates from lapi_events_various_witnessed - for witnessed events"
+    )
+    SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+    logger.info("Analyzed lapi_pruning_contract_candidate table")
   }
 
   private def pruneWithLogging(queryDescription: String)(query: SimpleSql[Row])(implicit
@@ -925,7 +1067,7 @@ abstract class EventStorageBackendTemplate(
         """
       .asVectorOf(long("event_sequential_id"))(connection)
 
-  def addActivationsToAchs(
+  override def addActivationsToAchs(
       params: AchsAddActivationsParams
   )(connection: Connection): Unit =
     SQL"""
@@ -944,7 +1086,7 @@ abstract class EventStorageBackendTemplate(
         )
     """.execute()(connection).discard
 
-  def removeDeactivatedFromAchs(
+  override def removeDeactivatedFromAchs(
       params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit =
     SQL"""
@@ -957,6 +1099,14 @@ abstract class EventStorageBackendTemplate(
           AND deactivate_evs.event_sequential_id <= ${params.endInclusive}
           AND deactivate_evs.event_sequential_id > ${params.startExclusive}
       )
+    """.execute()(connection).discard
+
+  override def deletePartiallyIngestedAchsData(fromExclusiveEventSeqId: Long)(
+      connection: Connection
+  ): Unit =
+    SQL"""
+      DELETE FROM lapi_filter_achs_stakeholder
+      WHERE lapi_filter_achs_stakeholder.event_sequential_id > $fromExclusiveEventSeqId
     """.execute()(connection).discard
 
   override def firstSynchronizerOffsetAfterOrAt(
@@ -1271,6 +1421,27 @@ abstract class EventStorageBackendTemplate(
           """)(connection)
           .filter(offset => Option(offset) <= ledgerEndCache().map(_.lastOffset))
       )
+
+  override def fetchAcsCommitments(
+      eventSequentialIds: SequentialIdBatch,
+      synchronizerId: SynchronizerId,
+      descendingOrder: Boolean,
+  )(connection: Connection): Vector[EventStorageBackend.RawAcsCommitment] =
+    stringInterning.synchronizerId
+      .tryInternalize(synchronizerId)
+      .fold(Vector.empty[EventStorageBackend.RawAcsCommitment]) { synchronizerIdInterned =>
+        val ordering = if (descendingOrder) cSQL"DESC" else cSQL"ASC"
+        val query = (columns: CompositeSql) =>
+          SQL"""
+            SELECT $columns
+            FROM lapi_events_acs_commitments e
+            WHERE ${queryStrategy.inBatch("e.event_sequential_id", eventSequentialIds)}
+                  AND e.synchronizer_id = $synchronizerIdInterned
+            ORDER BY e.event_sequential_id $ordering
+            """
+            .withFetchSize(Some(fetchSize(eventSequentialIds)))
+        RowDefs.acsCommitmentEventParser(stringInterning).queryMultipleRows(query)(connection)
+      }
 
   private def fetchByEventSequentialIds(
       tableName: String,

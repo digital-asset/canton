@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.*
@@ -25,6 +24,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -72,9 +72,9 @@ final case class GenTransactionTree private (
     go(this)
   }
 
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
-  // Private, because it does not check object invariants and is therefore unsafe.
-  private[data] def copy(
+  def copy(
       submitterMetadata: MerkleTree[SubmitterMetadata] = this.submitterMetadata,
       commonMetadata: MerkleTree[CommonMetadata] = this.commonMetadata,
       participantMetadata: MerkleTree[ParticipantMetadata] = this.participantMetadata,
@@ -284,15 +284,14 @@ object GenTransactionTree {
     ).validated
 
   /** Indicates an attempt to create an invalid [[GenTransactionTree]]. */
-  final case class InvalidGenTransactionTree(message: String) extends RuntimeException(message) {}
+  final case class InvalidGenTransactionTree(message: String) extends RuntimeException(message)
 
+  /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
-  val submitterMetadataUnsafe: Lens[GenTransactionTree, MerkleTree[SubmitterMetadata]] =
-    GenLens[GenTransactionTree](_.submitterMetadata)
-
-  @VisibleForTesting
-  val rootViewsUnsafe: Lens[GenTransactionTree, MerkleSeq[TransactionView]] =
-    GenLens[GenTransactionTree](_.rootViews)
+  object Optics {
+    val rootViewsUnsafe: Lens[GenTransactionTree, MerkleSeq[TransactionView]] =
+      GenLens[GenTransactionTree](_.rootViews)
+  }
 
   def fromProtoV30(
       context: (HashOps, ProtocolVersion),

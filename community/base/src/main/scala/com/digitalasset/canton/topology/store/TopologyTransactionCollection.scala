@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -13,6 +12,7 @@ import com.digitalasset.canton.topology.admin.v30 as adminV30
 import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.*
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import scala.reflect.ClassTag
 

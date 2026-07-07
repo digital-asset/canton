@@ -5,21 +5,27 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
+  Active,
   AtMostOnePhysicalActive,
   ConfigAlreadyExists,
   ConfigIdentifier,
   Error,
   InconsistentLogicalSynchronizerIds,
   InconsistentSequencerIds,
+  LsuOngoing,
+  LsuSource,
+  LsuTarget,
   MissingConfigForSynchronizer,
   SynchronizerIdAlreadyAdded,
   UnknownAlias,
@@ -35,6 +41,7 @@ import com.digitalasset.canton.participant.synchronizer.{
 }
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.{
   ConfiguredPhysicalSynchronizerId,
   KnownPhysicalSynchronizerId,
@@ -46,6 +53,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import slick.dbio
 import slick.dbio.DBIOAction
@@ -126,6 +134,9 @@ class DbSynchronizerConnectionConfigStore private[store] (
             Option[SynchronizerPredecessor],
         )
       ]
+      .map {
+        _.headOption.map((StoredSynchronizerConnectionConfig.apply _).tupled)
+      }
   }
 
   private def getInternal(configId: ConfigIdentifier)(implicit
@@ -141,10 +152,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
     EitherT {
       storage
         .query(
-          query.headOption
-            .map(_.map { case (config, status, configuredPsid, predecessor) =>
-              StoredSynchronizerConnectionConfig(config, status, configuredPsid, predecessor)
-            }),
+          query,
           functionFullName,
         )
         .map(_.toRight(MissingConfigForSynchronizer(configId)))
@@ -192,10 +200,13 @@ class DbSynchronizerConnectionConfigStore private[store] (
       functionFullName,
     )
 
-  def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     synchronizerConfigCache.clear()
     initialize().map(_ => ())
   }
+
+  override def clearCache()(implicit traceContext: TraceContext): Unit =
+    synchronizerConfigCache.clear()
 
   override def put(
       config: SynchronizerConnectionConfig,
@@ -212,9 +223,9 @@ class DbSynchronizerConnectionConfigStore private[store] (
         getAllFor(synchronizerAlias) match {
           case Right(existingConfigs)
               if existingConfigs.exists(c =>
-                c.config == config && c.configuredPsid.isDefined && c.predecessor == synchronizerPredecessor
+                c.config == config && c.configuredPsid.isDefined && c.predecessor == synchronizerPredecessor && c.status == status
               ) =>
-            logger.debug(
+            logger.info(
               s"Not adding connection for ($synchronizerAlias, $configuredPsid) to the store because ($synchronizerAlias, ${existingConfigs
                   .map(_.configuredPsid)}) already exists"
             )
@@ -228,6 +239,40 @@ class DbSynchronizerConnectionConfigStore private[store] (
 
       case Some(_) => putInternal(config, status, configuredPsid, synchronizerPredecessor)
     }
+  }
+
+  override def delete(
+      psid: PhysicalSynchronizerId
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, UnknownPsid, Unit] = {
+    // return the deleted rows so that we can log exactly what was deleted,
+    // in case users want to reconstruct the config again.
+    val queryAndDelete = for {
+      existingConfig <- getInternalQuery(ConfigIdentifier.WithPsid(psid))
+      numRowsDeleted <-
+        sqlu"delete from par_synchronizer_connection_configs where physical_synchronizer_id=$psid"
+    } yield (numRowsDeleted, existingConfig)
+
+    EitherT
+      .right[UnknownPsid](
+        storage
+          .queryAndUpdate(
+            queryAndDelete.transactionally,
+            functionFullName,
+          )(traceContext, closeContext, { case (numRowsDeleted, _) => numRowsDeleted > 0 })
+          .map { case (_, existingConfigO) => existingConfigO }
+      )
+      .flatMap {
+        case None =>
+          EitherT.leftT(UnknownPsid(psid))
+        case Some(storedConfig) =>
+          logger.info(s"Deleted the following synchronizer configuration: $storedConfig")
+          synchronizerConfigCache
+            .updateWith(storedConfig.config.synchronizerAlias)(
+              _.map(_.removed(KnownPhysicalSynchronizerId((psid))))
+            )
+            .discard
+          EitherTUtil.unitUS[UnknownPsid]
+      }
   }
 
   // Check that a new psid is consistent with stored IDs for that alias
@@ -275,6 +320,40 @@ class DbSynchronizerConnectionConfigStore private[store] (
     }
   } yield ()
 
+  /** Ensure no LSU is ongoing for the alias. An LSU is ongoing if there exists a config and
+    * successor config with statuses LsuSource and LsuTarget respectively.
+    */
+  private def checkNoLsuOngoing(alias: SynchronizerAlias): EitherT[dbio.DBIO, LsuOngoing, Unit] =
+    for {
+      configs <- dbEitherT[LsuOngoing](
+        sql"select physical_synchronizer_id, synchronizer_predecessor, status from par_synchronizer_connection_configs where synchronizer_alias=$alias and status in ($LsuSource, $LsuTarget)"
+          .as[
+            (
+                ConfiguredPhysicalSynchronizerId,
+                Option[SynchronizerPredecessor],
+                SynchronizerConnectionConfigStore.Status,
+            )
+          ]
+      )
+
+      // psid -> (predecessor, status)
+      configPerPsid = configs.mapFilter { case (configuredPsid, predecessor, status) =>
+        configuredPsid.toOption.map(_ -> (predecessor, status))
+      }.toMap
+
+      lsuOngoingCheckResult = configPerPsid.toSeq.traverse_ {
+        case (psid, (Some(predecessor), LsuTarget)) =>
+          configPerPsid
+            .get(predecessor.psid)
+            .collect { case (_, LsuSource) => () }
+            .fold(().asRight[LsuOngoing])(_ => LsuOngoing(predecessor.psid, psid).asLeft)
+
+        case _ => Right(())
+      }
+
+      _ <- EitherT.fromEither[DBIO](lsuOngoingCheckResult)
+    } yield ()
+
   // Ensure there is no other active configuration
   private def checkStatusConsistent(
       psid: ConfiguredPhysicalSynchronizerId,
@@ -308,12 +387,12 @@ class DbSynchronizerConnectionConfigStore private[store] (
       synchronizerPredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[DBIO, Error, Unit] = {
+  ): EitherT[DBIO, Error, Int] = {
     val alias = config.synchronizerAlias
     val id = ConfigIdentifier.WithAlias(config.synchronizerAlias, configuredPsid)
 
-    logger.debug(
-      s"Inserting connection for ($alias, $configuredPsid) into the store"
+    logger.info(
+      s"Inserting connection for ($alias, $configuredPsid) into the DB"
     )
 
     lazy val insertAction: DbAction.WriteOnly[Int] =
@@ -326,7 +405,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
       case 1 => EitherT.pure[DBIO, Error](())
       case 0 =>
         for {
-          retrievedResultO <- dbEitherT[Error](getInternalQuery(id)).map(_.headOption)
+          retrievedResultO <- dbEitherT[Error](getInternalQuery(id))
 
           _ <- retrievedResultO match {
             case None =>
@@ -338,10 +417,10 @@ class DbSynchronizerConnectionConfigStore private[store] (
                 )
               )
 
-            case Some((existingConfig, _, _, existingPredecessor)) =>
+            case Some(existing) =>
               EitherT.fromEither[DBIO](
                 Either.cond(
-                  existingConfig == config && existingPredecessor == synchronizerPredecessor,
+                  existing.config == config && existing.predecessor == synchronizerPredecessor,
                   (),
                   ConfigAlreadyExists(alias, configuredPsid): Error,
                 )
@@ -364,6 +443,14 @@ class DbSynchronizerConnectionConfigStore private[store] (
         predecessorCompatibilityCheck(configuredPsid, synchronizerPredecessor)
       )
 
+      /*
+      Adding a new synchronizer with status Active during an LSU (e.g., register) can break LSU.
+      It is most likely the result of an automation running in the background.
+       */
+      _ <-
+        if (status == Active) checkNoLsuOngoing(config.synchronizerAlias)
+        else EitherT.pure[DBIO, Error](())
+
       _ <- configuredPsid match {
         case KnownPhysicalSynchronizerId(psid) =>
           for {
@@ -379,7 +466,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
 
       nrRows <- dbEitherT[Error](insertAction)
       _ <- checkInsertion(nrRows)
-    } yield ()
+    } yield nrRows
   }
 
   private def putInternal(
@@ -392,7 +479,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   ): EitherT[FutureUnlessShutdown, Error, Unit] = {
     val alias = config.synchronizerAlias
 
-    logger.debug(s"Inserting connection for ($alias, $configuredPsid) into the store")
+    logger.info(s"Inserting connection for ($alias, $configuredPsid) into the store: $config")
 
     val queries = putInternalQuery(config, status, configuredPsid, synchronizerPredecessor)
 
@@ -424,7 +511,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   ): EitherT[FutureUnlessShutdown, MissingConfigForSynchronizer, Unit] = {
     val synchronizerAlias = config.synchronizerAlias
 
-    logger.debug(s"Replacing configuration for ($synchronizerAlias, $configuredPsid)")
+    logger.info(s"Replacing configuration for ($synchronizerAlias, $configuredPsid) with $config")
 
     val updateAction = configuredPsid.toOption match {
       case Some(psid) =>
@@ -460,26 +547,40 @@ class DbSynchronizerConnectionConfigStore private[store] (
           SynchronizerConnectionConfigStore.Status,
           Option[SynchronizerPredecessor],
       ),
-      transform: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
+      overrideSequencerConnections: Option[SequencerConnections],
+      overridePredecessor: Option[SynchronizerPredecessor],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, StoredSynchronizerConnectionConfig] = {
     val configId = ConfigIdentifier.WithPsid(psid)
 
-    val queries = for {
-      storedConfigO <- dbEitherT[Error](getInternalQuery(configId)).map { configs =>
-        configs.headOption
-          .map((StoredSynchronizerConnectionConfig.apply _).tupled)
-      }
+    val data = Map(
+      "insert data" -> insert.toString,
+      "overridePredecessor" -> overridePredecessor.toString,
+      "overrideSequencerConnections" -> overrideSequencerConnections.toString,
+    )
+    logger.info(s"Upserting connection config for synchronizer $psid, with data $data")
 
+    val queries = for {
+      storedConfigO <- dbEitherT(getInternalQuery(configId).map(_.asRight[Error]))
       newStoredConfig <- storedConfigO match {
         case Some(storedConfig) =>
-          val updatedConnectionConfig = transform(storedConfig.config)
+          val updatedStoredConfig = storedConfig
+            .focus(_.config.sequencerConnections)
+            .modify(value => overrideSequencerConnections.getOrElse(value))
+            .focus(_.predecessor)
+            .modify(value => overridePredecessor.fold(value)(Some(_)))
+            .focus(_.config.psid)
+            .replace(Some(psid))
 
-          dbEitherT[Error](sqlu"""update par_synchronizer_connection_configs
-              set config=$updatedConnectionConfig
-              where physical_synchronizer_id=$psid""")
-            .map(_ => storedConfig.copy(config = updatedConnectionConfig))
+          if (updatedStoredConfig != storedConfig)
+            dbEitherT[Error](sqlu"""update par_synchronizer_connection_configs
+              set config=${updatedStoredConfig.config}, synchronizer_predecessor=${updatedStoredConfig.predecessor}
+              where physical_synchronizer_id=$psid""").map(
+              (_, updatedStoredConfig)
+            )
+          else
+            dbEitherT[Error](DBIO.successful((0, storedConfig))) // No change
 
         case None =>
           val (config, status, predecessor) = insert
@@ -489,34 +590,34 @@ class DbSynchronizerConnectionConfigStore private[store] (
             status = status,
             configuredPsid = KnownPhysicalSynchronizerId(psid),
             synchronizerPredecessor = predecessor,
-          ).map(_ =>
-            StoredSynchronizerConnectionConfig(
-              config,
-              status,
-              KnownPhysicalSynchronizerId(psid),
-              predecessor,
+          ).map(inserted =>
+            (
+              inserted,
+              StoredSynchronizerConnectionConfig(
+                config,
+                status,
+                KnownPhysicalSynchronizerId(psid),
+                predecessor,
+              ),
             )
           )
+
       }
     } yield newStoredConfig
 
     val result: FutureUnlessShutdown[Either[Error, StoredSynchronizerConnectionConfig]] =
-      storage.queryAndUpdate(
-        queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
-        functionFullName,
-      )
+      storage
+        .queryAndUpdate(
+          queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
+          functionFullName,
+        )(traceContext, closeContext, _.exists { case (altered, _) => altered > 0 })
+        .map(_.map { case (_, config) => config })
 
     EitherT(result).map { newStoredConfig =>
       synchronizerConfigCache
         .updateWith(newStoredConfig.config.synchronizerAlias) {
           case Some(existingEntriesForAlias) =>
-            existingEntriesForAlias
-              .updatedWith(KnownPhysicalSynchronizerId(psid)) {
-                case Some(existingCacheEntry) =>
-                  existingCacheEntry.copy(config = newStoredConfig.config).some
-                case None => Some(newStoredConfig)
-              }
-              .some
+            (existingEntriesForAlias + (KnownPhysicalSynchronizerId(psid) -> newStoredConfig)).some
 
           case None =>
             Map[ConfiguredPhysicalSynchronizerId, StoredSynchronizerConnectionConfig](
@@ -533,13 +634,12 @@ class DbSynchronizerConnectionConfigStore private[store] (
       psid: PhysicalSynchronizerId,
       sequencerIds: Map[SequencerAlias, SequencerId],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
+    logger.info(s"Storing sequencer ids for synchronizer $psid and $sequencerIds")
     val configId = ConfigIdentifier.WithPsid(psid)
 
     val queries = for {
       storedConfigE <- dbEitherT[Error](getInternalQuery(configId)).map { configs =>
-        configs.headOption
-          .toRight(MissingConfigForSynchronizer(configId))
-          .map((StoredSynchronizerConnectionConfig.apply _).tupled)
+        configs.toRight(MissingConfigForSynchronizer(configId))
       }
 
       storedConfig <- EitherT.fromEither[DBIO](storedConfigE).leftWiden[Error]
@@ -559,16 +659,23 @@ class DbSynchronizerConnectionConfigStore private[store] (
           )
       )
 
-      _ <- dbEitherT[Error](sqlu"""update par_synchronizer_connection_configs
-                set config=$mergedConnectionConfig
-                where physical_synchronizer_id=$psid""")
-    } yield mergedConnectionConfig
+      updated <-
+        if (mergedConnectionConfig != storedConfig.config)
+          dbEitherT[Error](sqlu"""update par_synchronizer_connection_configs
+            set config=$mergedConnectionConfig
+            where physical_synchronizer_id=$psid""")
+        else
+          dbEitherT[Error](DBIO.successful(0)) // No change
+
+    } yield (updated, mergedConnectionConfig)
 
     val result: FutureUnlessShutdown[Either[Error, SynchronizerConnectionConfig]] =
-      storage.queryAndUpdate(
-        queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
-        functionFullName,
-      )
+      storage
+        .queryAndUpdate(
+          queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
+          functionFullName,
+        )(traceContext, closeContext, _.exists { case (updated, _) => updated > 0 })
+        .map(_.map { case (_, config) => config })
 
     EitherT(result).map { newConfig =>
       synchronizerConfigCache
@@ -619,7 +726,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Unit] = {
 
-    logger.debug(s"Setting status of ($alias, $configuredPsid) to $status")
+    logger.info(s"Setting status of ($alias, $configuredPsid) to $status")
 
     val updateAction = for {
       _ <- checkStatusConsistent(configuredPsid, alias, status)
@@ -656,7 +763,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Unit] = {
-    logger.debug(s"Set physical synchronizer id for $alias to $psid")
+    logger.info(s"Set physical synchronizer id for $alias to $psid")
 
     val queries: EitherT[dbio.DBIO, Error, Unit] = for {
       storedConfigToUpdateO <- getRowToSetPsid(alias, psid)
@@ -672,7 +779,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
         case Some(_) => setPsidInternal(alias, psid)
 
         case None =>
-          logger.debug(
+          logger.info(
             s"Physical synchronizer id for $alias is already set to $psid"
           )
           EitherT.pure[DBIO, Error](())
@@ -730,9 +837,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
   ): EitherT[dbio.DBIO, Error, Option[StoredSynchronizerConnectionConfig]] = {
     def get(id: ConfiguredPhysicalSynchronizerId) =
       dbEitherT[Error](getInternalQuery(ConfigIdentifier.WithAlias(alias, id))).map { configs =>
-        configs.headOption
-          .toRight(MissingConfigForSynchronizer(ConfigIdentifier.WithAlias(alias, id)))
-          .map((StoredSynchronizerConnectionConfig.apply _).tupled)
+        configs.toRight(MissingConfigForSynchronizer(ConfigIdentifier.WithAlias(alias, id)))
       }
 
     for {

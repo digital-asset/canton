@@ -13,7 +13,6 @@ import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{CacheMetrics, ExecutorServiceMetrics, HealthMetrics}
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
 import com.digitalasset.canton.auth.{CantonAdminTokenDispenser, GrpcAuthInterceptorFactory}
 import com.digitalasset.canton.concurrent.{
@@ -25,6 +24,7 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.{
   AdminTokenConfig,
   CryptoConfig,
+  DbConfig,
   IdentityConfig,
   LocalNodeConfig,
   ProcessingTimeout,
@@ -60,17 +60,19 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   HasCloseContext,
   LifeCycle,
+  UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
-import com.digitalasset.canton.metrics.{DbStorageMetrics, DeclarativeApiMetrics}
+import com.digitalasset.canton.metrics.{CryptoMetrics, DbStorageMetrics, DeclarativeApiMetrics}
 import com.digitalasset.canton.networking.grpc.{
   CantonGrpcUtil,
   CantonMutableHandlerRegistry,
   CantonServerBuilder,
 }
 import com.digitalasset.canton.replica.ReplicaManager
-import com.digitalasset.canton.resource.{Storage, StorageFactory}
+import com.digitalasset.canton.resource.DbStorage.RetryConfig
+import com.digitalasset.canton.resource.{DbMigrations, Storage, StorageFactory}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
@@ -126,10 +128,11 @@ import com.digitalasset.canton.util.{
   SimpleExecutionQueue,
   SingleUseCell,
 }
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion, ReleaseVersion}
 import com.digitalasset.canton.watchdog.WatchdogService
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.ServerServiceDefinition
-import io.grpc.protobuf.services.ProtoReflectionServiceV1
+import io.grpc.protobuf.services.{HealthStatusManager, ProtoReflectionServiceV1}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
 
@@ -181,6 +184,7 @@ trait BaseMetrics {
     new CacheMetrics("topology", openTelemetryMetricsFactory)
   def healthMetrics: HealthMetrics
   def storageMetrics: DbStorageMetrics
+  def cryptoMetrics: CryptoMetrics
   val declarativeApiMetrics: DeclarativeApiMetrics
 
 }
@@ -285,7 +289,7 @@ abstract class CantonNodeBootstrapImpl[
     getNode
       .map(_.status)
       .map(NodeStatus.Success(_))
-      .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor))
+      .getOrElse(NodeStatus.NotInitialized(isActive, waitingFor, ReleaseVersion.current))
 
   private def waitingFor: Option[WaitingForExternalInput] = {
     @tailrec
@@ -315,45 +319,6 @@ abstract class CantonNodeBootstrapImpl[
   // Node specific status service need to be bound early
   protected def bindNodeStatusService(): ServerServiceDefinition
 
-  private def mkHealthComponents(
-      nodeHealthService: DependenciesHealthService,
-      livenessService: LivenessHealthService,
-  ): (GrpcHealthReporter, Option[GrpcHealthServer], Option[HttpHealthServer]) = {
-    val healthReporter: GrpcHealthReporter = new GrpcHealthReporter(loggerFactory)
-    val grpcNodeHealthManager =
-      ServiceHealthStatusManager(
-        "Health API",
-        new io.grpc.protobuf.services.HealthStatusManager(),
-        Set(nodeHealthService, livenessService),
-      )
-    val grpcHealthServer = config.monitoring.grpcHealthServer.map { healthConfig =>
-      healthReporter.registerHealthManager(grpcNodeHealthManager)
-
-      val executor = Executors.newFixedThreadPool(healthConfig.parallelism)
-
-      new GrpcHealthServer(
-        healthConfig,
-        executor,
-        loggerFactory,
-        parameters.loggingConfig.api,
-        parameters.tracing,
-        arguments.metrics.grpcMetrics,
-        timeouts,
-        grpcNodeHealthManager.manager,
-      )
-    }
-    val httpHealthServer = config.monitoring.httpHealthServer.map { healthConfig =>
-      new HttpHealthServer(
-        nodeHealthService,
-        healthConfig.address,
-        healthConfig.port,
-        timeouts,
-        loggerFactory,
-      )
-    }
-    (healthReporter, grpcHealthServer, httpHealthServer)
-  }
-
   protected def customNodeStages(
       storage: Storage,
       indexedStringStore: IndexedStringStore,
@@ -370,14 +335,15 @@ abstract class CantonNodeBootstrapImpl[
   protected def member(uid: UniqueIdentifier): Member
 
   override def isInitialized: Boolean = startupStage.getNode.isDefined
-  override def isActive: Boolean = startupStage.next.forall(_.storage.isActive)
+  override def isActive: Boolean =
+    startupStage.selectNext[SetupCrypto].forall(_.storage.isActive)
 
   override def start(): EitherT[Future, String, Unit] =
     startupStage.start().onShutdown(Left("Aborted due to shutdown"))
 
   override def getNode: Option[T] = startupStage.getNode
   override protected[canton] def crypto: Option[Crypto] =
-    startupStage.next.flatMap(_.next).map(_.crypto)
+    startupStage.selectNext[SetupAdminApi].map(_.crypto)
 
   /** callback for topology read service
     *
@@ -411,61 +377,198 @@ abstract class CantonNodeBootstrapImpl[
   ): Option[SynchronizerTimeTracker]
   protected def lookupActivePsid: PsidLookup
 
-  private val startupStage =
-    new BootstrapStage[T, SetupCrypto](
-      description = "Initialise storage",
-      bootstrapStageCallback,
-    ) {
-      override protected def attempt()(implicit
-          traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, String, Option[SetupCrypto]] =
-        EitherT(
-          FutureUnlessShutdown.lift(
-            arguments.storageFactory
-              .create(
-                connectionPoolForParticipant,
-                arguments.parameterConfig.loggingConfig.queryCost,
-                arguments.clock,
-                Some(scheduler),
-                arguments.metrics.storageMetrics,
-                arguments.parameterConfig.processingTimeouts,
-                bootstrapStageCallback.loggerFactory,
-              )
-              .value
-          )
-        ).map { storage =>
-          addCloseable(registerHealthGauge())
-          // init health services once
-          val (healthService, livenessService) = mkNodeHealthService(storage)
-          addCloseable(healthService)
-          addCloseable(livenessService)
+  private val startupStage = new HealthReporting
 
-          arguments.parameterConfig.watchdog
-            .filter(_.enabled)
-            .foreach { watchdogConfig =>
-              val watchdog = WatchdogService.SysExitOnNotServing(
-                watchdogConfig.checkInterval,
-                watchdogConfig.killDelay,
-                livenessService,
-                bootstrap.loggerFactory,
-                bootstrap.timeouts,
-              )
-              addCloseable(watchdog)
-            }
+  /** We start the node with health reporting endpoints so that orchestrators can correctly handle
+    * lengthy startup operations, i.e. database migrations that can take hours. In such cases
+    * liveness reports "serving", so that the orchestrator doesn't forcibly restart the application.
+    * Readiness stays "not serving" until the node is actually fully up and ready to process
+    * requests. Note that we pass 2 distinct references down the startup stages:
+    *   - HealthStatusManager - populated if gRPC health monitoring is configured and is used for
+    *     late binding to liveness/readiness services from the later startup stages.
+    *   - HttpHealthServer - populated if HTTP health monitoring is configured and is used for late
+    *     binding to liveness/readiness services from the later startup stages.
+    */
+  private class HealthReporting
+      extends BootstrapStage[T, CheckDbMigrations](
+        description = "Report liveness and readiness over gRPC and HTTP during startup",
+        bootstrapStageCallback,
+      ) {
+    override protected def attempt()(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, String, Option[CheckDbMigrations]] = {
 
-          addCloseable(storage)
-          addCloseable(new AutoCloseable {
-            override def close(): Unit =
-              arguments.metrics.openTelemetryMetricsFactory.closeAcquired()
-          })
-          Some(new SetupCrypto(storage, healthService, livenessService))
-        }
+      val healthManager = config.monitoring.grpcHealthServer.map { healthConfig =>
+        logger.info(s"Starting gRPC liveness health server for node $name")
+        val healthStatusManager = new io.grpc.protobuf.services.HealthStatusManager()
+        val executor = Executors.newFixedThreadPool(healthConfig.parallelism)
+        val server = new GrpcHealthServer(
+          healthConfig,
+          executor = executor,
+          this.loggerFactory,
+          parameters.loggingConfig.api,
+          parameters.tracing,
+          metrics.grpcMetrics,
+          this.timeouts,
+          healthStatusManager,
+        )
+        healthStatusManager.setStatus(
+          LivenessHealthService.Name,
+          io.grpc.health.v1.HealthCheckResponse.ServingStatus.SERVING,
+        )
+
+        addCloseable(server)
+        healthStatusManager
+      }
+
+      val startupLivenessService = LivenessHealthService.alwaysAlive(
+        logger = logger,
+        timeouts = CantonNodeBootstrapImpl.this.timeouts,
+      )
+
+      val httpHealthServer = config.monitoring.httpHealthServer.map { healthConfig =>
+        new HttpHealthServer(
+          initialLiveness = Some(startupLivenessService),
+          initialReadiness = None,
+          healthConfig.address,
+          healthConfig.port,
+          CantonNodeBootstrapImpl.this.timeouts,
+          CantonNodeBootstrapImpl.this.loggerFactory,
+        )
+      }
+      httpHealthServer.foreach(addCloseable)
+
+      EitherT.rightT[FutureUnlessShutdown, String](
+        Option(new CheckDbMigrations(healthManager, httpHealthServer))
+      )
     }
+  }
+
+  /** This stage runs migrations if:
+    *   - Database is empty (fresh node),
+    *   - `migrateAndStart` is set to `true` in
+    *     [[com.digitalasset.canton.config.DbParametersConfig]]. If otherwise there are pending
+    *     migrations this stage will fail and the node will not start.
+    */
+  private class CheckDbMigrations(
+      healthManager: Option[HealthStatusManager],
+      httpHealthServer: Option[HttpHealthServer],
+  ) extends BootstrapStage[T, InitializeStorage](
+        description = "Validate schema and run database migrations if necessary",
+        bootstrapStageCallback,
+      ) {
+    override protected def attempt()(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, String, Option[InitializeStorage]] =
+      (CantonNodeBootstrapImpl.this.config.storage match {
+        case dbConfig: DbConfig =>
+          val migrations = DbMigrations.create(
+            dbConfig,
+            devVersionSupport = parameters.devVersionSupport,
+            timeouts = this.timeouts,
+            loggerFactory = this.loggerFactory,
+          )
+
+          logger.info(s"Setting up database schemas")
+
+          def errorMapping(err: DbMigrations.Error): StartupError =
+            err match {
+              case DbMigrations.PendingMigrationError(msg) =>
+                PendingDatabaseMigration(name.unwrap, msg)
+              case err: DbMigrations.FlywayError => FailedDatabaseMigration(name.unwrap, err)
+              case err: DbMigrations.DatabaseError => FailedDatabaseMigration(name.unwrap, err)
+              case err: DbMigrations.DatabaseVersionError =>
+                FailedDatabaseVersionChecks(name.unwrap, err)
+              case err: DbMigrations.DatabaseConfigError =>
+                FailedDatabaseConfigChecks(name.unwrap, err)
+            }
+          val retryConfig =
+            if (dbConfig.parameters.failFastOnStartup) RetryConfig.failFast
+            else RetryConfig.forever
+
+          migrations
+            .checkAndMigrate(parameters, retryConfig)
+            .leftMap(err =>
+              s"Failed to check and migrate database schemas for ${errorMapping(err)}"
+            )
+        case _ => EitherT.right[String](UnlessShutdown.unit)
+      })
+        .map(_ => Option(new InitializeStorage(healthManager, httpHealthServer)))
+        .mapK(FutureUnlessShutdown.liftK)
+  }
+
+  private class InitializeStorage(
+      healthStatusManager: Option[HealthStatusManager],
+      httpHealthServer: Option[HttpHealthServer],
+  ) extends BootstrapStage[T, SetupCrypto](
+        description = "Initialise storage",
+        bootstrapStageCallback,
+      ) {
+    override protected def attempt()(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, String, Option[SetupCrypto]] =
+      EitherT(
+        FutureUnlessShutdown.lift(
+          arguments.storageFactory
+            .create(
+              connectionPoolForParticipant,
+              arguments.parameterConfig.loggingConfig.queryCost,
+              arguments.clock,
+              Some(scheduler),
+              arguments.metrics.storageMetrics,
+              arguments.parameterConfig.processingTimeouts,
+              bootstrapStageCallback.loggerFactory,
+            )
+            .value
+        )
+      ).map { storage =>
+        addCloseable(registerHealthGauge())
+        // init health services once
+        val (readinessService, livenessService) = mkNodeHealthService(storage)
+        addCloseable(readinessService)
+        addCloseable(livenessService)
+        val healthReporter: GrpcHealthReporter =
+          new GrpcHealthReporter(CantonNodeBootstrapImpl.this.loggerFactory)
+        healthStatusManager.foreach { manager =>
+          healthReporter.registerHealthManager(
+            ServiceHealthStatusManager(
+              "Health API",
+              manager,
+              Set(readinessService, livenessService),
+            )
+          )
+        }
+        httpHealthServer.foreach { server =>
+          server.setLiveness(livenessService)
+          server.setReadiness(readinessService)
+        }
+
+        arguments.parameterConfig.watchdog
+          .filter(_.enabled)
+          .foreach { watchdogConfig =>
+            val watchdog = WatchdogService.SysExitOnNotServing(
+              watchdogConfig.checkInterval,
+              watchdogConfig.killDelay,
+              livenessService,
+              bootstrap.loggerFactory,
+              bootstrap.timeouts,
+            )
+            addCloseable(watchdog)
+          }
+
+        addCloseable(storage)
+        addCloseable(new AutoCloseable {
+          override def close(): Unit =
+            arguments.metrics.openTelemetryMetricsFactory.closeAcquired()
+        })
+        Some(new SetupCrypto(storage, readinessService, healthReporter))
+      }
+  }
 
   private class SetupCrypto(
       val storage: Storage,
-      healthService: DependenciesHealthService,
-      livenessService: LivenessHealthService,
+      readinessService: DependenciesHealthService,
+      healthReporter: GrpcHealthReporter,
   ) extends BootstrapStage[T, SetupAdminApi](
         description = "Init crypto module",
         bootstrapStageCallback,
@@ -492,6 +595,7 @@ abstract class CantonNodeBootstrapImpl[
             ReleaseProtocolVersion.latest,
             arguments.futureSupervisor,
             arguments.clock,
+            arguments.metrics.cryptoMetrics,
             executionContext,
             bootstrapStageCallback.timeouts,
             arguments.config.parameters.batching,
@@ -505,8 +609,8 @@ abstract class CantonNodeBootstrapImpl[
               new SetupAdminApi(
                 storage,
                 crypto,
-                healthService,
-                livenessService,
+                readinessService,
+                healthReporter,
               )
             )
           }
@@ -517,8 +621,8 @@ abstract class CantonNodeBootstrapImpl[
   private class SetupAdminApi(
       val storage: Storage,
       val crypto: Crypto,
-      healthService: DependenciesHealthService,
-      livenessService: LivenessHealthService,
+      readinessService: DependenciesHealthService,
+      healthReporter: GrpcHealthReporter,
   ) extends BootstrapStage[T, SetupNodeId](
         description = "Stage Admin API",
         bootstrapStageCallback,
@@ -547,6 +651,7 @@ abstract class CantonNodeBootstrapImpl[
               adminApiConfig.jwtTimestampLeeway,
               adminApiConfig.adminTokenConfig,
               adminApiConfig.jwksCacheConfig,
+              arguments.testingConfig.warnOnJwtScopeUsage,
             )
           ),
         )
@@ -576,11 +681,6 @@ abstract class CantonNodeBootstrapImpl[
           fixedToken = adminTokenConfig.fixedAdminToken,
         )
       createAdminServerRegistry(adminTokenDispenser).map { adminServerRegistry =>
-        val (healthReporter, grpcHealthServer, httpHealthServer) =
-          mkHealthComponents(healthService, livenessService)
-        grpcHealthServer.foreach(addCloseable)
-        httpHealthServer.foreach(addCloseable)
-
         adminServerRegistry.addServiceU(bindNodeStatusService())
 
         adminServerRegistry.addServiceU(
@@ -620,7 +720,7 @@ abstract class CantonNodeBootstrapImpl[
             adminServerRegistry,
             adminTokenDispenser,
             healthReporter,
-            healthService,
+            readinessService,
           )
         ): Option[SetupNodeId]
       }
@@ -635,7 +735,7 @@ abstract class CantonNodeBootstrapImpl[
       adminServerRegistry: CantonMutableHandlerRegistry,
       adminTokenDispenser: CantonAdminTokenDispenser,
       healthReporter: GrpcHealthReporter,
-      healthService: DependenciesHealthService,
+      readinessService: DependenciesHealthService,
   ) extends BootstrapStageWithStorage[
         T,
         GenerateOrAwaitNodeTopologyTx,
@@ -718,7 +818,7 @@ abstract class CantonNodeBootstrapImpl[
             adminServerRegistry,
             adminTokenDispenser,
             healthReporter,
-            healthService,
+            readinessService,
           )
         }
     }
@@ -771,6 +871,7 @@ abstract class CantonNodeBootstrapImpl[
         // as we are only expecting namespace delegations that end up in the authorized store, this is fine
         staticSynchronizerParameters = None,
         timeouts = this.timeouts,
+        futureSupervisor = futureSupervisor,
         loggerFactory = this.loggerFactory,
       )
 
@@ -952,7 +1053,7 @@ abstract class CantonNodeBootstrapImpl[
       adminServerRegistry: CantonMutableHandlerRegistry,
       adminTokenDispenser: CantonAdminTokenDispenser,
       healthReporter: GrpcHealthReporter,
-      healthService: DependenciesHealthService,
+      readinessService: DependenciesHealthService,
   ) extends BootstrapStageWithStorage[T, BootstrapStageOrLeaf[T], Unit](
         description = "generate-or-await-node-topology-tx",
         bootstrap = bootstrapStageCallback,
@@ -1016,7 +1117,6 @@ abstract class CantonNodeBootstrapImpl[
                   new GrpcTopologyManagerReadService(
                     member(nodeId),
                     temporaryStoreRegistry.stores() ++ sequencedTopologyStores :+ authorizedStore,
-                    crypto,
                     topologyClientLookup = lookupTopologyClient,
                     lookupSynchronizerTimeTracker,
                     lookupActivePsid,
@@ -1035,7 +1135,6 @@ abstract class CantonNodeBootstrapImpl[
                       .managers() ++ sequencedTopologyManagers :+ topologyManager,
                     lookupActivePsid,
                     temporaryStoreRegistry,
-                    parameters,
                     bootstrapStageCallback.loggerFactory,
                   ),
                   executionContext,
@@ -1110,7 +1209,7 @@ abstract class CantonNodeBootstrapImpl[
           nodeId,
           topologyManager,
           healthReporter,
-          healthService,
+          readinessService,
         )
       )
     }
@@ -1268,6 +1367,7 @@ abstract class CantonNodeBootstrapImpl[
           mapping,
           serial = None,
           keys,
+          namespacesToSignFor = Seq.empty,
           protocolVersion,
           expectFullAuthorization = true,
           waitToBecomeEffective = None,

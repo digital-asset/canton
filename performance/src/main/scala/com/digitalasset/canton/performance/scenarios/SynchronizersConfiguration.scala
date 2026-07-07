@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.performance.scenarios
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnection,
   SequencerConnectionPoolDelays,
   SequencerConnections,
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
   TrafficControlParameters,
 }
@@ -25,6 +25,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.util.chaining.*
 
@@ -74,7 +75,7 @@ class SynchronizerConfiguration(
         synchronizerOwners = sequencers.active,
         synchronizerThreshold = PositiveInt.tryCreate(sequencers.active.size),
         staticSynchronizerParameters =
-          StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
+          StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
         mediatorThreshold = PositiveInt.tryCreate(mediatorsWithoutReplica.size),
       )
       .logical
@@ -120,6 +121,7 @@ class SynchronizerConfiguration(
             sequencerLivenessMargin,
             SubmissionRequestAmplification.NoAmplification,
             SequencerConnectionPoolDelays.default,
+            SubscriptionLivenessLimits.default,
           )
           .getOrElse(sys.error("Failed to create sequencer connection"))
       } else {

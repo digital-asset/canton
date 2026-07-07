@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.sequencing.integrations.state
 
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.TestHash
@@ -13,11 +12,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.ActorSystem
@@ -124,7 +123,7 @@ trait SequencerStateManagerStoreTest
         val aggregationId1 = AggregationId(TestHash.digest(1))
         val aggregationId2 = AggregationId(TestHash.digest(2))
         val aggregationId3 = AggregationId(TestHash.digest(3))
-        val rule = AggregationRule(
+        val rule = AggregationRule.testing(
           NonEmpty(Seq, alice, bob),
           threshold = PositiveInt.tryCreate(2),
           testedProtocolVersion,
@@ -233,7 +232,7 @@ trait SequencerStateManagerStoreTest
 
         val aggregationId1 = AggregationId(TestHash.digest(1))
         val aggregationId2 = AggregationId(TestHash.digest(2))
-        val rule = AggregationRule(
+        val rule = AggregationRule.testing(
           NonEmpty(Seq, alice, bob, carlos),
           threshold = PositiveInt.tryCreate(2),
           testedProtocolVersion,

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.FullTransactionViewTree
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -21,7 +20,7 @@ import com.digitalasset.canton.protocol.{
   LfGlobalKey,
   LfTemplateId,
   LfTransaction,
-  RollbackContext,
+  LfVersionedTransaction,
 }
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -29,6 +28,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.transaction.{NodeId, TransactionError}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -38,7 +38,7 @@ trait InternalConsistencyChecker {
 
   def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfVersionedTransaction],
       topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext,
@@ -59,12 +59,18 @@ trait InternalConsistencyChecker {
       hostedKeys = keyMaintainers.toSeq.collect {
         case (key, maintainers) if maintainers.exists(hostedMaintainers.contains) => key
       }.toSet
-      _ <- EitherT.fromEither(check(rootViewTrees, mergedTransaction, hostedKeys))
+      _ <- EitherT.fromEither(
+        check(
+          rootViewTrees,
+          unmergedTransactionsWithoutToplevelRollbackNodes.map(_.transaction),
+          hostedKeys,
+        )
+      )
     } yield ()
 
   protected[validation] def check(
       rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]],
-      mergedTransaction: LfTransaction,
+      unmergedTransactionsWithoutToplevelRollbackNodes: Seq[LfTransaction],
       hostedKeys: Set[LfGlobalKey],
   )(implicit
       traceContext: TraceContext
@@ -165,24 +171,6 @@ object InternalConsistencyChecker {
       param("contractIds", _.contractIds)
     )
   }
-
-  private[validation] def checkRollbackScopeOrder(
-      presented: Seq[RollbackContext]
-  ): Either[String, Unit] =
-    Either.cond(
-      presented == presented.sorted,
-      (),
-      s"Detected out of order rollback scopes in: $presented",
-    )
-
-  private[validation] def checkRollbackScopes(
-      rootViewTrees: NonEmpty[Seq[FullTransactionViewTree]]
-  ): Result[Unit] =
-    checkRollbackScopeOrder(
-      rootViewTrees.map(_.viewParticipantData.rollbackContext)
-    ).left.map { error =>
-      ErrorWithInternalConsistencyCheck(IncorrectRollbackScopeOrder(error))
-    }
 
   private[validation] def checkNotUsedBeforeCreation(
       previouslyReferenced: Set[LfContractId],

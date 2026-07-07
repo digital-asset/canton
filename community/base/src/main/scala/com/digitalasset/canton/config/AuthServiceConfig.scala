@@ -25,6 +25,7 @@ sealed trait AuthServiceConfig {
       jwksCacheConfig: JwksCacheConfig,
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       loggerFactory: NamedLoggerFactory,
+      warnOnJwtScopeUsage: Boolean,
       maxTokenLife: NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ): AuthService
   def privileged: Boolean = false
@@ -44,6 +45,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         maxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceWildcard
@@ -77,6 +79,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -90,6 +93,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -120,6 +124,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -133,6 +138,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -147,6 +153,7 @@ object AuthServiceConfig {
       override val privileged: Boolean = false,
       accessLevel: AccessLevel = AccessLevel.Wildcard,
       override val users: Seq[AuthorizedUser] = Seq.empty,
+      override val maxTokenLife: config.NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ) extends AuthServiceConfig {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     private def verifier(
@@ -163,6 +170,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -176,6 +184,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -190,6 +199,7 @@ object AuthServiceConfig {
       override val privileged: Boolean = false,
       accessLevel: AccessLevel = AccessLevel.Wildcard,
       override val users: Seq[AuthorizedUser] = Seq.empty,
+      override val maxTokenLife: config.NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ) extends AuthServiceConfig {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     private def verifier(
@@ -206,6 +216,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -219,6 +230,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
 
   }
@@ -233,6 +245,7 @@ object AuthServiceConfig {
       override val privileged: Boolean = false,
       accessLevel: AccessLevel = AccessLevel.Wildcard,
       override val users: Seq[AuthorizedUser] = Seq.empty,
+      override val maxTokenLife: config.NonNegativeDuration = NonNegativeDuration(Duration.Inf),
   ) extends AuthServiceConfig {
     private def verifier(
         jwksCacheConfig: JwksCacheConfig,
@@ -253,6 +266,7 @@ object AuthServiceConfig {
         jwksCacheConfig: JwksCacheConfig,
         jwtTimestampLeeway: Option[JwtTimestampLeeway],
         loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
         globalMaxTokenLife: NonNegativeDuration,
     ): AuthService =
       AuthServiceJWT(
@@ -267,6 +281,7 @@ object AuthServiceConfig {
         accessLevel,
         loggerFactory,
         users,
+        warnOnJwtScopeUsage,
       )
   }
 

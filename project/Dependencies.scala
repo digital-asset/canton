@@ -33,14 +33,16 @@ object Dependencies {
   lazy val scala_version_short = "2.13"
 
   lazy val pekko_version = resolveDependency("org.apache.pekko", "pekko-actor").revision
+  lazy val pekko_projection_jdbc_version = "1.1.1"
+  lazy val pekko_projection_version = "1.1.0"
+  lazy val pekko_persistence_version = "1.2.1"
   lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
 
   lazy val ammonite_version = "3.0.1"
   lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.41.1"
+  lazy val aws_version = "2.44.3"
   lazy val better_files_version = "3.9.2"
-  lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.9.0"
@@ -49,20 +51,20 @@ object Dependencies {
   lazy val circe_version = "0.14.2"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
-  lazy val flyway_version = "10.22.0"
-  // From https://github.com/googleapis/java-cloud-bom/tree/v26.50.0
-  // kms 2.55.0 and storage 2.43.2 are within the same compatibility matrix
+  lazy val flyway_version = "12.0.2"
+  // From https://github.com/googleapis/java-cloud-bom/tree/v26.58.0
+  // kms 2.63.0 and storage 2.50.0 are within the same compatibility matrix
   // We should switch to using the BOM versioning system for these deps
   // https://docs.cloud.google.com/java/docs/bom
-  lazy val gcp_kms_version = "2.55.0"
-  lazy val gcp_storage_version = "2.43.2"
+  lazy val gcp_kms_version = "2.63.0"
+  lazy val gcp_storage_version = "2.50.0"
   lazy val zstd_version = "1.5.5-5"
   lazy val gson_version = "2.9.1"
   lazy val gson_fire_version = "1.9.0"
   lazy val h2_version = "2.2.224"
   lazy val janino_version = "3.1.12"
   lazy val javax_annotations_version = "1.3.2"
-  lazy val jackson_databind_nullable_version = "0.2.6"
+  lazy val jackson_databind_nullable_version = "0.2.10"
   lazy val jakarta_annotation_api_version = "1.3.5"
   lazy val magnolia_version = "1.1.10"
   lazy val magnolifyScalacheck_version = "0.6.2"
@@ -74,14 +76,14 @@ object Dependencies {
 
   lazy val pekko_http_backend_version = "3.9.0"
   lazy val protostuff_version = "3.1.40"
-  lazy val postgres_version = "42.7.3"
+  lazy val postgres_version = "42.7.11"
   lazy val pprint_version = "0.9.3"
   lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.2.1"
   lazy val scala_collections_contrib_version = "0.2.2"
-  lazy val scala_csv_version = "1.3.10"
+  lazy val scala_csv_version = "2.0.0"
   lazy val scala_logging_version = "3.9.5"
   lazy val scalacheck_version = "1.15.4"
   lazy val scalafx_version = "17.0.1-R26"
@@ -90,13 +92,13 @@ object Dependencies {
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.7"
-  lazy val slf4j_version = "2.0.6"
+  lazy val slf4j_version = resolveDependency("org.slf4j", "jul-to-slf4j").revision
   lazy val zio_version = "2.1.7"
 
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
-  lazy val sttp_version = "3.8.16"
-  lazy val swagger_parser_version = "2.1.22"
+  lazy val sttp_version = "3.11.0"
+  lazy val swagger_parser_version = "2.1.43"
   lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.11.7"
   lazy val testcontainers_version = "2.0.2"
@@ -196,6 +198,19 @@ object Dependencies {
     "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
   lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
   lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
+
+  lazy val pekko_projection_core =
+    "org.apache.pekko" %% "pekko-projection-core" % pekko_projection_version
+  lazy val pekko_projection_jdbc =
+    "org.apache.pekko" %% "pekko-projection-jdbc" % pekko_projection_version
+  lazy val pekko_projection_slick =
+    "org.apache.pekko" %% "pekko-projection-slick" % pekko_projection_version
+  lazy val pekko_projection_testkit =
+    "org.apache.pekko" %% "pekko-projection-testkit" % pekko_projection_version
+  lazy val pekko_persistence =
+    "org.apache.pekko" %% "pekko-persistence" % pekko_persistence_version
+  lazy val pekko_persistence_query =
+    "org.apache.pekko" %% "pekko-persistence-query" % pekko_persistence_version
 
   lazy val scala_logging =
     "com.typesafe.scala-logging" %% "scala-logging" % scala_logging_version excludeAll (incompatibleLogging: _*)
@@ -318,12 +333,6 @@ object Dependencies {
 
   lazy val sttp = "com.softwaremill.sttp.client3" %% "core" % sttp_version
 
-  // demo dependencies (you also need to update demo.sc)
-  lazy val scalafx = "org.scalafx" %% "scalafx" % scalafx_version
-  lazy val javafx_all = Seq("controls", "base", "fxml", "media", "web", "graphics").map { x =>
-    "org.openjfx" % s"javafx-$x" % scalafx_all_version
-  }
-
   lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % toxiproxy_java_version
 
   lazy val wartremover_dep =
@@ -396,7 +405,7 @@ object Dependencies {
   lazy val boopickle = "io.suzaku" %% "boopickle" % "1.5.0"
   lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
   lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.10.3"
-  lazy val semver = "org.semver4j" % "semver4j" % "5.3.0"
+  lazy val semver = "org.semver4j" % "semver4j" % "6.0.0"
   lazy val sourcecode = "com.lihaoyi" %% "sourcecode" % "0.4.2"
   lazy val ujson = "com.lihaoyi" %% "ujson" % upickle_version
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version

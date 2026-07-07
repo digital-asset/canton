@@ -4,8 +4,6 @@
 package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyUtil.instances.*
 import com.digitalasset.canton.admin.api.client.data.crypto.{
   CryptoKeyFormat,
   HashAlgorithm,
@@ -39,6 +37,8 @@ import com.digitalasset.canton.time.{
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.digitalasset.canton.{ProtoDeserializationError, config, crypto as SynchronizerCrypto}
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyUtil.instances.*
 import io.scalaland.chimney.dsl.*
 
 import scala.Ordering.Implicits.*
@@ -97,6 +97,10 @@ object StaticSynchronizerParameters {
     StaticSynchronizerParameters(internal)
   }
 
+  @deprecated(
+    "Use StaticSynchronizerParameters.defaults(CryptoConfig(), ...) instead",
+    since = "3.6.0",
+  )
   def defaultsWithoutKMS(
       protocolVersion: ProtocolVersion,
       serial: NonNegativeInt = NonNegativeInt.zero,
@@ -123,6 +127,11 @@ object StaticSynchronizerParameters {
     StaticSynchronizerParameters(internal)
   }
 
+  def defaults(
+      protocolVersion: ProtocolVersion
+  ): StaticSynchronizerParameters =
+    defaults(CryptoConfig(), protocolVersion)
+
   private[canton] def initialValues(
       clock: Clock,
       protocolVersion: ProtocolVersion,
@@ -133,7 +142,7 @@ object StaticSynchronizerParameters {
         StaticSynchronizerParametersInternal.defaultTopologyChangeDelayNonStandardClock
       case _ => StaticSynchronizerParametersInternal.defaultTopologyChangeDelay
     }
-    defaultsWithoutKMS(protocolVersion, serial, topologyChangeDelay.toConfig)
+    defaults(CryptoConfig(), protocolVersion, serial, topologyChangeDelay.toConfig)
   }
 
   def apply(

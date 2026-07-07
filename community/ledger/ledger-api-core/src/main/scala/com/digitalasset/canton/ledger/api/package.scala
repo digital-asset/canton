@@ -6,7 +6,6 @@ package com.digitalasset.canton.ledger
 import cats.syntax.either.*
 import cats.syntax.order.*
 import cats.syntax.traverse.*
-import com.daml.jwt.JwksUrl
 import com.daml.ledger.api.v2.admin.package_management_service
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
   TRANSACTION_SHAPE_ACS_DELTA,
@@ -14,7 +13,6 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
 }
 import com.daml.ledger.api.v2.{package_reference, package_service}
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
-import com.daml.nonempty.*
 import com.daml.platform.v1.page_tokens.ListVettedPackagesPageTokenPayload
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
@@ -44,6 +42,7 @@ import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.logging.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.value.Value as Lf
+import com.digitalasset.nonempty.*
 import scalaz.syntax.tag.*
 import scalaz.{@@, Tag}
 
@@ -73,6 +72,8 @@ package object api {
 
 package api {
 
+  import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
+
   sealed trait WorkflowIdTag
 
   sealed trait CommandIdTag
@@ -84,95 +85,6 @@ package api {
   sealed trait ParticipantIdTag
 
   sealed trait SubmissionIdTag
-
-  sealed trait IdentityProviderId {
-    def toRequestString: String
-
-    def toDb: Option[IdentityProviderId.Id]
-  }
-
-  object IdentityProviderId {
-    final case object Default extends IdentityProviderId {
-      override def toRequestString: String = ""
-
-      override def toDb: Option[Id] = None
-    }
-
-    final case class Id(value: Ref.LedgerString) extends IdentityProviderId {
-      override def toRequestString: String = value
-
-      override def toDb: Option[Id] = Some(this)
-    }
-
-    object Id {
-      def fromString(id: String): Either[String, IdentityProviderId.Id] =
-        Ref.LedgerString.fromString(id).map(Id.apply)
-
-      def assertFromString(id: String): Id =
-        Id(Ref.LedgerString.assertFromString(id))
-    }
-
-    def apply(identityProviderId: String): IdentityProviderId =
-      Some(identityProviderId).filter(_.nonEmpty) match {
-        case Some(id) => Id.assertFromString(id)
-        case None => Default
-      }
-
-    def fromString(identityProviderId: String): Either[String, IdentityProviderId] =
-      Some(identityProviderId).filter(_.nonEmpty) match {
-        case Some(id) => Id.fromString(id)
-        case None => Right(Default)
-      }
-
-    def fromDb(identityProviderId: Option[IdentityProviderId.Id]): IdentityProviderId =
-      identityProviderId match {
-        case None => IdentityProviderId.Default
-        case Some(id) => id
-      }
-
-    def fromOptionalLedgerString(
-        identityProviderId: Option[Ref.LedgerString]
-    ): IdentityProviderId =
-      identityProviderId match {
-        case None => IdentityProviderId.Default
-        case Some(id) => IdentityProviderId.Id(id)
-      }
-  }
-
-  final case class IdentityProviderConfig(
-      identityProviderId: IdentityProviderId.Id,
-      isDeactivated: Boolean = false,
-      jwksUrl: JwksUrl,
-      issuer: String,
-      audience: Option[String],
-  )
-
-  final case class ObjectMeta(
-      resourceVersionO: Option[Long],
-      annotations: Map[String, String],
-  )
-
-  object ObjectMeta {
-    def empty: ObjectMeta = ObjectMeta(
-      resourceVersionO = None,
-      annotations = Map.empty,
-    )
-  }
-
-  final case class User(
-      id: Ref.UserId,
-      primaryParty: Option[Ref.Party],
-      isDeactivated: Boolean = false,
-      metadata: ObjectMeta = ObjectMeta.empty,
-      identityProviderId: IdentityProviderId = IdentityProviderId.Default,
-      primaryPartyAuthentication: Boolean = false,
-  ) {
-    // Note: this should be replaced by pretty printing once the ledger-api server packages move
-    //  into their proper place
-    override def toString: String =
-      s"User(id=$id, primaryParty=$primaryParty, isDeactivated=$isDeactivated, metadata=${metadata.toString
-          .take(512)}, identityProviderId=${identityProviderId.toRequestString}, primaryPartyAuthentication=$primaryPartyAuthentication)"
-  }
 
   final case class PartyDetails(
       party: Ref.Party,
@@ -189,22 +101,6 @@ package api {
     override def getParty: Option[Ref.Party] = Some(party)
   }
 
-  object UserRight {
-    final case object ParticipantAdmin extends UserRight
-
-    final case object IdentityProviderAdmin extends UserRight
-
-    final case class CanActAs(party: Ref.Party) extends UserRightForParty(party)
-
-    final case class CanReadAs(party: Ref.Party) extends UserRightForParty(party)
-
-    final case object CanReadAsAnyParty extends UserRight
-
-    final case class CanExecuteAs(party: Ref.Party) extends UserRightForParty(party)
-
-    final case object CanExecuteAsAnyParty extends UserRight
-  }
-
   sealed abstract class Feature extends Product with Serializable
 
   object Feature {
@@ -214,6 +110,8 @@ package api {
       includeTransactions: Option[TransactionFormat],
       includeReassignments: Option[EventFormat],
       includeTopologyEvents: Option[TopologyFormat],
+      includeAcsCommitments: Option[SynchronizerId],
+      includeAcsChanges: Option[SynchronizerId],
   )
 
   final case class TopologyFormat(

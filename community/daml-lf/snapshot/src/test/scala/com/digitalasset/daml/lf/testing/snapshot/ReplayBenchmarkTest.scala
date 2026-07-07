@@ -10,14 +10,14 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.File
-import java.nio.file.Files
+import java.nio.file.{Files, Path}
 
 class ReplayBenchmarkTestV1 extends ReplayBenchmarkTest(ContractIdVersion.V1)
 
@@ -36,9 +36,9 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
   val darFileName = "ReplayBenchmark.dar"
   val darFile =
     Option(getClass.getClassLoader.getResource(darFileName))
-      .map(path => new File(path.getPath))
+      .map(path => Path.of(path.getPath))
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $darFileName"))
-  val packages = DarDecoder.assertReadArchiveFromFile(darFile)
+  val packages = DarDecoder.assertReadArchiveFromFile(darFile.toFile)
   val pkgId = packages.main._1
 
   "Generating a snapshot" should {
@@ -55,7 +55,7 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
           Ref.ChoiceName.assertFromString("Add"),
           ValueRecord(None, ImmArray(None -> ValueInt64(3))),
         )
-      val pkgs = TransactionSnapshot.loadDar(darFile.toPath)
+      val pkgs = TransactionSnapshot.loadDar(darFile)
       val engine = TransactionSnapshot.compile(
         pkgs,
         snapshotDir = Some(snapshotDir),
@@ -69,7 +69,8 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
         prefetchKeys = Seq.empty,
-        contractStateMode = ContractStateMachine.Mode.default,
+        interpretationConfig =
+          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
       )
 
       Files.exists(snapshotFile) should be(true)
@@ -77,7 +78,7 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
 
       // Replay and validate the snapshot file
       val benchmark = new ReplayBenchmark
-      benchmark.darFile = darFile.getAbsolutePath
+      benchmark.darDir = darFile.getParent.toFile.getAbsolutePath
       benchmark.choiceName = "ReplayBenchmark:T:Add"
       benchmark.entriesFile = snapshotFile.toFile.getAbsolutePath
       benchmark.contractIdVersion = contractIdVersion.toString

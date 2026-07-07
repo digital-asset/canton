@@ -31,6 +31,7 @@ import com.digitalasset.canton.lifecycle.{LifeCycle, ShutdownFailedException}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
   CommonMockMetrics,
+  CryptoMetrics,
   DbStorageMetrics,
   DeclarativeApiMetrics,
   LedgerApiServerMetrics,
@@ -55,7 +56,6 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PekkoUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
@@ -87,6 +87,8 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
     override def parameters: LocalNodeParametersConfig = new LocalNodeParametersConfig {
       override def batching: BatchingConfig = BatchingConfig()
       override def caching: CachingConfigs = CachingConfigs()
+
+      override def devVersionSupport: Boolean = false
       override def alphaVersionSupport: Boolean = false
       override def watchdog: Option[WatchdogConfig] = None
     }
@@ -107,10 +109,10 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       nonStandardConfig: Boolean = false,
       dbMigrateAndStart: Boolean = false,
       disableUpgradeValidation: Boolean = false,
+      devVersionSupport: Boolean = false,
       alphaVersionSupport: Boolean = false,
       betaVersionSupport: Boolean = false,
       dontWarnOnDeprecatedPV: Boolean = false,
-      initialProtocolVersion: ProtocolVersion = testedProtocolVersion,
       exitOnFatalFailures: Boolean = true,
       watchdog: Option[WatchdogConfig] = None,
       startupMemoryCheckConfig: StartupMemoryCheckConfig = StartupMemoryCheckConfig(
@@ -128,6 +130,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
         (LedgerApiServerMetrics.ForTesting.grpc, LedgerApiServerMetrics.ForTesting.requests),
       healthMetrics: HealthMetrics = LedgerApiServerMetrics.ForTesting.health,
       storageMetrics: DbStorageMetrics = CommonMockMetrics.dbStorage,
+      cryptoMetrics: CryptoMetrics = CommonMockMetrics.cryptoMetrics,
   ) extends BaseMetrics {
 
     override val declarativeApiMetrics: DeclarativeApiMetrics =

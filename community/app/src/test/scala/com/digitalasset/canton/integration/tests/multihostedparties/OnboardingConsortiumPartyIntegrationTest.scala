@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.multihostedparties
 
 import better.files.File
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.CantonLfV21
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
@@ -17,6 +16,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
 }
 import com.digitalasset.canton.topology.{Namespace, PartyId, UniqueIdentifier}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.Monocle.toAppliedFocusOps
 
 import scala.util.Try

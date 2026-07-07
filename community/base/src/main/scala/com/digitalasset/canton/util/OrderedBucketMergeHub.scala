@@ -4,7 +4,6 @@
 package com.digitalasset.canton.util
 
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -14,6 +13,7 @@ import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.OrderedBucketMergeHub.OutputElement
 import com.digitalasset.canton.util.PekkoUtil.{LoggingInHandler, LoggingOutHandler}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.stream.stage.{

@@ -40,10 +40,10 @@ object SequencerTestUtils extends BaseTest {
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
       topologyTimestampO: Option[CantonTimestamp] = None,
       previousTimestamp: Option[CantonTimestamp] = None,
-  ): Deliver[ClosedUncompressedEnvelope] = {
+  ): Deliver[Batch[ClosedUncompressedEnvelope]] = {
     val batch = Batch.empty(testedProtocolVersion)
 
-    val deliver = Deliver.create[ClosedUncompressedEnvelope](
+    val deliver = Deliver.create[Batch[ClosedUncompressedEnvelope]](
       previousTimestamp,
       timestamp,
       synchronizerId,
@@ -59,7 +59,7 @@ object SequencerTestUtils extends BaseTest {
         SequencedEvent
           .fromProtoV30(defaultMaxBytesToDecompress, deliver.toProtoV30)(bytes)
           .value
-          .asInstanceOf[Deliver[ClosedUncompressedEnvelope]]
+          .asInstanceOf[Deliver[Batch[ClosedUncompressedEnvelope]]]
 
       case None => deliver
     }
@@ -72,9 +72,9 @@ object SequencerTestUtils extends BaseTest {
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
       topologyTimestampO: Option[CantonTimestamp] = None,
       trafficReceipt: Option[TrafficReceipt] = None,
-  ): Deliver[Nothing] = {
+  ): Deliver[Batch[Nothing]] = {
     val batch = Batch.empty(testedProtocolVersion)
-    Deliver.create[Nothing](
+    Deliver.create[Batch[Nothing]](
       previousTimestamp,
       timestamp,
       synchronizerId,

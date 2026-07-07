@@ -31,7 +31,7 @@ object TestGroup extends ErrorGroup()(ErrorClass.root()) {
     object TestAlarmErrorCode extends AlarmErrorCode(id = "TEST_MALICIOUS_BEHAVIOR") {
       val exception = new RuntimeException("TestAlarmErrorCode exception")
       final case class MyAlarm()
-          extends Alarm(cause = "My alarm cause", throwableO = Some(exception)) {}
+          extends Alarm(cause = "My alarm cause", throwableO = Some(exception))
     }
   }
 }

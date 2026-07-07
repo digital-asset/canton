@@ -24,6 +24,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestContractHasher.SyncContractHasher
 import com.digitalasset.canton.util.TestEngine.{InMemoryPackageStore, TxAndMeta}
+import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.command.ReplayCommand
@@ -53,7 +54,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
-    contractStateMode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.NoKey,
+    interpretationConfig: LfInterpretationConfig = InterpretationConfig.Legacy,
     loggerFactory: NamedLoggerFactory,
 ) extends EitherValues
     with OptionValues {
@@ -105,7 +106,7 @@ class TestEngine(
 
   val engine = new Engine(
     EngineConfig(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      allowedLanguageVersions = LanguageVersion.allLfVersions,
       iterationsBetweenInterruptions = iterationsBetweenInterruptions,
     ),
     loggerFactory,
@@ -117,7 +118,7 @@ class TestEngine(
   ): LfHash =
     consume(engine.hashCreateNode(c, identity, method))
 
-  private val valueEnricher = new Enricher(engine)
+  private val valueEnricher = Enricher(engine)
 
   def consume[T](
       initial: Result[T],
@@ -136,7 +137,7 @@ class TestEngine(
             case Some(contractInstance) =>
               Response.ContractFound(
                 contractInstance,
-                Hash.HashingMethod.UpgradeFriendly,
+                Hash.HashingMethod.UpgradeFriendlyUnsafe,
                 _ => true,
               )
             case None =>
@@ -208,7 +209,7 @@ class TestEngine(
       readAs = Set.empty,
       prefetchKeys = Seq.empty,
       contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpretationConfig,
     )
 
     val contractMap = contracts.map(c => c.contractId -> c).toMap
@@ -269,7 +270,7 @@ class TestEngine(
         )
       ),
       contractId = fat.contractId.coid,
-      createdEventBlob = TransactionCoder.encodeFatContractInstance(fat).value,
+      createdEventBlob = ContractInstanceCoder.encodeFatContractInstance(fat).value,
       synchronizerId = "",
     )
   }
@@ -282,7 +283,7 @@ class TestEngine(
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       preparationTime: Time.Timestamp = testTimestamp,
       ledgerEffectiveTime: Time.Timestamp = testTimestamp,
-      contractStateMode: NextGenContractStateMachine.Mode,
+      interpreationConfig: LfInterpretationConfig,
   )(implicit traceContext: TraceContext): TxAndMeta = {
 
     val result = engine.reinterpret(
@@ -293,7 +294,7 @@ class TestEngine(
       ledgerEffectiveTime = ledgerEffectiveTime,
       packageResolution = packageResolution,
       contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
+      interpretationConfig = interpreationConfig,
     )
     consume(result, contracts)
   }
@@ -304,7 +305,7 @@ class TestEngine(
       meta: Transaction.Metadata,
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
       ledgerTime: Time.Timestamp = testTimestamp,
-      contractStateMode: NextGenContractStateMachine.Mode,
+      contractStateMode: LfInterpretationConfig,
   )(implicit traceContext: TraceContext): (SubmittedTransaction, Transaction.Metadata) = {
 
     val nodeSeeds = Map.from(meta.nodeSeeds.toList)
@@ -329,7 +330,7 @@ class TestEngine(
       packageResolution = packageResolution,
       preparationTime = meta.preparationTime,
       ledgerEffectiveTime = ledgerTime,
-      contractStateMode = contractStateMode,
+      interpreationConfig = contractStateMode,
     )
   }
 

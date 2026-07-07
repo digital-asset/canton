@@ -6,13 +6,9 @@ package value
 
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, TypeConId}
-import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.{Ast, StablePackages}
-import data.ScalazEqual._
-import scalaz.{Equal, Order}
-import scalaz.syntax.order._
-import scalaz.syntax.semigroup._
 
 import java.nio.{ByteBuffer, ByteOrder}
 
@@ -82,8 +78,9 @@ object GenValue {
     override def nonVerboseWithoutTrailingNones: this.type = this
   }
 
-  /** Daml-LF lists are basically linked lists. However we use FrontQueue since we store list-literals in the Daml-LF
-    * packages and FrontQueue lets prepend chunks rather than only one element.
+  /** Daml-LF lists are basically linked lists. However we use FrontQueue since we store
+    * list-literals in the Daml-LF packages and FrontQueue lets prepend chunks rather than only one
+    * element.
     */
   final case class List[+X](values: FrontStack[GenValue[X]])
       extends GenValue[X]
@@ -208,13 +205,12 @@ object GenValue {
 
 object Value {
 
-  /** the maximum nesting level for Daml-LF serializable values. we put this
-    * limitation to be able to reliably implement stack safe programs with it.
-    * right now it's 100 to be conservative -- it's in the same order of magnitude
-    * as the default maximum nesting value of protobuf.
+  /** the maximum nesting level for Daml-LF serializable values. we put this limitation to be able
+    * to reliably implement stack safe programs with it. right now it's 100 to be conservative --
+    * it's in the same order of magnitude as the default maximum nesting value of protobuf.
     *
-    * encoders and decoders should check this to make sure values do not exceed
-    * this level of nesting.
+    * encoders and decoders should check this to make sure values do not exceed this level of
+    * nesting.
     */
   val MAXIMUM_NESTING: Int = 100
 
@@ -270,30 +266,28 @@ object Value {
   type ValueUnit = GenValue.Unit.type
   val ValueUnit: GenValue.Unit.type = GenValue.Unit
 
-  import scalaz.syntax.traverse._
-  import scalaz.std.either._
-  import scalaz.std.option._
-
   // Casts from GenValue[Extension[From]] to GenValue[Nothing] i.e. `Value`
+  // USED BY DAML_SCRIPT DO NOT REMOVE
   def castExtendedValue[From](
       value: GenValue[GenValue.Extension[From]]
-  ): Either[RuntimeException, GenValue[Nothing]] =
+  ): Either[RuntimeException, GenValue[Nothing]] = {
+    import cats.implicits.*
     value match {
       case _: GenValue.Blob[From] => Left(new RuntimeException("Illegal Blob in Value"))
       case _: GenValue.Any[From] => Left(new RuntimeException("Illegal Any in Value"))
       case _: GenValue.TypeRep[From] => Left(new RuntimeException("Illegal TypeRep in Value"))
       case ValueRecord(tycon, content) =>
-        content
+        content.toList
           .traverse { case (label, value) => castExtendedValue(value).map((label, _)) }
-          .map(ValueRecord(tycon, _))
+          .map(content => ValueRecord(tycon, content.to(ImmArray)))
       case ValueVariant(tycon, variant, content) =>
         castExtendedValue(content).map(ValueVariant(tycon, variant, _))
       case ValueList(content) =>
-        content.traverse(castExtendedValue(_)).map(ValueList(_))
+        content.traverse(castExtendedValue).map(ValueList(_))
       case ValueOptional(content) =>
-        content.traverse(castExtendedValue(_)).map(ValueOptional(_))
+        content.traverse(castExtendedValue).map(ValueOptional(_))
       case ValueTextMap(content) =>
-        content.traverse(castExtendedValue(_)).map(ValueTextMap(_))
+        content.traverse(castExtendedValue).map(ValueTextMap(_))
       case ValueGenMap(content) =>
         content
           .traverse { case (key, value) =>
@@ -314,6 +308,7 @@ object Value {
       case v: ValueBool => Right(v)
       case v: ValueUnit => Right(v)
     }
+  }
 
   class ValueArithmeticError(stablePackages: StablePackages) {
     val tyCon: TypeConId = stablePackages.ArithmeticError
@@ -334,41 +329,6 @@ object Value {
 
   /** The data constructors of a variant or enum, if defined. */
   type LookupVariantEnum = Identifier => Option[ImmArray[Name]]
-
-  /** A contract instance is a value plus the template that originated it. */
-  // Prefer to use transaction.FatContractInstance
-  final case class ThinContractInstance(
-      packageName: Ref.PackageName,
-      template: Identifier,
-      arg: Value,
-  ) extends CidContainer[ThinContractInstance] {
-
-    def map(f: Value => Value): ThinContractInstance =
-      copy(arg = f(arg))
-
-    def mapCid(f: ContractId => ContractId): ThinContractInstance =
-      copy(arg = arg.mapCid(f))
-  }
-
-  type VersionedThinContractInstance = transaction.Versioned[ThinContractInstance]
-
-  object VersionedContractInstance {
-    def apply(
-        packageName: Ref.PackageName,
-        template: Identifier,
-        arg: VersionedValue,
-    ): VersionedThinContractInstance =
-      arg.map(ThinContractInstance(packageName, template, _))
-
-    @deprecated("use the version with 3 argument", since = "2.9.0")
-    def apply(
-        version: transaction.SerializationVersion,
-        packageName: Ref.PackageName,
-        template: Identifier,
-        arg: Value,
-    ): VersionedThinContractInstance =
-      transaction.Versioned(version, ThinContractInstance(packageName, template, arg))
-  }
 
   type NodeIdx = Int
 
@@ -431,13 +391,13 @@ object Value {
 
       def assertFromString(s: String): V1 = assertRight(fromString(s))
 
-      implicit val `V1 Order`: Order[V1] = {
-        case (ContractId.V1(hash1, suffix1), ContractId.V1(hash2, suffix2)) =>
-          hash1 ?|? hash2 |+| suffix1 ?|? suffix2
-      }
+      implicit val `V1 Ordering`: Ordering[V1] =
+        Ordering.by { case V1(local, global) => (local, global) }
     }
 
-    final case class V2 private[digitalasset] (local: Bytes, suffix: Bytes) extends ContractId with data.NoCopy {
+    final case class V2 private[digitalasset] (local: Bytes, suffix: Bytes)
+        extends ContractId
+        with data.NoCopy {
       override lazy val toBytes: Bytes = V2.prefix ++ local ++ suffix
       lazy val coid: Ref.HexString = toBytes.toHexString
       override def toString: String = s"ContractId($coid)"
@@ -460,7 +420,7 @@ object Value {
 
       private val suffixStart: Int = prefix.length + localSize
 
-      def build(local: Bytes, suffix: Bytes): Either[String, V2] = {
+      def build(local: Bytes, suffix: Bytes): Either[String, V2] =
         for {
           _ <- Either.cond(
             local.length == localSize,
@@ -473,13 +433,13 @@ object Value {
             s"The suffix is too long, expected at most $MaxSuffixLength bytes, but got ${suffix.length}",
           )
         } yield new V2(local, suffix)
-      }
 
       def assertBuild(local: Bytes, suffix: Bytes): V2 =
         assertRight(build(local, suffix))
 
-      /** The largest integer `i` so that the number of microseconds between [[Time.Timestamp.MinValue]]
-        * and [[Time.Timestamp.MaxValue]] divided by `i` is smaller than `2^40-1` and therefore fits into 5 bytes.
+      /** The largest integer `i` so that the number of microseconds between
+        * [[Time.Timestamp.MinValue]] and [[Time.Timestamp.MaxValue]] divided by `i` is smaller than
+        * `2^40-1` and therefore fits into 5 bytes.
         */
       private[lf] val resolution: Long = 286981L
 
@@ -527,10 +487,9 @@ object Value {
 
       def assertFromString(s: String): V2 = assertRight(fromString(s))
 
-      implicit val `V2 Order`: Order[V2] = {
-        case (ContractId.V2(local1, suffix1), ContractId.V2(local2, suffix2)) =>
-          local1 ?|? local2 |+| suffix1 ?|? suffix2
-      }
+      implicit val `V2 Ordering`: Ordering[V2] =
+        Ordering.by { case V2(local, global) => (local, global) }
+
     }
 
     def fromString(s: String): Either[String, ContractId] =
@@ -549,30 +508,12 @@ object Value {
       else if (bytes.startsWith(V1.prefix)) V1.fromBytes(bytes)
       else Left(s"cannot parse ContractId: unknown version prefix ${bytes.slice(0, 1).toHexString}")
 
-    implicit val `Cid Order`: Order[ContractId] = new Order[ContractId] {
-      override def order(a: ContractId, b: ContractId): scalaz.Ordering =
-        (a, b) match {
-          case (a: V2, b: V2) => a ?|? b
-          case (a: V1, b: V1) => a ?|? b
-          case (_: V1, _: V2) => scalaz.Ordering.LT
-          case (_: V2, _: V1) => scalaz.Ordering.GT
-        }
-
-      override def equal(a: ContractId, b: ContractId): Boolean =
-        (a, b).match2 {
-          case V1(discA, suffA) => { case V1(discB, suffB) =>
-            discA == discB && suffA.toByteString == suffB.toByteString
-          }
-          case V2(localA, suffA) => { case V2(localB, suffB) =>
-            localA == localB && suffA.toByteString == suffB.toByteString
-          }
-        }(fallback = false)
+    implicit val `Cid Ordering`: Ordering[ContractId] = {
+      case (a: V1, b: V1) => Ordering[V1].compare(a, b)
+      case (a: V2, b: V2) => Ordering[V2].compare(a, b)
+      case (_: V1, _: V2) => -1
+      case (_: V2, _: V1) => +1
     }
-
-    implicit val contractIdOrdering: Ordering[ContractId] =
-      `Cid Order`.toScalaOrdering
-
-    implicit val equalInstance: Equal[ContractId] = Equal.equalA
   }
 
   val ValueTrue: ValueBool = ValueBool.True

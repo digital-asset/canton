@@ -5,12 +5,14 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
+import com.digitalasset.canton.synchronizer.block.update.BlockProcessingParameters
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.TestingInterceptor
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
@@ -37,7 +39,7 @@ import com.typesafe.scalalogging.LazyLogging
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor}
+import scala.concurrent.ExecutionContextExecutor
 
 class BftSequencerFactory(
     config: BftBlockOrdererConfig,
@@ -117,12 +119,13 @@ class BftSequencerFactory(
       health: Option[SequencerHealthConfig],
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
-      orderingTimeFixMode: OrderingTimeFixMode,
-      synchronizerLoggerFactory: NamedLoggerFactory,
       lsuSequencingBounds: Option[LsuSequencingBounds],
+      parallelism: PositiveInt,
+      enablePrevalidation: Boolean,
+      synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
-      ec: ExecutionContext,
+      ec: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
   ): BlockSequencer =
@@ -135,26 +138,23 @@ class BftSequencerFactory(
       store,
       sequencerStore,
       blockSequencerConfig,
-      producePostOrderingTopologyTicks,
+      producePostOrderingTopologyTicks = producePostOrderingTopologyTicks,
       balanceStore,
       storage,
       futureSupervisor,
       health,
       clock,
       rateLimitManager,
-      orderingTimeFixMode,
-      lsuSequencingBounds,
-      drSequencingTimeUpperBound = nodeParameters.drSequencingTimeUpperBound,
-      nodeParameters.processingTimeouts,
-      nodeParameters.loggingConfig.eventDetails,
-      nodeParameters.loggingConfig.api.printer,
+      BlockProcessingParameters(
+        orderingTimeFixMode,
+        lsuSequencingBounds,
+        parallelism = parallelism,
+        enablePrevalidation = enablePrevalidation,
+      ),
+      nodeParameters,
       metrics,
-      nodeParameters.batchingConfig,
-      consistencyChecks = nodeParameters.enableAdditionalConsistencyChecks,
       synchronizerLoggerFactory,
-      exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
-      delayRequestsBeforeLsuTrafficInit = nodeParameters.delayRequestsBeforeLsuTrafficInit,
     )
 }
 

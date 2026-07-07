@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
@@ -45,17 +46,20 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
-import com.digitalasset.canton.platform.apiserver.SeedService
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
-import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImpl
 import com.digitalasset.canton.platform.apiserver.services.command.CommandServiceImpl.{
   UpdateServices,
   validateRequestTimeout,
 }
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.ExternalTransactionProcessor
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  CommandServiceImpl,
+  TrafficEnforcementBackend,
+}
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
 import com.digitalasset.canton.platform.apiserver.services.tracking.{
   CompletionResponse,
@@ -82,7 +86,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
   def createApiService(
       updateServices: UpdateServices,
       submissionSyncService: state.SyncService,
-      seedService: SeedService,
       commandExecutor: CommandExecutor,
       metrics: LedgerApiServerMetrics,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
@@ -92,6 +95,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
       packagePreferenceBackend: PackagePreferenceBackend,
       transactionSubmissionTracker: SubmissionTracker,
       defaultTrackingTimeout: NonNegativeFiniteDuration,
+      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -99,7 +103,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
   ): InteractiveSubmissionService & AutoCloseable = new InteractiveSubmissionServiceImpl(
     updateServices,
     submissionSyncService,
-    seedService,
     commandExecutor,
     metrics,
     checkOverloaded,
@@ -109,6 +112,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
     packagePreferenceBackend,
     transactionSubmissionTracker,
     defaultTrackingTimeout,
+    trafficEnforcementBackendO,
     loggerFactory,
   )
 
@@ -117,7 +121,6 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
 private[apiserver] final class InteractiveSubmissionServiceImpl private[services] (
     updateServices: UpdateServices,
     syncService: state.SyncService,
-    seedService: SeedService,
     commandExecutor: CommandExecutor,
     metrics: LedgerApiServerMetrics,
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
@@ -127,6 +130,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     packagePreferenceService: PackagePreferenceBackend,
     transactionSubmissionTracker: SubmissionTracker,
     defaultTrackingTimeout: NonNegativeFiniteDuration,
+    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends InteractiveSubmissionService
@@ -185,7 +189,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         )
       } else {
         evaluateAndHash(
-          seedService.nextSeed(),
+          SubmissionSeed.generate(syncService.randomOps),
           request.commands,
           request.verboseHashing,
           request.maxRecordTime,
@@ -258,7 +262,6 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
             transactionMetadata =
               commandExecutionResult.commandInterpretationResult.transactionMeta,
             submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
-            keyResolver = commandExecutionResult.commandInterpretationResult.globalKeyMapping,
             disclosedContracts =
               commandExecutionResult.commandInterpretationResult.processedDisclosedContracts
                 .map(contract => contract.contractId -> contract)
@@ -277,6 +280,17 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           .leftMap(InteractiveSubmissionPreparationError.Reject(_))
           .leftWiden[RpcError]
       }
+
+      _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
+        EitherT.right[RpcError](
+          trafficEnforcementBackend.value
+            .validateTraffic(
+              actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs,
+              trafficCost =
+                costEstimation.map(_.confirmationRequestTrafficCostEstimation).getOrElse(0L),
+            )
+        )
+      )
     } yield proto.PrepareSubmissionResponse(
       preparedTransaction = Some(prepareResult.transaction),
       preparedTransactionHash = prepareResult.hash.unwrap,
@@ -311,7 +325,6 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         result.commandInterpretationResult.submitterInfo,
         result.commandInterpretationResult.transactionMeta,
         result.commandInterpretationResult.interpretationTimeNanos,
-        result.commandInterpretationResult.globalKeyMapping,
         result.commandInterpretationResult.processedDisclosedContracts,
       )
   }

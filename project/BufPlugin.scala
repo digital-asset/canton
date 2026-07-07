@@ -49,6 +49,41 @@ object BufPlugin extends AutoPlugin {
     }
 
   private val unscopedProjectSettings = Seq(
+    // TODO(#33465) Remove this task once the flaky protoc CI failure is resolved.
+    PB.runProtoc := {
+      val log = streams.value.log
+      val exec = PB.protocExecutable.value.getAbsolutePath.toString
+      new protocbridge.ProtocRunner[Int] {
+        override def run(args: Seq[String], extraEnv: Seq[(String, String)]): Int = {
+          val exitCode = ProtocRunner(exec).run(args, extraEnv)
+          if (exitCode != 0) {
+            log.error(s"protoc failed with exit code $exitCode")
+            log.error(s"Full protoc args: ${args.mkString("[", ", ", "]")}")
+            val file = args.collectFirst {
+              case arg if arg.contains("protocbridge") => arg.split("=").last
+            }
+            file match {
+              case Some(file) =>
+                val pLogger = ProcessLogger(
+                  out => log.info(s"[process] $out"),
+                  err => log.error(s"[process] $err"),
+                )
+                log.info(s"Running 'ls -la $file'...")
+                Process(Seq("ls", "-la", file)).!(pLogger)
+                log.info(s"Running 'cat $file'...")
+                Process(Seq("cat", file)).!(pLogger)
+                log.info("Running 'ls -la /bin/sh'...")
+                Process(Seq("ls", "-la", "/bin/sh")).!(pLogger)
+                log.info("Running 'mount | grep /tmp'...")
+                (Process("mount") #| Process(Seq("grep", "/tmp"))).!(pLogger)
+              case None =>
+                log.error(s"Cannot find protocbridge from args")
+            }
+          }
+          exitCode
+        }
+      }
+    },
     bufFormat := {
       run(Command.FormatOverwrite).value
     },

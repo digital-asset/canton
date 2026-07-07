@@ -30,6 +30,7 @@ class OriginalLeaderSegmentState(
     initialCompletedBlocks: Seq[Block],
     initialCurrentViewPrePrepareBlockNumbers: Seq[BlockNumber],
     override val loggerFactory: NamedLoggerFactory,
+    initTraceContext: TraceContext,
 ) extends NamedLogging {
   private val segment = state.segment
 
@@ -90,13 +91,14 @@ class OriginalLeaderSegmentState(
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var waitingForAvailabilityResponse = false
 
+  def waitingResponseFromAvailability: Boolean = waitingForAvailabilityResponse
   def receivedResponseFromAvailability(): Unit = waitingForAvailabilityResponse = false
   def startWaitingForAvailabilityResponse(): Unit = waitingForAvailabilityResponse = true
 
   logger.debug(
     s"At segment creation with initialCompletedBlocks = ${initialCompletedBlocks.map(_.blockNumber)}, " +
       s"next relative block to propose = $nextRelativeBlockToPropose$absoluteNextBlockToProposeLogSuffix"
-  )(TraceContext.empty)
+  )(initTraceContext)
 
   def segmentIsInProgress: Boolean = segment.slotNumbers.sizeIs > nextRelativeBlockToPropose
 
@@ -121,10 +123,16 @@ class OriginalLeaderSegmentState(
         segment.slotNumbers(nextRelativeBlockToPropose - 1)
       )) // we finished processing the current slot
 
-  def reasonForNoProposal: Option[String] =
+  def reasonForNotAcceptingProposals: Option[String] =
     if (!segmentIsInProgress)
       Some(
-        s"End of segment reached: nextRelativeBlockToPropose $nextRelativeBlockToPropose is beyond segment size ${segment.slotNumbers.sizeIs}"
+        s"End of segment reached: nextRelativeBlockToPropose $nextRelativeBlockToPropose " +
+          s"is beyond segment size ${segment.slotNumbers.sizeIs}"
+      )
+    else if (waitingForAvailabilityResponse)
+      Some(
+        s"Waiting for availability proposal for relative block $nextRelativeBlockToPropose (absolute block ${segment
+            .slotNumbers(nextRelativeBlockToPropose)})"
       )
     else if (viewChangeOccurred)
       Some(s"ViewChangeOccurred! view = ${state.currentView}")
@@ -140,6 +148,8 @@ class OriginalLeaderSegmentState(
       Some(
         s"Previous relative block ${segment.slotNumbers(nextRelativeBlockToPropose - 1)} is still in progress"
       )
+    else if (!canReceiveProposals)
+      Some(s"Unknown (likely a new case, please align the reason computation logic)")
     else
       None
 

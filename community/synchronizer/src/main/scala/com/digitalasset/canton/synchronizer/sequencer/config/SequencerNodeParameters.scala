@@ -17,6 +17,7 @@ trait SequencerParameters {
   def maxConfirmationRequestsBurstFactor: PositiveDouble
   def processingTimeouts: ProcessingTimeout
   def maxSubscriptionsPerMember: PositiveInt
+  def disableSubmissionChecksForTesting: Boolean
 }
 
 /** Parameters for a SequencerNode. We "merge" parameters that are valid for all nodes (i.e.
@@ -47,7 +48,20 @@ trait SequencerParameters {
   *   Allows to specify an upper bound on the sequencing times: any message with sequencing time
   *   strictly greater to this value will not be delivered. Important notes:
   *   - SHOULD be set only in disaster recovery scenarios.
-  *   - MUST be the same value in all sequencers of a synchronizer.
+  *   - MUST be the same value in all sequencers of a synchronizer
+  * @param enableRejectDeliveredAggregationsOnPv35
+  *   No effect on pv34. On pv35, if true, the sequencer will reject aggregations that have already
+  *   been delivered for mediators. On pv36, this is always enabled, for all nodes.
+  * @param disableSubmissionChecksForTesting
+  *   Whether to disable submission checks for testing purposes. This should only be used in tests.
+  * @param disableAggregationRuleSizeCheckForTesting
+  *   Whether to disable the aggregation rule size check for testing purposes. This should only be
+  *   used in tests.
+  * @param disableReleaseVersionHandshakeCheck
+  *   If set to true, then the sequencer will skip checking that the client binary aligns 100% with
+  *   the server binary when the server is running an unstable protocol version.
+  * @param enablePrevalidation
+  *   if true then we will prevalidate signatures in a separate stage before processing
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -59,10 +73,17 @@ final case class SequencerNodeParameters(
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,
+    maxAuthNoncesPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
     delayRequestsBeforeLsuTrafficInit: Boolean,
+    enableRejectDeliveredAggregationsOnPv35: Seq[String],
+    disableSubmissionChecksForTesting: Boolean = false,
+    disableAggregationRuleSizeCheckForTesting: Boolean = false,
+    lsuConfig: SequencerLsuConfig,
+    disableReleaseVersionHandshakeCheck: Boolean = false,
+    enablePrevalidation: Boolean = true,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

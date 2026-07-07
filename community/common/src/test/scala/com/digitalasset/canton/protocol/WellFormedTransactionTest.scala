@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.data.PathRollbackContextFactory
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{Stage, WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageName, LfPartyId}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{NodeId, SerializationVersion}
-import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.Value.VersionedValue
 import org.scalatest.prop.{TableFor3, TableFor4}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -19,18 +20,18 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
 
   val lfAbs: LfContractId = suffixedId(0, 0)
 
-  val contractInst: LfThinContractInst = contractInstance()
+  val contractArg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue
 
   def createNode(
       cid: LfContractId,
-      contractInstance: LfThinContractInst = ExampleTransactionFactory.contractInstance(),
+      arg: VersionedValue = ExampleTransactionFactory.defaultVersionedValue,
       signatories: Set[LfPartyId] = Set(signatory),
       key: Option[LfGlobalKeyWithMaintainers] = None,
   ): LfNodeCreate =
     ExampleTransactionFactory.createNode(
       cid,
       signatories = signatories,
-      contractInstance = contractInstance,
+      arg = arg,
       key = key,
     )
 
@@ -170,7 +171,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         "Failure to serialize - depth limit exceeded",
         factory.versionedTransactionWithSeeds(
           Seq(0, 1),
-          createNode(unsuffixedId(0), contractInstance = veryDeepContractInstance),
+          createNode(unsuffixedId(0), arg = ExampleTransactionFactory.veryDeepVersionedValue),
           LfNodeExercises(
             targetCoid = suffixedId(2, -1),
             packageName = packageName,
@@ -193,12 +194,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
           ),
         ),
         WithoutSuffixes,
-        List(
-          """unable to serialize contract instance in node 0: """ +
-            s"""Provided Daml-LF value to encode exceeds maximum nesting level of ${Value.MAXIMUM_NESTING}""",
-          """unable to serialize chosen value in node 1: """ +
-            s"""Provided Daml-LF value to encode exceeds maximum nesting level of ${Value.MAXIMUM_NESTING}""",
-        ).sorted.mkString(", "),
+        "unable to encode value for NodeId.1.: Provided Daml-LF value to encode exceeds maximum nesting level of 100",
       ),
       (
         "Failure to parse party id",
@@ -217,14 +213,13 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             unsuffixedId(1),
             signatories = Set(signatory),
             key = Some(
-              LfGlobalKeyWithMaintainers
-                .assertBuild(
-                  templateId,
-                  contractInst.unversioned.arg,
-                  crypto.Hash.hashPrivateKey(contractInst.unversioned.arg.toString),
-                  Set.empty,
-                  LfPackageName.assertFromString("package-name"),
-                )
+              LfGlobalKeyWithMaintainers(
+                templateId,
+                contractArg.unversioned,
+                crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),
+                Set.empty,
+                LfPackageName.assertFromString("package-name"),
+              )
             ),
           ),
           ExampleTransactionFactory.exerciseNode(
@@ -232,10 +227,10 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             signatories = Set(signatory),
             actingParties = Set(signatory),
             key = Some(
-              LfGlobalKeyWithMaintainers.assertBuild(
+              LfGlobalKeyWithMaintainers(
                 templateId,
-                contractInst.unversioned.arg,
-                crypto.Hash.hashPrivateKey(contractInst.unversioned.arg.toString),
+                contractArg.unversioned,
+                crypto.Hash.hashPrivateKey(contractArg.unversioned.toString),
                 Set.empty,
                 packageName,
               )
@@ -248,7 +243,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
     )
 
   // Well-formed transactions are mostly covered by ExampleTransactionFactoryTest. So we test only a special cases here.
-  val wellformedExamples: TableFor3[String, (LfVersionedTransaction, TransactionMetadata), Stage] =
+  val wellFormedExamples: TableFor3[String, (LfVersionedTransaction, TransactionMetadata), Stage] =
     Table(
       ("Description", "Transaction and seeds", "Suffixing"),
       (
@@ -269,20 +264,25 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         description must {
           "be reported as malformed" in {
             WellFormedTransaction
-              .check(transaction, metadata, state)
+              .check(transaction, metadata, state, PathRollbackContextFactory)
               .left
               .value should fullyMatch regex expectedError
             an[IllegalArgumentException] must be thrownBy
-              WellFormedTransaction.checkOrThrow(transaction, metadata, WithoutSuffixes)
+              WellFormedTransaction.checkOrThrow(
+                transaction,
+                metadata,
+                WithoutSuffixes,
+                PathRollbackContextFactory,
+              )
           }
         }
     }
 
-    wellformedExamples.forEvery { case (description, (transaction, metadata), state) =>
+    wellFormedExamples.forEvery { case (description, (transaction, metadata), state) =>
       description must {
         "be accepted as well-formed" in {
           WellFormedTransaction
-            .check(transaction, metadata, state)
+            .check(transaction, metadata, state, PathRollbackContextFactory)
             .value shouldBe a[WellFormedTransaction[?]]
         }
       }
@@ -313,7 +313,9 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
         val expectedMetadata =
           factory.mkMetadata(Map(NodeId(0) -> lfHash(0), NodeId(1) -> lfHash(1)))
 
-        val wfTx = WellFormedTransaction.check(tx, metadata, WithoutSuffixes).value
+        val wfTx = WellFormedTransaction
+          .check(tx, metadata, WithoutSuffixes, PathRollbackContextFactory)
+          .value
         wfTx.unwrap shouldBe expectedTx
         wfTx.metadata shouldBe expectedMetadata
       }

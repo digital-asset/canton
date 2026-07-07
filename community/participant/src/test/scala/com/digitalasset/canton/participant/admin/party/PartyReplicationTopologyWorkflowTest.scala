@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{
   ForceFlags,
+  Namespace,
   ParticipantId,
   PartyId,
   SynchronizerId,
@@ -118,7 +119,7 @@ class PartyReplicationTopologyWorkflowTest
   )
 
   private val topologyStoreTestData =
-    new TopologyStoreTestData(testedProtocolVersion, loggerFactory, executionContext)
+    new TopologyStoreTestData(testedProtocolVersion, loggerFactory)
 
   private def topologyWorkflow(p: ParticipantId = tp): PartyReplicationTopologyWorkflow =
     new PartyReplicationTopologyWorkflow(
@@ -196,6 +197,7 @@ class PartyReplicationTopologyWorkflowTest
             mapping = ptpProposal,
             serial = Some(serial),
             signingKeys = Seq.empty,
+            namespacesToSignFor = Seq(params.targetParticipantId.namespace),
             protocolVersion = testedProtocolVersion,
             expectFullAuthorization = false,
             forceChanges = ForceFlags.none,
@@ -236,6 +238,7 @@ class PartyReplicationTopologyWorkflowTest
           topologyManager.extendSignature(
             any[SignedTopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant]],
             signingKeys = eqTo(Seq.empty),
+            namespacesToSignFor = eqTo(Seq(params.targetParticipantId.namespace)),
             eqTo(ForceFlags.none),
           )(anyTraceContext)
         ).thenReturn(
@@ -349,19 +352,27 @@ class PartyReplicationTopologyWorkflowTest
             mapping = ptpProposalMissingOnboardingFlag,
             serial = Some(serial),
             signingKeys = Seq.empty,
+            namespacesToSignFor = Seq(params.targetParticipantId.namespace),
             protocolVersion = testedProtocolVersion,
             expectFullAuthorization = true,
             forceChanges = ForceFlags.none,
             waitToBecomeEffective = None,
           )
-        ).thenAnswer[TopologyChangeOp, TopologyMapping, Option[PositiveInt], Seq[
-          Fingerprint
-        ], ProtocolVersion, Boolean, ForceFlags, Option[NonNegativeFiniteDuration]] {
-          case (_, mapping, _, _, _, _, _, _) =>
-            // Have the topology manager mock store the transaction in test topology store.
-            EitherT.right[TopologyManagerError](
-              add(topologyStore)(tsSerial, serial, mapping)
-            )
+        ).thenAnswer[
+          TopologyChangeOp,
+          TopologyMapping,
+          Option[PositiveInt],
+          Seq[Fingerprint],
+          Seq[Namespace],
+          ProtocolVersion,
+          Boolean,
+          ForceFlags,
+          Option[NonNegativeFiniteDuration],
+        ] { case (_, mapping, _, _, _, _, _, _, _) =>
+          // Have the topology manager mock store the transaction in test topology store.
+          EitherT.right[TopologyManagerError](
+            add(topologyStore)(tsSerial, serial, mapping)
+          )
         }
 
         for {

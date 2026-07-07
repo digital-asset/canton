@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.nonempty.NonEmpty
 
 object Pruning {
 

@@ -4,12 +4,12 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.sequencing.protocol.Recipients.cc
 import com.digitalasset.canton.sequencing.protocol.RecipientsTest.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext {
@@ -97,6 +97,15 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
       )
       recipients.leafRecipients shouldBe
         NonEmpty.mk(Set, recP2, recP3, recP4, recP6)
+    }
+
+    "correctly compute depth of tree" in {
+      t1.depth shouldBe 1
+      t2.depth shouldBe 1
+      t3.depth shouldBe 2
+      t4.depth shouldBe 1
+      t5.depth shouldBe 3
+      t6.depth shouldBe 1
     }
   }
 }

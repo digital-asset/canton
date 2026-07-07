@@ -254,7 +254,13 @@ class DbLockedConnectionPool private (
     }
 
   private def scheduleHealthCheck(now: CantonTimestamp): Unit =
-    clock.scheduleAt(runScheduledHealthCheck, now.add(config.healthCheckPeriod.asJava)).discard
+    clock
+      .scheduleAtCancelledOnShutdown(
+        runScheduledHealthCheck,
+        s"${getClass.getName}: scheduling health check",
+        now.add(config.healthCheckPeriod.asJava),
+      )
+      .discard
 
   private def findActiveConnection(pool: Seq[DbLockedConnection]): Option[KeepAliveConnection] = {
     val availableConnectionOpt = pool.find(_.get.exists(_.markInUse()))
@@ -280,6 +286,9 @@ class DbLockedConnectionPool private (
     case _: State.Active if mainConnection.isActive => true
     case _ => false
   }
+
+  def mainConnectionStatus: Either[DbLockedConnectionError, KeepAliveConnection] =
+    mainConnection.get
 
   def isPassive: Boolean = stateRef.get() match {
     case _: State.Active => false

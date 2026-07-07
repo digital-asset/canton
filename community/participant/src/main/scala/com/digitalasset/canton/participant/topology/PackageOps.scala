@@ -10,8 +10,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -27,7 +25,7 @@ import com.digitalasset.canton.ledger.api.{
   SinglePackageTargetVetting,
   UpdateVettedPackagesForceFlags,
 }
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
@@ -42,10 +40,11 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ContinueAfterFailure, SimpleExecutionQueue}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.{FailureMode, SimpleExecutionQueue}
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyReturningOps.*
 
 import scala.concurrent.ExecutionContext
 
@@ -117,7 +116,6 @@ class PackageOpsImpl(
     val participantId: ParticipantId,
     stateManager: SyncPersistentStateManager,
     topologyLookup: TopologyLookup,
-    initialProtocolVersion: ProtocolVersion,
     val loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
@@ -132,8 +130,11 @@ class PackageOpsImpl(
     timeouts,
     loggerFactory,
     logTaskTiming = false,
-    failureMode = ContinueAfterFailure,
+    failureMode = FailureMode.ContinueAfterFailure,
   )
+
+  override protected def onClosed(): Unit =
+    LifeCycle.close(vettingExecutionQueue)(logger)
 
   override def checkPackageUnused(packageId: PackageId)(implicit
       tc: TraceContext
@@ -519,7 +520,8 @@ class PackageOpsImpl(
             mapping = mapping,
             serial = Some(nextSerial),
             signingKeys = Seq.empty,
-            protocolVersion = initialProtocolVersion,
+            namespacesToSignFor = Seq.empty,
+            protocolVersion = topologyManager.psid.protocolVersion,
             expectFullAuthorization = true,
             forceChanges = forceFlags,
             waitToBecomeEffective = waitToBecomeEffective,

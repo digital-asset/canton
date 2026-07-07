@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.LeaderSelectionPolicyConfig.Blacklisting
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModuleTest.TestOutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -48,8 +47,8 @@ class BlacklistLeaderSelectionPolicyTest extends AnyWordSpec with BaseTest {
       val leaderSelectionPolicy =
         BlacklistLeaderSelectionPolicy.create(
           state,
-          Blacklisting(),
           orderingTopology,
+          testedProtocolVersion,
           store,
           metrics,
           loggerFactory,
@@ -68,8 +67,8 @@ class BlacklistLeaderSelectionPolicyTest extends AnyWordSpec with BaseTest {
       val leaderSelectionPolicy =
         BlacklistLeaderSelectionPolicy.create(
           state,
-          Blacklisting(),
           orderingTopology,
+          testedProtocolVersion,
           store,
           metrics,
           loggerFactory,

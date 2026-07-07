@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeyUsage, SigningPublicKey}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.topology.{Namespace, TestingOwnerWithKeys}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 import scala.util.Random
@@ -51,6 +51,7 @@ trait BaseAuthorizationGraphTest { self: BaseTest =>
   val nsk3k1_nonRoot_remove =
     mkRemove(mkNSD(namespace, key3, canSignNamespaceDelegations = false), key1)
   val nsk4k3 = mkAdd(mkNSD(namespace, key4, canSignNamespaceDelegations = true), key3)
+  val nsk5k3 = mkAdd(mkNSD(namespace, key5, canSignNamespaceDelegations = true), key3)
   val nsk5k3_nonRoot = mkAdd(mkNSD(namespace, key5, canSignNamespaceDelegations = false), key3)
 
   val decentralizedNamespace =

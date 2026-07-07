@@ -142,7 +142,7 @@ stability_crash_recovery_test:
       type: boolean
       default: true
   executor: canton-xlarge-docker-with-postgres
-  parallelism: 64 # The number of test runs. Increase to make the test more "aggressive".
+  parallelism: 16 # The number of test runs. Increase to make the test more "aggressive".
   # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
   steps:
     - run_crash_recovery_tests:
@@ -154,8 +154,9 @@ stability_crash_recovery_test:
 stability_crash_recovery_test_alerting:
   executor: canton-small-docker
   steps:
+    - checkout
     - check_number_of_successes:
-        min_successes: 32 # Low threshold, since test failures are reported to datadog anyway
+        min_successes: 8 # Low threshold, since test failures are reported to datadog anyway
         job_name: "stability_crash_recovery_test"
     - slack_red_main_with_volunteer
 
@@ -203,6 +204,26 @@ release_test:
         do_checkout: false # we already did the checkout before restoring the KMS driver
     - slack_red_main_with_volunteer
 
+test_docker_images:
+  executor: canton-large-docker-on-cci
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: false
+        is_manual: false
+    - setup_remote_docker
+    - run:
+        name: Build and test docker images (without publishing)
+        command: ./docker/canton/build_canton_image.sh false
+    - store_artifacts:
+        path: docker/canton/tests/ping/ci-artifacts/compose-logs
+        destination: docker-ping-test-logs
+        when: always
+    - slack_red_main_with_volunteer
+
 protocol_continuity_test_all:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 12 # Should be the same as num_test_buckets below, as we want to run every test once.
@@ -237,9 +258,25 @@ protocol_continuity_test_latest:
         num_parallel_tasks: "1"
         timeout: "30m"
 
+# Job used to run the ACS commitment tests in PV DEV, which are currently excluded from the regular test runs on dev branches.
+# This allows us to run them more frequently and get faster feedback during development of the redesigned ACS commitment feature.
+# TODO(#33536): Remove this job and usages once the ACS commitment redesign development is complete
+temp_acs_commitment_tests_pv_dev:
+  parameters:
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 1
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: "DEV"
+    - run_temp_acs_commitment_tests
+
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   steps:
+    - use_new_sequencer_aggregator
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
@@ -255,7 +292,8 @@ nightly_integration_test_with_session_keys:
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
-                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"
         num_test_buckets: "2"
         num_parallel_tasks: "1"
 
@@ -292,6 +330,8 @@ nightly_integration_test_bftordering_only:
         num_test_buckets: "2"
         num_parallel_tasks: "1"
         timeout: "60m"
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: "U04S25SG9D5" # Daniel
 
 nightly_test_upgrades_matrix:
   executor: canton-xlarge-docker-with-postgres
@@ -303,6 +343,20 @@ nightly_test_upgrades_matrix:
         report_to_datadog: false
     - slack_red_main_with_volunteer:
         fixed_volunteer: "U03HCPABC9M" # Dylan
+
+model_based_external_parties_test:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - set_external_parties
+    - run_tests:
+        command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        num_parallel_tasks: "1"
+        timeout: "120m"
+        report_to_datadog: false
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: "U03NCGBFCDP" # Thibault
 
 model_based_test:
   executor: canton-xlarge-docker-with-postgres
@@ -320,6 +374,131 @@ model_based_test:
         report_to_datadog: false
     - slack_red_main_with_volunteer:
         fixed_volunteer: "U05KX5V7KJN" # Paul
+
+generate_transaction_snapshot:
+  executor: canton-xlarge-docker-with-postgres
+  parameters:
+    git_commit:
+      default: ""
+      type: string
+    repository_url:
+      default: "https://github.com/DACH-NY/canton-network-apps.git"
+      type: string
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        name: Clone and Build Daml project from Github URL, then save test dar files
+        command: |
+          cd /tmp/workspace
+
+          BASE_REPOSITORY_URL=$(echo << parameters.repository_url >> | cut -c 9-)
+
+          if [ -z "<< parameters.git_commit >>" ]; then
+            git clone --depth 1 https://${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+          else
+            git clone --depth 1 --revision << parameters.git_commit >> https://${GITHUB_TOKEN}@${BASE_REPOSITORY_URL}
+          fi
+
+          cd $(basename << parameters.repository_url >> .git)
+          direnv allow .
+          eval "$(direnv export bash)"
+          unset TMP TMPDIR
+          export SNAPSHOT_VERSION=$(git rev-parse --short HEAD)
+          export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION
+          echo "export SNAPSHOT_DIR=/tmp/workspace/daml-lf-snapshot-data/$SNAPSHOT_VERSION" >> $BASH_ENV
+          dpm build --all
+          mkdir -p $SNAPSHOT_DIR/dars
+          find . -regex ".*/test/\.daml/.*\.dar" -print -exec cp {} $SNAPSHOT_DIR/dars \;
+    - checkout_and_restore_caches
+    - run:
+        command: |
+          export DAR_DIR=$SNAPSHOT_DIR/dars
+          .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.canton.integration.tests.snapshot.GenerateSnapshots" checkErrors
+        environment:
+          EXECUTOR_NUM_CPUS: 1
+          STANDALONE: "True"
+    - run:
+        command: |
+          echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
+          gcloud storage cp --recursive "$SNAPSHOT_DIR" "gs://daml-lf-snapshot-data"
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: U03K3A3UAGY # Carl
+
+benchmark_transaction_snapshot:
+  executor: canton-xlarge-docker-with-postgres
+  parameters:
+    snapshot_version:
+      type: string
+      default: "94db88e"
+    min_transaction_nodes:
+      type: integer
+      default: 0
+    min_fetch_nodes:
+      type: integer
+      default: 0
+    min_steps:
+      type: integer
+      default: 0
+    persist_benchmarking_result:
+      type: boolean
+      default: true
+  steps:
+    - checkout_and_restore_caches
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        command: |
+          echo "export SNAPSHOT_VERSION=$SNAPSHOT_VERSION" >> $BASH_ENV
+          echo "export SNAPSHOT_DIR_BASE=/tmp/workspace/daml-lf-snapshot-data" >> $BASH_ENV
+          source "$BASH_ENV"
+          echo "export SNAPSHOT_DIR=$SNAPSHOT_DIR_BASE/$SNAPSHOT_VERSION" >> $BASH_ENV
+        environment:
+          SNAPSHOT_VERSION: << parameters.snapshot_version >>
+    - run:
+        command: |
+          echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
+          mkdir -p $SNAPSHOT_DIR
+          gcloud storage cp --recursive "gs://daml-lf-snapshot-data/$SNAPSHOT_VERSION" "$SNAPSHOT_DIR_BASE"
+          echo "export SNAPSHOT_FILE=$(ls $SNAPSHOT_DIR/snapshot-*.bin | head -n 1)" >> $BASH_ENV
+    - run:
+        command: |
+          export STANDALONE=True
+          .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.daml.lf.testing.snapshot.ExtractSnapshotChoices"
+        environment:
+          EXECUTOR_NUM_CPUS: 1
+          MIN_FETCH_NODE_COUNT: << parameters.min_fetch_nodes >>
+          MIN_TX_NODE_COUNT: << parameters.min_transaction_nodes >>
+          MIN_STEP_COUNT: << parameters.min_steps >>
+    - run:
+        command: |
+          mkdir -p "$SNAPSHOT_DIR/results/$CIRCLE_SHA1/$CIRCLE_BUILD_NUM"
+          echo "export BENCHMARKING_RESULT_FILE=$SNAPSHOT_DIR/results/$CIRCLE_SHA1/$CIRCLE_BUILD_NUM/benchmarking-results.json" >> $BASH_ENV
+          CHOICE_NAMES=$(paste -sd, ${SNAPSHOT_FILE}.choices)
+          source "$BASH_ENV"
+          .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/Jmh/run -p entriesFile=$SNAPSHOT_FILE -p choiceName=$CHOICE_NAMES -p darDir=$SNAPSHOT_DIR/dars -rff $BENCHMARKING_RESULT_FILE -rf json"
+        environment:
+          EXECUTOR_NUM_CPUS: 1
+          TIMEOUT: 1h
+    - run:
+        command: |
+          if [[ "<< parameters.persist_benchmarking_result >>" == "true" ]]; then
+            echo $GCLOUD_DAML_LF_SERVICE_ACCOUNT | gcloud auth activate-service-account --key-file=-
+            gcloud storage cp --recursive "$SNAPSHOT_DIR/results" "gs://daml-lf-snapshot-data/$SNAPSHOT_VERSION"
+          fi
+    - run:
+        name: Copy benchmarking results and preserve them as build artefacts
+        when: always
+        command: |
+          mkdir -p log
+          cp $BENCHMARKING_RESULT_FILE log
+    - store_artifacts:
+        destination: log
+        name: Store log directory as artifacts (if any)
+        path: log
+    - post_transaction_snapshot_metrics
+    - slack_red_main_with_volunteer:
+        fixed_volunteer: U03K3A3UAGY # Carl
 
 toxiproxy_test_fast:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -576,6 +755,7 @@ test_ping_windows:
 test_ping_arm:
   executor: medium-arm-machine
   steps:
+    - checkout
     - attach_workspace:
         at: workspace
     - run:

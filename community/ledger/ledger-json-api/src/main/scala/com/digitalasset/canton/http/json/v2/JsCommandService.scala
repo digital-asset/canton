@@ -128,6 +128,15 @@ class JsCommandService(
       commandCompletionStream,
       timeoutOpenEndedStream = (_: command_completion_service.CompletionStreamRequest) => true,
     ),
+    websocket(
+      JsCommandService.commandCompletionsEndpoint,
+      commandCompletionsStream,
+    ),
+    asList(
+      JsCommandService.commandCompletionsListEndpoint,
+      commandCompletionsStream,
+      timeoutOpenEndedStream = (_: command_completion_service.GetCompletionsRequest) => true,
+    ),
   )
 
   private def commandCompletionStream(
@@ -140,6 +149,20 @@ class JsCommandService(
     implicit val tc: TraceContext = caller.traceContext()
     prepareSingleWsStream(
       commandCompletionServiceClient(caller.token()).completionStream,
+      Future.successful[command_completion_service.CompletionStreamResponse],
+    )
+  }
+
+  private def commandCompletionsStream(
+      caller: CallerContext
+  ): TracedInput[Unit] => Flow[
+    command_completion_service.GetCompletionsRequest,
+    command_completion_service.CompletionStreamResponse,
+    NotUsed,
+  ] = _ => {
+    implicit val tc: TraceContext = caller.traceContext()
+    prepareSingleWsStream(
+      commandCompletionServiceClient(caller.token()).getCompletions,
       Future.successful[command_completion_service.CompletionStreamResponse],
     )
   }
@@ -402,6 +425,33 @@ object JsCommandService extends DocumentationEndpoints {
        """.stripMargin.trim)
       .inStreamListParamsAndDescription()
 
+  val commandCompletionsEndpoint =
+    commands.get
+      .in(sttp.tapir.stringToPath("command-completions"))
+      .out(
+        webSocketBody[
+          command_completion_service.GetCompletionsRequest,
+          CodecFormat.Json,
+          Either[JsCantonError, command_completion_service.CompletionStreamResponse],
+          CodecFormat.Json,
+        ](PekkoStreams)
+      )
+      .protoRef(command_completion_service.CommandCompletionServiceGrpc.METHOD_GET_COMPLETIONS)
+
+  val commandCompletionsListEndpoint =
+    commands.post
+      .in(sttp.tapir.stringToPath("command-completions"))
+      .in(jsonBody[command_completion_service.GetCompletionsRequest])
+      .out(jsonBody[Seq[command_completion_service.CompletionStreamResponse]])
+      .description(s"""|
+           |Query completions list (blocking call)
+           |
+           |${createProtoRef(
+          command_completion_service.CommandCompletionServiceGrpc.METHOD_GET_COMPLETIONS
+        )}
+       """.stripMargin.trim)
+      .inStreamListParamsAndDescription()
+
   override def documentation: Seq[AnyEndpoint] = Seq(
     submitAndWait,
     submitAndWaitForTransactionEndpoint,
@@ -411,6 +461,8 @@ object JsCommandService extends DocumentationEndpoints {
     submitReassignmentAsyncEndpoint,
     completionStreamEndpoint,
     completionListEndpoint,
+    commandCompletionsEndpoint,
+    commandCompletionsListEndpoint,
   )
 }
 
@@ -458,6 +510,9 @@ object JsCommandServiceCodecs {
   implicit val jsCommandExerciseRW: Codec[JsCommand.ExerciseCommand] = deriveConfiguredCodec
 
   implicit val commandCompletionRW: Codec[command_completion_service.CompletionStreamRequest] =
+    deriveRelaxedCodec
+
+  implicit val getCompletionsRequestRW: Codec[command_completion_service.GetCompletionsRequest] =
     deriveRelaxedCodec
 
   implicit val reassignmentCommandsRW: Codec[reassignment_commands.ReassignmentCommands] =

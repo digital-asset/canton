@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
@@ -30,7 +29,8 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.transaction.{TopologyMapping, *}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
+import com.digitalasset.canton.{FailOnShutdown, HasActorSystem, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -40,12 +40,13 @@ trait TopologyStoreTest
     extends AsyncWordSpec
     with TopologyStoreTestBase
     with FailOnShutdown
-    with HasActorSystem {
+    with HasActorSystem
+    with HasExecutionContext {
 
   implicit def closeContext: CloseContext
 
   private[store] val testData =
-    new TopologyStoreTestData(testedProtocolVersion, loggerFactory, executionContext)
+    new TopologyStoreTestData(testedProtocolVersion, loggerFactory)
   import testData.*
 
   private[store] lazy val largeTestSnapshot = {
@@ -131,13 +132,15 @@ trait TopologyStoreTest
         update(store1, ts1, add = Seq(nsd_p1, nsd_p2, nsd_p3)).futureValueUS
         update(store2, ts1, add = Seq(nsd_p1, nsd_p2, nsd_p3)).futureValueUS
 
+        import PositiveInt.two
+
         // store1 can be incrementally cleared
         store1.dumpStoreContent().futureValueUS.result.size shouldBe 3
-        store1.deleteDataChunk(2).futureValueUS shouldBe true
+        store1.deleteDataChunk(two).futureValueUS shouldBe true
         store1.dumpStoreContent().futureValueUS.result.size shouldBe 1
-        store1.deleteDataChunk(2).futureValueUS shouldBe true
+        store1.deleteDataChunk(two).futureValueUS shouldBe true
         store1.dumpStoreContent().futureValueUS.result.size shouldBe 0
-        store1.deleteDataChunk(2).futureValueUS shouldBe false
+        store1.deleteDataChunk(two).futureValueUS shouldBe false
 
         // store2 is unaffected
         store2.dumpStoreContent().futureValueUS.result.size shouldBe 3
@@ -463,6 +466,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory = loggerFactory.appendUnnamedKey("TestName", "case6"),
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
@@ -626,6 +630,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
@@ -838,6 +843,7 @@ trait TopologyStoreTest
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
+              futureSupervisor = futureSupervisor,
               loggerFactory,
               cleanupTopologySnapshot = false,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
@@ -1961,6 +1967,239 @@ trait TopologyStoreTest
 
         }
 
+      }
+
+      "filterProvidesAdditionalSignatures" should {
+
+        val ts1 = CantonTimestamp.Epoch
+        val ts2 = ts1.plusSeconds(10)
+
+        "return an empty sequence when given an empty batch (fast-path)" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_empty")
+
+          for {
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq.empty)
+          } yield {
+            filteredBatch shouldBe empty
+          }
+        }
+
+        "include a brand new proposal that does not exist in the store" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_new")
+          val key = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, key))
+          val brandNewProposal = makeSignedTx(mapping, isProposal = true)(p1Key, key)
+
+          for {
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(brandNewProposal))
+          } yield {
+            filteredBatch should contain only brandNewProposal
+          }
+        }
+
+        "include a proposal that adds a new signature to an existing proposal" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_extraSig")
+          val keyA = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+
+          val baseProposal = makeSignedTx(mapping, isProposal = true)(p1Key, keyA)
+          val proposalWithExtraSig = makeSignedTx(mapping, isProposal = true)(p1Key, p2Key)
+
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(ValidatedTopologyTransaction(baseProposal)),
+            )
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(proposalWithExtraSig))
+          } yield {
+            filteredBatch should contain only proposalWithExtraSig
+          }
+        }
+
+        "drop a proposal that provides duplicate signatures" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_duplicate")
+          val keyA = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+
+          val baseProposal = makeSignedTx(mapping, isProposal = true)(p1Key, keyA)
+          val duplicateProposal = baseProposal.copy()
+
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(ValidatedTopologyTransaction(baseProposal)),
+            )
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(duplicateProposal))
+          } yield {
+            filteredBatch shouldBe empty
+          }
+        }
+
+        "drop a proposal if the store already has a superset of its signatures" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_subset")
+          val keyA = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+
+          val fullySignedProposal = makeSignedTx(mapping, isProposal = true)(p1Key, p2Key)
+          val incomingSubsetProposal =
+            makeSignedTx(mapping, isProposal = true)(p1Key) // Missing p2Key
+
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(ValidatedTopologyTransaction(fullySignedProposal)),
+            )
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(incomingSubsetProposal))
+          } yield {
+            filteredBatch shouldBe empty
+          }
+        }
+
+        "drop a proposal if the transaction is already fully authorized in the store" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_authorized")
+          val keyA = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+
+          val authorizedTx = makeSignedTx(mapping, isProposal = false)(p1Key)
+          val incomingForAuthorized = makeSignedTx(mapping, isProposal = true)(p1Key, p2Key)
+
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(ValidatedTopologyTransaction(authorizedTx)),
+            )
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(incomingForAuthorized))
+          } yield {
+            filteredBatch shouldBe empty
+          }
+        }
+
+        "drop a proposal if its store counterpart is already expired" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_expired")
+          val keyA = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+
+          val expiredProposal = makeSignedTx(mapping, isProposal = true)(p1Key)
+          val incomingForExpired = makeSignedTx(mapping, isProposal = true)(p1Key, p2Key)
+
+          for {
+            // Add the proposal
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(ValidatedTopologyTransaction(expiredProposal)),
+            )
+            // Expire it - NOTE: we use mapping.uniqueKey here, not mapping.uniqueKey.hash!
+            _ <- store.update(
+              SequencedTime(ts2),
+              EffectiveTime(ts2),
+              removals = Map(mapping.uniqueKey -> (None, Set(expiredProposal.hash))),
+              additions = Seq.empty,
+            )
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(incomingForExpired))
+          } yield {
+            filteredBatch shouldBe empty
+          }
+        }
+
+        "include a proposal if the previous attempt in the store was rejected" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_rejected")
+          val keyA = factory.SigningKeys.key1
+          val mapping = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+
+          val rejectedProposal = makeSignedTx(mapping, isProposal = true)(p1Key)
+          val incomingForRejected = makeSignedTx(mapping, isProposal = true)(p1Key, p2Key)
+
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(
+                ValidatedTopologyTransaction(
+                  rejectedProposal,
+                  rejectionReason = Some(
+                    TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+                      "Insufficient signatures"
+                    )
+                  ),
+                )
+              ),
+            )
+            filteredBatch <- store.filterProvidesAdditionalSignatures(Seq(incomingForRejected))
+          } yield {
+            // The DB ignores rejected rows, so the filter treats it as a brand new proposal
+            filteredBatch should contain only incomingForRejected
+          }
+        }
+
+        "correctly process a batch of multiple mixed transactions in a single invocation" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "filterSigs_mixedBatch")
+
+          val keyA = factory.SigningKeys.key1
+          val keyB = factory.SigningKeys.key2
+          val keyC = factory.SigningKeys.key3
+          val keyD = factory.SigningKeys.key4
+
+          // Transaction to be augmented (needs extra sig)
+          val mappingAugment = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyA))
+          val baseForAugment = makeSignedTx(mappingAugment, isProposal = true)(p1Key)
+          val incomingAugment = makeSignedTx(mappingAugment, isProposal = true)(p1Key, p2Key)
+
+          // Transaction that is a duplicate (should be dropped)
+          val mappingDuplicate = OwnerToKeyMapping.tryCreate(p2Id, NonEmpty(Seq, keyB))
+          val baseDuplicate = makeSignedTx(mappingDuplicate, isProposal = true)(p2Key)
+          val incomingDuplicate = baseDuplicate.copy()
+
+          // Transaction that is already authorized (should be dropped)
+          val mappingAuthorized = OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, keyC))
+          val baseAuthorized = makeSignedTx(mappingAuthorized, isProposal = false)(p1Key)
+          val incomingForAuthorized =
+            makeSignedTx(mappingAuthorized, isProposal = true)(p1Key, p2Key)
+
+          // Brand-new transaction (should be kept)
+          val mappingNew = OwnerToKeyMapping.tryCreate(p2Id, NonEmpty(Seq, keyD))
+          val incomingNew = makeSignedTx(mappingNew, isProposal = true)(p2Key)
+
+          for {
+            // Seed the database with the baseline states
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(
+                ValidatedTopologyTransaction(baseForAugment),
+                ValidatedTopologyTransaction(baseDuplicate),
+                ValidatedTopologyTransaction(baseAuthorized),
+              ),
+            )
+
+            // Pass all incoming transactions as a single batch
+            filteredBatch <- store.filterProvidesAdditionalSignatures(
+              Seq(
+                incomingAugment,
+                incomingDuplicate,
+                incomingForAuthorized,
+                incomingNew,
+              )
+            )
+          } yield {
+            // Assert that the batch was correctly filtered
+            filteredBatch should contain theSameElementsAs Seq(
+              incomingAugment,
+              incomingNew,
+            )
+          }
+        }
       }
 
     }

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.{
@@ -21,8 +22,8 @@ import java.util.regex.Pattern
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 
-final class CommandSubmissionCompletionIT extends LedgerTestSuite {
-  import CompanionImplicits.*
+final class CommandSubmissionCompletionIT(testDars: TestDars) extends LedgerTestSuite {
+  import testDars.companionImplicits.*
 
   test(
     "CSCCompletions",

@@ -18,6 +18,34 @@ fi
 
 _print_header "Wrapper for ${c_lgreen}CI/CD${c_reset} run SBT (GHA: $IS_GHA, CCI: $IS_CCI)"
 
+# GHA MIGRATION: In observed GHA runs, /bin/bash subprocess locale behavior differs from the
+# expected shell.nix locale setup. Instead of assuming why, validate locales in the same shell
+# context and fall back only when that subprocess reports "cannot change locale".
+# This block is gated to GHA to avoid changing CircleCI behavior in this PR.
+if [[ "$IS_GHA" == "true" ]]; then
+  choose_working_locale() {
+    local candidate output
+    for candidate in en_US.UTF-8 C.UTF-8 C; do
+      output=$(LC_ALL="$candidate" LANG="$candidate" /bin/bash -c 'locale >/dev/null' 2>&1 || true)
+      if [[ "$output" != *"cannot change locale"* ]]; then
+        echo "$candidate"
+        return 0
+      fi
+    done
+    echo "C"
+  }
+
+  TARGET_LOCALE="$(choose_working_locale)"
+  export LANG="$TARGET_LOCALE"
+  export LC_ALL="$TARGET_LOCALE"
+  if [[ "$TARGET_LOCALE" == "en_US.UTF-8" ]]; then
+    info "Using locale ${TARGET_LOCALE} for sbt-ci-wrapper"
+  else
+    info "en_US.UTF-8 is not usable in this GHA subprocess context, using ${TARGET_LOCALE} instead."
+  fi
+fi
+
+
 # GHA Migration: Added new condition for GHA
 if [ -z "${EXECUTOR_NUM_CPUS##*[!0-9]*}" ]; then
   if [[ "$IS_GHA" == "true" ]]; then
@@ -37,7 +65,6 @@ if [ -z "${EXECUTION_CONTEXT_SIZE##*[!0-9]*}" ]; then
   EXECUTION_CONTEXT_SIZE=${EXECUTOR_NUM_CPUS}
 fi
 
-TEMPDIR="${TEMPDIR:-/tmp}"
 # SBT output mode
 DEBUG="${DEBUG:-false}"
 # Use Azure DevOps Maven mirror for dependencies
@@ -53,6 +80,10 @@ fi
 TIMEOUT="${TIMEOUT:-25m}"
 SUCCEED_ON_ERROR="${SUCCEED_ON_ERROR:-0}"
 RETRY_FETCH="${RETRY_FETCH:-0}"
+REPORT_TO_DATADOG="${REPORT_TO_DATADOG:-true}"
+SBT_BOOTSTRAP_RETRY_ATTEMPTS="${SBT_BOOTSTRAP_RETRY_ATTEMPTS:-2}"
+SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS="${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS:-30}"
+SBT_BOOTSTRAP_RETRY_PATTERN="${SBT_BOOTSTRAP_RETRY_PATTERN:-Server returned HTTP response code: 429|CantDownloadModule|could not retrieve sbt}"
 FAIL_ON_ERROR_IN_OUTPUT="${FAIL_ON_ERROR_IN_OUTPUT:-1}"
 
 if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
@@ -124,7 +155,16 @@ on_exit() {
         else
             err "The script has failed with exit code $CODE."
         fi
-        python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
+        if [[ "${REPORT_TO_DATADOG,,}" == "true" || "${REPORT_TO_DATADOG}" == "1" ]]; then
+          if [[ -z "${DATADOG_API_KEY:-}" ]]; then
+            err "REPORT_TO_DATADOG is enabled, but DATADOG_API_KEY is not set"
+            exit 1
+          else
+            python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py "SBT exited with code $CODE ($HINT_MSG)"
+          fi
+        else
+          info "REPORT_TO_DATADOG is disabled, skipping Datadog reporting"
+        fi
     fi
     # ${variable,,} -- convert value to lowercase (Bash ver > 4)
     if [[ "${SUCCEED_ON_ERROR,,}" == "true" || "${SUCCEED_ON_ERROR}" == "1" ]]; then
@@ -138,6 +178,12 @@ trap on_exit EXIT
 # Necessary workaround to prevent sbt from setting default JVM options
 export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
 
+# Create a local temp folder in the working directory
+# This prevents protoc failures caused by 'noexec' locks on the global /tmp partition.
+mkdir -p .citmp
+export TEMPDIR="$PWD/.citmp"
+export SBT_OPTS="${SBT_OPTS} -Djava.io.tmpdir=${TEMPDIR}"
+
 _print_header "${c_white}Running parameters:${c_reset}"
 # Print variable = value of configuration
 for i in EXECUTION_CONTEXT_SIZE \
@@ -147,7 +193,11 @@ for i in EXECUTION_CONTEXT_SIZE \
          EXECUTOR_JVM_METASPACE_SIZE \
          TIMEOUT \
          SUCCEED_ON_ERROR \
+         REPORT_TO_DATADOG \
          RETRY_FETCH \
+         SBT_BOOTSTRAP_RETRY_ATTEMPTS \
+         SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS \
+         SBT_BOOTSTRAP_RETRY_PATTERN \
          FAIL_ON_ERROR_IN_OUTPUT \
          CUSTOM_JAVA_HOME \
          EXTRA_PARAMETERS \
@@ -188,16 +238,34 @@ if [[ "${USE_MAVEN_MIRROR,,}" == "true" || "${USE_MAVEN_MIRROR}" == "1" ]]; then
   SBT_CMD+=("-Dsbt.override.build.repos=true")
   SBT_CMD+=("-Dsbt.repository.config=${ABSDIR}/repositories")
   #  *** Credentials for Azure maven mirror ***
-  #   `realm` - must be `null` or `empty  to work with Azure
-  #   `host` - `pkgs.dev.azure.com` for Azure maven mirror
-  #.  `username` - used environment variable `MAVEN_USERNAME``
-  #   `password`- used environment variable `MAVEN_PASSWORD` (PERSONAL_ACCESS_TOKEN)
-  # * Note *
-  #    Variables stored in CircleCi context `maven-mirror`
-  SBT_CMD+=("-Dsbt.boot.credentials=${ABSDIR}/credentials.sbt")
-  # sbt and coursier can have different authorization, so it both need to be authorized dedicated.
+  #   Two separate credential mechanisms are needed:
+  #
+  #   1. Coursier (used by regular compile/test): reads credentials.sbt as Scala.
+  #      Passes null realm; Coursier matches by host only.
+  #      Variables: MAVEN_USERNAME, MAVEN_PASSWORD (stored in CircleCI context `maven-mirror`).
+  #
+  #   2. Ivy (used by sbt-license-report's updateLicenses): reads a Java .properties file.
+  #      -Dsbt.credentials.file CANNOT read Scala .sbt files; it silently produces empty
+  #      credentials if given one. We generate a proper properties file at runtime.
+  #      Realm is left empty; sbt's IvyAuthenticator matches credentials by host only,
+  #      so the exact WWW-Authenticate realm string does not need to match.
+  #   -Dsbt.boot.credentials also expects a .properties file (same format), so we reuse
+  #   the generated file for all three properties.
+  #
+  # Fail early if password is missing: the generated file would be written with an empty
+  # password and the failure would surface much later as a cascade of "module not found".
+  : "${MAVEN_PASSWORD:?MAVEN_PASSWORD must be set when USE_MAVEN_MIRROR=true}"
+  # Generate a Java properties credentials file for Coursier boot, Ivy, and sbt boot.
+  # Empty realm is intentional: sbt's Credentials.forHost matches by host, ignoring realm.
+  IVY_CREDS_FILE="${TEMPDIR}/sbt-ivy-credentials.properties"
+  install -m 600 /dev/null "${IVY_CREDS_FILE}"
+  printf 'realm=\nhost=%s\nuser=%s\npassword=%s\n' \
+    "${MAVEN_HOST:-pkgs.dev.azure.com}" \
+    "${MAVEN_USERNAME:-digitalasset}" \
+    "${MAVEN_PASSWORD}" > "${IVY_CREDS_FILE}"
+  SBT_CMD+=("-Dsbt.boot.credentials=${IVY_CREDS_FILE}")
   SBT_CMD+=("-Dsbt.coursier.credentials=${ABSDIR}/credentials.sbt")
-  SBT_CMD+=("-Dsbt.credentials.file=${ABSDIR}/credentials.sbt")
+  SBT_CMD+=("-Dsbt.credentials.file=${IVY_CREDS_FILE}")
 fi
 
 # Setup heap size
@@ -255,12 +323,33 @@ done
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]} ${PIPESTATUS[2]}"
 #   false | true
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"
-python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
-  timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
-  tee "${SBT_OUTPUT_FILE}"
+attempt=1
+# Note: RETRY_FETCH pipes newlines into sbt to prompt it to resume stalled dependency downloads
+# (in-process, single run). The outer bootstrap retry loop below is complementary: it re-invokes
+# the entire sbt process when the resolver itself is throttled (429) or the sbt launcher fails to
+# bootstrap. These two mechanisms target different failure modes and are not redundant.
+# Worst-case wall clock time is SBT_BOOTSTRAP_RETRY_ATTEMPTS x TIMEOUT (default: 2 x 25m = 50m).
+# Ensure the GHA job's timeout-minutes is set to at least that value.
+while true; do
+  python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
+    timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
+    tee "${SBT_OUTPUT_FILE}"
 
-# save sbt command exit code for use on exit
-CODE=${PIPESTATUS[1]}
+  # save sbt command exit code for use on exit
+  CODE=${PIPESTATUS[1]}
+
+  # Retry only for transient bootstrap and repository throttling errors.
+  if [[ "$CODE" != 0 ]] && grep -E -q "${SBT_BOOTSTRAP_RETRY_PATTERN}" "${SBT_OUTPUT_FILE}"; then
+    if [[ "$attempt" -lt "$SBT_BOOTSTRAP_RETRY_ATTEMPTS" ]]; then
+      err "sbt bootstrap/download failed (attempt ${attempt}/${SBT_BOOTSTRAP_RETRY_ATTEMPTS}), retrying in ${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS}s..."
+      attempt=$((attempt + 1))
+      sleep "${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS}"
+      continue
+    fi
+  fi
+
+  break
+done
 
 # Use filter 'ansi2txt' to remove control characters starting with '\e' like:
 #   reset text formatting: '\e[m'

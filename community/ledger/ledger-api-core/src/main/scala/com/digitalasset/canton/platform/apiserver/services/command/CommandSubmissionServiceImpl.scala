@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services.command
 
 import cats.data.EitherT
-import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
@@ -24,13 +23,14 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.apiserver.SeedService
+import com.digitalasset.canton.platform.apiserver.SubmissionSeed
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
 import com.digitalasset.canton.platform.apiserver.services.{RejectionGenerators, logging}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.command.ApiCommand
@@ -47,7 +47,6 @@ private[apiserver] object CommandSubmissionServiceImpl {
       syncService: state.SyncService,
       timeProvider: TimeProvider,
       timeProviderType: TimeProviderType,
-      seedService: SeedService,
       commandExecutor: CommandExecutor,
       checkOverloaded: TraceContext => Option[state.SubmissionResult],
       metrics: LedgerApiServerMetrics,
@@ -59,7 +58,6 @@ private[apiserver] object CommandSubmissionServiceImpl {
     syncService,
     timeProvider,
     timeProviderType,
-    seedService,
     commandExecutor,
     checkOverloaded,
     metrics,
@@ -71,7 +69,6 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
     syncService: state.SyncService,
     timeProvider: TimeProvider,
     timeProviderType: TimeProviderType,
-    seedService: SeedService,
     commandExecutor: CommandExecutor,
     checkOverloaded: TraceContext => Option[state.SubmissionResult],
     metrics: LedgerApiServerMetrics,
@@ -117,7 +114,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
         )
 
       val evaluatedCommand =
-        evaluateAndSubmit(seedService.nextSeed(), request.commands)
+        evaluateAndSubmit(SubmissionSeed.generate(syncService.randomOps), request.commands)
           .transform(handleSubmissionResult)
       evaluatedCommand.thereafter(logger.logErrorsOnCall[UnlessShutdown[Unit]])
     }
@@ -192,7 +189,7 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
           logger.info(s"Delaying submission by $submissionDelay")
           metrics.commands.delayedSubmissions.mark()
           val scalaDelay = scala.concurrent.duration.Duration.fromNanos(submissionDelay.toNanos)
-          Delayed.Future.by(scalaDelay)(submitTransaction(commandExecutionResult))
+          DelayUtil.delay(scalaDelay).flatMap(_ => submitTransaction(commandExecutionResult))
         }
       case TimeProviderType.Static =>
         // In static time mode, record time is always equal to ledger time
@@ -215,7 +212,6 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
         result.commandInterpretationResult.submitterInfo,
         result.commandInterpretationResult.transactionMeta,
         result.commandInterpretationResult.interpretationTimeNanos,
-        result.commandInterpretationResult.globalKeyMapping,
         result.commandInterpretationResult.processedDisclosedContracts,
       )
   }

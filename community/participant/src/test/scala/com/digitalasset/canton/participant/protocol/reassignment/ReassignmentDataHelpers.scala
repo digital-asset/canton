@@ -47,7 +47,8 @@ final case class ReassignmentDataHelpers(
       submittingParticipant,
       LedgerCommandId.assertFromString("assignment-validation-command-id"),
       submissionId = None,
-      LedgerUserId.assertFromString("tests"),
+      // Match LedgerApiCommands.defaultUserId so that myParticipant.ledger-api can be used to capture completions.
+      LedgerUserId.assertFromString("CantonConsole"),
       workflowId = None,
     )
 
@@ -56,13 +57,14 @@ final case class ReassignmentDataHelpers(
       submittingParticipant: ParticipantId,
       sourceMediator: MediatorGroupRecipient,
   )(
-      reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant)
+      reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant),
+      reassignmentCounter: ReassignmentCounter = ReassignmentCounter(1),
   ): FullUnassignmentTree =
     unassignmentRequest(
       submitter,
       submittingParticipant,
       sourceMediator,
-    )(reassigningParticipants)
+    )(reassigningParticipants, reassignmentCounter)
       .toFullUnassignmentTree(pureCrypto, pureCrypto, seedGenerator.generateSaltSeed(), uuid)
 
   def unassignmentRequest(
@@ -70,7 +72,8 @@ final case class ReassignmentDataHelpers(
       submittingParticipant: ParticipantId,
       sourceMediator: MediatorGroupRecipient,
   )(
-      reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant)
+      reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant),
+      reassignmentCounter: ReassignmentCounter = ReassignmentCounter(1),
   ): UnassignmentRequest =
     UnassignmentRequest(
       submitterMetadata = submitterInfo(submitter, submittingParticipant),
@@ -81,7 +84,7 @@ final case class ReassignmentDataHelpers(
           Source(sourceValidationPackageId.getOrElse(contract.templateId.packageId)),
         targetValidationPackageId =
           Target(targetValidationPackageId.getOrElse(contract.templateId.packageId)),
-        reassignmentCounter = ReassignmentCounter(1),
+        reassignmentCounter = reassignmentCounter,
       ),
       sourceSynchronizer = sourceSynchronizer,
       sourceMediator = sourceMediator,

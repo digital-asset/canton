@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.crashrecovery
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.*
 import com.digitalasset.canton.admin.api.client.data.ComponentHealthState
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.RemoteMediatorReference
 import com.digitalasset.canton.integration.bootstrap.{
@@ -14,9 +13,9 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UseExternalProcess,
   UsePostgres,
-  UseReferenceBlockSequencer,
   UseSharedStorage,
 }
 import com.digitalasset.canton.integration.tests.*
@@ -56,7 +55,7 @@ trait MediatorFailoverIntegrationTest
       additionalPlugins: Seq[EnvironmentSetupPlugin] = Seq.empty,
   ): Unit = {
     // Order of the plugins is important here
-    registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+    registerPlugin(new UseBftSequencer(loggerFactory))
     registerPlugin(storagePlugin)
     additionalPlugins.foreach(registerPlugin)
     registerPlugin(UseSharedStorage.forMediators(mediator1Name, Seq(mediator2Name), loggerFactory))

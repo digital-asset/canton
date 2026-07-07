@@ -42,9 +42,11 @@ final class SegmentClosingBehaviour[E <: Env[E]](
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var haveReceivedStartModuleClosingBehaviourMessage: Boolean = false
 
-  override def ready(self: ModuleRef[ConsensusSegment.Message]): Unit =
+  override def ready(self: ModuleRef[ConsensusSegment.Message])(implicit
+      traceContext: TraceContext
+  ): Unit =
     // If we are not waiting for any Future, have a message that will stop the module
-    self.asyncSendNoTrace(ConsensusSegment.StartModuleClosingBehaviour)
+    self.asyncSend(ConsensusSegment.StartModuleClosingBehaviour)
 
   override protected def receiveInternal(
       message: ConsensusSegment.Message

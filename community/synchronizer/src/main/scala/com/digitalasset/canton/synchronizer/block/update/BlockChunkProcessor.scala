@@ -8,11 +8,15 @@ import cats.syntax.alternative.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoClient, SynchronizerCryptoClient}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SyncCryptoClient,
+  SynchronizerCryptoClient,
+  SynchronizerSnapshotSyncCryptoApi,
+}
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -22,6 +26,7 @@ import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.{Acknowledgment, Send}
+import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGenerator.AccumulatedStateProcessingBlocks
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
@@ -35,13 +40,21 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-import BlockUpdateGeneratorImpl.{SequencedPreValidatedSubmissionResult, State}
+import BlockUpdateGeneratorImpl.SequencedPreValidatedSubmissionResult
 import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
+
+final case class BlockProcessingParameters(
+    orderingTimeFixMode: OrderingTimeFixMode,
+    lsuSequencingBounds: Option[LsuSequencingBounds],
+    parallelism: PositiveInt,
+    enablePrevalidation: Boolean,
+)
 
 /** Processes a chunk of events in a block, yielding a [[ChunkUpdate]].
   */
@@ -49,21 +62,19 @@ final class BlockChunkProcessor(
     synchronizerSyncCryptoApi: SynchronizerCryptoClient,
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
-    orderingTimeFixMode: OrderingTimeFixMode,
-    lsuSequencingBounds: Option[LsuSequencingBounds],
-    batchingConfig: BatchingConfig,
-    override val loggerFactory: NamedLoggerFactory,
+    parameters: BlockProcessingParameters,
     metrics: SequencerMetrics,
     memberValidator: SequencerMemberValidator,
+    override val loggerFactory: NamedLoggerFactory,
 )(implicit closeContext: CloseContext, tracer: Tracer)
     extends NamedLogging
     with Spanning {
 
   private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
-
+  private val lsuSequencingBounds = parameters.lsuSequencingBounds
   private val inFlightAggregationHandler = new InFlightAggregationHandler(
-    synchronizerSyncCryptoApi.pureCrypto,
     memberValidator,
+    synchronizerSyncCryptoApi,
     loggerFactory,
     protocolVersion,
   )
@@ -71,10 +82,11 @@ final class BlockChunkProcessor(
   private val submissionRequestValidator =
     new SubmissionRequestValidator(
       inFlightAggregationHandler,
-      batchingConfig,
-      loggerFactory,
       memberValidator = memberValidator,
       protocolVersion,
+      parameters.enablePrevalidation,
+      parameters.parallelism,
+      loggerFactory,
     )
 
   private val sequencedSubmissionsValidator =
@@ -89,27 +101,38 @@ final class BlockChunkProcessor(
       loggerFactory,
     )
 
+  def prevalidateLedgerBlockEvent(
+      approxCryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      event: LedgerBlockEvent,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[TracedPossiblyPrevalidated[LedgerBlockEvent]] =
+    submissionRequestValidator.prevalidateEvent(approxCryptoSnapshot, event)
+
   def processDataChunk(
-      state: BlockUpdateGeneratorImpl.State,
+      state: BlockUpdateGenerator.AccumulatedStateProcessingBlocks,
       height: Long,
       index: Int,
-      chunkEvents: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
+      chunkEvents: NonEmpty[Seq[TracedPossiblyPrevalidated[LedgerBlockEvent]]],
+      announcedLsu: Option[AnnouncedLsu],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[(BlockUpdateGeneratorImpl.State, ChunkUpdate)] = {
-    val (lastTsBeforeValidation, fixedTsChanges) = fixTimestamps(state, chunkEvents)
+  ): FutureUnlessShutdown[(BlockUpdateGenerator.AccumulatedStateProcessingBlocks, ChunkUpdate)] = {
+    val (lastTsBeforeValidation, fixedTsChanges) =
+      fixTimestampsAndDropSendsAfterUpgradeTime(state, chunkEvents, announcedLsu)
 
     logChunkDetails(state, height, index, fixedTsChanges)
 
     val orderingRequests =
-      fixedTsChanges.collect { case (ts, ev @ Traced(sendEvent: Send)) =>
+      fixedTsChanges.collect { case (ts, ev @ TracedPossiblyPrevalidated(sendEvent: Send, _)) =>
         // Discard the timestamp of the `Send` event as we're using the adjusted timestamp
         (ts, ev.map(_ => sendEvent.signedSubmissionRequest), sendEvent.orderingSequencerId)
       }
 
     FutureUtil.doNotAwait(
-      recordSubmissionMetrics(fixedTsChanges.map(_._2)),
+      recordSubmissionMetrics(fixedTsChanges.map(_._2.tracedValue)),
       "submission metric updating failed",
     )
 
@@ -154,7 +177,6 @@ final class BlockChunkProcessor(
           invalidAcks,
           inFlightAggregationUpdates,
           lastSequencerEventTimestamp,
-          finalInFlightAggregationsWithAggregationExpiry,
           reversedOutcomes.reverse,
         )
 
@@ -171,7 +193,7 @@ final class BlockChunkProcessor(
           .getOrElse(state.lastChunkTs)
 
       newState =
-        BlockUpdateGeneratorImpl.State(
+        BlockUpdateGenerator.AccumulatedStateProcessingBlocks(
           state.lastBlockTs,
           lastChunkTsOfSuccessfulEvents,
           lastSequencerEventTimestamp.orElse(state.latestSequencerEventTimestamp),
@@ -182,10 +204,10 @@ final class BlockChunkProcessor(
   }
 
   private def logChunkDetails(
-      state: State,
+      state: AccumulatedStateProcessingBlocks,
       height: Long,
       index: Int,
-      assignedTimestamps: Seq[(CantonTimestamp, Traced[LedgerBlockEvent])],
+      assignedTimestamps: Seq[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])],
   )(implicit traceContext: TraceContext): Unit =
     noTracingLogger.whenInfoEnabled {
       val sb = new mutable.StringBuilder()
@@ -231,11 +253,14 @@ final class BlockChunkProcessor(
     }
 
   def emitTick(
-      state: BlockUpdateGeneratorImpl.State,
+      state: BlockUpdateGenerator.AccumulatedStateProcessingBlocks,
       height: Long,
       tickAtLeastAt: CantonTimestamp,
       groupRecipient: Either[AllMembersOfSynchronizer.type, SequencersOfSynchronizer.type],
-  )(implicit ec: ExecutionContext, tc: TraceContext): FutureUnlessShutdown[(State, ChunkUpdate)] = {
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): FutureUnlessShutdown[(AccumulatedStateProcessingBlocks, ChunkUpdate)] = {
     // The block orderer requests a topology tick to advance the topology processor's time knowledge
     //  whenever it assesses that it may need to retrieve an up-to-date topology snapshot at a certain
     //  sequencing timestamp, and it does so by setting it as in a `RawLedgerBlock`, promising that
@@ -325,7 +350,6 @@ final class BlockChunkProcessor(
         invalidAcknowledgements = Seq.empty,
         inFlightAggregationUpdates = Map.empty,
         lastSequencerEventTimestamp = Some(tickSequencingTimestamp),
-        inFlightAggregations = unexpiredInFlightAggregations,
         submissionsOutcomes = Seq(tickSubmissionOutcome),
       )
 
@@ -333,10 +357,13 @@ final class BlockChunkProcessor(
     }
   }
 
-  private def fixTimestamps(
-      state: State,
-      chunk: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
-  ): (CantonTimestamp, Seq[(CantonTimestamp, Traced[LedgerBlockEvent])]) = {
+  private def fixTimestampsAndDropSendsAfterUpgradeTime(
+      state: AccumulatedStateProcessingBlocks,
+      chunk: NonEmpty[Seq[TracedPossiblyPrevalidated[LedgerBlockEvent]]],
+      announcedLsu: Option[AnnouncedLsu],
+  )(implicit
+      traceContext: TraceContext
+  ): (CantonTimestamp, Seq[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])]) = {
     val (lastTsBeforeValidation, revFixedTsChanges) =
       // With this logic, we assign to the initial non-Send events the same timestamp as for the last
       // block. This means that we will include these events in the ephemeral state of the previous block
@@ -345,43 +372,70 @@ final class BlockChunkProcessor(
       // assigned a sequencing time that corresponds to an actual (i.e. `Send`) event and that is also surely
       // at or after the acknowledged timestamp. This has no effect whatsoever on transaction processing.
       chunk.forgetNE.foldLeft[
-        (CantonTimestamp, Seq[(CantonTimestamp, Traced[LedgerBlockEvent])]),
+        (CantonTimestamp, Seq[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])]),
       ]((state.lastChunkTs, Seq.empty)) { case ((lastTs, events), event) =>
         event.value match {
           case send: Send =>
-            val ts = ensureStrictlyIncreasingTimestamp(lastTs, send.timestamp)
-            (ts, (ts, event) +: events)
+            val timestampO = ensureStrictlyIncreasingTimestampBeforeUpgradeTime(
+              lastTs,
+              send.timestamp,
+              announcedLsu,
+            )
+            timestampO match {
+              case Some(ts) => (ts, (ts, event) +: events)
+              case None =>
+                logger.info(
+                  s"Dropping Send event after upgrade time ${announcedLsu
+                      .map(_.successor.upgradeTime)}: $send"
+                )(event.traceContext)
+                (lastTs, events)
+            }
           case _ =>
             (lastTs, (lastTs, event) +: events)
         }
       }
-    val fixedTsChanges: Seq[(CantonTimestamp, Traced[LedgerBlockEvent])] = revFixedTsChanges.reverse
+    val fixedTsChanges: Seq[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])] =
+      revFixedTsChanges.reverse
     (lastTsBeforeValidation, fixedTsChanges)
   }
 
-  // only accept the provided timestamp if it's strictly greater than the last timestamp
-  // otherwise just offset the last valid timestamp by 1
-  private def ensureStrictlyIncreasingTimestamp(
+  /**   - in [[OrderingTimeFixMode.ValidateOnly]], accept the provided timestamp, if
+    *     1. it's before the upgrade time (in case an LSU was announced)
+    *     1. it's strictly greater than the last timestamp
+    *
+    *   - in [[OrderingTimeFixMode.MakeStrictlyIncreasing]], accept the max of the
+    *     `providedTimestamp` and `lastTs.immediateSuccessor`, if it's before the ugprade time (in
+    *     case an LSU was announced)
+    */
+  private def ensureStrictlyIncreasingTimestampBeforeUpgradeTime(
       lastTs: CantonTimestamp,
       providedTimestamp: CantonTimestamp,
-  ): CantonTimestamp = {
+      announcedLsu: Option[AnnouncedLsu],
+  )(implicit traceContext: TraceContext): Option[CantonTimestamp] = {
     val invariant = providedTimestamp > lastTs
-    orderingTimeFixMode match {
+    parameters.orderingTimeFixMode match {
 
       case OrderingTimeFixMode.ValidateOnly =>
-        if (!invariant)
-          sys.error(
+        // only check the invariant, if the provided timestamp is before the upgrade time
+        Option.when(announcedLsu.forall(lsu => providedTimestamp < lsu.successor.upgradeTime)) {
+          ErrorUtil.requireState(
+            invariant,
             "BUG: sequencing timestamps are not strictly monotonically increasing," +
-              s" last timestamp $lastTs, provided timestamp: $providedTimestamp"
+              s" last timestamp $lastTs, provided timestamp: $providedTimestamp",
           )
-        providedTimestamp
+          providedTimestamp
+        }
 
+      // When MakeStrictlyIncreasing is removed (because we only run with DABFT), the dropping of events can be done much in
+      // com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImpl.chunkBlock, because then the dropping doesn't rely
+      // on the state anymore and can be purely done base on the timestamp provided by the ordering layer.
       case OrderingTimeFixMode.MakeStrictlyIncreasing =>
-        if (invariant) {
+        val tsForEvent = if (invariant) {
           providedTimestamp
         } else {
           lastTs.immediateSuccessor
         }
+        Option.when(announcedLsu.forall(lsu => tsForEvent < lsu.successor.upgradeTime))(tsForEvent)
     }
   }
 
@@ -390,12 +444,14 @@ final class BlockChunkProcessor(
       sequencersSequencerCounter: Option[SequencerCounter],
       height: Long,
       index: Int,
-      submissionRequests: Seq[(CantonTimestamp, Traced[SignedSubmissionRequest], SequencerId)],
+      submissionRequests: Seq[
+        (CantonTimestamp, TracedPossiblyPrevalidated[SignedSubmissionRequest], SequencerId)
+      ],
       skipFreshInFlightValidationCheck: AggregationId => Boolean,
   )(implicit
       executionContext: ExecutionContext
   ): FutureUnlessShutdown[Seq[SequencedPreValidatedSubmissionResult]] =
-    MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(submissionRequests.zipWithIndex) {
+    MonadUtil.parTraverseWithLimit(parameters.parallelism)(submissionRequests.zipWithIndex) {
       case ((sequencingTimestamp, tracedSubmissionRequest, orderingSequencerId), requestIndex) =>
         tracedSubmissionRequest.withTraceContext {
           implicit traceContext => signedSubmissionRequest =>
@@ -411,28 +467,37 @@ final class BlockChunkProcessor(
               for {
                 topologySnapshotOrErrO <- submissionRequest.topologyTimestamp.traverse(
                   topologyTimestamp =>
-                    SequencedEventValidator
-                      .validateTopologyTimestamp(
-                        synchronizerSyncCryptoApi,
-                        topologyTimestamp,
-                        sequencingTimestamp,
-                        latestSequencerEventTimestamp,
-                        warnIfApproximate,
-                        _.sequencerTopologyTimestampTolerance,
+                    EitherTUtil
+                      .condUnitET[FutureUnlessShutdown](
+                        protocolVersion <= ProtocolVersion.v34,
+                        SequencerErrors.UnsupportedFeature(
+                          "topology timestamp in submission request is not supported in protocol versions > 34"
+                        ),
                       )
-                      .leftMap {
-                        case SequencedEventValidator.TopologyTimestampAfterSequencingTime =>
-                          SequencerErrors.TopologyTimestampAfterSequencingTimestamp(
+                      .flatMap(_ =>
+                        SequencedEventValidator
+                          .validateTopologyTimestamp(
+                            synchronizerSyncCryptoApi,
                             topologyTimestamp,
                             sequencingTimestamp,
+                            latestSequencerEventTimestamp,
+                            warnIfApproximate,
+                            _.sequencerTopologyTimestampTolerance,
                           )
-                        case SequencedEventValidator.TopologyTimestampTooOld(_) |
-                            SequencedEventValidator.NoDynamicSynchronizerParameters(_) =>
-                          SequencerErrors.TopologyTimestampTooEarly(
-                            topologyTimestamp,
-                            sequencingTimestamp,
-                          )
-                      }
+                          .leftMap {
+                            case SequencedEventValidator.TopologyTimestampAfterSequencingTime =>
+                              SequencerErrors.TopologyTimestampAfterSequencingTimestamp(
+                                topologyTimestamp,
+                                sequencingTimestamp,
+                              )
+                            case SequencedEventValidator.TopologyTimestampTooOld(_) |
+                                SequencedEventValidator.NoDynamicSynchronizerParameters(_) =>
+                              SequencerErrors.TopologyTimestampTooEarly(
+                                topologyTimestamp,
+                                sequencingTimestamp,
+                              )
+                          }
+                      )
                       .value
                 )
                 (topologyTimestampFromRequestError, topologySnapshotFromRequestO) =
@@ -471,11 +536,28 @@ final class BlockChunkProcessor(
                     )
                     snapshotAtSequencingTime
                 }
+                // Now that the sequencing timestamp is assigned, we can resolve the topology
+                // snapshot and re-bind the envelope contents' decompression to the dynamic
+                // `maxRequestSize`. Earlier protocol versions keep the hardcoded value.
+                maxBytesToDecompress <-
+                  if (protocolVersion <= ProtocolVersion.v35)
+                    FutureUnlessShutdown.pure(MaxBytesToDecompress.HardcodedDefault)
+                  else
+                    snapshotAtSequencingTime.ipsSnapshot
+                      .findDynamicSynchronizerParametersOrDefault(protocolVersion)
+                      .map(parameters => MaxBytesToDecompress(parameters.maxRequestSize.value))
+                boundedSignedSubmissionRequest = signedSubmissionRequest.copy(
+                  content = submissionRequest.withMaxBytesToDecompress(maxBytesToDecompress)
+                )
+                tracedBoundedSubmissionRequest = TracedPossiblyPrevalidated(
+                  boundedSignedSubmissionRequest,
+                  tracedSubmissionRequest.prevalidated,
+                )(traceContext)
                 sequencedValidatedSubmission <- {
                   submissionRequestValidator
                     .performIndependentValidations(
                       sequencingTimestamp,
-                      tracedSubmissionRequest,
+                      tracedBoundedSubmissionRequest,
                       snapshotToValidateSubmissionRequest,
                       topologySnapshotFromRequestO,
                       topologyTimestampFromRequestError,
@@ -486,11 +568,11 @@ final class BlockChunkProcessor(
                     .map { case (trafficConsumption, prevalidationOutcome) =>
                       SequencedPreValidatedSubmissionResult(
                         sequencingTimestamp,
-                        signedSubmissionRequest,
+                        boundedSignedSubmissionRequest,
                         orderingSequencerId,
                         trafficConsumption,
                         prevalidationOutcome,
-                        snapshotAtSequencingTime.ipsSnapshot,
+                        snapshotAtSequencingTime,
                       )(traceContext)
                     }
                 }
@@ -500,8 +582,8 @@ final class BlockChunkProcessor(
     }
 
   private def processAcknowledgements(
-      state: State,
-      fixedTsChanges: Seq[(CantonTimestamp, Traced[LedgerBlockEvent])],
+      state: AccumulatedStateProcessingBlocks,
+      fixedTsChanges: Seq[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -526,8 +608,9 @@ final class BlockChunkProcessor(
       synchronizerSuccessorO <- snapshot.ipsSnapshot
         .announcedLsu()
         .map(_.map { case (successor, _) => successor })
-      allAcknowledgements = fixedTsChanges.collect { case (_, t @ Traced(Acknowledgment(_, ack))) =>
-        t.map(_ => ack)
+      allAcknowledgements = fixedTsChanges.collect {
+        case (_, t @ TracedPossiblyPrevalidated(Acknowledgment(_, ack), _)) =>
+          t.map(_ => ack)
       }
       (goodTsAcks, futureAcks) = allAcknowledgements.partition { tracedSignedAck =>
         // In this condition we allow acks of timestamps that are in the future
@@ -561,38 +644,53 @@ final class BlockChunkProcessor(
           SequencerError.InvalidAcknowledgementTimestamp.Error(member, timestamp, state.lastBlockTs)
         (member, timestamp, error)
       })
-      sigChecks <- FutureUnlessShutdown.sequence(goodTsAcks.map(_.withTraceContext {
-        implicit traceContext => signedAck =>
-          val ack = signedAck.content
-          for {
-            snapshotToVerify <- EitherT.right(
-              if (protocolVersion < ProtocolVersion.v35)
-                FutureUnlessShutdown.pure(snapshot)
-              else {
-                SyncCryptoClient.getSnapshotForTimestamp(
-                  synchronizerSyncCryptoApi,
-                  ack.timestamp,
-                  previousTimestampO,
-                )
-              }
-            )
-            acksR <- signedAck
-              .verifySignature(
-                snapshotToVerify,
-                ack.member,
-                HashPurpose.AcknowledgementSignature,
+      sigChecks <- FutureUnlessShutdown.sequence(
+        goodTsAcks.map(prevalidatedEvent =>
+          {
+            implicit val traceContext: TraceContext = prevalidatedEvent.traceContext
+            val signedAck = prevalidatedEvent.value
+            val ack = signedAck.content
+            for {
+              snapshotToVerify <- EitherT.right(
+                if (protocolVersion < ProtocolVersion.v35)
+                  FutureUnlessShutdown.pure(snapshot)
+                else {
+                  SyncCryptoClient.getSnapshotForTimestamp(
+                    synchronizerSyncCryptoApi,
+                    ack.timestamp,
+                    previousTimestampO,
+                  )
+                }
               )
-              .leftMap(error =>
-                (
-                  ack.member,
-                  ack.timestamp,
-                  SequencerError.InvalidAcknowledgementSignature
-                    .Error(signedAck, state.lastBlockTs, error): BaseAlarm,
-                )
-              )
-              .map(_ => (ack.member, ack.timestamp))
-          } yield acksR
-      }.value))
+              // if the signature check already passed the prevalidation, then we restrict our check to ensuring that
+              // the key used is still valid (now that we have access to the actual topology snapshot)
+              acksR <-
+                (if (prevalidatedEvent.prevalidated)
+                   signedAck
+                     .verifyKeyUsage(
+                       snapshotToVerify,
+                       ack.member,
+                     )
+                 else
+                   signedAck
+                     .verifySignature(
+                       snapshotToVerify,
+                       ack.member,
+                       HashPurpose.AcknowledgementSignature,
+                     ))
+                  .leftMap(error =>
+                    (
+                      ack.member,
+                      ack.timestamp,
+                      SequencerError.InvalidAcknowledgementSignature
+                        .Error(signedAck, state.lastBlockTs, error): BaseAlarm,
+                    )
+                  )
+                  .map(_ => (ack.member, ack.timestamp))
+            } yield acksR
+          }.value
+        )
+      )
       (invalidSigAcks, validSigAcks) = sigChecks.separate
       acksByMember = validSigAcks
         // Look for the highest acked timestamp by each member

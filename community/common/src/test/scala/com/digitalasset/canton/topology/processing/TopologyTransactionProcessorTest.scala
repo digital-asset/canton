@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{FailOnShutdown, SequencerCounter}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
 abstract class TopologyTransactionProcessorTest
@@ -340,7 +340,7 @@ abstract class TopologyTransactionProcessorTest
               },
             )
             .futureValueUS
-          (proc, store, List(ns6k6_k6, ns1k3_k2, okm1bk5k1E_k1, dtcp1_k1))
+          (proc, store, List(ns6k6_k6, ns1k3_k2_restrict_nsd, okm1bk5k1E_k1, dtcp1_k1))
         }
 
         def runScenarios(
@@ -356,7 +356,7 @@ abstract class TopologyTransactionProcessorTest
               .futureValueUS
               .result
               .filter(_.rejectionReason.nonEmpty)
-            val garbage = Seq(p1p1B_k2, ns1k3_k2)
+            val garbage = Seq(p1p1B_k2, ns1k3_k2_restrict_nsd)
             val (expectedGarbage, rejected) =
               rejectedRaw.partition(c => garbage.contains(c.transaction))
             expectedGarbage should have length (2)

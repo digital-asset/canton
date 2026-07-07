@@ -5,21 +5,22 @@ package com.digitalasset.canton.platform.apiserver.services
 
 import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.ledger.api.v2.offset_checkpoint.SynchronizerTime
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.logging.entries.LoggingEntries
 import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.{GrpcApiService, StreamingServiceLifecycleManagement}
+import com.digitalasset.canton.ledger.api.messages.state.{
+  AcsContinuationToken,
+  AcsPageToken,
+  AcsRangeInfo,
+}
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator,
   FormatValidator,
   ParticipantOffsetValidator,
-}
-import com.digitalasset.canton.ledger.api.{
-  AcsContinuationToken,
-  AcsPageToken,
-  AcsRangeInfo,
-  ValidationLogger,
 }
 import com.digitalasset.canton.ledger.participant.state.SyncService
 import com.digitalasset.canton.ledger.participant.state.index.{
@@ -144,11 +145,12 @@ final class ApiStateService(
       consolidatedActiveAt = nextPageOpt.map(_._1).orElse(requestActiveAt)
     } yield {
       val pointer = nextPageOpt.map(_._2)
+      val activeAtOffset = consolidatedActiveAt match {
+        case Some(offset) => Some(offset)
+        case None => updateService.currentLedgerEnd().map(_.lastOffset)
+      }
+
       for {
-        activeAtOffset <- consolidatedActiveAt match {
-          case Some(offset) => Future(Some(offset))
-          case None => updateService.currentLedgerEnd()
-        }
         activeContractsWithPointer <- withEnrichedLoggingContext(
           logging.eventFormat(eventFormat),
           logging.maxPageSize(maxPageSize),
@@ -252,16 +254,23 @@ final class ApiStateService(
   }
 
   override def getLedgerEnd(request: GetLedgerEndRequest): Future[GetLedgerEndResponse] = {
-    implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
-    updateService
-      .currentLedgerEnd()
-      .map(offset =>
-        GetLedgerEndResponse(
-          offset.fold(0L)(_.unwrap)
-        )
+    val ledgerEnd = updateService.currentLedgerEnd()
+    Future.successful(
+      GetLedgerEndResponse(
+        ledgerEnd.fold(0L)(_.lastOffset.unwrap),
+        ledgerEnd
+          .map(
+            _.synchronizerIndices
+              .map { case (id, index) =>
+                SynchronizerTime(id.toProtoPrimitive, Some(index.recordTime.toProtoTimestamp))
+              }
+              .toSeq
+          )
+          .getOrElse(
+            Seq()
+          ),
       )
-      .thereafter(logger.logErrorsOnCall[GetLedgerEndResponse])
+    )
   }
 
   override def getLatestPrunedOffsets(

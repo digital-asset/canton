@@ -5,9 +5,8 @@ package com.digitalasset.canton.synchronizer.block.update
 
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
@@ -28,7 +27,6 @@ import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, Blo
 import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent, RawLedgerBlock}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
-import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   InvalidLedgerEvent,
   SequencingTimeNotAdmissible,
@@ -41,11 +39,11 @@ import com.digitalasset.canton.synchronizer.sequencer.time.{
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
 import com.digitalasset.canton.synchronizer.sequencer.{AnnouncedLsu, SubmissionOutcome}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.util.collection.IterableUtil
+import com.digitalasset.canton.util.{MaxBytesToDecompress, MonadUtil, TracedPossiblyPrevalidated}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.immutable
@@ -79,31 +77,68 @@ import scala.concurrent.ExecutionContext
 trait BlockUpdateGenerator {
   import BlockUpdateGenerator.*
 
-  type InternalState
-
-  def internalStateFor(state: BlockEphemeralState): InternalState
-
   def extractBlockEvents(tracedBlock: Traced[RawLedgerBlock]): Traced[BlockEvents]
+
+  /** Optimistically checks the sender signature and envelope signatures for validity (but not
+    * whether the key is still valid)
+    */
+  def prevalidateSignatures(chunk: BlockChunk, parallelism: PositiveInt)(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[BlockChunk]
 
   def chunkBlock(block: BlockEvents)(implicit
       traceContext: TraceContext
   ): immutable.Iterable[BlockChunk]
 
-  def processBlockChunk(state: InternalState, chunk: BlockChunk)(implicit
+  def processBlockChunk(state: AccumulatedStateProcessingBlocks, chunk: BlockChunk)(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[(InternalState, OrderedBlockUpdate)]
+  ): FutureUnlessShutdown[(AccumulatedStateProcessingBlocks, OrderedBlockUpdate)]
 
 }
 
 object BlockUpdateGenerator {
 
+  /** Internal state
+    *
+    * @param latestPendingTopologyTransactionTimestamp
+    *   is used to determine whether a topology tick should be emitted at the end of the block, so
+    *   it is updated whenever we see a topology transaction. We only use it to decide if we should
+    *   emit a tick at the end of a block. It may be incorrect if a topology tx was rejected, but
+    *   that doesn't matter much from the perspective of "ticking" the topology.
+    */
+  final case class AccumulatedStateProcessingBlocks(
+      lastBlockTs: CantonTimestamp,
+      lastChunkTs: CantonTimestamp,
+      latestSequencerEventTimestamp: Option[CantonTimestamp],
+      latestPendingTopologyTransactionTimestamp: Option[CantonTimestamp],
+      inFlightAggregations: InFlightAggregations,
+  )
+  object AccumulatedStateProcessingBlocks {
+    def fromEphemeralState(state: BlockEphemeralState): AccumulatedStateProcessingBlocks =
+      AccumulatedStateProcessingBlocks(
+        lastBlockTs = state.latestBlock.lastTs,
+        lastChunkTs = state.latestBlock.lastTs,
+        latestSequencerEventTimestamp = state.latestBlock.latestSequencerEventTimestamp,
+        latestPendingTopologyTransactionTimestamp =
+          state.latestBlock.latestPendingTopologyTransactionTimestamp,
+        inFlightAggregations = state.inFlightAggregations,
+      )
+  }
+
   sealed trait BlockChunk extends Product with Serializable
   final case class NextChunk(
       blockHeight: Long,
       chunkIndex: Int,
-      events: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
+      events: NonEmpty[Seq[TracedPossiblyPrevalidated[LedgerBlockEvent]]],
   ) extends BlockChunk
+
+  /** @param baseBlockSequencingTime
+    *   See [[RawLedgerBlock.baseSequencingTimeMicrosFromEpoch]]
+    * @param tickTopologyAtLeastAt
+    *   See [[RawLedgerBlock.tickTopologyAtMicrosFromEpoch]]
+    */
   final case class MaybeTopologyTickChunk(
       blockHeight: Long,
       baseBlockSequencingTime: CantonTimestamp,
@@ -116,14 +151,12 @@ class BlockUpdateGeneratorImpl(
     synchronizerSyncCryptoApi: SynchronizerCryptoClient,
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
-    orderingTimeFixMode: OrderingTimeFixMode,
-    lsuSequencingBounds: Option[LsuSequencingBounds],
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
     getAnnouncedLsu: => Option[AnnouncedLsu],
     producePostOrderingTopologyTicks: Boolean,
-    metrics: SequencerMetrics,
-    batchingConfig: BatchingConfig,
     consistencyChecks: Boolean,
+    parameters: BlockProcessingParameters,
+    metrics: SequencerMetrics,
     memberValidator: SequencerMemberValidator,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val closeContext: CloseContext, tracer: Tracer)
@@ -131,7 +164,6 @@ class BlockUpdateGeneratorImpl(
     with NamedLogging
     with Spanning {
   import BlockUpdateGenerator.*
-  import BlockUpdateGeneratorImpl.*
 
   private val epsilon = synchronizerSyncCryptoApi.staticSynchronizerParameters.topologyChangeDelay
   private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
@@ -144,24 +176,11 @@ class BlockUpdateGeneratorImpl(
       synchronizerSyncCryptoApi,
       sequencerId,
       rateLimitManager,
-      orderingTimeFixMode,
-      lsuSequencingBounds,
-      batchingConfig,
-      loggerFactory,
+      parameters,
       metrics,
       memberValidator = memberValidator,
+      loggerFactory,
     )
-
-  override type InternalState = State
-
-  override def internalStateFor(state: BlockEphemeralState): InternalState = State(
-    lastBlockTs = state.latestBlock.lastTs,
-    lastChunkTs = state.latestBlock.lastTs,
-    latestSequencerEventTimestamp = state.latestBlock.latestSequencerEventTimestamp,
-    latestPendingTopologyTransactionTimestamp =
-      state.latestBlock.latestPendingTopologyTransactionTimestamp,
-    inFlightAggregations = state.inFlightAggregations,
-  )
 
   /** Return true if the event contains only [[LsuSequencingTestMessage]] and recipients are
     * mediator groups. Since the method open envelopes, which is resources consuming, should be
@@ -202,7 +221,11 @@ class BlockUpdateGeneratorImpl(
 
       val ledgerBlockEvents = block.events.mapFilter { tracedEvent =>
         withSpan("BlockUpdateGenerator.extractBlockEvents") { implicit traceContext => _ =>
-          // TODO(i29003): Defer decompression to addSnapshotsAndValidateSubmissions
+          // At this point no sequencing timestamp is assigned yet, so we cannot resolve the
+          // topology snapshot the dynamic `maxRequestSize` depends on. We therefore use the
+          // hardcoded value, which only bounds the eager decompression of the recipients (needed
+          // for chunking). The envelope contents are decompressed later, in the block chunk
+          // processor, with the dynamic `maxRequestSize` value (for protocol versions >= 36).
           val maxBytesToDecompress = MaxBytesToDecompress.HardcodedDefault
           LedgerBlockEvent.fromRawBlockEvent(protocolVersion, maxBytesToDecompress)(
             tracedEvent.value
@@ -213,10 +236,9 @@ class BlockUpdateGeneratorImpl(
 
             case Right(event) =>
               val checksResult = for {
-                _ <- checkLsuSequencingBounds(event, lsuSequencingBounds)
+                _ <- checkLsuSequencingBounds(event, parameters.lsuSequencingBounds)
                 _ <- checkDrSequencingTimeUpperBound(event, drSequencingTimeUpperBound)
               } yield ()
-
               checksResult.fold(
                 err => {
                   err.log()
@@ -312,7 +334,12 @@ class BlockUpdateGeneratorImpl(
       .splitAfter(blockEvents.events)(event => isAddressingSequencers(event.value))
       .zipWithIndex
       .map { case (events, index) =>
-        NextChunk(blockHeight, index, events)
+        NextChunk(
+          blockHeight,
+          index,
+          // map to prevalidated type
+          events.map(tv => TracedPossiblyPrevalidated.notValidated(tv.value)(tv.traceContext)),
+        )
       }
 
     val chunks = dataChunks ++ Seq(tick) ++ Seq(EndOfBlock(blockHeight))
@@ -334,10 +361,15 @@ class BlockUpdateGeneratorImpl(
       case _ => false
     }
 
-  override final def processBlockChunk(state: InternalState, chunk: BlockChunk)(implicit
+  override final def processBlockChunk(
+      state: BlockUpdateGenerator.AccumulatedStateProcessingBlocks,
+      chunk: BlockChunk,
+  )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[(InternalState, OrderedBlockUpdate)] =
+  ): FutureUnlessShutdown[
+    (BlockUpdateGenerator.AccumulatedStateProcessingBlocks, OrderedBlockUpdate)
+  ] =
     chunk match {
       case EndOfBlock(height) =>
         val newState = state.copy(lastBlockTs = state.lastChunkTs)
@@ -352,7 +384,7 @@ class BlockUpdateGeneratorImpl(
         logger.debug(s"Block $height completed with update $update")
         FutureUnlessShutdown.pure(newState -> update)
       case NextChunk(height, index, chunksEvents) =>
-        blockChunkProcessor.processDataChunk(state, height, index, chunksEvents)
+        blockChunkProcessor.processDataChunk(state, height, index, chunksEvents, getAnnouncedLsu)
       case MaybeTopologyTickChunk(blockHeight, baseBlockSequencingTime, tickTopologyAtLeastAt) =>
         lazy val createTick = state.latestPendingTopologyTransactionTimestamp.exists { ts =>
           // If the latest topology transaction becomes effective between the end of the previous block and the end of
@@ -373,21 +405,34 @@ class BlockUpdateGeneratorImpl(
           state.lastBlockTs < latestTopologyTransactionEffectiveTime && latestTopologyTransactionEffectiveTime < blockEnd
         }
 
-        getAnnouncedLsu.map(_.successor) match {
-          case Some(upgrade)
-              if upgrade.upgradeTime <= baseBlockSequencingTime && upgrade.upgradeTime > state.lastBlockTs =>
-            logger.info(
-              s"Emitting an LSU tick for the upgrade $upgrade at block $blockHeight with base sequencing time $baseBlockSequencingTime"
-            )
-            blockChunkProcessor.emitTick(
-              state.copy(
-                // There shouldn't be topology changes activated after the LSU upgrade time
-                latestPendingTopologyTransactionTimestamp = None
-              ),
-              blockHeight,
-              upgrade.upgradeTime,
-              Left(AllMembersOfSynchronizer),
-            )
+        getAnnouncedLsu match {
+          case Some(announcedLsu @ AnnouncedLsu(upgrade, _, _))
+              if state.lastBlockTs < upgrade.upgradeTime && upgrade.upgradeTime <= baseBlockSequencingTime =>
+            for {
+              _ <- announcedLsu.computeAndCacheTimeOffset(
+                synchronizerSyncCryptoApi,
+                upgrade.upgradeTime,
+              )
+              upgradeTimeWithDecisionTimeOffset = announcedLsu.addOffsetAfterUpgradeTime(
+                upgrade.upgradeTime
+              )
+              _ = logger.info(
+                s"Emitting an LSU tick with ts=$upgradeTimeWithDecisionTimeOffset for the upgrade $upgrade at block $blockHeight with base sequencing time $baseBlockSequencingTime"
+              )
+              tickResult <- blockChunkProcessor.emitTick(
+                state.copy(
+                  // There shouldn't be topology changes activated after the LSU upgrade time
+                  latestPendingTopologyTransactionTimestamp = None
+                ),
+                blockHeight,
+                upgradeTimeWithDecisionTimeOffset,
+                Left(AllMembersOfSynchronizer),
+              )
+            } yield tickResult
+
+          case Some(AnnouncedLsu(upgrade, _, _))
+              if upgrade.upgradeTime <= baseBlockSequencingTime =>
+            FutureUnlessShutdown.pure((state, ChunkUpdate.noop))
           case _ =>
             // Starting with protocol version 35, topology ticks can be deterministically injected post-ordering
             // by sequencers, making time proofs unnecessary for observing topology transactions becoming effective.
@@ -405,7 +450,7 @@ class BlockUpdateGeneratorImpl(
                 // DABFT assigns monotonically increasing timestamps to all ordered requests, including acks,
                 //  but the sequencer does not (because acks are not events), so if an epoch ends with an ack and
                 //  DABFT expects a tick at a certain timestamp to be able to query a topology snapshot and
-                //  establish the ordering topology fot the next epoch, we must make sure that sequencing time advances
+                //  establish the ordering topology for the next epoch, we must make sure that sequencing time advances
                 //  at least until that timestamp, else the topology snapshot query could get stuck and the system
                 //  could deadlock.
                 tickAtLeastAt = state.lastChunkTs
@@ -431,25 +476,34 @@ class BlockUpdateGeneratorImpl(
         }
     }
 
+  override def prevalidateSignatures(
+      chunk: BlockChunk,
+      parallelism: PositiveInt,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[BlockChunk] = chunk match {
+    case NextChunk(blockHeight, chunkIndex, events) =>
+      val snapshot = synchronizerSyncCryptoApi.headSnapshot
+      MonadUtil
+        .parTraverseWithLimit(parallelism)(events)(_.withTraceContext {
+          implicit traceContext => event =>
+            blockChunkProcessor.prevalidateLedgerBlockEvent(snapshot, event)
+        })
+        .map { events =>
+          NextChunk(
+            blockHeight,
+            chunkIndex,
+            NonEmpty.from(events).getOrElse(sys.error("cannot be empty")),
+          )
+        }
+
+    case other => FutureUnlessShutdown.pure(other)
+  }
+
 }
 
 object BlockUpdateGeneratorImpl {
-
-  /** Internal state
-    *
-    * @param latestPendingTopologyTransactionTimestamp
-    *   is used to determine whether a topology tick should be emitted at the end of the block, so
-    *   it is updated whenever we see a topology transaction. We only use it to decide if we should
-    *   emit a tick at the end of a block. It may be incorrect if a topology tx was rejected, but
-    *   that doesn't matter much from the perspective of "ticking" the topology.
-    */
-  private[block] final case class State(
-      lastBlockTs: CantonTimestamp,
-      lastChunkTs: CantonTimestamp,
-      latestSequencerEventTimestamp: Option[CantonTimestamp],
-      latestPendingTopologyTransactionTimestamp: Option[CantonTimestamp],
-      inFlightAggregations: InFlightAggregations,
-  )
 
   /** Positive outcome of the pre-validation step
     *
@@ -477,7 +531,7 @@ object BlockUpdateGeneratorImpl {
       orderingSequencerId: SequencerId,
       consumeTraffic: SubmissionRequestValidator.TrafficConsumption,
       errorOrPrevalidationOutcome: Either[SubmissionOutcome, PrevalidationOutcome],
-      sequencingSnapshot: TopologySnapshot,
+      sequencingSnapshot: SyncCryptoApi,
   )(val traceContext: TraceContext)
 
 }

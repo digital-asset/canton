@@ -7,8 +7,7 @@ import cats.data.Chain
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.sequencing.protocol.AggregationRule
-import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
+import com.digitalasset.canton.sequencing.protocol.{AggregationBySender, AggregationRule}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.{ErrorUtil, OptionUtil}
 

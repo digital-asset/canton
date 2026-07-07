@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
@@ -16,6 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkRef,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.{
+  BeforeAndAfter,
   ResultWithLogs,
   objId,
 }
@@ -82,9 +82,6 @@ final class P2PGrpcConnectionState(
   override def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean =
     stateRef.get().p2pEndpointIdToNetworkRef.get(p2pEndpointId).exists(_.isOutgoingConnection)
 
-  override def authenticatedCount: NonNegativeInt =
-    NonNegativeInt.tryCreate(stateRef.get().bftNodeIdToNetworkRef.size)
-
   override def getBftNodeId(p2pEndpointId: P2PEndpoint.Id): Option[BftNodeId] =
     stateRef.get().p2pEndpointIdToBftNodeId.get(p2pEndpointId)
 
@@ -119,7 +116,7 @@ final class P2PGrpcConnectionState(
 
   override def associateP2PEndpointIdToBftNodeId(
       p2pAddress: P2PAddress
-  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult = {
+  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult[Unit] = {
     val maybeP2PEndpoint = p2pAddress.maybeP2PEndpoint
     val maybeBftNodeId = p2pAddress.maybeBftNodeId
     maybeP2PEndpoint
@@ -132,7 +129,7 @@ final class P2PGrpcConnectionState(
   def associateP2PEndpointIdToBftNodeId(
       p2pEndpointId: P2PEndpoint.Id,
       bftNodeId: BftNodeId,
-  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult = {
+  )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult[Unit] = {
     val (prevState, newState, result, refsToClose) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(
@@ -144,14 +141,25 @@ final class P2PGrpcConnectionState(
         )
 
     refsToClose.foreach { case (endpointId, networkRef) =>
-      logger.debug(
+      logger.info(
         s"Closing duplicate network ref ${objId(networkRef)} for endpoint $endpointId after re-association"
       )
       networkRef.close()
     }
-    logger.debug(s"P2P connection state before `associateP2PEndpointIdToBftNodeId`: $prevState")
-    logger.debug(s"P2P connection state after `associateP2PEndpointIdToBftNodeId`: $newState")
-    result
+    if (result.getOrElse(false)) { // Changes made
+      val trimmedPrevState = prevState.only(p2pEndpointId, bftNodeId)
+      val trimmedNewState = newState.only(p2pEndpointId, bftNodeId)
+      logger.info(
+        "Relevant P2P connection state before and after " +
+          s"`associateP2PEndpointIdToBftNodeId($p2pEndpointId, $bftNodeId)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+      )
+    } else {
+      logger.debug(
+        s"No association change of P2P endpoint $p2pEndpointId to BFT node ID $bftNodeId: $result"
+      )
+    }
+    result.map(_ => ())
   }
 
   /** Adds a new sender or completes the endpoint information if already present, returning `false`
@@ -161,16 +169,28 @@ final class P2PGrpcConnectionState(
       bftNodeId: BftNodeId,
       peerSender: PeerSender,
   )(implicit traceContext: TraceContext): Boolean = {
-    val (prevState, newState, result) =
+    val (prevState, newState, existingPeerSenderO) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.addSenderIfMissing(bftNodeId, peerSender))
         .logAndExtract(
           logger,
           prefix = s"Adding peer sender $peerSender for BFT node ID $bftNodeId: ",
         )
-    logger.debug(s"P2P connection state before `addSenderIfMissing`: $prevState")
-    logger.debug(s"P2P connection state after `addSenderIfMissing`: $newState")
-    result
+    existingPeerSenderO.fold {
+      val trimmedPrevState = prevState.only(bftNodeId, peerSender)
+      val trimmedNewState = newState.only(bftNodeId, peerSender)
+      logger.info(
+        s"Added peer sender $peerSender for BFT node ID $bftNodeId, " +
+          s"relevant P2P connection state before and after `addSenderIfMissing($bftNodeId, $peerSender)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+      )
+      true
+    } { existingPeerSender =>
+      logger.debug(
+        s"No association added for BFT node ID $bftNodeId and peer sender $peerSender because one already exists: $existingPeerSender"
+      )
+      false
+    }
   }
 
   override def addNetworkRefIfMissing(
@@ -180,13 +200,14 @@ final class P2PGrpcConnectionState(
   )(
       createNetworkRef: () => P2PNetworkRef[BftOrderingMessage]
   )(implicit traceContext: TraceContext): Unit = {
-    val (prevState, newState, added) =
+    val (prevState, newState, created) =
       AtomicUtil.updateAndGetComputed(stateRef)(
         _.addNetworkRefIfMissing(p2pAddressId, createNetworkRef)
       )
 
-    if (!added) {
+    if (!created) {
       actionIfPresent()
+      logger.debug(s"No network ref created for $p2pAddressId as one already exists")
     } else {
       // Trigger the network ref creation
       p2pAddressId match {
@@ -201,10 +222,13 @@ final class P2PGrpcConnectionState(
             logger.debug(s"Created network ref ${objId(networkRef)} for BFT node ID $bftNodeId")
           }
       }
+      val trimmedPrevState = prevState.only(p2pAddressId)
+      val trimmedNewState = newState.only(p2pAddressId)
+      logger.info(
+        s"Relevant P2P connection state before and after `addNetworkRefIfMissing($p2pAddressId)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+      )
     }
-
-    logger.debug(s"P2P connection state before `addNetworkRefIfMissing`: $prevState")
-    logger.debug(s"P2P connection state after `addNetworkRefIfMissing`: $newState")
   }
 
   // Used to close a connection in various situations
@@ -234,15 +258,20 @@ final class P2PGrpcConnectionState(
 
     networkRefO.foreach { networkRef =>
       if (closeNetworkRef) {
-        logger.debug(
+        logger.info(
           s"Closing network ref ${objId(networkRef)} for $p2pAddressId as part of connection shutdown (as requested)"
         )
         networkRef.close()
       }
     }
 
-    logger.debug(s"P2P connection state before `shutdownConnectionAndReturnPeerSender`: $prevState")
-    logger.debug(s"P2P connection state after `shutdownConnectionAndReturnPeerSender`: $newState")
+    val trimmedPrevState = prevState.only(p2pAddressId)
+    val trimmedNewState = newState.only(p2pAddressId)
+    logger.info(
+      "Relevant P2P connection state before and after " +
+        s"`shutdownConnectionAndReturnPeerSender($p2pAddressId, $clearNetworkRefAssociations, $closeNetworkRef)`: " +
+        s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+    )
 
     peerSenderO
   }
@@ -254,15 +283,23 @@ final class P2PGrpcConnectionState(
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.unassociateSenderAndReturnEndpointIds(peerSender))
         .logAndExtract(logger, prefix = s"Unassociating sender $peerSender: ")
-    logger.debug(s"P2P connection state before `unassociateSenderAndReturnEndpointIds`: $prevState")
-    logger.debug(s"P2P connection state after `unassociateSenderAndReturnEndpointIds`: $newState")
+    if (result.nonEmpty) {
+      val trimmedPrevState = prevState.only(peerSender)
+      val trimmedNewState = newState.only(peerSender)
+      logger.info(
+        s"Relevant P2P connection state before and after `unassociateSenderAndReturnEndpointIds($peerSender)`: " +
+          s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+      )
+    } else {
+      logger.debug(s"No association change for sender $peerSender: $result")
+    }
     result
   }
 
   // Only used to simulate a restart
   def clear(): Unit = {
     val prevState = stateRef.getAndUpdate(_ => State())
-    logger.debug(s"P2P connection state before `clear`: $prevState")(TraceContext.empty)
+    logger.info(s"P2P connection state before `clear`: $prevState")(TraceContext.empty)
   }
 }
 
@@ -330,6 +367,9 @@ object P2PGrpcConnectionState {
         param("p2pEndpointIdToNetworkRef", _.p2pEndpointIdToNetworkRef),
       )
 
+    // Returns the new state with the endpoint associated to the node,
+    //  the state transition with logs, potentially an error if the association is not allowed
+    //  and the network refs to close, if any duplicates were replaced.
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     def associateP2PEndpointIdToBftNodeId(
         thisNode: BftNodeId,
@@ -341,13 +381,12 @@ object P2PGrpcConnectionState {
           (
               State,
               State,
-              P2PEndpointIdAssociationResult,
+              P2PEndpointIdAssociationResult[Boolean],
               Iterable[(P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])],
           )
         ],
     ) = {
-      var result: P2PEndpointIdAssociationResult = Right(())
-      var changesMade = false
+      var result: P2PEndpointIdAssociationResult[Boolean] = Right(false)
       var refsToClose: Iterable[(P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])] = Seq.empty
       var annotation = ""
       var logLevel = Level.DEBUG
@@ -386,11 +425,11 @@ object P2PGrpcConnectionState {
                 None
               case _ =>
                 annotation = s"Associated $p2pEndpointId -> $bftNodeId, no previous association"
-                changesMade = true
+                result = Right(true)
                 Some(bftNodeId)
             }
         )
-      if (changesMade) {
+      if (result.getOrElse(false)) { // Whether changes were made
         val consolidateResult = updatedState.consolidateNetworkRefs(bftNodeId)
         updatedState = consolidateResult._1
         refsToClose = consolidateResult._2
@@ -401,29 +440,37 @@ object P2PGrpcConnectionState {
       )
     }
 
+    // Associates a sender to the node if one is missing, returning the new state, the state transition with logs
+    //  and a boolean indicating whether an association was added.
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     def addSenderIfMissing(
         bftNodeId: BftNodeId,
         peerSender: PeerSender,
-    ): (State, ResultWithLogs[(State, State, Boolean)]) = {
+    ): (State, ResultWithLogs[(State, State, Option[PeerSender])]) = {
       var updatedState = this
       var annotation = ""
       val result =
-        if (!bftNodeIdToPeerSender.contains(bftNodeId)) {
-          annotation = s"Associating peer sender $bftNodeId <-> $peerSender"
-          updatedState = biAssociateBftNodeIdWithPeerSender(bftNodeId, peerSender)
-          true
-        } else {
-          annotation =
-            s"Not associating peer sender $bftNodeId <-> $peerSender because one for this node already exists"
-          false
-        }
+        bftNodeIdToPeerSender
+          .get(bftNodeId)
+          .fold[Option[PeerSender]] {
+            annotation = s"Associating $bftNodeId <-> $peerSender"
+            updatedState = biAssociateBftNodeIdWithPeerSender(bftNodeId, peerSender)
+            None
+          } { existingPeerSender =>
+            annotation =
+              s"Not associating $bftNodeId <-> $peerSender because one for this node already exists"
+            Some(existingPeerSender)
+          }
       updatedState -> ResultWithLogs(
         (this, updatedState, result),
         Level.DEBUG -> (() => annotation),
       )
     }
 
+    // Shuts down the connection to the node,
+    //  removing the sender and optionally the network ref associations if requested;
+    //  returns the new state, the state transition with logs
+    //  and the sender to close and the network ref to close, if any.
     def shutdownConnectionAndReturnPeerSender(
         p2pAddressId: P2PAddress.Id,
         clearNetworkRefAssociations: Boolean,
@@ -516,6 +563,8 @@ object P2PGrpcConnectionState {
             }
       }
 
+    // Removes the sender associated with the node ID, returning the new state, the state transition with logs
+    //  and any endpoints that are associated to the node.
     def unassociateSenderAndReturnEndpointIds(
         peerSender: PeerSender
     ): (State, ResultWithLogs[(State, State, Seq[P2PEndpoint.Id])]) =
@@ -546,6 +595,9 @@ object P2PGrpcConnectionState {
           )
         }
 
+    // Associates a new network ref to the node ID if one does not exist already,
+    //  returning the new state, the state transition with logs
+    //  and a boolean indicating whether a new network ref was associated.
     def addNetworkRefIfMissing(
         p2pAddressId: P2PAddress.Id,
         createNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
@@ -607,6 +659,8 @@ object P2PGrpcConnectionState {
             }
       }
 
+    // Returns the new state with a single network ref for the node ID and all the endpoints known to be
+    //  associated to it, and the network refs to close, if any duplicates were replaced.
     private def consolidateNetworkRefs(
         bftNodeId: BftNodeId
     ): (State, Iterable[(P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])]) = {
@@ -615,60 +669,60 @@ object P2PGrpcConnectionState {
           .collect {
             case (endpointId, nodeId) if nodeId == bftNodeId => endpointId
           }
+
+      // Prioritize the network ref already associated to the node ID (potentially an incoming connection), if any.
       val maybeExistingNetworkRefAssociatedToNodeIdOrElseEndpoint =
         bftNodeIdToNetworkRef
           .get(bftNodeId)
-          .map(_ -> true)
           .orElse(
             p2pEndpointIds.view
               .flatMap(p2pEndpointIdToNetworkRef.get)
-              .map(_ -> false)
               .headOption
           )
 
       maybeExistingNetworkRefAssociatedToNodeIdOrElseEndpoint
-        .map {
-          // Prioritize the network ref associated to the BFT node ID (potentially an incoming connection)
-
-          case (e, isAssociatedToNodeId) if isAssociatedToNodeId =>
-            updateEndpointsNetworkRef(p2pEndpointIds, e)
-
-          case (e, _) => // Associated to endpoint
-            val newState =
-              copy(bftNodeIdToNetworkRef =
-                bftNodeIdToNetworkRef
-                  .updated(bftNodeId, e)
-              )
-            newState.updateEndpointsNetworkRef(p2pEndpointIds, e)
+        .map { selectedNetworkRefEntry =>
+          val newState =
+            copy(bftNodeIdToNetworkRef =
+              bftNodeIdToNetworkRef
+                .updated(bftNodeId, selectedNetworkRefEntry)
+            ) // No-op if there was already a network ref associated to the node ID
+          newState.updateEndpointsNetworkRef(p2pEndpointIds, selectedNetworkRefEntry)
         }
         .getOrElse(this -> Seq.empty)
     }
 
+    // Returns the new state with a network ref associated to the endpoints
+    //  and the network refs to close, if any duplicates were replaced.
     private def updateEndpointsNetworkRef(
         p2pEndpointIds: Iterable[P2PEndpoint.Id],
-        existingNetworkRefEntry: P2PNetworkRefEntry,
+        selectedNetworkRefEntry: P2PNetworkRefEntry,
     ): (State, Iterable[(P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])]) = {
       val updatedState =
         copy(p2pEndpointIdToNetworkRef =
           p2pEndpointIdToNetworkRef ++
             p2pEndpointIds.map { p2pEndpointId =>
-              p2pEndpointId -> existingNetworkRefEntry
+              p2pEndpointId -> selectedNetworkRefEntry
             }
         )
+
       val previousAssociatedRefs =
         p2pEndpointIds.flatMap(p2pEndpointId =>
           p2pEndpointIdToNetworkRef.get(p2pEndpointId).map { networkRefEntry =>
             p2pEndpointId -> networkRefEntry.networkRef
           }
         )
+
       updatedState ->
+        // Duplicated refs to close
         (for ((p2pEndpointId, networkRef) <- previousAssociatedRefs) yield {
           Option.when(
-            networkRef != existingNetworkRefEntry.networkRef
+            networkRef != selectedNetworkRefEntry.networkRef
           )(p2pEndpointId -> networkRef)
         }).flatten
     }
 
+    // Returns the new state with a sender associated to the node and vice versa.
     private def biAssociateBftNodeIdWithPeerSender(
         bftNodeId: BftNodeId,
         peerSender: PeerSender,
@@ -678,6 +732,8 @@ object P2PGrpcConnectionState {
         peerSenderToBftNodeId = peerSenderToBftNodeId.updated(peerSender, bftNodeId),
       )
 
+    // Removes the association of a sender to the node, returning the state transition with logs
+    //  and the sender that was associated, if any.
     private def unassociateAndReturnPeerSender(
         bftNodeId: BftNodeId
     ): ResultWithLogs[(State, State, Option[PeerSender])] =
@@ -707,6 +763,8 @@ object P2PGrpcConnectionState {
           )
         }
 
+    // Removes the association of a network to the node and its endpoints, returning the new state with logs
+    //  and the network ref that was associated, if any.
     private def cleanupNetworkRef(
         bftNodeId: BftNodeId,
         clearNetworkRefAssociations: Boolean,
@@ -745,5 +803,104 @@ object P2PGrpcConnectionState {
           Level.DEBUG -> (() => s"Not removing network ref for $bftNodeId (as requested)"),
         )
       }
+
+    def only(p2pEndpointId: P2PEndpoint.Id, bftNodeId: BftNodeId): State =
+      copy(
+        bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, _) =>
+          nodeId == bftNodeId
+        },
+        peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (_, nodeId) =>
+          nodeId == bftNodeId
+        },
+        p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (endpointId, nodeId) =>
+          endpointId == p2pEndpointId || nodeId == bftNodeId
+        },
+        bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+          nodeId == bftNodeId
+        },
+        p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+          endpointId == p2pEndpointId
+        },
+      )
+
+    def only(bftNodeId: BftNodeId, peerSender: PeerSender): State =
+      copy(
+        bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, sender) =>
+          nodeId == bftNodeId || sender == peerSender
+        },
+        peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (sender, nodeId) =>
+          nodeId == bftNodeId || sender == peerSender
+        },
+        p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (_, nodeId) =>
+          nodeId == bftNodeId
+        },
+        bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+          nodeId == bftNodeId
+        },
+        p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+          p2pEndpointIdToBftNodeId.get(endpointId).contains(bftNodeId)
+        },
+      )
+
+    def only(p2pAddressId: P2PAddress.Id): State =
+      p2pAddressId match {
+        case Left(p2pEndpointId) =>
+          copy(
+            bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, _) =>
+              p2pEndpointIdToBftNodeId.get(p2pEndpointId).contains(nodeId)
+            },
+            peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (_, nodeId) =>
+              p2pEndpointIdToBftNodeId.get(p2pEndpointId).contains(nodeId)
+            },
+            p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (endpointId, _) =>
+              endpointId == p2pEndpointId
+            },
+            bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+              p2pEndpointIdToBftNodeId.get(p2pEndpointId).contains(nodeId)
+            },
+            p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+              endpointId == p2pEndpointId
+            },
+          )
+        case Right(bftNodeId) =>
+          copy(
+            bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (nodeId, _) =>
+              nodeId == bftNodeId
+            },
+            peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (_, nodeId) =>
+              nodeId == bftNodeId
+            },
+            p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (_, nodeId) =>
+              nodeId == bftNodeId
+            },
+            bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+              nodeId == bftNodeId
+            },
+            p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+              p2pEndpointIdToBftNodeId.get(endpointId).contains(bftNodeId)
+            },
+          )
+      }
+
+    def only(peerSender: PeerSender): State =
+      copy(
+        bftNodeIdToPeerSender = bftNodeIdToPeerSender.filter { case (_, sender) =>
+          sender == peerSender
+        },
+        peerSenderToBftNodeId = peerSenderToBftNodeId.filter { case (sender, _) =>
+          sender == peerSender
+        },
+        p2pEndpointIdToBftNodeId = p2pEndpointIdToBftNodeId.filter { case (_, nodeId) =>
+          peerSenderToBftNodeId.get(peerSender).contains(nodeId)
+        },
+        bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.filter { case (nodeId, _) =>
+          peerSenderToBftNodeId.get(peerSender).contains(nodeId)
+        },
+        p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef.filter { case (endpointId, _) =>
+          peerSenderToBftNodeId.get(peerSender).exists { nodeId =>
+            p2pEndpointIdToBftNodeId.get(endpointId).contains(nodeId)
+          }
+        },
+      )
   }
 }

@@ -9,7 +9,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.{Eval, Monad}
 import com.daml.nameof.NameOf.functionFullName
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -36,7 +35,6 @@ import com.digitalasset.canton.participant.store.{
   InFlightSubmissionStore,
   ParticipantNodePersistentState,
   RequestJournalStore,
-  SyncPersistentState,
   SynchronizerConnectionConfigStore,
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
@@ -52,6 +50,7 @@ import com.digitalasset.canton.util.{
   MonadUtil,
   SimpleExecutionQueue,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 
@@ -70,10 +69,7 @@ import scala.math.Ordering.Implicits.*
   *   pruning metrics
   * @param exitOnFatalFailures
   *   whether to crash on failures
-  * @param synchronizerConnectionStatus
-  *   helper to determine whether the synchronizer is active or in another state
   */
-// TODO(#26490) This class should be revisited to check physical <> logical
 class PruningProcessor(
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     syncPersistentStateManager: SyncPersistentStateManager,
@@ -142,17 +138,14 @@ class PruningProcessor(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Unit] = {
 
-    def go(lastUpTo: Option[Offset]): FutureUnlessShutdown[
-      Either[Option[Offset], Either[LedgerPruningError, Unit]]
-    ] = {
+    // Returns a Right(()) if done and a Left(Some(offset)) if pruning should
+    // be done again using offset.
+    def go(lastUpTo: Option[Offset]): FutureUnlessShutdown[Either[Option[Offset], Unit]] = {
       val pruneUpToNext = increaseByBatchSize(lastUpTo)
       val offset = pruneUpToNext.min(pruneUpToInclusive)
       val done = offset == pruneUpToInclusive
-      pruneLedgerEventBatch(lastUpTo, offset).transform {
-        case Left(e) => Right(Left(e))
-        case Right(_) if done => Right(Either.unit)
-        case Right(_) => Left(Some(offset))
-      }.value
+
+      pruneLedgerEventBatch(lastUpTo, offset).map(_ => Either.cond(done, (), Some(offset)))
     }
 
     def doPrune()(implicit
@@ -168,12 +161,14 @@ class PruningProcessor(
             pruneUpToInclusive,
             safeToPruneCommitmentState,
           )
-          _prunedAllEventBatches <- EitherT(
+
+          _ <- EitherT.liftF[FutureUnlessShutdown, LedgerPruningError, Unit](
             Monad[FutureUnlessShutdown].tailRecM(pruningStatus.completedO)(go)
           )
         } yield ()
       )
-    executionQueue.executeEUS(doPrune(), s"prune ledger events upto $pruneUpToInclusive")
+
+    executionQueue.executeEUS(doPrune(), s"prune ledger events up to $pruneUpToInclusive")
   }
 
   /** Returns an offset of at most `boundInclusive` that is safe to prune and whose timestamp is
@@ -207,33 +202,32 @@ class PruningProcessor(
             .map { firstUnsafeOffset =>
               val result = firstUnsafeOffset
                 .map(_.offset)
-                .flatMap(_.decrement)
-                .map(safeOffset => safeOffset.min(rewoundBoundInclusive))
+                .flatMap(_.decrement) // unsafe -> safe
+                .map(_.min(rewoundBoundInclusive))
 
               logger.debug(
-                s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
+                s"BoundInclusive: $boundInclusive, beforeOrAtPublicationTime: $beforeOrAt, beforeOrAtOffset: $beforeOrAtOffset, rewoundBoundInclusive: $rewoundBoundInclusive, first unsafe offset for rewound-bound: $firstUnsafeOffset, result: $result"
               )
               result
             }
             .value
 
         case None =>
-          FutureUnlessShutdown.pure(
-            Left(LedgerPruningNothingToPrune)
-          ) // nothing to prune, beforeOrAt is too low
+          // nothing to prune, beforeOrAt is too low
+          FutureUnlessShutdown.pure(Left(LedgerPruningNothingToPrune))
       }
   )
 
   /** Purge all data of the specified synchronizer that must be inactive.
     */
-  def purgeInactiveSynchronizer(synchronizerId: SynchronizerId)(implicit
+  def purgeInactiveSynchronizer(lsid: SynchronizerId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Unit] = for {
     // Ensure all configs are inactive
     configs <- EitherT.fromEither[FutureUnlessShutdown](
       synchronizerConnectionConfigStore
-        .getAllFor(synchronizerId)
-        .leftMap(_ => PurgingUnknownSynchronizer(synchronizerId))
+        .getAllFor(lsid)
+        .leftMap(_ => PurgingUnknownSynchronizer(lsid))
     )
 
     _ <- EitherT.fromEither[FutureUnlessShutdown](
@@ -243,47 +237,38 @@ class PruningProcessor(
             (config.configuredPsid, config.status)
         }.toSet)
         .toLeft(())
-        .leftMap(PurgingOnlyAllowedOnInactiveSynchronizer(synchronizerId, _))
+        .leftMap(PurgingOnlyAllowedOnInactiveSynchronizer(lsid, _))
     )
 
-    _ = logger.info(s"Purging inactive synchronizer $synchronizerId")
-
     _ <- EitherT.right(
-      synchronizeWithClosing("Purge inactive synchronizer")(
-        MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllFor(synchronizerId))(
-          purgeSynchronizer
-        )
-      )
+      synchronizeWithClosing("Purge inactive synchronizer")(purgeSynchronizer(lsid))
     )
   } yield ()
 
   private def pruneLedgerEventBatch(
       lastUpTo: Option[Offset],
       pruneUpToInclusiveBatchEnd: Offset,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LedgerPruningError, Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     synchronizeWithClosing(functionFullName) {
-      logger.info(s"Start pruning up to $pruneUpToInclusiveBatchEnd...")
+      logger.info(s"Start pruning up to $pruneUpToInclusiveBatchEnd")
       val pruningStore = participantNodePersistentState.value.pruningStore
       for {
-        _ <- EitherT.right(
-          pruningStore.markPruningStarted(pruneUpToInclusiveBatchEnd)
-        )
-        _ <- EitherT.right(performPruning(lastUpTo, pruneUpToInclusiveBatchEnd))
-        _ <- EitherT.right(
-          pruningStore.markPruningDone(pruneUpToInclusiveBatchEnd)
-        )
+        _ <- pruningStore.markPruningStarted(pruneUpToInclusiveBatchEnd)
+        _ <- performPruning(lastUpTo, pruneUpToInclusiveBatchEnd)
+        _ <- pruningStore.markPruningDone(pruneUpToInclusiveBatchEnd)
       } yield {
         logger.info(s"Pruned up to $pruneUpToInclusiveBatchEnd")
       }
     }
 
-  private def lookUpSynchronizerAndParticipantPruningCutoffs(
+  private def getPruningCutoffs(
       pruneFromExclusive: Option[Offset],
       pruneUpToInclusive: Offset,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[PruningCutoffs] =
     for {
       lastOffsetBeforeOrAtPruneUptoInclusive <- participantNodePersistentState.value.ledgerApiStore
         .lastSynchronizerOffsetBeforeOrAt(pruneUpToInclusive)
+
       lastOffsetInPruningRange = lastOffsetBeforeOrAtPruneUptoInclusive
         .filter(synchronizerOffset => Option(synchronizerOffset.offset) > pruneFromExclusive)
         .map(synchronizerOffset =>
@@ -292,21 +277,21 @@ class PruningProcessor(
             CantonTimestamp(synchronizerOffset.publicationTime),
           )
         )
-      // TODO(#24716) We probably don't need to iterate over physical synchronizers
-      synchronizerOffsets <- syncPersistentStateManager.getAll.toList.parTraverseFilter {
-        case (synchronizerId, state) =>
+
+      synchronizerOffsets <- syncPersistentStateManager.getAllLogical.keySet.toList
+        .parTraverseFilter[FutureUnlessShutdown, PruningCutoffs.SynchronizerOffset] { lsid =>
           participantNodePersistentState.value.ledgerApiStore
-            .lastSynchronizerOffsetBeforeOrAt(synchronizerId.logical, pruneUpToInclusive)
+            .lastSynchronizerOffsetBeforeOrAt(lsid, pruneUpToInclusive)
             .map(
               _.filter(synchronizerOffset => Option(synchronizerOffset.offset) > pruneFromExclusive)
                 .map { synchronizerOffset =>
                   PruningCutoffs.SynchronizerOffset(
-                    state = state,
-                    lastTimestamp = CantonTimestamp(synchronizerOffset.recordTime),
+                    lsid = lsid,
+                    lastRecordTime = CantonTimestamp(synchronizerOffset.recordTime),
                   )
                 }
             )
-      }
+        }
     } yield PruningCutoffs(
       lastOffsetInPruningRange,
       synchronizerOffsets,
@@ -314,9 +299,7 @@ class PruningProcessor(
 
   private def ensurePruningOffsetIsSafe(
       offset: Offset,
-      safeToPruneCommitmentState: Option[
-        SafeToPruneCommitmentState
-      ],
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Unit] =
@@ -349,7 +332,7 @@ class PruningProcessor(
       upToInclusive: Offset,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
-      cutoffs <- lookUpSynchronizerAndParticipantPruningCutoffs(fromExclusive, upToInclusive)
+      cutoffs <- getPruningCutoffs(fromExclusive, upToInclusive)
       _ <- cutoffs.synchronizerOffsets.parTraverse(pruneSynchronizer)
       _ <- cutoffs.globalOffsetO.fold(FutureUnlessShutdown.unit) {
         case (globalOffset, publicationTime) =>
@@ -357,59 +340,86 @@ class PruningProcessor(
       }
     } yield ()
 
-  /** Prune a synchronizer persistent state.
+  /** Prune the persistent states of all physical instances of the given lsid.
     */
   private def pruneSynchronizer(synchronizerOffset: PruningCutoffs.SynchronizerOffset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    val PruningCutoffs.SynchronizerOffset(state, lastTimestamp) = synchronizerOffset
+    val PruningCutoffs.SynchronizerOffset(lsid, lastRecordTime) = synchronizerOffset
 
-    logger.info(show"Pruning ${state.synchronizerIdx.synchronizerId} up to $lastTimestamp")
+    def logical(): EitherT[FutureUnlessShutdown, LedgerPruningInternalError, Unit] = for {
+      state <- syncPersistentStateManager.getAllLogical
+        .get(lsid)
+        .toRight(LedgerPruningInternalError(s"Unable to get persistent state for $lsid"))
+        .toEitherT[FutureUnlessShutdown]
 
-    // we don't prune stores that are pruned by the JournalGarbageCollector regularly anyway
-    logger.debug("Pruning sequenced event store...")
+      _ <- EitherT.liftF(state.acsCommitmentStore.prune(lastRecordTime))
+      // TODO(#2600) Prune the reassignment store
+    } yield ()
+
+    def physical(): FutureUnlessShutdown[Unit] =
+      MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllFor(lsid)) { state =>
+        logger.debug(s"Pruning sequenced event store of ${state.psid}")
+
+        for {
+          _ <- state.sequencedEventStore.prune(lastRecordTime)
+
+          _ = logger.debug(s"Pruning request journal store of ${state.psid}")
+          _ <- state.requestJournalStore.prune(lastRecordTime)
+        } yield ()
+      }
+
+    logger.info(s"Pruning $lsid up to $lastRecordTime")
 
     for {
-      _ <- state.sequencedEventStore.prune(lastTimestamp)
-
-      _ = logger.debug("Pruning request journal store...")
-      _ <- state.requestJournalStore.prune(lastTimestamp)
-
-      _ = logger.debug("Pruning acs commitment store...")
-      _ <- state.acsCommitmentStore.prune(lastTimestamp)
-      // TODO(#2600) Prune the reassignment store
+      _ <- physical()
+      _ <- logical().fold(
+        err => logger.warn(s"Unable to prune $lsid: $err"),
+        _ => (),
+      )
     } yield ()
   }
 
-  // TODO(#24716) Split physical vs logical pruning
-  private def purgeSynchronizer(state: SyncPersistentState)(implicit
+  /** Purge the persistent states of all physical instances of the given lsid.
+    */
+  private def purgeSynchronizer(lsid: SynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    logger.info(s"Purging synchronizer ${state.synchronizerIdx.synchronizerId}")
+    def logical(): EitherT[FutureUnlessShutdown, LedgerPruningInternalError, Unit] = for {
+      state <- syncPersistentStateManager.getAllLogical
+        .get(lsid)
+        .toRight(LedgerPruningInternalError(s"Unable to get persistent state for $lsid"))
+        .toEitherT[FutureUnlessShutdown]
 
-    logger.debug("Purging active contract store...")
+      _ <- EitherT.liftF(state.activeContractStore.purge())
+
+      // TODO(#2600) Purge the reassignment store
+    } yield ()
+
+    def physical(): FutureUnlessShutdown[Unit] =
+      MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllFor(lsid)) { state =>
+        logger.debug(s"Purging sequenced event store of ${state.psid}")
+
+        for {
+          _ <- state.sequencedEventStore.purge()
+
+          _ = logger.debug(s"Purging request journal store of ${state.psid}")
+          _ <- state.requestJournalStore.purge()
+
+          _ = logger.debug(s"Purging submission of ${state.lsid}")
+          _ <- state.submissionTrackerStore.purge()
+        } yield ()
+      }
+
+    logger.info(s"Purging synchronizer $lsid")
+
     for {
-      // Purge stores that are pruned by the ConnectedSynchronizer's JournalGarbageCollector as the ConnectedSynchronizer
-      // is never active anymore.
-      _ <- state.activeContractStore.purge()
-
-      _ = logger.debug("Purging sequenced event store...")
-      _ <- state.sequencedEventStore.purge()
-
-      _ = logger.debug("Purging request journal store...")
-      _ <- state.requestJournalStore.purge()
-
-      // We don't purge the ACS commitment store, as the data might still serve as audit evidence.
-
-      _ = logger.debug("Purging submission tracker store...")
-      _ <- state.submissionTrackerStore.purge()
-
-      // TODO(#2600) Purge the reassignment store when implementing pruning
-    } yield {
-      logger.info(
-        s"Purging synchronizer ${state.synchronizerIdx.synchronizerId} has been completed"
+      _ <- physical()
+      _ <- logical().fold(
+        err => logger.warn(s"Unable to purge $lsid: $err"),
+        _ => (),
       )
-    }
+    } yield ()
   }
 
   private def pruneDeduplicationStore(
@@ -604,7 +614,7 @@ private[pruning] object PruningProcessor extends HasLoggerName {
   )
 
   /** PruningCutoffs captures two "formats" of the same pruning cutoff: The global offset and
-    * per-synchronizer local offsets (with participant offset).
+    * per-synchronizer local offsets.
     * @param synchronizerOffsets
     *   cutoff as synchronizer-local offsets used for canton-internal per-synchronizer pruning
     */
@@ -615,14 +625,15 @@ private[pruning] object PruningProcessor extends HasLoggerName {
 
   object PruningCutoffs {
 
-    /** @param state
-      *   SyncPersistentState of the synchronizer
-      * @param lastTimestamp
-      *   Last sequencing timestamp below the given globalOffset
+    /** @param lsid
+      *   The id of the synchronizer. It is logical despite referring to a sequencing timestamp
+      *   (which is physical) because it comes from the indexer.
+      * @param lastRecordTime
+      *   Last sequencing timestamp/record time below the given globalOffset
       */
     final case class SynchronizerOffset(
-        state: SyncPersistentState,
-        lastTimestamp: CantonTimestamp,
+        lsid: SynchronizerId,
+        lastRecordTime: CantonTimestamp,
     )
   }
 }

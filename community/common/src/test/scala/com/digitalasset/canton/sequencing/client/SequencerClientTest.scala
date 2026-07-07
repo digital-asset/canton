@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.*
@@ -46,6 +45,7 @@ import com.digitalasset.canton.protocol.{
   TestSynchronizerParameters,
   v30,
   v31,
+  v32,
 }
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
@@ -115,6 +115,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
@@ -142,25 +143,25 @@ final class SequencerClientTest
     with ProtocolVersionChecksAnyWordSpec {
 
   private lazy val metrics = CommonMockMetrics.sequencerClient
-  private lazy val deliver: Deliver[Nothing] =
+  private lazy val deliver: Deliver[Batch[Nothing]] =
     SequencerTestUtils.mockDeliver(
       CantonTimestamp.Epoch,
       synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
     )
-  private lazy val signedDeliver: SequencedEventWithTraceContext[ClosedEnvelope] =
+  private lazy val signedDeliver: SequencedEventWithTraceContext[Batch[ClosedEnvelope]] =
     SequencedEventWithTraceContext(SequencerTestUtils.sign(deliver))(traceContext)
 
-  private lazy val nextDeliver: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private lazy val nextDeliver: Deliver[Batch[Nothing]] = SequencerTestUtils.mockDeliver(
     timestamp = CantonTimestamp.ofEpochSecond(1),
     previousTimestamp = Some(CantonTimestamp.Epoch),
     synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
   )
-  private lazy val deliver44: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private lazy val deliver44: Deliver[Batch[Nothing]] = SequencerTestUtils.mockDeliver(
     timestamp = CantonTimestamp.ofEpochSecond(2),
     previousTimestamp = Some(CantonTimestamp.ofEpochSecond(1)),
     synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
   )
-  private lazy val deliver45: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private lazy val deliver45: Deliver[Batch[Nothing]] = SequencerTestUtils.mockDeliver(
     timestamp = CantonTimestamp.ofEpochSecond(3),
     previousTimestamp = Some(CantonTimestamp.ofEpochSecond(2)),
     synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
@@ -193,7 +194,7 @@ final class SequencerClientTest
     super.afterAll()
   }
 
-  private def deliver(i: Long): Deliver[Nothing] = SequencerTestUtils.mockDeliver(
+  private def deliver(i: Long): Deliver[Batch[Nothing]] = SequencerTestUtils.mockDeliver(
     timestamp = CantonTimestamp.Epoch.plusSeconds(i),
     previousTimestamp = if (i > 1) Some(CantonTimestamp.Epoch.plusSeconds(i - 1)) else None,
     DefaultTestIdentities.physicalSynchronizerId,
@@ -255,22 +256,30 @@ final class SequencerClientTest
           eventValidator = new SequencedEventValidator {
             override def validate(
                 priorEvent: Option[ProcessingSerializedEvent],
-                event: SequencedSerializedEvent,
+                event: MaybeCompressedSerializedEvent,
                 sequencerId: SequencerId,
             )(implicit
                 traceContext: TraceContext
-            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] = {
+            ): EitherT[
+              FutureUnlessShutdown,
+              SequencedEventValidationError[Nothing],
+              SequencedSerializedEvent,
+            ] = {
               validated.set(true)
               eventAlwaysValid.validate(priorEvent, event, sequencerId)
             }
 
             override def validateOnReconnect(
                 priorEvent: Option[ProcessingSerializedEvent],
-                reconnectEvent: SequencedSerializedEvent,
+                reconnectEvent: MaybeCompressedSerializedEvent,
                 sequencerId: SequencerId,
             )(implicit
                 traceContext: TraceContext
-            ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[Nothing], Unit] =
+            ): EitherT[
+              FutureUnlessShutdown,
+              SequencedEventValidationError[Nothing],
+              SequencedSerializedEvent,
+            ] =
               validate(priorEvent, reconnectEvent, sequencerId)
 
             override def validatePekko[E: Pretty](
@@ -1516,13 +1525,15 @@ final class SequencerClientTest
     def subscription: MockSubscription[E]
     def sendToHandler(event: SequencedSerializedEvent): FutureUnlessShutdown[Unit]
 
-    def sendToHandler(event: SequencedEvent[ClosedEnvelope]): FutureUnlessShutdown[Unit] =
+    def sendToHandler(
+        event: DecompressedSequencedEvent[ClosedEnvelope]
+    ): FutureUnlessShutdown[Unit] =
       sendToHandler(SequencedEventWithTraceContext(SequencerTestUtils.sign(event))(traceContext))
   }
 
   private case class OldStyleSubscriber[E](
       override val request: SubscriptionRequest,
-      private val handler: SequencedEventHandler[E],
+      private val handler: MaybeCompressedSequencedEventHandler[E],
       override val subscription: MockSubscription[E],
   ) extends Subscriber[E] {
     override def sendToHandler(event: SequencedSerializedEvent): FutureUnlessShutdown[Unit] =
@@ -1747,7 +1758,7 @@ final class SequencerClientTest
 
     override def subscribe[E](
         request: SubscriptionRequest,
-        handler: SequencedEventHandler[E],
+        handler: MaybeCompressedSequencedEventHandler[E],
         timeout: Duration,
     )(implicit traceContext: TraceContext): Either[String, SequencerSubscription[E]] = {
       val subscription = new MockSubscription[E]
@@ -1822,7 +1833,7 @@ final class SequencerClientTest
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
 
-    override def physicalSynchronizerIdO: Option[PhysicalSynchronizerId] = ???
+    override def physicalSynchronizerIdO: Option[PhysicalSynchronizerId] = None
 
     override def staticSynchronizerParametersO: Option[StaticSynchronizerParameters] = ???
 
@@ -1851,17 +1862,27 @@ final class SequencerClientTest
 
     override def nbConnections: NonNegativeInt = ???
 
-    override def getConnections(requester: String, nb: PositiveInt, exclusions: Set[SequencerId])(
-        implicit traceContext: TraceContext
+    override def getConnections(
+        requester: String,
+        nb: PositiveInt,
+        excluded: Set[SequencerId],
+        acceptableO: Option[Set[SequencerId]],
+    )(implicit
+        traceContext: TraceContext
     ): Set[SequencerConnection] = Set(connection)
 
-    override def getOneConnectionPerSequencer(requester: String)(implicit
+    override def getOneConnectionPerSequencer(
+        requester: String,
+        acceptableO: Option[Set[SequencerId]],
+    )(implicit
         traceContext: TraceContext
     ): Map[SequencerId, SequencerConnection] = ???
 
-    override def getAllConnections()(implicit
+    override def getAllConnections: Seq[SequencerConnection] = ???
+
+    override def getAllSequencerIds(implicit
         traceContext: TraceContext
-    ): Seq[SequencerConnection] = ???
+    ): Map[SequencerAlias, SequencerId] = ???
 
     override def contents: Map[SequencerId, Set[SequencerConnection]] = ???
 
@@ -1874,6 +1895,8 @@ final class SequencerClientTest
     )(implicit
         traceContext: TraceContext
     ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = Either.unit
+
+    override val metricsContext: MetricsContext = MetricsContext.Empty
   }
 
   private object MockPool {
@@ -1931,7 +1954,7 @@ final class SequencerClientTest
   private trait EnvFactory[+Client <: SequencerClient] {
     def create(
         psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-        storedEvents: Seq[SequencedEvent[ClosedEnvelope]] = Seq.empty,
+        storedEvents: Seq[DecompressedSequencedEvent[ClosedEnvelope]] = Seq.empty,
         cleanPrehead: Option[SequencerCounterCursorPrehead] = None,
         eventValidator: SequencedEventValidator = eventAlwaysValid,
         options: SequencerClientConfig = SequencerClientConfig(),
@@ -1945,7 +1968,7 @@ final class SequencerClientTest
     )(implicit closeContext: CloseContext): Env[Client]
 
     protected def preloadStores(
-        storedEvents: Seq[SequencedEvent[ClosedEnvelope]],
+        storedEvents: Seq[DecompressedSequencedEvent[ClosedEnvelope]],
         cleanPrehead: Option[SequencerCounterCursorPrehead],
         sequencedEventStore: SequencedEventStore,
         sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -2034,6 +2057,9 @@ final class SequencerClientTest
     override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
       v31.EnvelopeContent.SomeEnvelopeContent.Empty
 
+    override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
+      v32.EnvelopeContent.SomeEnvelopeContent.Empty
+
     override def productElement(n: Int): Any = fail("shouldn't be used")
     override def productArity: Int = fail("shouldn't be used")
     override def canEqual(that: Any): Boolean = fail("shouldn't be used")
@@ -2042,7 +2068,7 @@ final class SequencerClientTest
   private object RichEnvFactory extends EnvFactory[RichSequencerClient] {
     override def create(
         psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId,
-        storedEvents: Seq[SequencedEvent[ClosedEnvelope]],
+        storedEvents: Seq[DecompressedSequencedEvent[ClosedEnvelope]],
         cleanPrehead: Option[SequencerCounterCursorPrehead],
         eventValidator: SequencedEventValidator,
         options: SequencerClientConfig,
@@ -2102,6 +2128,7 @@ final class SequencerClientTest
           sequencerLivenessMargin = NonNegativeInt.zero,
           submissionRequestAmplification = amplificationConfig,
           sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+          subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
         )
 
       val client = new RichSequencerClientImpl(
@@ -2162,7 +2189,7 @@ final class SequencerClientTest
   private object PekkoEnvFactory extends EnvFactory[SequencerClient] {
     override def create(
         psid: PhysicalSynchronizerId,
-        storedEvents: Seq[SequencedEvent[ClosedEnvelope]],
+        storedEvents: Seq[DecompressedSequencedEvent[ClosedEnvelope]],
         cleanPrehead: Option[SequencerCounterCursorPrehead],
         eventValidator: SequencedEventValidator,
         options: SequencerClientConfig,

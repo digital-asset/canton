@@ -56,6 +56,7 @@ class ParticipantNodePersistentState private (
       pruningStore,
       ledgerApiStore,
       contractStore,
+      acsCounterParticipantConfigStore,
     )(logger)
 }
 

@@ -15,7 +15,7 @@ import com.digitalasset.canton.sequencing.handlers.ThrottlingApplicationEventHan
   BelowCapacity,
   ThrottlingState,
 }
-import com.digitalasset.canton.sequencing.protocol.Envelope
+import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope, GenBatch}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -27,15 +27,15 @@ class ThrottlingApplicationEventHandler(
     override val loggerFactory: NamedLoggerFactory
 ) extends NamedLogging {
 
-  def throttle[Box[+_ <: Envelope[?]], Env <: Envelope[?], A](
+  def throttle[Box[+_ <: GenBatch[?]], Env <: Envelope[?], A](
       maximumInFlightEventBatches: PositiveInt,
       handler: ApplicationHandler[Lambda[
-        `+e <: Envelope[?]` => Traced[Seq[Box[e]]]
+        `+e <: Envelope[?]` => Traced[Seq[Box[Batch[e]]]]
       ], Env, A],
       metrics: SequencerClientMetrics,
   )(implicit
       ec: ExecutionContext
-  ): ApplicationHandler[Lambda[`+e <: Envelope[?]` => Traced[Seq[Box[e]]]], Env, A] = {
+  ): ApplicationHandler[Lambda[`+e <: Envelope[?]` => Traced[Seq[Box[Batch[e]]]]], Env, A] = {
 
     def acquirePermit(s: ThrottlingState)(implicit traceContext: TraceContext) =
       s match {

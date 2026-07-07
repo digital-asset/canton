@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration
 
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.config
@@ -16,6 +15,7 @@ import com.digitalasset.canton.examples.java.cycle as M
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.{Party, PartyId}
+import com.digitalasset.nonempty.NonEmpty
 
 /** Adds the ability to run cycles to integration tests
   */

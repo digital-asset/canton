@@ -11,10 +11,7 @@ import com.daml.ports.Port
 import com.digitalasset.canton.TestPredicateFiltersFixtureAnyWordSpec
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.CantonConfig
-import com.digitalasset.canton.integration.ConfigTransforms.{
-  enableAlphaVersionSupport,
-  setBetaSupport,
-}
+import com.digitalasset.canton.integration.ConfigTransforms.setBetaSupport
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixtureIsolated
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentSetupPlugin}
@@ -127,7 +124,11 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
 
     def accept(langVersion: LanguageVersion, version: String, mode: String) = {
       val protocolVersion =
-        if (LanguageVersion.stableLfVersions.contains(langVersion))
+        if (
+          LanguageVersion.stableLfVersions.contains(
+            langVersion
+          ) && !ProtocolVersion.alphaOnlyLfVersions.contains(langVersion)
+        )
           ProtocolVersion.latest
         else if (LanguageVersion.earlyAccessLfVersionsRange.contains(langVersion))
           ProtocolVersion.beta.lastOption.getOrElse(ProtocolVersion.dev)
@@ -189,9 +190,7 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
           _.focus(_.ledgerApi.authServices).replace(Seq(Wildcard))
         )
       val transforms =
-        Seq(noAuth) ++ (if (supportDevLanguageVersions)
-                          enableAlphaVersionSupport
-                        else Nil) ++ setBetaSupport(testedProtocolVersion.isBeta)
+        Seq(noAuth) ++ setBetaSupport(testedProtocolVersion.isBeta)
       transforms.foldLeft(config)((cfg, transform) => transform(cfg))
     }
   }

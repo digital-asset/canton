@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.DbConfig
@@ -40,6 +40,7 @@ import com.digitalasset.canton.topology.{
   TopologyManagerError,
   UnknownPhysicalSynchronizerId,
 }
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.syntax.all.*
 import org.scalatest.Assertion
@@ -190,7 +191,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // sequencer2 announces its connection details for the successor synchronizer
     sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
-      endpoints = NonEmpty(Set, new URI("http://localhost:6000"), new URI("http://localhost:7000")),
+      endpoints = NonEmpty(Set, new URI("http://localhost:6000")),
       successorSynchronizerId = successorPsid,
     )
 
@@ -200,18 +201,17 @@ final class LsuAnnouncementTopologyIntegrationTest
       participant2,
       sequencer1.id -> 5000,
       sequencer2.id -> 6000,
-      sequencer2.id -> 7000,
     )
 
     // sequencer2 changes its connection details for the successor synchronizer
     sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
-      endpoints = NonEmpty(Set, new URI("http://localhost:6000")),
+      endpoints = NonEmpty(Set, new URI("http://localhost:6001")),
       successorSynchronizerId = successorPsid,
     )
     // check that participant2 updated the synchronizer config for the successor synchronizer
     // for sequencer2
-    checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5000, sequencer2.id -> 6000)
+    checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5000, sequencer2.id -> 6001)
 
     // sequencer1 changes its connection details for the successor synchronizer
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
@@ -224,7 +224,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // check that the participants automatically modified their synchronizer configs for the successor synchronizer
     // according to the latest sequencer connection updates
     checkUpgradedSequencerConfig(participant1, sequencer1.id -> 5005)
-    checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5005, sequencer2.id -> 6000)
+    checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5005, sequencer2.id -> 6001)
 
     // check that modifying the synchronizer configs (adding sequencer2) yields to the config
     // of the successor being updated
@@ -243,11 +243,10 @@ final class LsuAnnouncementTopologyIntegrationTest
           NonNegativeInt.zero,
           SubmissionRequestAmplification.NoAmplification,
           SequencerConnectionPoolDelays.default,
+          SubscriptionLivenessLimits.default,
         )
       ),
     )
-
-    checkUpgradedSequencerConfig(participant1, sequencer1.id -> 5005, sequencer2.id -> 6000)
   }
 
   // this test simulates an automation that is part of a logical synchronizer upgrade

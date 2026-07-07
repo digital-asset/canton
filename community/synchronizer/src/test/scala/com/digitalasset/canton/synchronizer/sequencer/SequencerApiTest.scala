@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{
@@ -34,6 +33,8 @@ import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import org.apache.pekko.actor.ActorSystem
@@ -46,6 +47,7 @@ import org.slf4j.event.Level
 import java.time.Duration
 import java.util.UUID
 import scala.annotation.nowarn
+import scala.concurrent.Promise
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 abstract class SequencerApiTest
@@ -328,6 +330,8 @@ abstract class SequencerApiTest
       }
 
       def testAggregation: Boolean = supportAggregation
+      def testAggregationPV35: Boolean =
+        supportAggregation && testedProtocolVersion > ProtocolVersion.v34
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*
@@ -335,14 +339,17 @@ abstract class SequencerApiTest
         val messageContent = "aggregatable-message"
         // TODO(i10412): See above
         val aggregationRule =
-          AggregationRule(NonEmpty(Seq, p6, p9), PositiveInt.tryCreate(2), testedProtocolVersion)
+          AggregationRule.testing(
+            NonEmpty(Seq, p6, p9),
+            PositiveInt.tryCreate(2),
+            testedProtocolVersion,
+          )
         val request1 = createSendRequest(
           p6,
           messageContent,
           Recipients.cc(p10),
           maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
           aggregationRule = Some(aggregationRule),
-          topologyTimestamp = Some(CantonTimestamp.Epoch),
         )
         val request2 = request1.copy(sender = p9, messageId = MessageId.fromUuid(new UUID(1, 2)))
 
@@ -397,21 +404,24 @@ abstract class SequencerApiTest
         }
       }
 
-      "bounce on write path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregation in {
+      "bounce on write path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregationPV35 in {
         env =>
           import env.*
 
           val messageContent = "bounce-write-path-message"
           // TODO(i10412): See above
           val aggregationRule =
-            AggregationRule(NonEmpty(Seq, p6, p9), PositiveInt.tryCreate(2), testedProtocolVersion)
+            AggregationRule.testing(
+              NonEmpty(Seq, p6, p9),
+              PositiveInt.tryCreate(2),
+              testedProtocolVersion,
+            )
           val request1 = createSendRequest(
             p6,
             messageContent,
             Recipients.cc(p10),
             maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofMinutes(10)),
             aggregationRule = Some(aggregationRule),
-            topologyTimestamp = Some(CantonTimestamp.Epoch.add(Duration.ofSeconds(1))),
           )
           val request2 = request1.copy(
             sender = p9,
@@ -447,6 +457,39 @@ abstract class SequencerApiTest
           }
       }
 
+      "bounce on write path aggregate submissions dedup" onlyRunWhen testAggregationPV35 in { env =>
+        import env.*
+
+        val messageContent = "bounce-sender-dedup-message"
+        // TODO(i10412): See above
+        val aggregationRule =
+          AggregationRule.senderDedup(p6, testedProtocolVersion)
+
+        val request1 = createSendRequest(
+          p6,
+          messageContent,
+          Recipients.cc(p10),
+          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofMinutes(1)),
+          aggregationRule = Some(aggregationRule),
+        )
+
+        val signed = sign(request1)
+        for {
+          // first succeeds
+          _ <- sequencer
+            .sendAsyncSigned(signed)
+            .valueOrFail("Sent async for participant1")
+          _ <- readForMembers(Seq(p6), sequencer)
+          // second bounces
+          deduped <- sequencer
+            .sendAsyncSigned(signed)
+            .leftOrFail("A sendAsync of duplicate aggregation submission")
+        } yield {
+          deduped.code.id shouldBe SequencerErrors.AggregateSubmissionAlreadySent.id
+          succeed
+        }
+      }
+
       "bounce on read path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregation in {
         env =>
           import env.*
@@ -455,7 +498,11 @@ abstract class SequencerApiTest
           val messageContent = "bounce-read-path-message"
           // TODO(i10412): See above
           val aggregationRule =
-            AggregationRule(NonEmpty(Seq, p6, p9), PositiveInt.tryCreate(2), testedProtocolVersion)
+            AggregationRule.testing(
+              NonEmpty(Seq, p6, p9),
+              PositiveInt.tryCreate(2),
+              testedProtocolVersion,
+            )
 
           val request1 = createSendRequest(
             p6,
@@ -465,7 +512,6 @@ abstract class SequencerApiTest
             //        read side clock is at 0s, which should produce an error due to the MST bound at 6m(=360s)
             maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(370)),
             aggregationRule = Some(aggregationRule),
-            topologyTimestamp = Some(CantonTimestamp.Epoch),
           )
 
           // Only block orderers implement aggregation, so this should always be defined.
@@ -491,7 +537,7 @@ abstract class SequencerApiTest
 
         // TODO(i10412): See above
         val aggregationRule =
-          AggregationRule(
+          AggregationRule.testing(
             NonEmpty(Seq, p11, p12, p13),
             PositiveInt.tryCreate(2),
             testedProtocolVersion,
@@ -531,42 +577,51 @@ abstract class SequencerApiTest
             messageId,
             Batch(envelopes, testedProtocolVersion),
             CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-            topologyTimestamp = Some(CantonTimestamp.Epoch),
+            topologyTimestamp = None,
             Some(aggregationRule),
             Option.empty[SequencingSubmissionCost],
             testedProtocolVersion,
           )
+
+        val lockP = Promise[Unit]()
 
         for {
           envs1 <- envelopes.parTraverse(signEnvelope(p11Crypto, _))
           request1 = mkRequest(p11, messageId1, envs1)
           envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _))
           request2 = mkRequest(p12, messageId2, envs2)
+          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
+          request3 = mkRequest(p13, messageId3, envs3)
           _ <- sequencer
             .sendAsyncSigned(sign(request1))
             .valueOrFail("Sent async for participant11")
           reads11 <- readForMembers(Seq(p11), sequencer)
+          _ = sequencer.applyPostProcessingLockForTesting(lockP.future)
           _ <- sequencer
             .sendAsyncSigned(sign(request2))
             .valueOrFail("Sent async for participant13")
+          _ <- sequencer
+            .sendAsyncSigned(sign(request3))
+            .valueOrFail("Sent async for participant13")
+          _ = lockP.success(())
           reads12 <- readForMembers(Seq(p12, p13), sequencer)
           reads12a <- readForMembers(
             Seq(p11),
             sequencer,
             startTimestamp = firstEventTimestamp(p11)(reads11).map(_.immediateSuccessor),
           )
-
-          // participant13 is late to the party and its request is refused
-          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
-          request3 = mkRequest(p13, messageId3, envs3)
-          _ <- sequencer
-            .sendAsyncSigned(sign(request3))
-            .valueOrFail("Sent async for participant13")
           reads13 <- readForMembers(
             Seq(p13),
             sequencer,
             startTimestamp = firstEventTimestamp(p13)(reads12).map(_.immediateSuccessor),
           )
+          // if participant13 sends after processing, he'll see the already sent error
+          _ <-
+            if (testAggregationPV35)
+              sequencer
+                .sendAsyncSigned(sign(request3))
+                .leftOrFail("Send async should fail with already sent")
+            else FutureUnlessShutdown.unit
         } yield {
           checkMessages(
             Seq(
@@ -618,6 +673,11 @@ abstract class SequencerApiTest
                 include(s"The aggregatable request with aggregation ID") and
                   include("was previously delivered at")
               )
+            case SequencerErrors.AggregateSubmissionAlreadySentV2(reason) =>
+              reason should (
+                include(s"The aggregatable request with aggregation ID") and
+                  include("was previously delivered at")
+              )
           }
         }
       }
@@ -628,7 +688,11 @@ abstract class SequencerApiTest
         val messageContent = "aggregatable-message-stuffing"
         // TODO(i10412): See above
         val aggregationRule =
-          AggregationRule(NonEmpty(Seq, p14, p15), PositiveInt.tryCreate(2), testedProtocolVersion)
+          AggregationRule.testing(
+            NonEmpty(Seq, p14, p15),
+            PositiveInt.tryCreate(2),
+            testedProtocolVersion,
+          )
         val recipients = Recipients.cc(p14, p15)
         val envelope = ClosedUncompressedEnvelope.create(
           ByteString.copyFromUtf8(messageContent),
@@ -652,7 +716,7 @@ abstract class SequencerApiTest
             messageId,
             Batch(List(envelope), testedProtocolVersion),
             CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-            topologyTimestamp = Some(CantonTimestamp.Epoch),
+            topologyTimestamp = None,
             Some(aggregationRule),
             Option.empty[SequencingSubmissionCost],
             testedProtocolVersion,
@@ -746,7 +810,11 @@ abstract class SequencerApiTest
         // But we need a fresh unregistered participant16
         // TODO(i10412): remove this comment
         val aggregationRule =
-          AggregationRule(NonEmpty(Seq, p1, p16), PositiveInt.tryCreate(1), testedProtocolVersion)
+          AggregationRule.testing(
+            NonEmpty(Seq, p1, p16),
+            PositiveInt.tryCreate(1),
+            testedProtocolVersion,
+          )
 
         val request = createSendRequest(
           p1,
@@ -754,8 +822,6 @@ abstract class SequencerApiTest
           Recipients.cc(p1),
           aggregationRule = Some(aggregationRule),
           maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-          // Since the envelope does not contain a signature, we don't need to specify a topology timestamp
-          topologyTimestamp = None,
         )
 
         for {
@@ -775,7 +841,7 @@ abstract class SequencerApiTest
         // TODO(i10412): See above
         val faultyThreshold = PositiveInt.tryCreate(2)
         val aggregationRule =
-          AggregationRule(NonEmpty(Seq, p17, p17), faultyThreshold, testedProtocolVersion)
+          AggregationRule.testing(NonEmpty(Seq, p17, p17), faultyThreshold, testedProtocolVersion)
 
         val messageId = MessageId.tryCreate("unreachable-threshold")
         val request = SubmissionRequest.tryCreate(
@@ -819,7 +885,11 @@ abstract class SequencerApiTest
 
         // TODO(i10412): See above
         val aggregationRule =
-          AggregationRule(NonEmpty(Seq, p17), PositiveInt.tryCreate(1), testedProtocolVersion)
+          AggregationRule.testing(
+            NonEmpty(Seq, p17),
+            PositiveInt.tryCreate(1),
+            testedProtocolVersion,
+          )
 
         val messageId = MessageId.tryCreate("first-sender-not-eligible")
         val request = SubmissionRequest.tryCreate(
@@ -863,7 +933,11 @@ abstract class SequencerApiTest
 
         val messageContent = "aggregatable-message"
         val aggregationRule =
-          AggregationRule(NonEmpty(Seq, p1, p2), PositiveInt.tryCreate(2), testedProtocolVersion)
+          AggregationRule.testing(
+            NonEmpty(Seq, p1, p2),
+            PositiveInt.tryCreate(2),
+            testedProtocolVersion,
+          )
 
         val requestFromP1 = createSendRequest(
           sender = p1,
@@ -871,7 +945,6 @@ abstract class SequencerApiTest
           Recipients.cc(p3),
           maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
           aggregationRule = Some(aggregationRule),
-          topologyTimestamp = Some(CantonTimestamp.Epoch),
         )
 
         // Request with non-eligible sender
@@ -1061,7 +1134,6 @@ trait SequencerApiTestUtils
       recipients: Recipients,
       maxSequencingTime: CantonTimestamp = CantonTimestamp.MaxValue,
       aggregationRule: Option[AggregationRule] = None,
-      topologyTimestamp: Option[CantonTimestamp] = None,
       sequencingSubmissionCost: Batch[ClosedUncompressedEnvelope] => Option[
         SequencingSubmissionCost
       ] = _ => None,
@@ -1074,7 +1146,7 @@ trait SequencerApiTestUtils
       messageId,
       batch,
       maxSequencingTime,
-      topologyTimestamp,
+      None,
       aggregationRule,
       sequencingSubmissionCost(batch),
       testedProtocolVersion,

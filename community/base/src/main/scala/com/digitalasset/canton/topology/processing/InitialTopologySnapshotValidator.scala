@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.processing
 
 import cats.data.EitherT
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -61,6 +62,7 @@ class InitialTopologySnapshotValidator(
     topologyConfig: TopologyConfig,
     staticSynchronizerParameters: Option[StaticSynchronizerParameters],
     timeouts: ProcessingTimeout,
+    futureSupervisor: FutureSupervisor,
     override val loggerFactory: NamedLoggerFactory,
     cleanupTopologySnapshot: Boolean = false,
 )(implicit ec: ExecutionContext, materializer: Materializer)
@@ -75,11 +77,13 @@ class InitialTopologySnapshotValidator(
       lookup =>
         new RequiredTopologyMappingChecks(
           staticSynchronizerParameters,
+          store.protocolVersion,
           lookup,
           loggerFactory,
         ),
       pureCrypto,
       timeouts,
+      futureSupervisor,
       loggerFactory,
     )
 

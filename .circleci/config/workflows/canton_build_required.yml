@@ -37,8 +37,24 @@ jobs:
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
 
+  - test_docker_images:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/
+      requires:
+        - package_community
+
 ##### Static analysis
-  - verify_circleci_config_and_compliance_label:
+  - verify_circleci_config:
       filters:
         branches:
           ignore:
@@ -58,6 +74,18 @@ jobs:
         branches:
           ignore:
             - /^gha-migration\/.*/ # Do not run the CCI job on the GHA migration branches
+  - check_todos:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        branches:
+          ignore:
+            - /^gha-migration\/.*/ # Do not run the CCI job on the GHA migration branches
+            - main # we run the todo checker nightly on main to avoid race conditions between concurrent PRs
   - protobuf_continuity:
       context:
         - datadog
@@ -88,6 +116,23 @@ jobs:
             - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
+  - build_docs_snippets:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
   - build_docs:
       context:
         - datadog
@@ -104,6 +149,7 @@ jobs:
       requires:
         - package_community
         - build_scaladoc
+        - build_docs_snippets
 
 ##### Tests
   - test:
@@ -139,8 +185,8 @@ jobs:
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - test:
-      name: test_protocol_version_34
-      protocol_version: "34"
+      name: test_protocol_version_36
+      protocol_version: "36"
       context:
         - datadog
         - artifactory
@@ -174,7 +220,27 @@ jobs:
         tags:
           only: /^v.*/
       requires:
-        - test_protocol_version_34
+        - test_protocol_version_36
+  # TODO(#33536): Remove this job once the ACS commitment redesign development is complete
+  - temp_acs_commitment_tests_pv_dev:
+      name: temp_acs_commitment_tests_pv_dev
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile
+      filters:
+        branches:
+          # The ACS commitment tests are run as part of PV dev tests, so fine to ignore them on non-dev branches to save credits
+          ignore:
+            - main
+            - /^release-line.*/
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
   - unstable_test:
       context:
         - datadog

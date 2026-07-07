@@ -12,6 +12,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   TopologyStateForInitHashResponse,
   TopologyStateForInitRequest,
 }
+import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry
@@ -31,16 +32,20 @@ object BftTopologyForInitDownloader {
       retryDelay: FiniteDuration,
       request: TopologyStateForInitRequest,
       loggerFactory: NamedLoggerFactory,
-      getBftInitTopologyStateHash: TopologyStateForInitRequest => EitherT[
+      getBftInitTopologyStateHash: (
+          TopologyStateForInitRequest,
+          Option[Set[SequencerId]],
+      ) => EitherT[
         FutureUnlessShutdown,
         String,
         TopologyStateForInitHashResponse,
       ],
-      downloadSnapshot: TopologyStateForInitRequest => EitherT[
+      downloadSnapshot: (TopologyStateForInitRequest, Option[Set[SequencerId]]) => EitherT[
         FutureUnlessShutdown,
         String,
         GenericStoredTopologyTransactions,
       ],
+      acceptableSequencersO: Option[Set[SequencerId]],
   )(implicit
       closeContext: CloseContext,
       ec: ExecutionContext,
@@ -59,7 +64,10 @@ object BftTopologyForInitDownloader {
               operationName = "Get hash for init topology state",
               retryLogLevel = retryLogLevel,
             )
-            .unlessShutdown(getBftInitTopologyStateHash(request).value, NoExceptionRetryPolicy)
+            .unlessShutdown(
+              getBftInitTopologyStateHash(request, acceptableSequencersO).value,
+              NoExceptionRetryPolicy,
+            )
         )
       }
       _ = logger.info(s"Expecting topology state for init with hash $expectedBftHash")
@@ -77,7 +85,7 @@ object BftTopologyForInitDownloader {
             .unlessShutdown(
               {
                 val hashBuilder = TopologyStateHash.build()
-                downloadSnapshot(request).value.map {
+                downloadSnapshot(request, acceptableSequencersO).value.map {
                   case Right(topologyTransactions) =>
                     topologyTransactions.result.foreach { tx =>
                       hashBuilder.add(tx).discard

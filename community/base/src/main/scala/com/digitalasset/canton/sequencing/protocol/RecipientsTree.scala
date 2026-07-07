@@ -5,13 +5,12 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.reducible.*
 import cats.syntax.traverse.*
-import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.nonempty.NonEmpty
 
 /** A tree representation of the recipients for a batch. Each member receiving the batch should see
   * only subtrees of recipients from a node containing the member. If a member is present in a
@@ -32,6 +31,12 @@ final case class RecipientsTree(
     val tail: Set[Recipient] = children.flatMap(t => t.allRecipients).toSet
     recipientGroup ++ tail
   }
+
+  /** Computes the depth of the recipients tree, defined as the length of the longest path from this
+    * node to a leaf node. A leaf node has depth 1 .
+    */
+  def depth: Int =
+    1 + children.foldLeft(0)((maxDepth, child) => maxDepth.max(child.depth))
 
   def allPaths: NonEmpty[Seq[NonEmpty[Seq[NonEmpty[Set[Recipient]]]]]] =
     NonEmpty.from(children) match {

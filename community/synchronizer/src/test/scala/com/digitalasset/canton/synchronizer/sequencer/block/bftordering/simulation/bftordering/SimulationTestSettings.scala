@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
+  DefaultSegmentLength,
+  SegmentLength,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
   PowerDistribution,
   SimulationSettings,
@@ -16,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   defaultKeyExpirationDistribution,
   defaultOffboardDistribution,
 }
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
@@ -52,6 +54,6 @@ final case class SimulationTestStageSettings(
 
 final case class SimulationTestSettings(
     numberOfInitialNodes: Int,
-    epochLength: EpochLength = DefaultEpochLength,
+    segmentLength: SegmentLength = DefaultSegmentLength,
     stages: NonEmpty[Seq[SimulationTestStageSettings]],
 )

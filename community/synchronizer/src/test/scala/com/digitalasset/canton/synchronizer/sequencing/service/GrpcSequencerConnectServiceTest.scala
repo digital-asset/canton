@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.service
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -16,6 +15,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import org.mockito.MockitoSugar
@@ -62,7 +62,8 @@ class GrpcSequencerConnectServiceTest
         LsuSequencingBounds.unsafeCreate(upgradeTime = ts, lowerBoundSequencingTimeExclusive = ts)
       ),
       sanitizePublicErrorMessages = false,
-      SequencerTestMetrics,
+      disableReleaseVersionHandshakeCheck = false,
+      SequencerTestMetrics(this.getClass.getSimpleName),
       loggerFactory,
     )(parallelExecutionContext)
 

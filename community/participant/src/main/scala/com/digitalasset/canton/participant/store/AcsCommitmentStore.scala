@@ -3,23 +3,25 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.ReinitializationStatus
 import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.CommitmentPeriodStateInOutstanding
 import com.digitalasset.canton.protocol.messages.{
-  AcsCommitment,
-  CommitmentPeriod,
   CommitmentPeriodState,
+  Digest,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.store.PrunableByTime
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.immutable
@@ -29,7 +31,11 @@ import scala.util.control.Breaks.*
 /** Read and write interface for ACS commitments. Apart from pruning, should only be used by the ACS
   * commitment processor
   */
-trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with AutoCloseable {
+trait AcsCommitmentStore
+    extends AcsCommitmentLookup
+    with PrunableByTime
+    with AutoCloseable
+    with NamedLogging {
 
   override protected def kind: String = "acs commitments"
 
@@ -52,10 +58,11 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     * Caller needs to ensure the periods are valid.
     */
   def markOutstanding(
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit]
 
   /** Marks a period as processed and thus its end as a safe point for crash-recovery.
@@ -64,8 +71,9 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     *
     * The period must be after the time point returned by [[lastComputedAndSent]].
     */
-  def markComputedAndSent(period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
+  def markComputedAndSent(period: LegacyCommitmentPeriod)(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[Unit]
 
   /** Store a received ACS commitment. To be called by the ACS commitment processor only.
@@ -79,7 +87,7 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     * same time period. The caller can still store both commitments, for example, such that it can
     * later prove to a third party that the sender sent an incorrect commitment.
     */
-  def storeReceived(commitment: SignedProtocolMessage[AcsCommitment])(implicit
+  def storeReceived(commitment: SignedProtocolMessage[LegacyAcsCommitment])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -98,8 +106,8 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     */
   def markSafe(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
       periods,
@@ -121,8 +129,8 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     */
   def markUnsafe(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
       periods,
@@ -142,9 +150,9 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     */
   protected def markPeriod(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[LegacyCommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit]
 
   val runningCommitments: IncrementalCommitmentStore
 
@@ -159,9 +167,11 @@ trait AcsCommitmentLookup {
     *
     * No guarantees on the order of the returned commitments.
     */
-  def getComputed(period: CommitmentPeriod, counterParticipant: ParticipantId)(implicit
+  def getComputed(period: LegacyCommitmentPeriod, counterParticipant: ParticipantId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Iterable[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)]]
+  ): FutureUnlessShutdown[
+    Iterable[(LegacyCommitmentPeriod, Digest.HashedDigestType)]
+  ]
 
   /** Last locally processed timestamp.
     *
@@ -203,7 +213,7 @@ trait AcsCommitmentLookup {
       includeMatchedPeriods: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)]]
+  ): FutureUnlessShutdown[Iterable[(LegacyCommitmentPeriod, ParticipantId, CommitmentPeriodState)]]
 
   /** Inspection: search computed commitments applicable to the specified period (start is
     * exclusive, end is inclusive)
@@ -215,7 +225,7 @@ trait AcsCommitmentLookup {
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.HashedCommitmentType)]
+    Iterable[(LegacyCommitmentPeriod, ParticipantId, Digest.HashedDigestType)]
   ]
 
   /** Inspection: search received commitments applicable to the specified period (start is
@@ -227,7 +237,7 @@ trait AcsCommitmentLookup {
       counterParticipantsFilter: Option[NonEmpty[Seq[ParticipantId]]] = None,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Iterable[SignedProtocolMessage[AcsCommitment]]]
+  ): FutureUnlessShutdown[Iterable[SignedProtocolMessage[LegacyAcsCommitment]]]
 
 }
 
@@ -255,9 +265,10 @@ trait IncrementalCommitmentStore {
     * added yet.
     */
   def get()(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): FutureUnlessShutdown[
-    (RecordTime, Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType])
+    (RecordTime, Map[SortedSet[InternedPartyId], Digest.DigestType])
   ]
 
   /** Return the record time of the latest update.
@@ -281,7 +292,7 @@ trait IncrementalCommitmentStore {
     */
   def update(
       rt: RecordTime,
-      updates: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
+      updates: Map[SortedSet[InternedPartyId], Digest.DigestType],
       deletes: Set[SortedSet[InternedPartyId]],
       updateMode: UpdateMode,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
@@ -335,7 +346,7 @@ trait IncrementalCommitmentStore {
   */
 trait CommitmentQueue {
 
-  def enqueue(commitment: AcsCommitment)(implicit
+  def enqueue(commitment: LegacyAcsCommitment)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -380,7 +391,7 @@ trait CommitmentQueue {
     * and there is no malicious behavior.
     */
   def peekOverlapsForCounterParticipant(
-      period: CommitmentPeriod,
+      period: LegacyCommitmentPeriod,
       counterParticipant: ParticipantId,
   )(implicit
       traceContext: TraceContext
@@ -424,8 +435,8 @@ object AcsCommitmentStore {
 
   final case class ParticipantCommitmentData(
       counterParticipant: ParticipantId,
-      period: CommitmentPeriod,
-      commitment: AcsCommitment.HashedCommitmentType,
+      period: LegacyCommitmentPeriod,
+      commitment: Digest.HashedDigestType,
   )
 
   final case class ReinitializationStatus(

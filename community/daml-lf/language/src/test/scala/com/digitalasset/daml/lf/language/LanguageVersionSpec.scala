@@ -10,26 +10,8 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class LanguageVersionSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
 
-  "LanguageVersion.ordering order as expected" in {
-
-    val versionInOrder = List(
-      LV.v2_1,
-      LV.v2_2,
-      LV.v2_3_1,
-      LV.v2_3_2,
-      LV.v2_3,
-      LV.v2_dev,
-    )
-
-    val versionRank = versionInOrder.zipWithIndex.toMap
-
-    val versions = Table("version", versionInOrder*)
-
-    forEvery(versions)(v1 =>
-      forEvery(versions)(v2 =>
-        v1.compare(v2).sign shouldBe (versionRank(v1) compareTo versionRank(v2)).sign
-      )
-    )
+  "allLfVersions is sorted" in {
+    LV.allLfVersions shouldBe sorted
   }
 
   "Minor.compare orders all possible minor variants correctly" in {

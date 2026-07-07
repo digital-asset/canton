@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.sequencer
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.*
 import com.digitalasset.canton.admin.api.client.data.{
@@ -46,7 +45,10 @@ import com.digitalasset.canton.sequencing.client.{SendResult, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
+import com.digitalasset.nonempty.NonEmpty
+import monocle.macros.syntax.lens.*
 import org.scalatest
 import org.slf4j.event.Level
 
@@ -74,7 +76,12 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       numMediators = 1,
     ).withNetworkBootstrap { implicit env =>
       new NetworkBootstrapper(EnvironmentDefinition.S1M1)
-    }.addConfigTransforms(ConfigTransforms.setExitOnFatalFailures(false))
+    }.addConfigTransforms(
+      ConfigTransforms.setExitOnFatalFailures(false),
+      ConfigTransforms.updateAllSequencerConfigs_(
+        _.focus(_.parameters.disableAggregationRuleSizeCheckForTesting).replace(true)
+      ),
+    )
 
   private def modifyConnection(
       participant: ParticipantReference,
@@ -120,7 +127,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       val p1SequencerClient = sequencerClientOf(participant1, daId)
 
       // First aggregation will remain in-flight while we switch sequencers
-      aggregationRule1 = AggregationRule(
+      aggregationRule1 = AggregationRule.testing(
         NonEmpty(Seq, participant1.id, participant3.id),
         PositiveInt.tryCreate(2),
         testedProtocolVersion,
@@ -130,7 +137,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         Duration.ofMinutes(2)
       ) // cannot exceed the DynamicSynchronizerParameters.sequencerAggregateSubmissionTimeout (defaults to 5m)
       topologyTimestampTombstone = now
-
       aggregatedBatch = Batch.of(
         testedProtocolVersion,
         RootHashMessage(
@@ -162,7 +168,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       }
 
       // Second aggregation is delivered before we switch sequencers, but must be deduplicated afterwards
-      aggregationRule2 = AggregationRule(
+      aggregationRule2 = AggregationRule.testing(
         NonEmpty(Seq, participant1.id, participant3.id),
         PositiveInt.tryCreate(2),
         testedProtocolVersion,
@@ -348,15 +354,37 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
                 )
               ) =>
             message should include(s"was previously delivered at $aggregationSequenced2")
+          case SendResult.Error(
+                DeliverError(
+                  _,
+                  _,
+                  _,
+                  _,
+                  SequencerErrors.AggregateSubmissionAlreadySentV2(message),
+                  _,
+                )
+              ) =>
+            message should include(s"was previously delivered at $aggregationSequenced2")
         }
       }
     }
 
-    "new sequencer sends out tombstone for participant subscription on events before its initialization" in {
+    "new sequencer sends out tombstone for participant subscription on events before its initialization" onlyRunWith (ProtocolVersion.v34) in {
       implicit env =>
         import env.*
-        // participant3 now talks to the newly onboarded sequencer
 
+        // participant3 now talks to the newly onboarded sequencer (it is already connected)
+        // What this test does is the following: the new sequencer cannot sign events with a
+        // timestamp before its onboarding. This test now sends a submission with a
+        // topologyTimestamp before the onboarding.
+        // The event will be sequenced because the topologyTimestamp is not checked in the write path
+        // but in the post process path on pv34, which is bad as it should be checked on the write and on the
+        // post process path. In that sense this test relied on a wart in the validation logic.
+        // As the old logic was that the sequencer must sign the event with the topology timestamp,
+        // it couldn't deliver it anymore.
+        // However, with pv35, topologyTimestamp cannot be used anymore which means that the
+        // condition doesn't exist and this test cannot be reproduced.
+        // TODO(#31863): remove this test with the deprecated tombstone logic
         val logAssertions: Seq[LogEntry => scalatest.Assertion] =
           Seq {
             // Sequencer logs the tombstone on the read side, together with the event counter, timestamp at which it cannot sign and the member
@@ -483,12 +511,13 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         modifyConnection(participant3, daName, sequencer1.sequencerConnection),
         logs => {
           inside(logs) {
+            case _ if testedProtocolVersion > ProtocolVersion.v34 => succeed
             case x
                 if x.exists(r =>
                   r.loggerName.contains("participant=participant3") && r.message.contains(
                     "Deliver("
                   ) && r.message.contains("message id = Some(tombstone-submission-request)")
-                ) =>
+                ) && testedProtocolVersion == ProtocolVersion.v34 =>
               succeed
           }
         },

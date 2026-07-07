@@ -5,11 +5,11 @@ package com.digitalasset.canton.integration.tests.performance
 
 import cats.syntax.foldable.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.concurrent.Threading
@@ -40,6 +40,7 @@ import com.digitalasset.canton.performance.{
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.{BaseTest, SequencerAlias}
+import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.Future
@@ -140,6 +141,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
               sequencerLivenessMargin = NonNegativeInt.zero,
               SubmissionRequestAmplification.NoAmplification,
               SequencerConnectionPoolDelays.default,
+              SubscriptionLivenessLimits.default,
             ),
           )
         )
@@ -234,8 +236,8 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
         if (racyTopologyStateCrashRecovery) {
-          (1 to 3).foreach { idx =>
-            val threshold = if (idx % 2 == 0) 2 else 4
+          Seq(2, 1, 4, 1, 3).foreach { threshold =>
+            logger.info("Testing with threshold " + threshold)
             adjustMediatorThreshold(PositiveInt.tryCreate(threshold))
             val p1Runner = runners.headOption.value
             p1Runner.setActive(false)
@@ -253,10 +255,24 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
                 trs.item.threshold.value shouldBe threshold
               }
             }
+
             Threading.sleep(2000) // let it progress a bit
 
           }
         }
+
+        // we cycle through all sequencers to increase the chance of triggering crash recovery
+        // and bft issues (we use threshold = 2 in the test).
+        logger.debug("Starting to cycle sequencers")
+        Seq(sequencer1, sequencer2, sequencer3, sequencer1, sequencer2, sequencer3).foreach { seq =>
+          clue(s"cycling ${seq.name}") {
+            seq.stop()
+            seq.start()
+          }
+        }
+
+        logger.debug("Completed cycling sequencers")
+
         val res = waitTimeout
           .await("waiting for per runners to complete")(
             runnerF
@@ -274,7 +290,12 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
       },
       forEvery(_)(
         acceptableLogMessageExt(
-          Seq("SUBMISSION_SYNCHRONIZER_NOT_READY", "No connection available"),
+          Seq(
+            "SUBMISSION_SYNCHRONIZER_NOT_READY",
+            "No connection available",
+            "Is the server running",
+            "Connection is not started",
+          ),
           Seq(),
         )
       ),

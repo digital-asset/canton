@@ -7,14 +7,14 @@ import com.daml.tls.{TlsServerConfig, TlsVersion}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.integration.plugins.*
-import com.digitalasset.canton.integration.tests.ledgerapi.LedgerApiConformanceBase.excludedTests
-import com.digitalasset.canton.integration.tests.ledgerapi.SingleVersionLedgerApiConformanceBase
-import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
+import com.digitalasset.canton.integration.tests.ledgerapi.{
+  LedgerApiConformanceBase,
+  SingleVersionLedgerApiConformanceBase,
+}
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.config.{ParticipantNodeConfig, TestingTimeServiceConfig}
-import com.digitalasset.canton.platform.apiserver.SeedService
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
@@ -34,8 +34,6 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
             .replace(true)
             .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
             .replace(20000)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
         }
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
@@ -48,15 +46,11 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
 
   "A participant with covering in-memory fan-out buffer" can {
     "pass integration tests" in { implicit env =>
-      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-        ledgerApiTestToolPlugin.runShardedSuites(
-          shard = shard,
-          numShards = numShards,
-          exclude = excludedTests,
-          concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
-          useJson = false,
-        )
-      }
+      runShardedTests(
+        shard = shard,
+        numShards = numShards,
+        concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
+      )(env)
     }
   }
 }
@@ -81,31 +75,7 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
-      .addConfigTransforms(
-        ConfigTransforms.updateParticipantConfig("participant1") { (c: ParticipantNodeConfig) =>
-          c
-            .focus(_.ledgerApi.userManagementService.enabled)
-            .replace(true)
-            .focus(_.ledgerApi.userManagementService.maxCacheSize)
-            .replace(2)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
-            .focus(_.ledgerApi.indexService.activeContractsServiceStreams.maxIdsPerIdPage)
-            .replace(2)
-            .focus(
-              _.ledgerApi.indexService.activeContractsServiceStreams.maxPayloadsPerPayloadsPage
-            )
-            .replace(2)
-            .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
-            .replace(2)
-            .focus(_.ledgerApi.indexService.maxContractStateCacheSize)
-            .replace(2)
-            .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
-            .replace(3)
-            .focus(_.ledgerApi.indexService.bufferedStreamsPageSize)
-            .replace(1)
-        }
-      )
+      .addConfigTransforms(ConfigTransforms.setTinyCache)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
@@ -113,20 +83,16 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
-
   "A participant with tiny buffers" can {
     "pass integration tests" in { implicit env =>
-      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-        ledgerApiTestToolPlugin.runShardedSuites(
-          shard = shard,
-          numShards = numShards,
-          exclude = excludedTests,
-          concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
-          useJson = false,
-        )
-      }
+      runShardedTests(
+        shard = shard,
+        numShards = numShards,
+        concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
+      )(env)
     }
   }
+
 }
 
 class LedgerApiShard0TinyBuffersConformanceTestPostgres
@@ -143,55 +109,40 @@ class LedgerApiShard3TinyBuffersConformanceTestPostgres
 
 // Conformance test with the in-memory fan-out, mutable contract state cache and user management cache disabled
 // (i.e. cache/buffer sizes set to 0).
-trait LedgerApiCachesDisabledConformanceTest extends SingleVersionLedgerApiConformanceBase {
+abstract class LedgerApiCachesDisabledConformanceTest(shard: Int)
+    extends SingleVersionLedgerApiConformanceBase {
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def connectedSynchronizersCount = 1
+  protected val numShards: Int = 4
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(
-        ConfigTransforms.updateParticipantConfig("participant1") { (c: ParticipantNodeConfig) =>
-          c
-            .focus(_.ledgerApi.userManagementService.enabled)
-            .replace(true)
-            .focus(_.ledgerApi.userManagementService.maxCacheSize)
-            .replace(0)
-            .focus(_.ledgerApi.userManagementService.maxRightsPerUser)
-            .replace(100)
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
-            .focus(_.ledgerApi.indexService.maxContractKeyStateCacheSize)
-            .replace(0)
-            .focus(_.ledgerApi.indexService.maxContractStateCacheSize)
-            .replace(0)
-            .focus(_.ledgerApi.indexService.maxTransactionsInMemoryFanOutBufferSize)
-            .replace(0)
-        }
-      )
+    EnvironmentDefinition.P3_S1M1
+      .addConfigTransforms(ConfigTransforms.disableCache)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
   "A participant with caches disabled" can {
     "pass integration tests" in { implicit env =>
-      loggerFactory.suppress(ApiUserManagementServiceSuppressionRule) {
-        ledgerApiTestToolPlugin.runSuites(
-          suites = "SemanticTests,MultiPartySubmissionIT,ExplicitDisclosureIT,CommandServiceIT",
-          exclude = Seq(
-            // Following value normalisation (https://github.com/digital-asset/daml/pull/19912), this throws a different, equally correct, error
-            "CommandServiceIT:CSRefuseBadParameter"
-          ),
-          concurrency = VariationsConformanceTestUtils.ConcurrentTestRuns,
-        )
-      }
+      runShardedTests(
+        shard = shard,
+        numShards = numShards,
+        concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
+      )(env)
     }
   }
 }
 
-class LedgerApiCachesDisabledConformanceTestPostgres
-    extends LedgerApiCachesDisabledConformanceTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-}
+class LedgerApiShard0CachesDisabledConformanceTestPostgres
+    extends LedgerApiCachesDisabledConformanceTest(shard = 0)
+class LedgerApiShard1CachesDisabledConformanceTestPostgres
+    extends LedgerApiCachesDisabledConformanceTest(shard = 1)
+class LedgerApiShard2CachesDisabledConformanceTestPostgres
+    extends LedgerApiCachesDisabledConformanceTest(shard = 2)
+class LedgerApiShard3CachesDisabledConformanceTestPostgres
+    extends LedgerApiCachesDisabledConformanceTest(shard = 3)
 
 trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConformanceBase {
 
@@ -202,8 +153,6 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
       .addConfigTransforms(
         ConfigTransforms.updateParticipantConfig("participant1") { (c: ParticipantNodeConfig) =>
           c
-            .focus(_.parameters.ledgerApiServer.contractIdSeeding)
-            .replace(SeedService.Seeding.Weak)
             .focus(_.testingTime)
             .replace(
               Some(TestingTimeServiceConfig.MonotonicTime)
@@ -256,7 +205,7 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
         ledgerApiTestToolPlugin.runShardedSuites(
           shard = 0,
           numShards = 1,
-          exclude = excludedTests ++ exclusions,
+          exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion) ++ exclusions,
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
           useJson = false,
         )

@@ -4,12 +4,12 @@
 package com.digitalasset.canton.scheduler
 
 import cats.syntax.option.*
-import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.scheduler.JobSchedule.NextRun
 import com.digitalasset.canton.scheduler.JobScheduler.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds, SimClock}
+import com.digitalasset.nonempty.NonEmptyUtil
 
 import java.time.Instant
 

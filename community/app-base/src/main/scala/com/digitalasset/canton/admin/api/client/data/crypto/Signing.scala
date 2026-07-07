@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.admin.api.client.data.crypto
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.nonempty.NonEmpty
 
 final case class RequiredSigningSpecs(
     algorithms: NonEmpty[Set[SigningAlgorithmSpec]],
@@ -38,6 +38,10 @@ object SigningKeySpec {
   case object EcSecp256k1 extends SigningKeySpec {
     override val name: String = "EC-Secp256k1"
   }
+
+  case object MlDsa65 extends SigningKeySpec {
+    override val name: String = "ML-DSA-65"
+  }
 }
 
 /** Algorithm schemes for signing. */
@@ -57,5 +61,9 @@ object SigningAlgorithmSpec {
 
   case object EcDsaSha384 extends SigningAlgorithmSpec {
     override val name: String = "EC-DSA-SHA384"
+  }
+
+  case object MlDsa65 extends SigningAlgorithmSpec {
+    override val name: String = "ML-DSA-65"
   }
 }

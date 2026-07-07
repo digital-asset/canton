@@ -10,10 +10,10 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SubmissionRequestAmplification,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -106,8 +106,11 @@ sealed trait BftSequencerConnectionsIntegrationTest
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
-                mediator1 -> (sequencers.remote,
-                /* trust threshold */ PositiveInt.two, /* liveness margin */ NonNegativeInt.zero)
+                mediator1 -> MediatorSequencersConfiguration(
+                  sequencers.remote,
+                  trustThreshold = PositiveInt.two,
+                  livenessMargin = NonNegativeInt.zero,
+                )
               )
             ),
           )
@@ -163,6 +166,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
             // Make the warning delay large to avoid these warnings in the test
             sequencerConnectionPoolDelays =
               old.sequencerConnectionPoolDelays.copy(warnValidationDelay = 1.day),
+            subscriptionLivenessLimits = old.subscriptionLivenessLimits,
           )
         }
       }
@@ -251,7 +255,6 @@ sealed trait BftSequencerConnectionsIntegrationTest
   }
 }
 
-@UnstableTest // TODO(#27384)
 class BftSequencerConnectionsIntegrationTestDefault extends BftSequencerConnectionsIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))

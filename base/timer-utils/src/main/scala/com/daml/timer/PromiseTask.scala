@@ -8,6 +8,7 @@ import scala.concurrent.{Future, Promise}
 import scala.util.Try
 import scala.util.control.NonFatal
 
+// TODO(#30860) Remove once RetryStrategy is removed
 private class PromiseTask[A](value: => Future[A]) extends TimerTask with Promise[A] {
 
   private val p = Promise[A]()

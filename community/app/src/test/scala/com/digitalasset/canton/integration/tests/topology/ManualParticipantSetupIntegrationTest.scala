@@ -27,7 +27,10 @@ trait ManualParticipantSetupIntegrationTest
   "create a participant based on the identity of another participant" in { implicit env =>
     import env.*
     val staticParameters =
-      StaticSynchronizerParameters.defaults(sequencer1.config.crypto, testedProtocolVersion)
+      StaticSynchronizerParameters.defaults(
+        cryptoConfig = sequencer1.config.crypto,
+        protocolVersion = testedProtocolVersion,
+      )
     sequencer1.start()
     mediator1.start()
 

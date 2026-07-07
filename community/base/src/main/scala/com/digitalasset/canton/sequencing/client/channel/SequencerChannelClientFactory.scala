@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client.channel
 
 import com.daml.metrics.api.MetricsContext
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{SynchronizerCrypto, SynchronizerCryptoClient}
@@ -23,6 +22,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import io.grpc.ManagedChannel
 
 import scala.concurrent.ExecutionContextExecutor

@@ -3,6 +3,7 @@
 
 package com.daml.ledger.api.testtool.suites.v2_2
 
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.{
@@ -33,8 +34,8 @@ import java.util.regex.Pattern
 import scala.concurrent.Future
 import scala.util.Random
 
-final class PartyManagementServiceIT extends PartyManagementITBase {
-  import CompanionImplicits.*
+final class PartyManagementServiceIT(testDars: TestDars) extends PartyManagementITBase {
+  import testDars.companionImplicits.*
 
   val namePicker: NamePicker = NamePicker(
     "-_ 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

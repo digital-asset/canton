@@ -6,7 +6,6 @@ package com.digitalasset.canton.platform.apiserver.services.command.interactive.
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.DamlTransaction.Node.VersionedNode
-import com.daml.ledger.api.v2.interactive.interactive_submission_service.Metadata
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.Metadata.InputContract.Contract
 import com.daml.ledger.api.v2.interactive.transaction.v1.interactive_submission_data as isdv1
 import com.daml.ledger.api.v2.interactive.{
@@ -36,26 +35,28 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref.TypeConId
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
+  ContractInstanceCoder,
   CreationTime,
   FatContractInstance,
+  GlobalKeyWithMaintainers,
   NodeId,
+  SerializationVersion,
   SerializationVersion as LfSerializationVersion,
-  TransactionCoder,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import io.scalaland.chimney.PartialTransformer
 import io.scalaland.chimney.dsl.TransformerConfiguration.UpdateFlag
 import io.scalaland.chimney.dsl.{TransformedNamesComparison, TransformerConfiguration}
 import io.scalaland.chimney.inlined.*
 import io.scalaland.chimney.internal.runtime.TransformerFlags
 import io.scalaland.chimney.partial.Result
 import io.scalaland.chimney.syntax.*
-import io.scalaland.chimney.{PartialTransformer, Transformer}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordering.Implicits.infixOrderingOps
 
 /** Class to decode a PreparedTransaction to an LF Transaction and its metadata. Uses chimney to
   * define Transformers and PartialTransformer for all conversions.
@@ -177,13 +178,65 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         packageName: Ref.PackageName,
         hash: lf.crypto.Hash,
     ): Result[lf.transaction.GlobalKey] =
-      lf.transaction.GlobalKey.build(templateId, packageName, key, hash).leftMap(_.msg).toResult
+      Result.Value(lf.transaction.GlobalKey(templateId, packageName, key, hash))
 
     PartialTransformer
       .define[iscd.GlobalKey, lf.transaction.GlobalKey]
       .withConstructorPartial(globalKeyConstructor _)
       .buildTransformer
   }
+
+  private implicit def globalKeyWithMaintainersTransformer(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      serializationVersion: LfSerializationVersion,
+  ): PartialTransformer[iscd.GlobalKeyWithMaintainers, lf.transaction.GlobalKeyWithMaintainers] =
+    PartialTransformer
+      .define[iscd.GlobalKeyWithMaintainers, lf.transaction.GlobalKeyWithMaintainers]
+      .withFieldComputedPartial(
+        _.globalKey,
+        globalKeyProto =>
+          serializationVersion match {
+            case SerializationVersion.V1 =>
+              Result.fromErrorString(
+                s"Keys are not supported in nodes with LF Serialization version ${serializationVersion.pretty}"
+              )
+            case _ =>
+              globalKeyProto.key
+                .traverse(_.transformIntoPartial[lf.transaction.GlobalKey])
+                .flatMap(
+                  _.map(Result.fromValue)
+                    .getOrElse(Result.fromErrorString("Empty key in GlobalKeyWithMaintainers"))
+                )
+          },
+      )
+      .buildTransformer
+
+  private def byKeyDecoder[T](byKey: T => Boolean)(
+      value: T
+  )(implicit serializationVersion: LfSerializationVersion): Result[Boolean] =
+    serializationVersion match {
+      // byKey cannot be true in SerializationVersion.V1
+      case SerializationVersion.V1 if byKey(value) =>
+        Result.fromErrorString(
+          s"byKey is not supported in nodes with LF Serialization version ${SerializationVersion.V1.pretty}"
+        )
+      case _ => Result.fromValue(byKey(value))
+    }
+
+  private def validateTransactionVersions(
+      transaction: lf.transaction.VersionedTransaction
+  ): Result[lf.transaction.VersionedTransaction] =
+    // The LF transaction proto decoder enforces the same invariant, but interactive submission
+    // decodes from Ledger API protos and therefore needs the check here as well.
+    transaction.nodes.values.iterator
+      .flatMap(_.optVersion)
+      .find(_ > transaction.version) match {
+      case Some(nodeVersion) =>
+        Result.fromErrorString(
+          s"A transaction of version ${transaction.version} cannot contain node of newer version (version $nodeVersion)"
+        )
+      case None => Result.fromValue(transaction)
+    }
 
   /*
    * Node Transformers
@@ -198,51 +251,125 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
     // Make the create transformer visible to the package because some objects require explicitly decoding to a create node
     private[interactive] implicit def createNodeTransformer(implicit
         errorLoggingContext: ErrorLoggingContext
-    ): PartialTransformer[isdv1.Create, lf.transaction.Node.Create] = Transformer
-      .definePartial[isdv1.Create, lf.transaction.Node.Create]
-      .withFieldRenamed(_.contractId, _.coid)
-      .withFieldComputedPartial(
-        _.arg,
-        _.argument
-          .traverse(_.transformIntoPartial[lf.value.Value])
-          .flatMap(_.toRight("Missing argument value").toResult),
-      )
-      .withFieldComputedPartial(_.version, _.lfVersion.transformIntoPartial[LfSerializationVersion])
-      // Fields not supported in V1
-      .withFieldConst(_.keyOpt, None)
-      .buildTransformer
+    ): PartialTransformer[isdv1.Create, lf.transaction.Node.Create] =
+      PartialTransformer[isdv1.Create, lf.transaction.Node.Create] { proto =>
+        proto.lfVersion.transformIntoPartial[LfSerializationVersion].flatMap { implicit version =>
+          proto
+            .intoPartial[lf.transaction.Node.Create]
+            .withFieldRenamed(_.contractId, _.coid)
+            .withFieldComputedPartial(
+              _.arg,
+              _.argument
+                .traverse(_.transformIntoPartial[lf.value.Value])
+                .flatMap(_.toRight("Missing argument value").toResult),
+            )
+            .withFieldConst(_.version, version)
+            .withFieldComputedPartial(
+              _.keyOpt,
+              _.key.traverse(_.transformIntoPartial[GlobalKeyWithMaintainers]),
+            )
+            .transform
+        }
+      }
 
     private[interactive] implicit def fetchTransformer(implicit
         errorLoggingContext: ErrorLoggingContext
-    ): PartialTransformer[isdv1.Fetch, lf.transaction.Node.Fetch] = Transformer
-      .definePartial[isdv1.Fetch, lf.transaction.Node.Fetch]
-      .withFieldRenamed(_.contractId, _.coid)
-      .withFieldComputedPartial(_.version, _.lfVersion.transformIntoPartial[LfSerializationVersion])
-      // Not supported in V1
-      .withFieldConst(_.keyOpt, None)
-      .withFieldConst(_.byKey, false)
-      .buildTransformer
+    ): PartialTransformer[isdv1.Fetch, lf.transaction.Node.Fetch] =
+      PartialTransformer[isdv1.Fetch, lf.transaction.Node.Fetch] { proto =>
+        // Extract and decode the LF version first so we can use it in further converters to make
+        // validations when decoding fields based on it
+        proto.lfVersion.transformIntoPartial[LfSerializationVersion].flatMap { implicit version =>
+          proto
+            .intoPartial[lf.transaction.Node.Fetch]
+            .withFieldRenamed(_.contractId, _.coid)
+            .withFieldConst(_.version, version)
+            .withFieldComputedPartial(
+              _.keyOpt,
+              _.key.traverse(_.transformIntoPartial[GlobalKeyWithMaintainers]),
+            )
+            .withFieldComputedPartial(_.byKey, byKeyDecoder(_.byKey))
+            .transform
+        }
+      }
+
+    private[interactive] implicit def queryByKeyTransformer(implicit
+        errorLoggingContext: ErrorLoggingContext
+    ): PartialTransformer[isdv1.QueryByKey, lf.transaction.Node.QueryByKey] =
+      PartialTransformer[isdv1.QueryByKey, lf.transaction.Node.QueryByKey] { proto =>
+        // Extract and decode the LF version first so we can use it in further converters to make
+        // validations when decoding fields based on it
+        proto.lfVersion.transformIntoPartial[LfSerializationVersion].flatMap { implicit version =>
+          proto
+            .intoPartial[lf.transaction.Node.QueryByKey]
+            .withFieldConst(_.version, version)
+            .transform
+        }
+      }
+
+    private def decodeExternalCallTextField(fieldName: String, value: String): Result[String] =
+      lf.data.Text
+        .fromString(value)
+        .leftMap(err => s"Invalid external call $fieldName: $err")
+        .toResult
+
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : PartialTransformer[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult] =
+      PartialTransformer { value =>
+        for {
+          extensionId <- decodeExternalCallTextField("extension_id", value.extensionId)
+          functionId <- decodeExternalCallTextField("function_id", value.functionId)
+        } yield lf.transaction.ExternalCallResult(
+          extensionId = extensionId,
+          functionId = functionId,
+          config = lf.data.Bytes.fromByteString(value.config),
+          input = lf.data.Bytes.fromByteString(value.input),
+          output = lf.data.Bytes.fromByteString(value.output),
+        )
+      }
+
+    private def externalCallResultsDecoder(value: isdv1.Exercise)(implicit
+        serializationVersion: LfSerializationVersion
+    ): Result[ImmArray[lf.transaction.ExternalCallResult]] =
+      if (
+        value.externalCallResults.nonEmpty &&
+        serializationVersion < LfSerializationVersion.VDev
+      )
+        Result.fromErrorString(
+          s"External call results are not supported in nodes with LF Serialization version ${serializationVersion.pretty}"
+        )
+      else
+        value.externalCallResults.transformIntoPartial[ImmArray[lf.transaction.ExternalCallResult]]
 
     private[interactive] implicit def exerciseTransformer(implicit
         errorLoggingContext: ErrorLoggingContext
     ): PartialTransformer[isdv1.Exercise, lf.transaction.Node.Exercise] =
-      Transformer
-        .definePartial[isdv1.Exercise, lf.transaction.Node.Exercise]
-        .withFieldRenamed(_.contractId, _.targetCoid)
-        .withFieldComputedPartial(
-          _.choiceObservers,
-          _.choiceObservers.traverse(_.transformIntoPartial[lf.data.Ref.Party]).map(_.toSet),
-        )
-        .withFieldComputedPartial(
-          _.version,
-          _.lfVersion.transformIntoPartial[LfSerializationVersion],
-        )
-        // Fields not supported in V1
-        .withFieldConst(_.keyOpt, None)
-        .withFieldConst(_.byKey, false)
-        .withFieldConst(_.choiceAuthorizers, None)
-        .withFieldConst(_.externalCallResults, lf.transaction.ExternalCallResult.Empty)
-        .buildTransformer
+      PartialTransformer[isdv1.Exercise, lf.transaction.Node.Exercise] { proto =>
+        // Extract and decode the LF version first so we can use it in further converters to make
+        // validations when decoding fields based on it
+        proto.lfVersion.transformIntoPartial[LfSerializationVersion].flatMap { implicit version =>
+          proto
+            .intoPartial[lf.transaction.Node.Exercise]
+            .withFieldRenamed(_.contractId, _.targetCoid)
+            .withFieldComputedPartial(
+              _.choiceObservers,
+              _.choiceObservers.traverse(_.transformIntoPartial[lf.data.Ref.Party]).map(_.toSet),
+            )
+            .withFieldConst(_.version, version)
+            .withFieldComputedPartial(
+              _.keyOpt,
+              _.key.traverse(_.transformIntoPartial[GlobalKeyWithMaintainers]),
+            )
+            .withFieldComputedPartial(_.byKey, byKeyDecoder(_.byKey))
+            // Only supported in LF-dev
+            .withFieldConst(_.choiceAuthorizers, None)
+            .withFieldComputedPartial(
+              _.externalCallResults,
+              externalCallResultsDecoder,
+            )
+            .transform
+        }
+      }
 
     private implicit val rollbackTransformer
         : PartialTransformer[isdv1.Rollback, lf.transaction.Node.Rollback] =
@@ -259,6 +386,8 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         exercise.value.transformIntoPartial[lf.transaction.Node.Exercise]
       case isdv1.Node(rollback: isdv1.Node.NodeType.Rollback) =>
         rollback.value.transformIntoPartial[lf.transaction.Node.Rollback]
+      case isdv1.Node(queryByKey: isdv1.Node.NodeType.QueryByKey) =>
+        queryByKey.value.transformIntoPartial[lf.transaction.Node.QueryByKey]
       case isdv1.Node(isdv1.Node.NodeType.Empty) =>
         Result.fromErrorString("Cannot decode empty transaction node")
     }
@@ -308,32 +437,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         )
         .withConstructor(lfVersionedConstructor _)
         .transform
-    }
-
-  // Global key mapping decoder
-  private implicit def globalKeyMappingsTransformer(implicit
-      errorLoggingContext: ErrorLoggingContext
-  ): PartialTransformer[Seq[
-    Metadata.GlobalKeyMappingEntry
-  ], Map[lf.transaction.GlobalKey, Vector[lf.value.Value.ContractId]]] =
-    PartialTransformer { result =>
-      result
-        .traverse { case Metadata.GlobalKeyMappingEntry(keyOpt, valueOpt) =>
-          for {
-            convertedKey <- keyOpt
-              .traverse(_.transformIntoPartial[lf.transaction.GlobalKey])
-              .flatMap(_.toRight("Missing global key in key mappings").toResult)
-            convertedValue <- valueOpt.traverse(_.transformIntoPartial[lf.value.Value])
-            contractId <- convertedValue.traverse {
-              case Value.ValueContractId(value) => Result.fromValue(value)
-              case _ =>
-                Result.fromErrorString(
-                  s"Value with key $convertedValue in global key mapping was not a contract id"
-                )
-            }
-          } yield convertedKey -> contractId.asCidVector
-        }
-        .map(_.toMap)
+        .flatMap(validateTransactionVersions)
     }
 
   // Input contract decoder
@@ -351,7 +455,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       for {
         createNode <- createNodeResult
         createTime <- src.createdAt.transformIntoPartial[Time.Timestamp]
-        originalContract <- TransactionCoder
+        originalContract <- ContractInstanceCoder
           .decodeFatContractInstance(src.eventBlob)
           .leftMap(_.errorMessage)
           .toResult
@@ -450,6 +554,9 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
           _.externallySignedSubmission,
           Some(externallySignedSubmission),
         )
+        // Hash is unknown at decode time; it is computed later from the verified
+        // signature during execution (see ExternalTransactionProcessor.withTransactionHash).
+        .withFieldConst(_.transactionHash, None)
         .transform
         .toFutureWithLoggedFailuresDecode("Failed to deserialize submitter info", logger)
       synchronizer <- Future.fromTry(
@@ -502,9 +609,6 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       transaction <- transactionProto
         .transformIntoPartial[lf.transaction.VersionedTransaction]
         .toFutureWithLoggedFailuresDecode("Failed to deserialize transaction", logger)
-      globalKeyMapping <- metadataProto.globalKeyMapping
-        .transformIntoPartial[Map[lf.transaction.GlobalKey, Vector[lf.value.Value.ContractId]]]
-        .toFutureWithLoggedFailuresDecode("Failed to deserialize global key mapping", logger)
       inputContracts <- metadataProto.inputContracts
         .traverse(_.transformIntoPartial[ExternalInputContract])
         .map(_.map(eic => eic.contractId -> eic).toMap)
@@ -539,7 +643,6 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         synchronizer = synchronizer,
         transactionMeta = transactionMeta,
         transaction = lf.transaction.SubmittedTransaction(transaction),
-        globalKeyMapping = globalKeyMapping,
         inputContracts = inputContracts,
         externallySignedSubmission = externallySignedSubmission,
       )

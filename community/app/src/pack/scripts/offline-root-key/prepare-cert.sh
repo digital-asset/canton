@@ -10,7 +10,6 @@ source "$(dirname "$0")/utils.sh"
 echo "== Tool Versions =="
 check_tool "openssl" "openssl version"
 check_tool "buf" "buf --version"
-check_tool "xxd" "xxd --version"
 check_tool "gunzip" "gunzip --version"
 check_tool "jq" "jq --version"
 echo ""
@@ -28,7 +27,7 @@ ALLOWED_DELEGATION_RESTRICTIONS=($(gunzip -c "$BUF_PROTO_IMAGE" | jq '.file[]
 
 # Function to display usage information
 usage() {
-  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1> --output <prefix>"
+  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> --output <prefix>"
   echo
   echo "Arguments:"
   echo "  --root-delegation              Optional. Set if the delegation is a self signed root delegation."
@@ -49,11 +48,13 @@ usage() {
   echo "                                   - ecp256: P-256 elliptic curve key."
   echo "                                   - ecp384: P-384 elliptic curve key."
   echo "                                   - secp256k1: SECP256k1 elliptic curve key."
+  echo "                                   - mldsa65: ML-DSA-65 key."
   echo "  --target-key-spec <value>      Optional. Key specification for the target public key. Valid values are:"
   echo "                                   - ed25519: Curve25519-based key."
   echo "                                   - ecp256: P-256 elliptic curve key."
   echo "                                   - ecp384: P-384 elliptic curve key."
   echo "                                   - secp256k1: SECP256k1 elliptic curve key."
+  echo "                                   - mldsa65: ML-DSA-65 key."
   echo "                                 The script will attempt to automatically detect the key specification"
   echo "                                 from the public key. This flag can be used to override it or provide it if"
   echo "                                 automatic detection fails."
@@ -159,8 +160,11 @@ EOF
         secp256k1)
           TARGET_KEY_SPEC="SIGNING_KEY_SPEC_EC_SECP256K1"
           ;;
+        mldsa65)
+          TARGET_KEY_SPEC="SIGNING_KEY_SPEC_ML_DSA_65"
+          ;;
         *)
-          err "Error: Invalid value for --target-key-spec. Valid values are: ed25519, ecp256, ecp384, secp256k1."
+          err "Error: Invalid value for --target-key-spec. Valid values are: ed25519, ecp256, ecp384, secp256k1, mldsa65."
           exit 1
           ;;
       esac
@@ -181,8 +185,11 @@ EOF
         secp256k1)
           ROOT_KEY_SPEC="SIGNING_KEY_SPEC_EC_SECP256K1"
           ;;
+        mldsa65)
+          ROOT_KEY_SPEC="SIGNING_KEY_SPEC_ML_DSA_65"
+          ;;
         *)
-          err "Error: Invalid value for --root-key-spec. Valid values are: ed25519, ecp256, ecp384, secp256k1."
+          err "Error: Invalid value for --root-key-spec. Valid values are: ed25519, ecp256, ecp384, secp256k1, mldsa65."
           exit 1
           ;;
       esac
@@ -269,7 +276,7 @@ else
       if [[ "$DETECTED_ROOT_SPEC" != "UNKNOWN" ]]; then
         ROOT_KEY_SPEC="$DETECTED_ROOT_SPEC"
       else
-        err "Error: Could not detect root key spec."
+        err "Error: Could not detect root key spec"
         exit 1
       fi
   fi

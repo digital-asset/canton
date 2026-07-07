@@ -99,11 +99,6 @@ class TopologyComponentFactory(
       recordOrderPublisher: RecordOrderPublisher,
       pendingLsuOperationsStore: PendingLsuOperation.Store,
       pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
-      retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
-        FutureUnlessShutdown,
-        String,
-        Unit,
-      ],
       sequencedEventStore: SequencedEventStore,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       ledgerApiStore: LedgerApiStore,
@@ -128,7 +123,6 @@ class TopologyComponentFactory(
         pendingLsuOperationsStore = pendingLsuOperationsStore,
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
-        retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
         metrics = metrics,
         loggerFactory,
       )
@@ -211,12 +205,13 @@ class TopologyComponentFactory(
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
         validatePackageVetting(
-          currentlyVettedPackages,
-          nextPackageIds,
-          packageMetadataView,
-          dryRunSnapshot.getOrElse(PackageMetadata()),
-          forceFlags,
-          disableUpgradeValidation,
+          currentlyVettedPackages = currentlyVettedPackages,
+          nextPackageIds = nextPackageIds,
+          packageMetadataView = packageMetadataView,
+          dryRunSnapshot = dryRunSnapshot.getOrElse(PackageMetadata()),
+          forceFlags = forceFlags,
+          disableUpgradeValidation = disableUpgradeValidation,
+          protocolVersion = store.protocolVersion,
         )
 
       override def checkCannotDisablePartyWithActiveContracts(
@@ -276,6 +271,7 @@ class TopologyComponentFactory(
       topology,
       Some(crypto.staticSynchronizerParameters),
       timeouts,
+      futureSupervisor = futureSupervisor,
       loggerFactory,
     )
 
@@ -292,6 +288,7 @@ class TopologyComponentFactory(
       topologyStore,
       topologyStateCache,
       synchronizerUpgradeTime = synchronizerPredecessor.map(_.upgradeTime),
+      sequencerSnapshotTimestamp = None,
       packageDependencyResolver,
       caching,
       enableConsistencyChecks,
@@ -299,7 +296,7 @@ class TopologyComponentFactory(
       timeouts,
       futureSupervisor,
       loggerFactory,
-    )()
+    )
   def createTopologySnapshot(
       asOf: CantonTimestamp,
       packageDependencyResolver: PackageDependencyResolver,

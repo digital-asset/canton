@@ -4,12 +4,12 @@
 package com.daml.ledger.api.testtool.suites.v2_2
 
 import cats.implicits.{catsStdInstancesForFuture, toFunctorOps}
+import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.createdEvents
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
-import com.daml.ledger.api.testtool.suites.v2_2.CompanionImplicits.*
 import com.daml.ledger.api.v2.commands.DisclosedContract
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
@@ -30,7 +30,7 @@ import com.digitalasset.canton.ledger.error.groups.{
   ConsistencyErrors,
   RequestValidationErrors,
 }
-import com.digitalasset.daml.lf.transaction.TransactionCoder
+import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import com.google.protobuf.ByteString
 import org.scalatest.Inside.inside
 
@@ -39,8 +39,9 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{Success, Try}
 
-final class ExplicitDisclosureIT extends LedgerTestSuite {
+final class ExplicitDisclosureIT(testDars: TestDars) extends LedgerTestSuite {
   import ExplicitDisclosureIT.*
+  import testDars.companionImplicits.*
 
   test(
     "EDCorrectCreatedEventBlobDisclosure",
@@ -288,14 +289,14 @@ final class ExplicitDisclosureIT extends LedgerTestSuite {
         // Ensure participants are synchronized
         _ <- p.synchronize
 
-        otherSalt = TransactionCoder
+        otherSalt = ContractInstanceCoder
           .decodeFatContractInstance(delegateContext.disclosedContract.createdEventBlob)
           .map(_.authenticationData)
           .getOrElse(fail("contract decode failed"))
 
-        tamperedEventBlob = TransactionCoder
+        tamperedEventBlob = ContractInstanceCoder
           .encodeFatContractInstance(
-            TransactionCoder
+            ContractInstanceCoder
               .decodeFatContractInstance(ownerContext.disclosedContract.createdEventBlob)
               .map(_.setAuthenticationData(otherSalt))
               .getOrElse(fail("contract decode failed"))
@@ -547,6 +548,47 @@ final class ExplicitDisclosureIT extends LedgerTestSuite {
       case (true, true) => fail("Exactly one request should have failed, but both failed")
       case (false, false) => fail("Exactly one request should have failed, but both succeeded")
     }
+
+  private def initializeTest(
+      ownerParticipant: ParticipantTestContext,
+      delegateParticipant: ParticipantTestContext,
+      owner: Party,
+      delegate: Party,
+      transactionFormat: TransactionFormat,
+  )(implicit ec: ExecutionContext): Future[TestContext] = {
+    val contractKey = ownerParticipant.nextKeyId()
+
+    for {
+      // Create a Delegation contract
+      // Contract is visible both to owner (as signatory) and delegate (as observer)
+      delegationCid <- ownerParticipant.create(
+        owner,
+        new Delegation(owner.getValue, delegate.getValue),
+      )
+
+      // Create Delegated contract
+      // This contract is only visible to the owner
+      delegatedCid <- ownerParticipant.create(owner, new Delegated(owner.getValue, contractKey))
+
+      // Get the contract payload from the transaction stream of the owner
+      txReq <- ownerParticipant.getTransactionsRequest(transactionFormat)
+      delegatedTx <- ownerParticipant.transactions(txReq)
+      createDelegatedEvent = createdEvents(delegatedTx.headOption.value).headOption.value
+
+      // Copy the actual Delegated contract to a disclosed contract (which can be shared out of band).
+      disclosedContract = createEventToDisclosedContract(createDelegatedEvent)
+    } yield TestContext(
+      ownerParticipant = ownerParticipant,
+      delegateParticipant = delegateParticipant,
+      owner = owner,
+      delegate = delegate,
+      contractKey = contractKey,
+      delegationCid = delegationCid,
+      delegatedCid = delegatedCid,
+      originalCreateEvent = createDelegatedEvent,
+      disclosedContract = disclosedContract,
+    )
+  }
 }
 
 object ExplicitDisclosureIT {
@@ -595,47 +637,6 @@ object ExplicitDisclosureIT {
       delegateParticipant.submitAndWait(request).void
     }
 
-  }
-
-  private def initializeTest(
-      ownerParticipant: ParticipantTestContext,
-      delegateParticipant: ParticipantTestContext,
-      owner: Party,
-      delegate: Party,
-      transactionFormat: TransactionFormat,
-  )(implicit ec: ExecutionContext): Future[TestContext] = {
-    val contractKey = ownerParticipant.nextKeyId()
-
-    for {
-      // Create a Delegation contract
-      // Contract is visible both to owner (as signatory) and delegate (as observer)
-      delegationCid <- ownerParticipant.create(
-        owner,
-        new Delegation(owner.getValue, delegate.getValue),
-      )
-
-      // Create Delegated contract
-      // This contract is only visible to the owner
-      delegatedCid <- ownerParticipant.create(owner, new Delegated(owner.getValue, contractKey))
-
-      // Get the contract payload from the transaction stream of the owner
-      txReq <- ownerParticipant.getTransactionsRequest(transactionFormat)
-      delegatedTx <- ownerParticipant.transactions(txReq)
-      createDelegatedEvent = createdEvents(delegatedTx.headOption.value).headOption.value
-
-      // Copy the actual Delegated contract to a disclosed contract (which can be shared out of band).
-      disclosedContract = createEventToDisclosedContract(createDelegatedEvent)
-    } yield TestContext(
-      ownerParticipant = ownerParticipant,
-      delegateParticipant = delegateParticipant,
-      owner = owner,
-      delegate = delegate,
-      contractKey = contractKey,
-      delegationCid = delegationCid,
-      delegatedCid = delegatedCid,
-      originalCreateEvent = createDelegatedEvent,
-      disclosedContract = disclosedContract,
-    )
   }
 
   private def formatByPartyAndTemplate(

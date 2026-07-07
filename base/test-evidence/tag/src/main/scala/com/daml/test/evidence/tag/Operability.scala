@@ -8,7 +8,7 @@ object Operability {
   /** Operability-relevant information on a test-suite level. */
   trait OperabilityTestSuite
 
-  object OperabilityTestSuite {}
+  object OperabilityTestSuite
 
   /** A operability-relevant test
     *

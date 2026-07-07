@@ -17,7 +17,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.CommitmentSnapshot
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.protocol.messages.AcsCommitment.CommitmentType
+import com.digitalasset.canton.protocol.messages.Digest
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.{InternedPartyId, LfPartyId, lfPartyOrdering}
 
@@ -31,12 +31,13 @@ abstract class GenericRunningCommitments[T: Pretty](
 )(implicit ordering: Ordering[T])
     extends HasLoggerName {
 
-  protected val commitments: TrieMap[SortedSet[T], LtHash16] = TrieMap.from(initialCommitments)
+  private val commitments: TrieMap[SortedSet[T], LtHash16] = TrieMap.from(initialCommitments)
 
   private val lock = new Mutex()
   @volatile private var rt: RecordTime = initRt
   private val deltaB = Map.newBuilder[SortedSet[T], LtHash16]
   private var freshStakeholderGroupsSinceLastSnapshot: Long = 0
+  private var closed = false
 
   /** The latest (immutable) snapshot. Taking the snapshot also garbage collects empty commitments.
     */
@@ -59,6 +60,7 @@ abstract class GenericRunningCommitments[T: Pretty](
 
     {
       lock.exclusive {
+        ensureNotClosed()
         val delta = deltaB.result()
         deltaB.clear()
         val deleted = garbageCollect(delta)
@@ -83,6 +85,7 @@ abstract class GenericRunningCommitments[T: Pretty](
       loggingContext: NamedLoggingContext
   ): Unit =
     lock.exclusive {
+      ensureNotClosed()
       this.rt = rt
       change.activations.foreach { case (cid, stakeholdersAndReassignmentCounter) =>
         val sortedStakeholders =
@@ -127,8 +130,9 @@ abstract class GenericRunningCommitments[T: Pretty](
 
   def watermark: RecordTime = rt
 
-  def reinitialize(snapshot: Map[SortedSet[T], CommitmentType], recordTime: RecordTime): Unit =
+  def reinitialize(snapshot: Map[SortedSet[T], Digest.DigestType], recordTime: RecordTime): Unit =
     lock.exclusive {
+      ensureNotClosed()
       // delete all active
       deltaB.clear()
       commitments.clear()
@@ -137,6 +141,17 @@ abstract class GenericRunningCommitments[T: Pretty](
       }
       rt = recordTime
     }
+
+  private def ensureNotClosed(): Unit =
+    if (closed) {
+      throw new IllegalStateException("RunningCommitments is closed")
+    }
+
+  def releaseMemory(): Unit = lock.exclusive {
+    deltaB.clear()
+    commitments.clear()
+    closed = true
+  }
 
   @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   def size: Int = commitments.size

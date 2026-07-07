@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.topology.ListOwnerToKeyMappingResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
@@ -32,6 +31,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PartyId, TopologyManagerError}
 import com.digitalasset.daml.lf.archive.DarParser
+import com.digitalasset.nonempty.NonEmpty
 
 import java.io.File
 import scala.annotation.nowarn
@@ -606,12 +606,12 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     mediator1.topology.synchronisation.await_idle()
   }
 
-  "transactions.genesis_state" should {
+  "transactions.genesis_stateV2" should {
     "happy path" in { implicit env =>
       import env.*
-      val p1GenesisState = participant1.topology.transactions.genesis_state(daId)
-      val s1GenesisState = sequencer1.topology.transactions.genesis_state()
-      val m1GenesisState = mediator1.topology.transactions.genesis_state()
+      val p1GenesisState = participant1.topology.transactions.genesis_stateV2(daId)
+      val s1GenesisState = sequencer1.topology.transactions.genesis_stateV2()
+      val m1GenesisState = mediator1.topology.transactions.genesis_stateV2()
 
       p1GenesisState.isEmpty shouldBe false
       p1GenesisState shouldEqual s1GenesisState
@@ -621,7 +621,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
       import env.*
 
       loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.topology.transactions.genesis_state(),
+        participant1.topology.transactions.genesis_stateV2(),
         _.errorMessage should include("reason=>FieldNotSet(synchronizer_store)"),
       )
     }

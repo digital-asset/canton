@@ -25,8 +25,10 @@ import com.digitalasset.canton.util.retry.Success
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SimpleExecutionQueue, retry}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import scala.annotation.tailrec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
+import scala.reflect.ClassTag
 
 sealed trait BootstrapStageOrLeaf[T <: CantonNode]
     extends FlagCloseable
@@ -131,10 +133,6 @@ abstract class BootstrapStage[T <: CantonNode, StageResult <: BootstrapStageOrLe
           EitherT.rightT[FutureUnlessShutdown, String](())
         case Some(stage) =>
           logger.debug(s"Succeeded startup stage: $description")
-          def closeOnFailure() = {
-            LifeCycle.close(this)(logger)
-            bootstrap.abortThisNodeOnStartupFailure()
-          }
           stage
             .start()
             .thereafter {
@@ -142,18 +140,33 @@ abstract class BootstrapStage[T <: CantonNode, StageResult <: BootstrapStageOrLe
               // do nothing on right success
               case scala.util.Success(UnlessShutdown.Outcome(Left(err))) =>
                 logger.info(s"Closing due to error $err")
-                closeOnFailure()
+                // Note: we don't duplicate the call to abortThisNodeOnStartupFailure(),
+                // which is already called in attemptAndStore() on .leftMap
+                LifeCycle.close(this)(logger)
               case scala.util.Success(AbortedDueToShutdown) =>
               // should be okay as if the child is shutdown, then the parent will be shutdown soon too
               case scala.util.Failure(ex) =>
                 logger.error(".start() failed with exception!", ex)
-                closeOnFailure()
+                LifeCycle.close(this)(logger)
+                bootstrap.abortThisNodeOnStartupFailure()
             }
       }
     } yield ()
   }
 
   def next: Option[StageResult] = stageResult.get()
+  def selectNext[R <: BootstrapStage[?, ?]: ClassTag]: Option[R] = {
+    @tailrec
+    def selectNextStep(stage: BootstrapStage[?, ?]): Option[R] =
+      stage.next match {
+        case Some(s: R) => Some(s)
+        case Some(s: BootstrapStage[?, ?]) => selectNextStep(s)
+        case _ => None
+      }
+
+    selectNextStep(this)
+  }
+
   def getNode: Option[T] = next.flatMap(_.getNode)
 
   override def getAdminToken: Option[String] = next.flatMap(_.getAdminToken)

@@ -65,8 +65,8 @@ abstract class CryptoIntegrationTest(cryptoConfig: CryptoConfig)
         mediator1.start()
 
         val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
-          sequencer1.config.crypto,
-          testedProtocolVersion,
+          cryptoConfig = sequencer1.config.crypto,
+          protocolVersion = testedProtocolVersion,
         )
 
         // initialize the first synchronizer where the 'regular' tests will be run
@@ -287,8 +287,8 @@ sealed trait ReconnectSynchronizerAutoInitIntegrationTest {
       mediator2.start()
 
       val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
-        sequencer1.config.crypto,
-        testedProtocolVersion,
+        cryptoConfig = sequencer1.config.crypto,
+        protocolVersion = testedProtocolVersion,
       )
 
       val anotherSynchronizerId = bootstrap.synchronizer(
