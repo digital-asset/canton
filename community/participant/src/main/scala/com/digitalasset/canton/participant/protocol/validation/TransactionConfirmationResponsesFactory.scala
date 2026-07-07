@@ -139,6 +139,8 @@ class TransactionConfirmationResponsesFactory(
 
         internalConsistencyResultE <- transactionValidationResult.internalConsistencyResultET.value
 
+        externalCallCheckResult <- transactionValidationResult.externalCallCheckResultF
+
         // Rejections due to a failed model conformance check
         // Aborts are logged by the Engine callback when the abort happens
         modelConformanceRejections =
@@ -244,13 +246,31 @@ class TransactionConfirmationResponsesFactory(
                   ).toLocalReject(protocolVersion)
                 )
 
+              // Rejections due to recorded external-call results that disagree (with each other
+              // across the request, or with the extension service on re-validation). The request
+              // is rejected on behalf of all hosted confirming parties; the rejections rank with
+              // the other consistency rejections, ahead of the authentication and conformance
+              // rejections.
+              val externalCallRejections =
+                externalCallCheckResult match {
+                  case ExternalCallCheck.Rejected(description) =>
+                    Some(
+                      logged(
+                        requestId,
+                        LocalRejectError.ConsistencyRejections.ExternalCallResultDisagreement
+                          .Reject(description),
+                      ).toLocalReject(protocolVersion)
+                    )
+                  case _ => None
+                }
+
               // Approve if the consistency check succeeded, reject otherwise.
               val consistencyVerdicts =
                 verdictsForView(viewValidationResult, hostedConfirmingParties)
 
               val localVerdicts: Seq[LocalVerdict] =
                 consistencyVerdicts.toList ++ timeValidationRejections ++ contractConsistencyRejections ++
-                  authenticationRejections ++ authorizationRejections ++
+                  externalCallRejections ++ authenticationRejections ++ authorizationRejections ++
                   modelConformanceRejections ++ internalConsistencyRejections ++
                   replayRejections
 
@@ -266,7 +286,25 @@ class TransactionConfirmationResponsesFactory(
                   )
                 )
 
-              localVerdictAndPartiesO.map { case (localVerdict, parties) =>
+              // A recorded external-call result that could not be re-validated downgrades an
+              // approval to an abstention: the participant cannot vouch for the recorded result,
+              // but the request is not provably wrong either.
+              val localVerdictAndPartiesWithAbstentionO = localVerdictAndPartiesO.map {
+                case (approve: LocalApprove, parties) =>
+                  externalCallCheckResult match {
+                    case ExternalCallCheck.CannotValidate(reason) =>
+                      logged(
+                        requestId,
+                        LocalAbstainError.CannotPerformAllValidations.Abstain(reason),
+                      ).toLocalAbstain(protocolVersion) -> parties
+                    case _ => approve -> parties
+                  }
+                case other => other
+              }
+
+              localVerdictAndPartiesWithAbstentionO.map { case (localVerdict, parties) =>
+                // The abstention above preserves the tryCreate invariant: it is not malformed,
+                // and it keeps the approval's non-empty party set.
                 checked(
                   ConfirmationResponse
                     .tryCreate(
