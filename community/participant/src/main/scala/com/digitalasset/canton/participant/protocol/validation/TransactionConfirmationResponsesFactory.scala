@@ -189,8 +189,7 @@ class TransactionConfirmationResponsesFactory(
                       requestId,
                       // Conceptually, a normal LocalReject for the admin party should suffice for rejecting replays.
                       // However, we nevertheless use a `Malformed` rejection here so that the rejection preference sorting
-                      // ensures that this rejection, something at least as strong, or the external-call
-                      // abstention (which ranks earlier in the verdicts below) will make it to the mediator.
+                      // ensures that this rejection or something at least as strong will make it to the mediator.
                       LocalRejectError.MalformedRejects.MalformedRequest.Reject(
                         err.format(viewPosition)
                       ),
@@ -283,12 +282,20 @@ class TransactionConfirmationResponsesFactory(
                   modelConformanceRejections ++ internalConsistencyRejections ++
                   replayRejections
 
+              // Any rejection, wherever it ranks in the verdicts, takes precedence over the
+              // abstention.
               val localVerdictAndPartiesO = localVerdicts
                 .collectFirst[(LocalVerdict, Set[LfPartyId])] {
                   case malformed: LocalReject if malformed.isMalformed => malformed -> Set.empty
-                  case nonPositive: NonPositiveLocalVerdict if hostedConfirmingParties.nonEmpty =>
-                    nonPositive -> hostedConfirmingParties
+                  case localReject: LocalReject if hostedConfirmingParties.nonEmpty =>
+                    localReject -> hostedConfirmingParties
                 }
+                .orElse(
+                  localVerdicts.collectFirst[(LocalVerdict, Set[LfPartyId])] {
+                    case abstain: LocalAbstain if hostedConfirmingParties.nonEmpty =>
+                      abstain -> hostedConfirmingParties
+                  }
+                )
                 .orElse(
                   Option.when(hostedConfirmingParties.nonEmpty)(
                     LocalApprove(protocolVersion) -> hostedConfirmingParties

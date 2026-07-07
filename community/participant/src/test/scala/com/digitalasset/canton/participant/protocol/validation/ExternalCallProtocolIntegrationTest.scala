@@ -390,8 +390,7 @@ final class ExternalCallProtocolIntegrationTest
       }
     }
 
-    "prefer the abstention over a rejection from a later validation suite" in {
-      // The shadowed authorization rejection is still logged, as a malformed-request alarm.
+    "prefer a rejection from a later validation suite over the abstention" in {
       val responses = loggerFactory.assertLogs(
         createResponses(
           ExternalCallCheck.CannotValidate("extension service is not configured"),
@@ -401,13 +400,21 @@ final class ExternalCallProtocolIntegrationTest
       )
 
       responses should have size 2
-      forEvery(responses) { response =>
-        inside(response) { case ConfirmationResponse(_, abstain: LocalAbstain, parties) =>
-          abstain.reason.message shouldBe
-            "CANNOT_PERFORM_ALL_VALIDATIONS(9,0): " +
-            "Cannot perform all validations: extension service is not configured"
-          parties shouldBe confirmers
-        }
+      val leftResponse = responses.find(_.viewPositionO.contains(leftViewPosition)).value
+      inside(leftResponse) { case ConfirmationResponse(_, reject: LocalReject, parties) =>
+        reject.isMalformed shouldBe true
+        // Malformed rejections carry a redacted reason on the wire.
+        reject.reason.message shouldBe
+          "An error occurred. Please contact the operator and inquire about the request " +
+          "<no-correlation-id> with tid <no-tid>"
+        parties shouldBe empty
+      }
+      val rightResponse = responses.find(_.viewPositionO.contains(rightViewPosition)).value
+      inside(rightResponse) { case ConfirmationResponse(_, abstain: LocalAbstain, parties) =>
+        abstain.reason.message shouldBe
+          "CANNOT_PERFORM_ALL_VALIDATIONS(9,0): " +
+          "Cannot perform all validations: extension service is not configured"
+        parties shouldBe confirmers
       }
     }
 
