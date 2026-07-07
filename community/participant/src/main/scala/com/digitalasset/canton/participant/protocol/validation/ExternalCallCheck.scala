@@ -30,9 +30,8 @@ import scala.concurrent.ExecutionContext
   * The outcome is a single per-request `ExternalCallCheck.Result`: a disagreement from either part
   * rejects the request on behalf of all hosted confirming parties, and a recorded result that
   * cannot be re-validated leads to an abstention instead of an approval (see
-  * [[TransactionConfirmationResponsesFactory]]). Distinguishing the affected checking parties per
-  * view is a tracked follow-up; disagreements within the replay data of a single reinterpretation
-  * already surface as model-conformance errors independently of this check.
+  * [[TransactionConfirmationResponsesFactory]]). Disagreements within the replay data of a single
+  * reinterpretation already surface as model-conformance errors independently of this check.
   *
   * @param externalCallValidator
   *   The validator used to re-run external calls against the extension service.
@@ -48,8 +47,7 @@ class ExternalCallCheck(
   import ExternalCallCheck.*
 
   /** Checks consistency of the recorded external-call results and re-validates them against the
-    * extension service. The network I/O runs concurrently with the other validation suites; the
-    * returned future completes once all validator calls have.
+    * extension service.
     *
     * If no view records an external-call result -- in particular, always, on protocol versions
     * without external-call support -- the check short-circuits to `ExternalCallCheck.Passed`.
