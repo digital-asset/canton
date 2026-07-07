@@ -48,8 +48,11 @@ private[validation] trait ExternalCallValidationTestUtil {
     output = Bytes.fromStringUtf8("output"),
   )
 
-  protected val otherExternalCallOutput: ExternalCallResult =
+  protected val otherExternalCallResult: ExternalCallResult =
     externalCallResult.copy(output = Bytes.fromStringUtf8("other-output"))
+
+  protected def participantView(view: TransactionView): ParticipantTransactionView =
+    ParticipantTransactionView.tryCreate(view)
 
   protected def validationResult(
       view: TransactionView,
@@ -60,7 +63,7 @@ private[validation] trait ExternalCallValidationTestUtil {
       ),
   ): ViewValidationResult =
     ViewValidationResult(
-      ParticipantTransactionView.tryCreate(view),
+      participantView(view),
       activenessResult,
     )
 }

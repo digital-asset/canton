@@ -24,15 +24,15 @@ class ExternalCallConsistencyCheckerTest
 
   protected val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
 
-  private val partyA = ExampleTransactionFactory.signatory
-  private val partyB = ExampleTransactionFactory.submitter
-  private val partyC = ExampleTransactionFactory.observer
+  private val partyA: LfPartyId = ExampleTransactionFactory.signatory
+  private val partyB: LfPartyId = ExampleTransactionFactory.submitter
+  private val partyC: LfPartyId = ExampleTransactionFactory.observer
 
   private def check(
       leftCheckingParties: Set[LfPartyId],
       rightCheckingParties: Set[LfPartyId],
       hostedParties: Set[LfPartyId],
-      rightResult: ExternalCallResult = otherExternalCallOutput,
+      rightResult: ExternalCallResult = otherExternalCallResult,
   ): ExternalCallConsistencyChecker.Result = {
     val example = factory.MultipleRoots
     val left = withExternalCallResults(
@@ -58,11 +58,11 @@ class ExternalCallConsistencyCheckerTest
 
     ExternalCallConsistencyChecker.check(
       Map(
-        ViewPosition.root -> validationResult(left),
+        ViewPosition.root -> participantView(left),
         ViewPosition(
           List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
         ) ->
-          validationResult(right),
+          participantView(right),
       ),
       hostedParties,
     )
@@ -102,7 +102,7 @@ class ExternalCallConsistencyCheckerTest
       val visibleInconsistency = result.visibleInconsistencies.loneElement
       visibleInconsistency.outputs shouldBe Set(
         externalCallResult.output,
-        otherExternalCallOutput.output,
+        otherExternalCallResult.output,
       )
     }
 
@@ -122,7 +122,7 @@ class ExternalCallConsistencyCheckerTest
         leftCheckingParties = Set(partyA),
         rightCheckingParties = Set(partyA),
         hostedParties = Set(partyA),
-        rightResult = otherExternalCallOutput.copy(functionId = "other-function"),
+        rightResult = otherExternalCallResult.copy(functionId = "other-function"),
       )
 
       result.inconsistentParties shouldBe Set.empty
@@ -141,7 +141,7 @@ class ExternalCallConsistencyCheckerTest
           ),
           externalCallViewResult(
             exerciseIndex = 0,
-            result = otherExternalCallOutput,
+            result = otherExternalCallResult,
             checkingParties = Set(partyA),
             callIndex = 1,
           ),
@@ -149,13 +149,13 @@ class ExternalCallConsistencyCheckerTest
       )
 
       val result = ExternalCallConsistencyChecker.check(
-        Map(ViewPosition.root -> validationResult(view)),
+        Map(ViewPosition.root -> participantView(view)),
         Set(partyA),
       )
 
       result.inconsistentParties shouldBe Set(partyA)
       val inconsistency = result.hostedInconsistencies(partyA).loneElement
-      inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallOutput.output)
+      inconsistency.outputs shouldBe Set(externalCallResult.output, otherExternalCallResult.output)
       inconsistency.occurrences.map(occurrence =>
         occurrence.exerciseIndex -> occurrence.callIndex
       ) shouldBe Set(
@@ -201,11 +201,11 @@ class ExternalCallConsistencyCheckerTest
 
       val result = ExternalCallConsistencyChecker.check(
         Map(
-          ViewPosition.root -> validationResult(left),
+          ViewPosition.root -> participantView(left),
           ViewPosition(
             List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
           ) ->
-            validationResult(right),
+            participantView(right),
         ),
         Set(partyA),
       )
@@ -221,7 +221,7 @@ class ExternalCallConsistencyCheckerTest
       val example = factory.MultipleRoots
 
       val result = ExternalCallConsistencyChecker.check(
-        Map(ViewPosition.root -> validationResult(example.rootViews(4))),
+        Map(ViewPosition.root -> participantView(example.rootViews(4))),
         Set(partyA),
       )
 
