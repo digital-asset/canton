@@ -927,8 +927,10 @@ class TransactionProcessingSteps(
           if (malformedPayloads.nonEmpty) {
             // With malformed payloads, the responses factory takes the
             // constructResponsesForMalformedPayloads path and never awaits the check (only its
-            // alarms matter there); drain it so that failures are logged rather than silently
-            // discarded.
+            // alarms matter there). The check is currently synchronous in that case (it makes no
+            // validator calls without runValidation), so the drain only matters should the check
+            // ever become asynchronous there; it stays so that failures would be logged rather
+            // than silently discarded.
             FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
               checkResultF,
               "external-call check failed for a request with malformed payloads",
