@@ -36,8 +36,8 @@ import com.digitalasset.canton.protocol.messages.{
   LocalReject,
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
