@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.Order
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.ViewPosition
+import com.digitalasset.canton.data.{ParticipantTransactionView, ViewPosition}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
@@ -147,24 +147,23 @@ object ExternalCallConsistencyChecker {
   }
 
   private def visibleOccurrences(
-      viewValidationResults: Map[ViewPosition, ViewValidationResult]
+      views: Map[ViewPosition, ParticipantTransactionView]
   ): Seq[VisibleExternalCallOccurrence] =
-    viewValidationResults.toSeq
+    views.toSeq
       .sortBy(_._1)(ViewPosition.orderViewPosition.toOrdering)
-      .flatMap { case (viewPosition, viewValidationResult) =>
-        viewValidationResult.view.viewParticipantData.externalCallResults.map {
-          externalCallResult =>
-            val occurrence = ExternalCallOccurrence(
-              viewPosition,
-              externalCallResult.exerciseIndex,
-              externalCallResult.callIndex,
-            )
-            VisibleExternalCallOccurrence(
-              DAMLe.ExternalCallKey.fromResult(externalCallResult.result),
-              externalCallResult.result.output,
-              occurrence,
-              externalCallResult.checkingParties,
-            )
+      .flatMap { case (viewPosition, view) =>
+        view.viewParticipantData.externalCallResults.map { externalCallResult =>
+          val occurrence = ExternalCallOccurrence(
+            viewPosition,
+            externalCallResult.exerciseIndex,
+            externalCallResult.callIndex,
+          )
+          VisibleExternalCallOccurrence(
+            DAMLe.ExternalCallKey.fromResult(externalCallResult.result),
+            externalCallResult.result.output,
+            occurrence,
+            externalCallResult.checkingParties,
+          )
         }
       }
 
@@ -204,10 +203,10 @@ object ExternalCallConsistencyChecker {
     * [[Result]] for how the two differ.
     */
   def check(
-      viewValidationResults: Map[ViewPosition, ViewValidationResult],
+      views: Map[ViewPosition, ParticipantTransactionView],
       hostedConfirmingParties: Set[LfPartyId],
   ): Result = {
-    val occurrences = visibleOccurrences(viewValidationResults)
+    val occurrences = visibleOccurrences(views)
     Result(
       hostedInconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
       visibleInconsistencies = visibleInconsistencies(occurrences),
