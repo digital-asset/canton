@@ -15,6 +15,7 @@ import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.MultiRootNo
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.damltests.upgrade.v1.java as v1
 import com.digitalasset.canton.damltests.upgrade.v2.java as v2
+import com.digitalasset.canton.damltests.upgradeck.v1.java as v1ck
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -43,6 +44,11 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
 
   private val byPackageNameIdentifier: Identifier =
     Identifier.fromJavaProto(v1.upgrade.Upgrading.TEMPLATE_ID.toProto)
+
+  // The keyed template lives in its own package (UpgradeCK), so it needs its own
+  // package-name-scoped identifier for the ExerciseByKey resolution test.
+  private val byPackageNameIdentifierCK: Identifier =
+    Identifier.fromJavaProto(v1ck.upgradeck.UpgradingCK.TEMPLATE_ID.toProto)
 
   private def party(name: String)(implicit env: TestConsoleEnvironment): Party =
     env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
@@ -131,22 +137,28 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
 
     "commands are submitted by key with a package-name-scoped template id" should {
       // Contract keys require Daml-LF >= 2.3 and protocol version >= 3.5, so this uses the keyed
-      // UpgradingCK template (part of the Upgrade package, which now targets LF 2.3) and is gated
-      // accordingly. The Upgrade V1/V2 DARs are already uploaded to participant1 in the setup.
+      // UpgradingCK template, which lives in its own LF 2.3 UpgradeCK package (the shared Upgrade
+      // package stays on LF 2.1). The UpgradeCK DARs are uploaded here rather than in the shared
+      // setup so environments below the required protocol version are unaffected.
       "resolve ExerciseByKey to the newest uploaded package" onlyRunWithOrGreaterThan
         ProtocolVersion.v35 in { implicit env =>
           import env.*
 
+          participant1.dars.upload(UpgradingBaseTest.UpgradeCKV1)
+          participant1.dars.upload(UpgradingBaseTest.UpgradeCKV2)
+
           val alice = party("alice1")
           val bob = party("bob1")
 
+          val ckPackageName = byPackageNameIdentifierCK.packageId
+
           // Create by specifying the package name; resolves to the newest uploaded package (V2).
-          new v1.upgrade.UpgradingCK(
+          new v1ck.upgradeck.UpgradingCK(
             alice.toProtoPrimitive,
             alice.toProtoPrimitive,
             0,
           ).create.commands.asScala.toSeq
-            .map(_.withPackageName)
+            .map(_.withPackageName(ckPackageName))
             .pipe(
               participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
             )
@@ -154,13 +166,13 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
 
           // ExerciseByKey on the previously created contract, again by package name: the key is
           // (issuer, field) == (alice, 0).
-          v1.upgrade.UpgradingCK
-            .byKey(new v1.da.types.Tuple2(alice.toProtoPrimitive, java.lang.Long.valueOf(0L)))
+          v1ck.upgradeck.UpgradingCK
+            .byKey(new v1ck.da.types.Tuple2(alice.toProtoPrimitive, java.lang.Long.valueOf(0L)))
             .exerciseChangeOwnerCK(bob.toProtoPrimitive)
             .commands
             .asScala
             .toSeq
-            .map(_.withPackageName)
+            .map(_.withPackageName(ckPackageName))
             .pipe(
               participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
             )
@@ -393,9 +405,10 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
   }
 
   private implicit class CommandWithoutPackageId(commandJava: javaapi.data.Command) {
-    def withPackageName: javaapi.data.Command = {
+    def withPackageName: javaapi.data.Command = withPackageName(byPackageNameIdentifier.packageId)
+
+    def withPackageName(packageName: String): javaapi.data.Command = {
       val command = Command.fromJavaProto(commandJava.toProtoCommand)
-      val packageName = byPackageNameIdentifier.packageId
       val res = command.command match {
         case Command.Command.Empty => command
         case c: Command.Command.Create =>

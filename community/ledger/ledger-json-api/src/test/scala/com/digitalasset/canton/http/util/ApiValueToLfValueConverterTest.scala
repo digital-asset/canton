@@ -28,7 +28,7 @@ class ApiValueToLfValueConverterTest
       forAll(minSuccessful(20)) { (v: va.Inj) =>
         val vv = va.inj(v)
         val roundTrip =
-          lfValueToApiValue(true, vv).toOption flatMap (x => apiValueToLfValue(x).toMaybe.toOption)
+          lfValueToApiValue(true, vv).toOption flatMap (x => apiValueToLfValue(x).toOption)
         roundTrip shouldBe Some(vv)
       }
     }

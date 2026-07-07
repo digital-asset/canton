@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.crypto.{LtHash16Blake3, TestHash}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -17,6 +18,7 @@ import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
   PartyRemovedFromParticipant,
   ProcessingContext,
 }
+import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   HashedDigest,
@@ -28,25 +30,33 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   RawDigest,
   RemotePartyFirst,
 }
+import com.digitalasset.canton.participant.store.db.{BaseDbAcsDigestStoreTest, DbAcsDigestStore}
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
-import com.digitalasset.canton.platform.store.interning.MockStringInterning
+import com.digitalasset.canton.platform.store.interning.{MockStringInterning, StringInterning}
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
 import com.digitalasset.canton.store.IndexedSynchronizer
+import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
   LedgerParticipantId,
   LfPartyId,
+  ProtocolVersionChecksAnyWordSpec,
   ReassignmentCounter,
 }
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.language.implicitConversions
 
-class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+trait SequentialDigestAccumulatorTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec {
 
   private val synchronizerId = DefaultTestIdentities.synchronizerId
   private val p1 = DefaultTestIdentities.participant1.toLf
@@ -61,12 +71,21 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
   implicit def anyToCheckpointFenceOr(a: Classification): CheckpointFenceOr[Classification] =
     NotCheckpointFence(mock[TopologySnapshot], a)
 
-  class Fixture(participant: LedgerParticipantId) {
+  protected def minimumVersionToRunTest: ProtocolVersion
+
+  protected def createStore(
+      indexedSynchronizer: IndexedSynchronizer,
+      stringInterning: StringInterning,
+  ): AcsDigestStore
+
+  class Fixture(
+      participant: LedgerParticipantId,
+      tracingMode: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
+  ) {
     val stringInterning = new MockStringInterning()
-    val digestStore = new InMemoryAcsDigestStore(
+    val digestStore = createStore(
       IndexedSynchronizer.tryCreate(synchronizerId, 1),
       stringInterning,
-      loggerFactory,
     )
     val accumulator =
       new SequentialDigestAccumulator(
@@ -74,6 +93,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
         digestStore,
         stringInterning,
         TestHash,
+        tracingMode,
         loggerFactory,
       )
 
@@ -114,7 +134,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
   }
 
   "SequentialInMemoryDigestAccumulator" should {
-    "process a simple AcsUpdate" in {
+    "process a simple AcsUpdate" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -140,7 +160,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
     // this test checks that the digests are the same in the following two scenarios:
     // 1. p1 hosts only alice, receives cid0, and then onboards bob
     // 2. p1 hosts alice and bob, and then receives cid0
-    "process a party onboarding scenario" in {
+    "process a party onboarding scenario" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixtureBobOnboarded = new Fixture(p1)
 
       fixtureBobOnboarded
@@ -209,7 +229,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
     // this test checks that the digests are the same in the following two scenarios:
     // 1. p1 hosts alice and bob, receives cid0, and then offboards bob
     // 2. p1 hosts only alice and receives cid0
-    "process a party offboarding scenario" in {
+    "process a party offboarding scenario" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixtureBobOffboarded = new Fixture(p1)
 
       fixtureBobOffboarded
@@ -273,7 +293,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
         .digestO
     }
 
-    "write a checkpoint when requested" in {
+    "write a checkpoint when requested" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -294,7 +314,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
         .value shouldBe targetCheckpoint
     }
 
-    "not store empty initial digests" in {
+    "not store empty initial digests" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -312,7 +332,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
       lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
     }
 
-    "store empty digests after a non-empty initial digest" in {
+    "store empty digests after a non-empty initial digest" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -364,7 +384,7 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
       }
     }
 
-    "not create cycles in the replacement chain" in {
+    "not create cycles in the replacement chain" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -430,6 +450,183 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
       }
       lookupParticipantDigest(p1).value.replacesOffset.value shouldBe off(1)
     }
+
+    "store incremental traces" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+      val fixture = new Fixture(p1, AcsDigestTracingMode.Incremental)
+
+      import fixture.*
+
+      lookupParticipantDigest(p2) shouldBe empty
+      lookupPartyDigest(alice, RemotePartyFirst) shouldBe empty
+      lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
+
+      process(
+        (ts(1), off(2)) -> AcsUpdate(
+          stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
+          locallyHostedStakeholders = Seq(alice),
+          cid0,
+          rc0,
+          isActivation = true,
+        )
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = true)
+      )
+
+      process(
+        (ts(2), off(3)) -> AcsUpdate(
+          stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
+          locallyHostedStakeholders = Seq(alice),
+          cid0,
+          rc0,
+          isActivation = false,
+        )
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = false)
+      )
+
+      // observe the activation of another contract at the same time and offset as the previous deactivation
+      process(
+        (ts(2), off(3)) -> AcsUpdate(
+          stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
+          locallyHostedStakeholders = Seq(alice),
+          cid1,
+          rc0,
+          isActivation = true,
+        )
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = false),
+        SingleTrace(cid1, rc0, alice, bob, isActivation = true),
+      )
+
+      process(
+        (ts(3), off(4)) -> PartyAddedToParticipant(alice, p2)
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        // in incremental tracing, only the latest trace of the party is retained
+        TraceGroup(
+          s"onboarded $alice",
+          Seq(
+            SingleTrace(cid0, rc0, alice, alice, isActivation = false),
+            SingleTrace(cid1, rc0, alice, alice, isActivation = true),
+          ),
+          addedToHash = true,
+        )
+      )
+    }
+
+    "store full traces" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+      val fixture = new Fixture(p1, AcsDigestTracingMode.Full)
+
+      import fixture.*
+
+      lookupParticipantDigest(p2) shouldBe empty
+      lookupPartyDigest(alice, RemotePartyFirst) shouldBe empty
+      lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
+
+      // add a contract to alice, bob, p1, p2
+      process(
+        (ts(1), off(2)) -> AcsUpdate(
+          stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
+          locallyHostedStakeholders = Seq(alice),
+          cid0,
+          rc0,
+          isActivation = true,
+        )
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = true)
+      )
+
+      process(
+        (ts(2), off(3)) -> AcsUpdate(
+          stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
+          locallyHostedStakeholders = Seq(alice),
+          cid0,
+          rc0,
+          isActivation = false,
+        )
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p1
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, alice, isActivation = true),
+        SingleTrace(cid0, rc0, alice, alice, isActivation = false),
+      )
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = true),
+        SingleTrace(cid0, rc0, alice, bob, isActivation = false),
+      )
+
+      // observe the activation of another contract at the same time and offset as the previous deactivation
+      process(
+        (ts(2), off(3)) -> AcsUpdate(
+          stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
+          locallyHostedStakeholders = Seq(alice),
+          cid1,
+          rc0,
+          isActivation = true,
+        )
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p1
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, alice, isActivation = true),
+        SingleTrace(cid0, rc0, alice, alice, isActivation = false),
+        SingleTrace(cid1, rc0, alice, alice, isActivation = true),
+      )
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = true),
+        SingleTrace(cid0, rc0, alice, bob, isActivation = false),
+        SingleTrace(cid1, rc0, alice, bob, isActivation = true),
+      )
+
+      process(
+        (ts(3), off(4)) -> PartyAddedToParticipant(alice, p2)
+      ).futureValueUS shouldBe empty // no checkpoints written
+
+      lookupParticipantDigest(
+        p2
+      ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
+        SingleTrace(cid0, rc0, alice, bob, isActivation = true),
+        SingleTrace(cid0, rc0, alice, bob, isActivation = false),
+        SingleTrace(cid1, rc0, alice, bob, isActivation = true),
+        TraceGroup(
+          s"onboarded $alice",
+          Seq(
+            SingleTrace(cid0, rc0, alice, alice, isActivation = true),
+            SingleTrace(cid0, rc0, alice, alice, isActivation = false),
+            SingleTrace(cid1, rc0, alice, alice, isActivation = true),
+          ),
+          addedToHash = true,
+        ),
+      )
+    }
   }
 
   private def ts(offsetFromEpoch: Int): CantonTimestamp =
@@ -438,3 +635,45 @@ class SequentialDigestAccumulatorTest extends AnyWordSpec with BaseTest with Has
 
   private def cid(i: Int): LfContractId = ExampleTransactionFactory.suffixedId(i, i)
 }
+
+@AcsCommitmentTest
+class SequentialDigestAccumulatorTestInMemory extends SequentialDigestAccumulatorTest {
+  // the in-memory test runs with any version, because it doesn't depend on dev-DB migrations
+  override protected def minimumVersionToRunTest: ProtocolVersion = ProtocolVersion.minimum
+
+  override protected def createStore(
+      indexedSynchronizer: IndexedSynchronizer,
+      stringInterning: StringInterning,
+  ): AcsDigestStore =
+    new InMemoryAcsDigestStore(indexedSynchronizer, stringInterning, loggerFactory)
+}
+
+abstract class BaseDbSequentialDigestAccumulatorTest
+    extends SequentialDigestAccumulatorTest
+    with BaseDbAcsDigestStoreTest { self: DbTest =>
+
+  // the DB test requires the protocol version that also runs the corresponding DB migrations
+  override protected def minimumVersionToRunTest: ProtocolVersion =
+    ProtocolVersion.acsCommitmentRedesign
+
+  override protected def createStore(
+      indexedSynchronizer: IndexedSynchronizer,
+      stringInterning: StringInterning,
+  ): AcsDigestStore =
+    new DbAcsDigestStore(
+      indexedSynchronizer,
+      stringInterning,
+      ReleaseProtocolVersion.acsCommitmentRedesign,
+      storage,
+      loggerFactory,
+      timeouts,
+    )
+}
+
+@AcsCommitmentTest
+class SequentialDigestAccumulatorTestH2 extends BaseDbSequentialDigestAccumulatorTest with H2Test
+
+@AcsCommitmentTest
+class SequentialDigestAccumulatorTestPostgres
+    extends BaseDbSequentialDigestAccumulatorTest
+    with PostgresTest

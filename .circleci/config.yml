@@ -202,7 +202,7 @@ commands:
         steps:
             - run:
                 command: |
-                    nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py"
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "python3 ./scripts/ci/report_failing_tests.py"
                 name: Send name of each failing test to datadog
                 when: always
     docker_log_into_gcr:

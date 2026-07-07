@@ -4,9 +4,9 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
-import cats.implicits.catsSyntaxEitherId
-import cats.syntax.bifunctor.*
+import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
@@ -73,7 +73,7 @@ final case class BaseQuery(
 
 object BaseQuery {
   def apply(
-      store: TopologyStoreId,
+      store: grpc.TopologyStoreId,
       proposals: Boolean,
       timeQuery: TimeQuery,
       ops: Option[TopologyChangeOp],
@@ -112,7 +112,9 @@ object BaseQuery {
 
 class GrpcTopologyManagerReadService(
     member: Member,
-    stores: => Seq[topology.store.TopologyStore[topology.store.TopologyStoreId]],
+    stores: => Seq[
+      TopologyStoreInitializationStatus[topology.store.TopologyStoreId, TopologyStore]
+    ],
     topologyClientLookup: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
     timeTrackerLookup: PhysicalSynchronizerId => Option[SynchronizerTimeTracker],
     physicalSynchronizerIdLookup: PsidLookup,
@@ -123,7 +125,7 @@ class GrpcTopologyManagerReadService(
     with NamedLogging {
 
   private case class TransactionSearchResult(
-      store: TopologyStoreId,
+      store: grpc.TopologyStoreId,
       sequenced: SequencedTime,
       validFrom: EffectiveTime,
       validUntil: Option[EffectiveTime],
@@ -137,25 +139,9 @@ class GrpcTopologyManagerReadService(
       storeO: Option[grpc.TopologyStoreId]
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Seq[
     topology.store.TopologyStore[topology.store.TopologyStoreId]
-  ]] =
-    storeO match {
-      case Some(store) =>
-        EitherT.rightT(
-          activePsidFor(store).toOption.toList.flatMap(targetStoreId =>
-            stores.filter(_.storeId == targetStoreId)
-          )
-        )
-      case None => EitherT.rightT(stores)
-    }
-
-  private def activePsidFor(
-      grpcTopologyStoreId: grpc.TopologyStoreId
-  )(implicit
-      traceContext: TraceContext
-  ): Either[RpcError, topology.store.TopologyStoreId] =
-    grpcTopologyStoreId
-      .toInternal(physicalSynchronizerIdLookup)
-      .leftMap(TopologyManagerError.InvalidSynchronizer.Failure(_))
+  ]] = EitherT.fromEither(
+    GrpcTopologyServiceUtil.collectActiveStores(storeO.toList, stores, physicalSynchronizerIdLookup)
+  )
 
   private def collectSynchronizerStore(
       storeO: Option[grpc.TopologyStoreId]
@@ -164,50 +150,30 @@ class GrpcTopologyManagerReadService(
   ): EitherT[FutureUnlessShutdown, RpcError, topology.store.TopologyStore[
     topology.store.TopologyStoreId.SynchronizerStore
   ]] = {
-    val synchronizerStores =
-      storeO match {
-        case Some(store) =>
-          activePsidFor(store).flatMap { targetStoreInternal =>
-            val synchronizerStores = stores
-              .flatMap(
-                topology.store.TopologyStoreId
-                  .select[topology.store.TopologyStoreId.SynchronizerStore]
-              )
-              .filter(store => store.storeId == targetStoreInternal)
-            synchronizerStores match {
-              case Nil =>
-                TopologyManagerError.TopologyStoreUnknown
-                  .Failure(targetStoreInternal)
-                  .asLeft
-              case Seq(synchronizerStore) => synchronizerStore.asRight
-              case multiple =>
-                TopologyManagerError.InvalidSynchronizer
-                  .MultipleSynchronizerStoresFound(multiple.map(_.storeId))
-                  .asLeft
-            }
-          }
+    // get all known synchronizer stores
+    val synchronizerStoresWithStatus = stores.mapFilter(
+      topology.store.TopologyStoreId
+        .select[
+          topology.store.TopologyStoreId.SynchronizerStore,
+          TopologyStoreInitializationStatus.Aux,
+        ]
+    )
 
-        case None =>
-          val synchronizerStores = stores
-            .flatMap(
-              topology.store.TopologyStoreId
-                .select[topology.store.TopologyStoreId.SynchronizerStore]
-            )
-            .map(store => store.storeId.psid -> store)
-            .toMap
-          val allKnownLogical = synchronizerStores.keySet.map(_.logical)
-          val allKnownActivePhysical =
-            allKnownLogical.flatMap(physicalSynchronizerIdLookup.activePsidFor)
-          val activePhysicalStores = allKnownActivePhysical.flatMap(synchronizerStores.get)
-          activePhysicalStores.toSeq match {
-            case Seq(synchronizerStore) => synchronizerStore.asRight
-            case Seq() =>
-              TopologyManagerError.TopologyStoreUnknown.NoSynchronizerStoreAvailable().asLeft
-            case multiple =>
-              TopologyManagerError.InvalidSynchronizer
-                .MultipleSynchronizerStoresFound(multiple.map(_.storeId))
-                .asLeft
-          }
+    val synchronizerStores = GrpcTopologyServiceUtil
+      .collectActiveStores(
+        storeO.toList,
+        synchronizerStoresWithStatus,
+        physicalSynchronizerIdLookup,
+      )
+      .flatMap {
+        case Seq(synchronizerStore) => synchronizerStore.asRight
+        case Seq() =>
+          TopologyManagerError.TopologyStoreUnknown.NoSynchronizerStoreAvailable().asLeft
+        case multiple =>
+          TopologyManagerError.TopologyStoreUnknown
+            .MultipleSynchronizerStoresFound(multiple.map(_.storeId))
+            .asLeft
+
       }
 
     EitherT.fromEither[FutureUnlessShutdown](synchronizerStores)
@@ -296,7 +262,7 @@ class GrpcTopologyManagerReadService(
             )
             .map { tx =>
               val result = TransactionSearchResult(
-                TopologyStoreId.fromInternal(storeId),
+                grpc.TopologyStoreId.fromInternal(storeId),
                 tx.sequenced,
                 tx.validFrom,
                 tx.validUntil,
@@ -674,7 +640,7 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListAvailableStoresRequest
   ): Future[adminProto.ListAvailableStoresResponse] = Future.successful(
     adminProto.ListAvailableStoresResponse(storeIds =
-      stores.map(s => TopologyStoreId.fromInternal(s.storeId).toProtoV30)
+      stores.map(s => grpc.TopologyStoreId.fromInternal(s.storeId).toProtoV30)
     )
   )
 

@@ -40,6 +40,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   val sut = new WallClock(DefaultProcessingTimeouts.testing, loggerFactory)
   val timeout = Timeout(6.seconds)
+  val taskName = "ClockTestTask"
   def testTask(now: CantonTimestamp): Unit = ()
 
   "SimClock" should {
@@ -63,23 +64,24 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     }
 
     "allow task to be scheduled in future" in {
-      val task1 = sim.scheduleAt(testTask(_), sim.uniqueTime().plusSeconds(1)).onShutdown(fail())
+      val task1 =
+        sim.scheduleAt(testTask(_), taskName, sim.uniqueTime().plusSeconds(1)).onShutdown(fail())
       testExecution(task1, sim.uniqueTime().plusSeconds(2))
     }
 
     "ensure that tasks are executed in proper order" in {
       val now = sim.uniqueTime()
-      val task1 = sim.scheduleAt(testTask(_), now.plusSeconds(3)).onShutdown(fail())
-      val task2 = sim.scheduleAt(testTask(_), now.plusSeconds(1)).onShutdown(fail())
+      val task1 = sim.scheduleAt(testTask(_), taskName, now.plusSeconds(3)).onShutdown(fail())
+      val task2 = sim.scheduleAt(testTask(_), taskName, now.plusSeconds(1)).onShutdown(fail())
       testExecution(task2, now.plusSeconds(2))
       testExecution(task1, now.plusSeconds(4))
     }
 
     "ensure that multiple tasks are executed, again in proper order" in {
       val now = sim.uniqueTime()
-      val task1 = sim.scheduleAt(testTask(_), now.plusSeconds(5)).onShutdown(fail())
-      val task2 = sim.scheduleAt(testTask(_), now.plusSeconds(3)).onShutdown(fail())
-      val task3 = sim.scheduleAt(testTask(_), now.plusSeconds(1)).onShutdown(fail())
+      val task1 = sim.scheduleAt(testTask(_), taskName, now.plusSeconds(5)).onShutdown(fail())
+      val task2 = sim.scheduleAt(testTask(_), taskName, now.plusSeconds(3)).onShutdown(fail())
+      val task3 = sim.scheduleAt(testTask(_), taskName, now.plusSeconds(1)).onShutdown(fail())
       testExecution(task3, now.plusSeconds(4))
       val res = Await.ready(task2, timeout.value)
       assert(res.isCompleted)
@@ -88,7 +90,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
     "ensure that a task scheduled for now executes" in {
       val now = sim.uniqueTime()
-      val task = sim.scheduleAt(testTask(_), now).onShutdown(fail())
+      val task = sim.scheduleAt(testTask(_), taskName, now).onShutdown(fail())
       val res = Await.ready(task, timeout.value)
       assert(res.isCompleted)
     }
@@ -97,6 +99,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
       val executed = new AtomicBoolean(false)
       val (future, handle) = sim.scheduleAtCancellable(
         _ => executed.set(true),
+        taskName,
         sim.now.plusSeconds(10),
       )
 
@@ -109,7 +112,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
     "remove cancelled tasks immediately from queue" in {
       val handles = (1 to 100).map { i =>
-        sim.scheduleAtCancellable(_ => (), sim.now.plusSeconds(i.toLong))._2
+        sim.scheduleAtCancellable(_ => (), taskName, sim.now.plusSeconds(i.toLong))._2
       }
 
       sim.numberOfScheduledTasks shouldBe 100
@@ -126,9 +129,12 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     "handle mixed cancelled and active tasks" in {
       val results = new ConcurrentLinkedQueue[Int]()
 
-      val (f1, h1) = sim.scheduleAtCancellable(_ => results.add(1), sim.now.plusSeconds(1))
-      val (f2, h2) = sim.scheduleAtCancellable(_ => results.add(2), sim.now.plusSeconds(2))
-      val (f3, h3) = sim.scheduleAtCancellable(_ => results.add(3), sim.now.plusSeconds(3))
+      val (f1, h1) =
+        sim.scheduleAtCancellable(_ => results.add(1), taskName, sim.now.plusSeconds(1))
+      val (f2, h2) =
+        sim.scheduleAtCancellable(_ => results.add(2), taskName, sim.now.plusSeconds(2))
+      val (f3, h3) =
+        sim.scheduleAtCancellable(_ => results.add(3), taskName, sim.now.plusSeconds(3))
 
       h2.cancel(UnlessShutdown.AbortedDueToShutdown)
       sim.advanceTo(sim.now.plusSeconds(5))
@@ -137,7 +143,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     }
 
     "handle cancellation of immediately-executed tasks" in {
-      val (future, handle) = sim.scheduleAtCancellable(_ => 42, sim.now)
+      val (future, handle) = sim.scheduleAtCancellable(_ => 42, taskName, sim.now)
 
       handle.cancel(UnlessShutdown.AbortedDueToShutdown) // Should be no-op since task already ran
       future.futureValueUS shouldBe 42
@@ -146,8 +152,9 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     "handle cancellation with scheduleAfterCancellable" in {
       val executed = new AtomicBoolean(false)
       val (future, handle) = sim.scheduleAfterCancellable(
-        _ => executed.set(true),
-        java.time.Duration.ofSeconds(10),
+        action = _ => executed.set(true),
+        taskName = taskName,
+        delta = java.time.Duration.ofSeconds(10),
       )
 
       handle.cancel(UnlessShutdown.AbortedDueToShutdown)
@@ -165,8 +172,8 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
       val timestamp = sim.now.plusSeconds(5)
 
       // Schedule the same action instance at the same timestamp twice
-      val (future1, handle1) = sim.scheduleAtCancellable(sharedAction, timestamp)
-      val (future2, handle2) = sim.scheduleAtCancellable(sharedAction, timestamp)
+      val (future1, handle1) = sim.scheduleAtCancellable(sharedAction, taskName, timestamp)
+      val (future2, handle2) = sim.scheduleAtCancellable(sharedAction, taskName, timestamp)
 
       // Each handle must be a distinct object so cancel() targets only the specific task.
       // With case class: identical action/timestamp would make handle1 == handle2, causing
@@ -240,18 +247,18 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
     "scheduling one task works and completes" in {
       val now = sut.uniqueTime()
-      val task1 = sut.scheduleAt(testTask(_), now.plusMillis(50)).onShutdown(fail())
+      val task1 = sut.scheduleAt(testTask(_), taskName, now.plusMillis(50)).onShutdown(fail())
       assert(Await.ready(task1, timeout.value).isCompleted)
     }
 
     "scheduling of three tasks works and completes" in {
       val now = sut.uniqueTime()
       val tasks = Seq(
-        sut.scheduleAt(testTask, now.plusMillis(50)),
-        sut.scheduleAt(testTask, now.plusMillis(20)),
-        sut.scheduleAt(testTask, now),
-        sut.scheduleAt(testTask, now.minusMillis(1000)),
-        sut.scheduleAfter(testTask, java.time.Duration.ofMillis(55)),
+        sut.scheduleAt(testTask, taskName, now.plusMillis(50)),
+        sut.scheduleAt(testTask, taskName, now.plusMillis(20)),
+        sut.scheduleAt(testTask, taskName, now),
+        sut.scheduleAt(testTask, taskName, now.minusMillis(1000)),
+        sut.scheduleAfter(testTask, taskName, java.time.Duration.ofMillis(55)),
       )
       tasks.zipWithIndex.foreach { case (task, index) =>
         assert(
@@ -373,7 +380,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
       val ts = CantonTimestamp.ofEpochMilli(1)
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
-          val taskF = Future(env.clock.scheduleAt(_ => (), ts))
+          val taskF = Future(env.clock.scheduleAt(_ => (), taskName, ts))
 
           logger.info("Waiting to see the first request being observed")
           firstRequestObserved.future.futureValue
@@ -440,7 +447,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
       val env = new RemoteClockEnv(service)
 
       val ts = CantonTimestamp.ofEpochMilli(1)
-      val taskF = env.clock.scheduleAt(_ => (), ts)
+      val taskF = env.clock.scheduleAt(_ => (), taskName, ts)
 
       // Return some random gRPC errors first, then a time
       val err = DeprecatedProtocolVersion

@@ -90,7 +90,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         .discard
 
       // then
-      verify(clock, never).scheduleAfter(any[CantonTimestamp => Any], any[Duration])
+      verify(clock, never).scheduleAfter(any[CantonTimestamp => Any], any[String], any[Duration])
     }
 
     "schedule and send a time-advancement message" in {
@@ -237,7 +237,7 @@ class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
         .discard
 
       // then
-      verify(clock, never).scheduleAfter(any[CantonTimestamp => Any], any[Duration])
+      verify(clock, never).scheduleAfter(any[CantonTimestamp => Any], any[String], any[Duration])
     }
 
     // A case caught by flakiness in the sequencer off-boarding integration test.

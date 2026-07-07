@@ -15,6 +15,7 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.{UpdateService, UpdateServiceStub}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.auth.{
   AuthInterceptor,
   Authorizer,
@@ -56,6 +57,7 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise}
 import scala.util.Try
 
+@UnstableTest // TODO(i33799): remove this once the test is no longer flaky
 class StreamAuthorizationComponentSpec
     extends AsyncFlatSpec
     with BaseTest

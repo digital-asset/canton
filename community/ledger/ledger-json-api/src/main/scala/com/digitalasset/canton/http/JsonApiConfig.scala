@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.http
 
-import com.digitalasset.canton.config.RequireTypes.Port
+import cats.Show
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.http.WebsocketConfig as WSC
 import org.apache.pekko.stream.ThrottleMode
-import scalaz.Show
 
 import java.nio.file.Path
 import scala.concurrent.duration.*
@@ -24,6 +24,7 @@ final case class JsonApiConfig(
     portFile: Option[Path] = None,
     pathPrefix: Option[String] = None,
     requestTimeout: FiniteDuration = JsonApiConfig.defaultRequestTimeout,
+    maxInboundMessageSize: Option[NonNegativeInt] = None,
 ) {
   def port: Port =
     internalPort.getOrElse(
@@ -76,7 +77,7 @@ final case class WebsocketConfig(
 )
 
 object WebsocketConfig {
-  implicit val showInstance: Show[WebsocketConfig] = Show.shows(c =>
+  implicit val showInstance: Show[WebsocketConfig] = Show.show(c =>
     s"WebsocketConfig(httpListMaxElementsLimit=${c.httpListMaxElementsLimit}, httpListWaitTime=${c.httpListWaitTime})"
   )
 

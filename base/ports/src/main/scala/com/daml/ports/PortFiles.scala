@@ -3,7 +3,8 @@
 
 package com.daml.ports
 
-import scalaz.{Show, \/}
+import cats.Show
+import cats.syntax.either.*
 
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
@@ -14,7 +15,7 @@ object PortFiles {
   final case class CannotWriteToFile(path: Path, reason: String) extends Error
 
   object Error {
-    implicit val showInstance: Show[Error] = Show.shows {
+    implicit val showInstance: Show[Error] = Show.show {
       case FileAlreadyExists(path) =>
         s"Port file already exists: ${path.toAbsolutePath: Path}"
       case CannotWriteToFile(path, reason) =>
@@ -25,8 +26,9 @@ object PortFiles {
   /** Creates a port file and requests that the created file be deleted when the virtual machine
     * terminates. See [[java.io.File.deleteOnExit]].
     */
-  def write(path: Path, port: Port): Error \/ Unit =
-    \/.attempt(writeUnsafe(path, port))(identity)
+  def write(path: Path, port: Port): Either[Error, Unit] =
+    Either
+      .catchNonFatal(writeUnsafe(path, port))
       .leftMap {
         case _: java.nio.file.FileAlreadyExistsException => FileAlreadyExists(path)
         case e => CannotWriteToFile(path, e.toString)

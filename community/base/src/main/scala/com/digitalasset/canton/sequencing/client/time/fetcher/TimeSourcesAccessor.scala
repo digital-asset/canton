@@ -97,7 +97,11 @@ private[client] class OneCallAtATimeSourcesAccessor(
           //  because we won't retry in that case
           FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
             localClock
-              .scheduleAfter(_ => setFirst(Map.empty), timeout.duration),
+              .scheduleAfter(
+                action = _ => setFirst(Map.empty),
+                taskName = s"${getClass.getName}: clear sequencer timestamp map",
+                delta = timeout.duration,
+              ),
             "waiting for timeout to elapse failed",
           )
           val timeSourcesToBeStarted =

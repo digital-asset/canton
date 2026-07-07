@@ -3,6 +3,8 @@
 
 package com.daml.executors.executors
 
+import org.slf4j.{Logger, LoggerFactory}
+
 import java.util
 import java.util.concurrent.{Callable, ExecutorService, Future, TimeUnit}
 import scala.concurrent.ExecutionContextExecutorService
@@ -14,10 +16,18 @@ class NamedExecutionContextExecutorService(
 ) extends ExecutionContextExecutorService
     with NamedExecutor {
 
+  private val logger: Logger = LoggerFactory.getLogger(getClass)
+
   override def reportFailure(cause: Throwable): Unit = reporter(cause)
 
-  override def shutdown(): Unit = delegate.shutdown()
-  override def shutdownNow(): util.List[Runnable] = delegate.shutdownNow()
+  override def shutdown(): Unit = {
+    logger.info(s"Shutting down executor service: $name")
+    delegate.shutdown()
+  }
+  override def shutdownNow(): util.List[Runnable] = {
+    logger.info(s"Shutting down executor service now: $name")
+    delegate.shutdownNow()
+  }
   override def isShutdown: Boolean = delegate.isShutdown
   override def isTerminated: Boolean = delegate.isTerminated
   override def awaitTermination(l: Long, timeUnit: TimeUnit): Boolean =
@@ -57,5 +67,12 @@ class NamedExecutionContextExecutorService(
     delegate.invokeAny(collection, l, timeUnit)
 
   override def execute(runnable: Runnable): Unit =
-    delegate.execute(runnable)
+    if (!isShutdown) {
+      delegate.execute(runnable)
+    } else {
+      // Avoid RejectedExecutionException on shutdown
+      logger.debug(
+        s"Executor service $name is shutdown [terminated=${delegate.isTerminated}], discarding task: $runnable"
+      )
+    }
 }

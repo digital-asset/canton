@@ -43,8 +43,6 @@ import com.digitalasset.daml.lf.data.logging.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.value.Value as Lf
 import com.digitalasset.nonempty.*
-import scalaz.syntax.tag.*
-import scalaz.{@@, Tag}
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64
@@ -53,38 +51,31 @@ import scala.util.Try
 
 package object api {
   type Value = Lf
-
-  type WorkflowId = Ref.WorkflowId @@ WorkflowIdTag
-  val WorkflowId: Tag.TagOf[WorkflowIdTag] = Tag.of[WorkflowIdTag]
-
-  type CommandId = Ref.CommandId @@ CommandIdTag
-  val CommandId: Tag.TagOf[CommandIdTag] = Tag.of[CommandIdTag]
-
-  type UpdateId = Ref.TransactionId @@ UpdateIdTag
-  val UpdateId: Tag.TagOf[UpdateIdTag] = Tag.of[UpdateIdTag]
-
-  type ParticipantId = Ref.ParticipantId @@ ParticipantIdTag
-  val ParticipantId: Tag.TagOf[ParticipantIdTag] = Tag.of[ParticipantIdTag]
-
-  type SubmissionId = Ref.SubmissionId @@ SubmissionIdTag
-  val SubmissionId: Tag.TagOf[SubmissionIdTag] = Tag.of[SubmissionIdTag]
 }
 
 package api {
 
   import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
 
-  sealed trait WorkflowIdTag
+  final case class WorkflowId(unwrap: Ref.WorkflowId) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait CommandIdTag
+  final case class CommandId(unwrap: Ref.CommandId) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait UpdateIdTag
+  final case class UpdateId(unwrap: Ref.TransactionId) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait EventIdTag
+  final case class ParticipantId(unwrap: Ref.ParticipantId) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait ParticipantIdTag
-
-  sealed trait SubmissionIdTag
+  final case class SubmissionId(unwrap: Ref.SubmissionId) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
   final case class PartyDetails(
       party: Ref.Party,
@@ -209,7 +200,7 @@ package api {
         param("submittedAt", _.submittedAt),
         param("ledgerEffectiveTime", _.commands.ledgerEffectiveTime),
         param("deduplicationPeriod", _.deduplicationPeriod),
-        paramIfDefined("workflowId", _.workflowId.filter(_ != commandId).map(_.unwrap)),
+        paramIfDefined("workflowId", _.workflowId.map(_.unwrap).filter(_ != commandId.unwrap)),
         paramIfDefined("synchronizerId", _.synchronizerId),
         paramIfNonEmpty("prefetchKeys", _.prefetchKeys.map(_.toString.unquoted)),
         paramIfDefined("tapsMaxPasses", _.tapsMaxPasses.map(_.value)),
@@ -296,7 +287,15 @@ package api {
   }
 
   object Logging {
-    implicit def `tagged value to LoggingValue`[T: ToLoggingValue, Tag]: ToLoggingValue[T @@ Tag] =
+    implicit val `WorkflowId to LoggingValue`: ToLoggingValue[WorkflowId] =
+      value => value.unwrap
+    implicit val `CommandId to LoggingValue`: ToLoggingValue[CommandId] =
+      value => value.unwrap
+    implicit val `UpdateId to LoggingValue`: ToLoggingValue[UpdateId] =
+      value => value.unwrap
+    implicit val `ParticipantId to LoggingValue`: ToLoggingValue[ParticipantId] =
+      value => value.unwrap
+    implicit val `SubmissionId to LoggingValue`: ToLoggingValue[SubmissionId] =
       value => value.unwrap
   }
 

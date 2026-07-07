@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.slow
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.integration.plugins.toxiproxy.{
   ParticipantToPostgres,
@@ -38,8 +37,6 @@ import scala.concurrent.duration.*
   *   - load balancer in front of the replicated participant ledger API to which the performance
   *     runner connect
   */
-// TODO(i16601): this is known to be flaky
-@UnstableTest
 class PerformanceReplicatedParticipantDatabaseFaultIntegrationTest
     extends ReliabilityPerformanceIntegrationTest
     with BasePerformanceIntegrationTest

@@ -549,8 +549,10 @@ trait CommitmentTestUtil
     simClock.advanceTo(tick1.forgetRefinement.immediateSuccessor)
     // just fetch_synchronizer_times() is sometimes not enough to trigger commitment generation
     firstParticipant.health.ping(firstParticipant)
+    secondParticipant.health.ping(secondParticipant)
 
     firstParticipant.testing.fetch_synchronizer_times()
+    secondParticipant.testing.fetch_synchronizer_times()
 
     val p1Computed = eventually() {
       val p1Computed = firstParticipant.commitments
@@ -561,6 +563,17 @@ trait CommitmentTestUtil
           Some(secondParticipant),
         )
       p1Computed.size shouldBe 1
+
+      val p2Computed = secondParticipant.commitments
+        .computed(
+          daName,
+          tick1.toInstant.minusMillis(1),
+          tick1.toInstant,
+          Some(firstParticipant),
+        )
+      p2Computed.size shouldBe 1
+
+      // p2Computed gives back the same commitment time period, so giving back p1Computed is enough
       p1Computed
     }
 

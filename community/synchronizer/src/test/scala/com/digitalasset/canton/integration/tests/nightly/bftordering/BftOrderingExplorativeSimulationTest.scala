@@ -126,7 +126,7 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         ),
         phaseDurations = PhaseDurations(
           faulty = durationOfFirstPhaseWithFaults,
-          recovery = (10 seconds).plus(
+          recovery = (15 seconds).plus(
             if (numberOfNodesToOnboard > 0)
               // We add some extra times if a node was onboarded
               (segmentLength.length.value * numberOfNodes * 4) seconds

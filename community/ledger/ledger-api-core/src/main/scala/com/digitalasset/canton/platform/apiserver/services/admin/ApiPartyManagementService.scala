@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta as ProtoObjectMeta
 import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyRequest.SignedTransaction
 import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementService
@@ -96,9 +97,6 @@ import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code.ALREADY_EXISTS
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer
-import scalaz.std.either.*
-import scalaz.std.list.*
-import scalaz.syntax.traverse.*
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64

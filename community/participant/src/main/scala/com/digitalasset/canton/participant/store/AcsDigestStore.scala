@@ -5,10 +5,11 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.participant.commitment.AcsDigestTrace
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{InternedPartyId, LfPartyId}
+import com.digitalasset.canton.{InternedPartyId, LedgerParticipantId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.ParticipantId
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -254,6 +255,7 @@ object AcsDigestStore {
       offset: Offset,
       timestamp: CantonTimestamp,
       digestO: Option[V],
+      trace: Option[AcsDigestTrace],
   ) {
     def map[L](f: K => L): AcsDigest[L, V] = copy(key = f(key))
   }
@@ -262,7 +264,13 @@ object AcsDigestStore {
     implicit def getAcsDigest[K: GetResult, V](implicit
         vO: GetResult[Option[V]]
     ): GetResult[AcsDigestStore.AcsDigest[K, V]] = GetResult { pr =>
-      AcsDigestStore.AcsDigest(pr.<<[K], pr.<<[Offset], pr.<<[CantonTimestamp], pr.<<[Option[V]])
+      AcsDigestStore.AcsDigest(
+        pr.<<[K],
+        pr.<<[Offset],
+        pr.<<[CantonTimestamp],
+        pr.<<[Option[V]],
+        pr.<<[Option[AcsDigestTrace]],
+      )
     }
   }
 
@@ -360,6 +368,11 @@ object AcsDigestStore {
       case LocalPartyFirst => 0
       case RemotePartyFirst => 1
     }
+    def orderFor(
+        localParticipant: LedgerParticipantId,
+        remoteParticipant: LedgerParticipantId,
+    ): PartyOrder =
+      if (localParticipant < remoteParticipant) LocalPartyFirst else RemotePartyFirst
   }
 
   type InternedParticipantId = Int

@@ -12,10 +12,12 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import slick.jdbc.SetParameter
 
 import scala.concurrent.ExecutionContext
 
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
 class DbSynchronizerConnectivityStatusStore(
     psid: PhysicalSynchronizerId,
     override protected val storage: DbStorage,
@@ -74,7 +76,14 @@ class DbSynchronizerConnectivityStatusStore(
         functionFullName,
       )
 
-  def setTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  @volatile
+  private var isTopologyInitializedCache = false
+  @volatile
+  private var hasStoreBeenInitialized = false
+
+  override def setTopologyInitialized()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
     storage
       .update_(
         sqlu"""update par_synchronizer_connectivity_status
@@ -82,8 +91,19 @@ class DbSynchronizerConnectivityStatusStore(
                 where physical_synchronizer_id = $psid""",
         functionFullName,
       )
+      .map(_ => isTopologyInitializedCache = true)
 
-  def isTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+  override def isTopologyInitialized(implicit traceContext: TraceContext): Boolean = {
+    ErrorUtil.requireState(
+      hasStoreBeenInitialized,
+      s"Invalid read access to ${getClass.getSimpleName} before it has been initialized.",
+    )
+    isTopologyInitializedCache
+  }
+
+  private def readIsTopologyInitializedFromStore()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] =
     storage
       .query(
         sql"""select is_topology_initialized
@@ -95,4 +115,9 @@ class DbSynchronizerConnectivityStatusStore(
       )
       .map(_.getOrElse(false))
 
+  def initialize()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    readIsTopologyInitializedFromStore().map { isTopoInitialized =>
+      isTopologyInitializedCache = isTopoInitialized
+      hasStoreBeenInitialized = true
+    }
 }

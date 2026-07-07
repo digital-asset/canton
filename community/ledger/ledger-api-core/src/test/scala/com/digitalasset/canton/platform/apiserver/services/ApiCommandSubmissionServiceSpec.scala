@@ -81,7 +81,9 @@ class ApiCommandSubmissionServiceSpec
         .map { _ =>
           verify(mockCommandSubmissionService)
             .submit(requestCaptor.capture)(any[LoggingContextWithTrace])
-          requestCaptor.value.commands.submissionId shouldBe Some(expectedSubmissionId)
+          requestCaptor.value.commands.submissionId.map(_.unwrap) shouldBe Some(
+            expectedSubmissionId
+          )
         }
     }
 
@@ -101,7 +103,9 @@ class ApiCommandSubmissionServiceSpec
         .map { _ =>
           verify(mockCommandSubmissionService)
             .submit(requestCaptor.capture)(any[LoggingContextWithTrace])
-          requestCaptor.value.commands.submissionId shouldBe Some(generatedSubmissionId)
+          requestCaptor.value.commands.submissionId.map(_.unwrap) shouldBe Some(
+            generatedSubmissionId
+          )
         }
     }
 

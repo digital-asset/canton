@@ -33,6 +33,8 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
 - JSON API: `POST /v2/updates/update-by-hash`
 
 ### Minor Improvements
+- The HTTP server for the Ledger JSON API is now explicitly configured with a maximum content length. A new config option `http-ledger-api.max-inbound-message-size` has been added. If not configured, the gRPC setting `ledger-api.max-inbound-message-size` will be used.
+    Previously, an implicit limit of 8 MB was used, so this change should not affect existing configurations.
 - The concurrency limit interceptor `ActiveRequestInterceptor` now caches rejection responses instead of generating a new error (and thereby filling the stack trace) for each
   rejected response, once the concurrency limit is filled.
 - Onboarding party submission prevention: Ensures a participant does not submit a transaction or reassignment on behalf
@@ -85,6 +87,60 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
   - Mediators will report `readiness` `NOT_SERVING` when `liveness` is also `NOT_SERVING`, where previously it was possible for a mediator to report `readiness` `SERVING` while `liveness` was `NOT_SERVING`.
   - HTTP health checks now expose the `liveness` and `readiness`, under the URIs `/health/liveness` or `health/live` and `/health/readiness` or `/health/ready` endpoints, respectively. `/health` is still available for backward compatibility, mapping to `readiness`.
 - Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
+- *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
+
+  The list of removed suites:
+  - `TLS_DHE_RSA_WITH_AES_256_GCM_SHA384`
+  - `TLS_DHE_RSA_WITH_AES_128_GCM_SHA256`
+  - `TLS_DHE_RSA_WITH_AES_256_CBC_SHA256`
+  - `TLS_DHE_RSA_WITH_AES_128_CBC_SHA256`
+  - `TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384`
+  - `TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256`
+
+  The list of new suites:
+    - `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256`
+    - `TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384`
+    - `TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256`
+    - `TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256`
+
+  To use non-default cipher suites for backwards compatibility, set the following values in the config (not recommended):
+  - `canton.participants.<participant>.ledger-api.tls.ciphers` if you have `canton.participants.<participant>.ledger-api.tls` set already
+  - `canton.sequencers.<sequencer>.public-api.tls.ciphers` if you have `canton.sequencers.<sequencer>.public-api.tls` set already
+
+  For full compatibility, set the entire old list of suites:
+  ```
+  canton.participants.<participant>.ledger-api.tls.ciphers =
+    [
+      "TLS_AES_256_GCM_SHA384",
+      "TLS_CHACHA20_POLY1305_SHA256",
+      "TLS_AES_128_GCM_SHA256",
+      "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
+      "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
+    ]
+  ```
+
+  ```
+  canton.sequencers.<sequencer>.public-api.tls.ciphers =
+    [
+      "TLS_AES_256_GCM_SHA384",
+      "TLS_CHACHA20_POLY1305_SHA256",
+      "TLS_AES_128_GCM_SHA256",
+      "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
+      "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
+    ]
+  ```
 - AWS KMS keys created by Canton can now be configured with custom tags through the `custom-tags` setting.
 
 ### Preview Features

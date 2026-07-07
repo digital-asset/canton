@@ -3,19 +3,20 @@
 
 package com.digitalasset.canton.http.util
 
-import scalaz.{Applicative, EitherT, Functor, \/}
+import cats.data.EitherT
+import cats.{Applicative, Functor}
 
 import scala.concurrent.Future
 
 object FutureUtil {
   def liftET[E]: LiftET[E] = new LiftET(0)
   final class LiftET[E](private val ignore: Int) extends AnyVal {
-    def apply[F[_]: Functor, A](fa: F[A]): EitherT[F, E, A] = EitherT.rightT(fa)
+    def apply[F[_]: Functor, A](fa: F[A]): EitherT[F, E, A] = EitherT.right(fa)
   }
 
-  def eitherT[A, B](fa: Future[A \/ B]): EitherT[Future, A, B] =
-    EitherT.eitherT[Future, A, B](fa)
+  def eitherT[A, B](fa: Future[Either[A, B]]): EitherT[Future, A, B] =
+    EitherT(fa)
 
-  def either[A, B](d: A \/ B)(implicit ev: Applicative[Future]): EitherT[Future, A, B] =
-    EitherT.either[Future, A, B](d)
+  def either[A, B](d: Either[A, B])(implicit ev: Applicative[Future]): EitherT[Future, A, B] =
+    EitherT.fromEither[Future](d)
 }

@@ -146,7 +146,11 @@ class TaskScheduler[Task <: TimedTask](
 
   private def scheduleNextCheck(after: JDuration): Unit =
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      clock.scheduleAfter(_ => checkIfBlocked(), after),
+      clock.scheduleAfterCancelledOnShutdown(
+        _ => checkIfBlocked(),
+        s"${getClass.getName}: scheduled check",
+        after,
+      ),
       "The check for missing ticks has failed unexpectedly",
     )(errorLoggingContext(TraceContext.empty))
 

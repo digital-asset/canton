@@ -174,6 +174,7 @@ class AuthenticationTokenManager(
       clock
         .scheduleAt(
           _ => backgroundRefreshToken(),
+          s"${getClass.getName}: schedule token refresh",
           expiresAt.minus(config.refreshAuthTokenBeforeExpiry.asJava),
         )
         .discard

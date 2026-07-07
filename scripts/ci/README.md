@@ -2,9 +2,20 @@
 
 ## Flaky test notification system
 
-`collect_failing_tests_and_send_to_datadog.py` tracks test failures across CI runs. For every failing test it posts a metric to Datadog, maintains a GitHub issue on `main` and `main-2.x`, and sends a Slack alert when the same test fails on several consecutive commits.
+The flaky-test notification system tracks test failures across CI runs. For every failing test it posts a metric to Datadog, maintains a GitHub issue on `main` and `main-2.x`, and sends a Slack alert when the same test fails on several consecutive commits.
 
-It is invoked via the `collect_failing_test_data_and_send_to_datadog` CircleCI command, which runs after every test job, always, even on failure.
+It is split into four focused scripts that pass data via JSON artifacts in a shared directory (`FLAKY_ARTIFACT_DIR`), run in sequence by the `report_failing_tests.py` orchestrator:
+
+| Script | Concern |
+|---|---|
+| `parse_failing_tests.py` | collect failing tests from `test-reports/` (+ `found_problems.txt`) → `failing_tests.json` |
+| `report_to_datadog.py` | post a metric per failing test (all branches) |
+| `manage_flaky_issues.py` | create/update the GitHub issue on tracked branches → `streaks.json` |
+| `alert_slack.py` | post the Slack summary for any streaks |
+
+Shared code (CI-env detection, the `gh` wrapper, formatting, project/field config, the JSON contracts) lives in `flaky_common.py`. Each script also runs its own inline self-tests on startup and supports `--self-test` to run them and exit.
+
+It is invoked via the `collect_failing_test_data_and_send_to_datadog` CircleCI command (and the GitHub Actions composite action of the same name), which runs `report_failing_tests.py` after every test job, always, even on failure.
 
 ### What do we check?
 
@@ -57,15 +68,23 @@ All `gh` API calls are wrapped in `run_gh_with_retries`, which retries up to 3 t
 
 ### Running locally
 
-The script runs its own self-tests on startup before doing any real work:
+Each step runs its own self-tests on startup; run just the self-tests (no real work, no env needed) with `--self-test`. To run them for the whole pipeline:
 
 ```sh
-python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py
+python3 ./scripts/ci/report_failing_tests.py --self-test
 ```
 
-This will print `All self-checks passed` and then fail on missing env vars; that is expected outside CI. To pass a single failure name directly (e.g. for manual testing of the Datadog path):
+To run the full pipeline (parse → datadog → issues → slack), reading `./test-reports`:
+
+```sh
+python3 ./scripts/ci/report_failing_tests.py
+```
+
+To pass a single failure name directly (e.g. the sbt-crash path, or manual testing of the Datadog path):
 
 ```sh
 DATADOG_API_KEY=... CIRCLE_SHA1=... CIRCLE_BUILD_URL=... CIRCLE_JOB=... CIRCLE_NODE_INDEX=... \
-  python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py MyFlakyTest
+  python3 ./scripts/ci/report_failing_tests.py MyFlakyTest
 ```
+
+Individual steps can also be run on their own; they exchange data via JSON files under `FLAKY_ARTIFACT_DIR` (default: a CI temp dir), overridable with `--failing-tests-json` / `--streaks-json`.

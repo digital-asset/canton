@@ -9,6 +9,7 @@ import com.google.protobuf.ByteString
 
 package object version {
   type VersionedMessage[+M] = VersionedMessageImpl.Instance.VersionedMessage[M]
+  type VersionedJsonMessage[+M] = VersionedJsonMessageImpl.Instance.VersionedJsonMessage[M]
   type OriginalByteString = ByteString // What is passed to the fromByteString method
   type DataByteString = ByteString // What is inside the parsed UntypedVersionedMessage message
 

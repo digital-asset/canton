@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
 import com.daml.ledger.api.v2.transaction_filter.{
   EventFormat as ProtoEventFormat,
@@ -34,9 +35,6 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref.{NameTypeConRef, PackageRef}
 import io.grpc.StatusRuntimeException
-import scalaz.std.either.*
-import scalaz.std.list.*
-import scalaz.syntax.traverse.*
 
 object FormatValidator {
 

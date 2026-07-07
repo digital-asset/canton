@@ -660,16 +660,10 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
 
   protected final def storeSync(
       commands: Vector[(Offset, LedgerEntry.Transaction)]
-  ): Future[Vector[(Offset, LedgerEntry.Transaction)]] = {
-
-    import com.daml.scalautil.TraverseFMSyntax.*
-    import scalaz.std.scalaFuture.*
-    import scalaz.std.vector.*
-
-    // force synchronous future processing with Free monad
+  ): Future[Seq[(Offset, LedgerEntry.Transaction)]] =
+    // ensure synchronous future processing under the Monad[Future] constraint
     // to provide the guarantees that all transactions persisted in the specified order
-    commands traverseFM (store(_))
-  }
+    com.digitalasset.canton.util.MonadUtil.sequentialTraverse(commands)(store(_))
 
   /** A transaction that creates the given key */
   protected final def txCreateContractWithKey(

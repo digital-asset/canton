@@ -22,25 +22,6 @@ template Upgrading with
       controller fetcher
       do pure this
 
--- A keyed counterpart of `Upgrading`, used to exercise ExerciseByKey command upgrading.
--- Contract keys require Daml-LF >= 2.3 (see daml.yaml `--target`), which is why the whole
--- Upgrade package now targets 2.3. The shared `Upgrading` template above is intentionally left
--- unkeyed so the other upgrading tests keep working under a shared environment.
-template UpgradingCK with
-    issuer : Party
-    owner : Party
-    field : Int
-  where
-    signatory issuer
-    observer owner
-    key (issuer, field) : (Party, Int)
-    maintainer key._1
-
-    choice ChangeOwnerCK : ContractId UpgradingCK
-        with newOwner : Party
-      controller owner
-        do create this with owner = newOwner, field = field + 1
-
 --
 -- Interface Testing
 --

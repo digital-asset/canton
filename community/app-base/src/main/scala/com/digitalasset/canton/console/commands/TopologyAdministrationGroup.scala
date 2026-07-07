@@ -1575,8 +1575,6 @@ class TopologyAdministrationGroup(
       )
 
       verifyKeyPresence(currentKey, contains = false)
-
-      // TODO(#24218): reduce the risk of using a new key that is not yet recognized by another node.
     }
 
     private def ensurePrivateKeyExists(fingerprint: Fingerprint, purpose: KeyPurpose): PublicKey =
@@ -3499,8 +3497,9 @@ class TopologyAdministrationGroup(
           // Use the clock instead of Threading.sleep to support sim clock based tests.
           val delayF = consoleEnvironment.environment.clock
             .scheduleAt(
-              _ => (),
-              startTs.plus(waitDuration),
+              action = _ => (),
+              taskName = s"${getClass.getName}: delay",
+              timestamp = startTs.plus(waitDuration),
             ) // avoid scheduleAfter, because that causes a race condition in integration tests
             .onShutdown(
               throw new IllegalStateException(

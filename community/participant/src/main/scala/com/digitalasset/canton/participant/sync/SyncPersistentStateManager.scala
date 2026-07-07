@@ -177,11 +177,13 @@ class SyncPersistentStateManager(
         storedSynchronizerConnectionConfig <- EitherT
           .fromEither[FutureUnlessShutdown](synchronizerConnectionConfigStore.get(psid))
           .leftMap(_.toString)
-        persistentState = createPhysicalPersistentState(
-          psidIndexed,
-          indexedTopologyStoreId,
-          staticSynchronizerParameters,
-          storedSynchronizerConnectionConfig.predecessor,
+        persistentState <- EitherT.right(
+          createPhysicalPersistentState(
+            psidIndexed,
+            indexedTopologyStoreId,
+            staticSynchronizerParameters,
+            storedSynchronizerConnectionConfig.predecessor,
+          )
         )
         _ = logger.debug(s"Discovered existing state for $psid")
       } yield {
@@ -254,17 +256,19 @@ class SyncPersistentStateManager(
             synchronizerIdx.synchronizerId,
             createLogicalPersistentState(synchronizerIdx),
           )
-        physical = {
-          physicalPersistentStates.getOrElse(
-            physicalSynchronizerIdx.psid,
-            createPhysicalPersistentState(
-              physicalSynchronizerIdx,
-              indexedTopologyStoreId,
-              synchronizerParameters,
-              predecessor,
-            ),
-          )
-        }
+        physical <- EitherT.right(
+          physicalPersistentStates
+            .get(physicalSynchronizerIdx.psid)
+            .map(FutureUnlessShutdown.pure)
+            .getOrElse(
+              createPhysicalPersistentState(
+                physicalSynchronizerIdx,
+                indexedTopologyStoreId,
+                synchronizerParameters,
+                predecessor,
+              )
+            )
+        )
 
         _ <- checkAndUpdateSynchronizerParameters(
           psid,
@@ -300,7 +304,10 @@ class SyncPersistentStateManager(
       indexedTopologyStoreId: IndexedTopologyStoreId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       predecessor: Option[SynchronizerPredecessor],
-  )(implicit writeLockHandle: lock.WriteLockHandle): PhysicalSyncPersistentState =
+  )(implicit
+      traceContext: TraceContext,
+      writeLockHandle: lock.WriteLockHandle,
+  ): FutureUnlessShutdown[PhysicalSyncPersistentState] =
     mkPhysicalPersistentState(
       physicalSynchronizerIdx,
       indexedTopologyStoreId,
@@ -453,7 +460,10 @@ class SyncPersistentStateManager(
       indexedTopologyStoreId: IndexedTopologyStoreId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       predecessor: Option[SynchronizerPredecessor],
-  )(implicit @unused writeLockHandle: lock.WriteLockHandle): PhysicalSyncPersistentState =
+  )(implicit
+      traceContext: TraceContext,
+      @unused writeLockHandle: lock.WriteLockHandle,
+  ): FutureUnlessShutdown[PhysicalSyncPersistentState] =
     PhysicalSyncPersistentState
       .create(
         storage,

@@ -831,8 +831,9 @@ abstract class SequencerClientImpl(
             )
             FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
               clock
-                .scheduleAfter(
+                .scheduleAfterCancelledOnShutdown(
                   _ => maybeResendAfterPatience(sendInFlight = sendInFlight),
+                  s"${getClass.getName}: scheduling amplification",
                   durationToWait.toJava,
                 )
                 .flatten,

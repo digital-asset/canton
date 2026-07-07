@@ -20,7 +20,6 @@ import com.digitalasset.daml.lf.data.Ref
 import io.circe.Json
 import io.circe.syntax.*
 import org.apache.pekko.http.scaladsl.model.{HttpHeader, StatusCode, StatusCodes, Uri}
-import scalaz.syntax.tag.*
 
 import java.io.File
 import scala.concurrent.Future

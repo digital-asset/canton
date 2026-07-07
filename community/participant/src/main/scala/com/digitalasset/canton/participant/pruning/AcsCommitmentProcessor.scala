@@ -1744,7 +1744,9 @@ class AcsCommitmentProcessor private (
           val readyToCheck = readyForRemote.get().exists(_ >= commitment.period.toInclusive)
           if (readyToCheck) {
             // Do not sequentialize the checking
-            FutureUnlessShutdown.pure(checkMatchAndMarkSafe(List(commitment)))
+            FutureUnlessShutdown.pure(
+              synchronizeWithClosing(functionFullName)(checkMatchAndMarkSafe(List(commitment)))
+            )
           } else {
             logger.info(s"Buffering $commitment for later processing")
             store.queue.enqueue(commitment).map((_: Unit) => FutureUnlessShutdown.unit)

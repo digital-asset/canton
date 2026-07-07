@@ -942,12 +942,14 @@ object ConfigTransforms {
       participantName: String,
       websocketConfig: Option[WebsocketConfig] = None,
       pathPrefix: Option[String] = None,
+      maxInboundMessageSize: Option[NonNegativeInt] = None,
   ): ConfigTransform =
     updateParticipantConfig(participantName)(config =>
       config.copy(httpLedgerApi =
         JsonApiConfig(
           pathPrefix = pathPrefix,
           websocketConfig = websocketConfig,
+          maxInboundMessageSize = maxInboundMessageSize,
         )
       )
     )

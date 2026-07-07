@@ -373,6 +373,8 @@ object TestingTimeServiceConfig {
   * @param connectToSynchronizersOnStartup
   *   If true, connects to synchronizers that have manualConnect=false on startup. Default: true.
   *   Has impact only if manual-start is false.
+  * @param commitmentTracing
+  *   Whether commitment tracing should be disabled, incremental, or full. Default: disabled
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -416,7 +418,16 @@ final case class ParticipantNodeParameterConfig(
     lsu: LsuConfig = LsuConfig(),
     validateLegacyContractsV11: Boolean = true,
     connectToSynchronizersOnStartup: Boolean = true,
+    acsCommitments: AcsCommitmentConfig = AcsCommitmentConfig(),
 ) extends LocalNodeParametersConfig
+
+/** Config for the ACS commitment processing pipeline.
+  * @param tracing
+  *   the tracing mode. Default is disabled.
+  */
+final case class AcsCommitmentConfig(
+    tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled
+)
 
 /** Config for LSU.
   *

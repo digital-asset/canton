@@ -7,7 +7,6 @@ import com.daml.ports.PortFiles.FileAlreadyExists
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
-import scalaz.{-\/, \/-}
 
 import java.nio.file.{Path, Paths}
 import java.util.UUID
@@ -16,18 +15,14 @@ class PortFilesSpec extends AnyFreeSpec with Matchers with Inside {
 
   "Can create a port file with a unique file name" in {
     val path = uniquePath()
-    inside(PortFiles.write(path, Port(1024))) { case \/-(()) =>
-    }
+    PortFiles.write(path, Port(1024)) shouldBe Right(())
     path.toFile.exists() shouldBe true
   }
 
   "Cannot create a port file with a nonunique file name" in {
     val path = uniquePath()
-    inside(PortFiles.write(path, Port(1024))) { case \/-(()) =>
-    }
-    inside(PortFiles.write(path, Port(1024))) { case -\/(FileAlreadyExists(p)) =>
-      p shouldBe path
-    }
+    PortFiles.write(path, Port(1024)) shouldBe Right(())
+    PortFiles.write(path, Port(1024)) shouldBe Left(FileAlreadyExists(path))
   }
 
   private def uniquePath(): Path = {

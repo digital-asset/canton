@@ -5,7 +5,6 @@ package com.digitalasset.canton.ledger.service
 
 import com.google.rpc.Status
 import io.grpc.protobuf.StatusProto
-import scalaz.syntax.std.boolean.*
 
 import scala.util.control.NonFatal
 
@@ -19,7 +18,7 @@ private[canton] object Grpc {
           // fromThrowable uses UNKNOWN if it didn't find one
           val code = com.google.rpc.Code.forNumber(status.getCode)
           if (code == null) None
-          else (code != com.google.rpc.Code.UNKNOWN) option status
+          else Option.when(code != com.google.rpc.Code.UNKNOWN)(status)
         }
       case _ => None
     }

@@ -49,7 +49,6 @@ import io.grpc.StatusRuntimeException
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import scalaz.syntax.tag.*
 
 import java.time.{Duration as JDuration, Instant}
 

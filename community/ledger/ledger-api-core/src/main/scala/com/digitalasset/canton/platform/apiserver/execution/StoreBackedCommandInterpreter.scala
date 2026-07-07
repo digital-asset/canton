@@ -47,7 +47,6 @@ import com.digitalasset.daml.lf.transaction.{
   Transaction,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
-import scalaz.syntax.tag.*
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong

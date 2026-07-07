@@ -53,6 +53,7 @@ create table par_acs_party_running_digest (
   -- VARBINARY has a performance and memory layout advantage over BLOB for small, fixed-size byte structures (like digests).
   -- see https://www.h2database.com/html/datatypes.html for details
   digest varbinary,
+  trace_data varchar,
   -- link to the last version of the digest that has the same party_and_order_id
   replaces_offset bigint,
   primary key (synchronizer_idx, party_and_order_id, change_offset)
@@ -73,6 +74,7 @@ create table par_acs_participant_running_digest (
   -- see https://www.h2database.com/html/datatypes.html for details
   digest varbinary,
   hashed_digest varbinary,
+  trace_data varchar,
   -- link to the last version of the digest that has the same (counter) participant_id
   replaces_offset bigint,
   primary key (synchronizer_idx, participant_id, change_offset)

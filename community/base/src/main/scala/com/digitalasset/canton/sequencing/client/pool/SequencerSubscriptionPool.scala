@@ -9,7 +9,7 @@ import com.digitalasset.canton.health.{
   ComponentHealthState,
   HealthQuasiComponent,
 }
-import com.digitalasset.canton.lifecycle.{FlagCloseable, HasRunOnClosing}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, HasRunOnClosing}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.ProcessingSerializedEvent
@@ -42,7 +42,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *     fewer extra subscriptions than the liveness margin;
   *   - it is failing if the number of subscriptions is below the trust threshold.
   */
-trait SequencerSubscriptionPool extends FlagCloseable with NamedLogging {
+trait SequencerSubscriptionPool extends FlagCloseable with HasCloseContext with NamedLogging {
   import SequencerSubscriptionPool.*
 
   def start()(implicit traceContext: TraceContext): Unit

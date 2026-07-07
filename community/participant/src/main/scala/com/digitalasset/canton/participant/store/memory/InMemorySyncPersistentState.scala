@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.data.SynchronizerPredecessor
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
@@ -33,6 +34,7 @@ import com.digitalasset.canton.store.{
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
 
 import scala.concurrent.ExecutionContext
@@ -121,4 +123,7 @@ class InMemoryPhysicalSyncPersistentState(
 
   override def close(): Unit = ()
 
+  override protected def doInitialize()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 }

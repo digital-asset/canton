@@ -177,15 +177,8 @@ final class LsuExhaustiveHandshakeIntegrationTest extends LsuBase {
         },
       )
 
-      loggerFactory.assertLogsSeq(
-        SuppressionRule.Level(Level.DEBUG) && SuppressionRule.forLogger[GrpcSynchronizerRegistry]
-      )(
-        participant2.stop(),
-        forExactly(1, _) { entry =>
-          entry.debugMessage should include("Stopping the wait because of shutdown.")
-          entry.loggerName should include("participant2")
-        },
-      )
+      // Stopping P2, this will result in the `GrpcSynchronizerRegistry.waiter` call to be cancelled
+      participant2.stop()
 
       // Starting S4 should eventually allow P1 to handshake with S4
       sequencer4.start()

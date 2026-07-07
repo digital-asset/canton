@@ -66,9 +66,11 @@ final case class BaseServerTlsConfig(
   *   can be loosened. See
   *   https://github.com/digital-asset/daml/commit/edd73384c427d9afe63bae9d03baa2a26f7b7f54
   * @param minimumServerProtocolVersion
-  *   minimum supported TLS protocol. Set None (or null in config file) to default to JVM settings.
+  *   minimum supported TLS protocol. Set None (or null in config file) to use default settings
+  *   [[com.daml.tls.TlsServerConfig.defaultMinimumServerProtocol]]
   * @param ciphers
-  *   supported ciphers. Set to None (or null in config file) to default to JVM settings.
+  *   supported ciphers. Set to None (or null in config file) to use default settings
+  *   [[com.daml.tls.TlsServerConfig.defaultCiphers]]
   * @param enableCertRevocationChecking
   *   whether to enable certificate revocation checking per
   *   https://tersesystems.com/blog/2014/03/22/fixing-certificate-revocation/
@@ -119,21 +121,24 @@ final case class TlsServerConfig(
 
 object TlsServerConfig {
 
-  // default OWASP strong cipher set with broad compatibility (B list)
-  // https://cheatsheetseries.owasp.org/cheatsheets/TLS_Cipher_String_Cheat_Sheet.html
+  // Source: https://configurator.tlsref.org/#server=tomcat&version=11.0.1&config=intermediate&hsts&guideline=6.0
+  // General guidelines: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+  // For 1.3 suites, customize the supported key exchanges using the Java `jdk.tls.namedGroups` property
   lazy val defaultCiphers = {
     val candidates = Seq(
+      // TLS 1.3 suites
       "TLS_AES_256_GCM_SHA384",
-      "TLS_CHACHA20_POLY1305_SHA256",
       "TLS_AES_128_GCM_SHA256",
-      "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
-      "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
-      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_CHACHA20_POLY1305_SHA256",
+
+      // For TLS 1.2 compatibility
+      // Transformed the values from the tlsref configurator, example: ECDHE-ECDSA-AES128-GCM-SHA256 -> TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+      "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
       "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-      "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
-      "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
-      "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
-      "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+      "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+      "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
     )
     val logger = LoggerFactory.getLogger(TlsServerConfig.getClass)
     val filtered = candidates.filter { x =>

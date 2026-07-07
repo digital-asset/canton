@@ -8,15 +8,15 @@ import org.scalactic.{Prettifier, source}
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.Checkers
 
-/** Integration of Scalatest [[org.scalatest.wordspec.AnyWordSpec]] with Scalaz law checkers, or any
-  * other purely Scalacheck-defined tests, for that matter. Each invocation should go in a separate
-  * `should` category, as test names will collide otherwise.
+/** Integration of Scalatest [[org.scalatest.wordspec.AnyWordSpec]] with cats-laws law checkers, or
+  * any other purely Scalacheck-defined tests, for that matter. Each invocation should go in a
+  * separate `should` category, as test names will collide otherwise.
   *
   * Usage:
   *
   * {{{
   *  "Blah Functor" should {
-  *    checkLaws(ScalazProperties.functor.laws[Blah])
+  *    checkLaws(FunctorTests[Blah].functor[Int, Int, Int].all)
   *  }
   * }}}
   */

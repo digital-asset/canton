@@ -36,7 +36,6 @@ import com.google.protobuf.ByteString
 import com.google.rpc.Code
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.*
-import ujson.StringRenderer
 import ujson.circe.CirceJson
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -98,9 +97,11 @@ class ProtocolConverters(
   ], com.google.protobuf.timestamp.Timestamp] =
     _.getOrElse(com.google.protobuf.timestamp.Timestamp.defaultInstance)
 
+  // We are doing safe conversion from Circe to ujson on input
   implicit def fromCirce(js: io.circe.Json): ujson.Value =
-    ujson.read(CirceJson.transform(js, StringRenderer()).toString)
+    CirceToUJson.transform(js)
 
+  // Responses are converted using default mechanism -> no need for extra safety here
   implicit def toCirce(js: ujson.Value): io.circe.Json = CirceJson(js)
 
   object Command {

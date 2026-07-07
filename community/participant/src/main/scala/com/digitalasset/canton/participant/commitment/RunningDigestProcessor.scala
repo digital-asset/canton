@@ -22,6 +22,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.*
+import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.LfContractId
@@ -61,6 +62,7 @@ class RunningDigestProcessor(
     stringInterning: StringInterning,
     hashOps: HashOps,
     counterpartyBatchSize: PositiveInt,
+    tracingMode: AcsDigestTracingMode,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContext,
@@ -572,6 +574,7 @@ class RunningDigestProcessor(
     acsDigestStore,
     stringInterning,
     hashOps,
+    tracingMode,
     loggerFactory,
   )
   def inMemoryDigestAccumulator: Flow[DigestAccumulator_Input, DigestAccumulator_Output, NotUsed] =

@@ -83,7 +83,11 @@ sealed trait OfflinePartyMigrationAcsCommitmentIntegrationTest
         val promise = Promise[Unit]()
         FutureUtil.doNotAwait(
           env.environment.clock
-            .scheduleAfter(_ => promise.success(()), acsCommitmentInterval.unwrap)
+            .scheduleAfter(
+              action = _ => promise.success(()),
+              taskName = "awaiting mismatches",
+              delta = acsCommitmentInterval.unwrap,
+            )
             .unwrap,
           "awaiting mismatches",
         )

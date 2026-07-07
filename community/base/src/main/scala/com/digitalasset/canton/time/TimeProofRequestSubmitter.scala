@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{ProcessingTimeout, TimeProofRequestConfig}
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.TimeProof
@@ -59,6 +59,7 @@ private[time] class TimeProofRequestSubmitterImpl(
     extends TimeProofRequestSubmitter
     with NamedLogging
     with FlagCloseable
+    with HasCloseContext
     with HasFlushFuture {
   import com.digitalasset.canton.time.TimeProofRequestSubmitterImpl.*
 
@@ -115,8 +116,9 @@ private[time] class TimeProofRequestSubmitterImpl(
                 // intentionally don't wait for future
                 FutureUtil.doNotAwait(
                   clock
-                    .scheduleAfter(
+                    .scheduleAfterCancelledOnShutdown(
                       _ => eventuallySendRequest(),
+                      s"${getClass.getName}: retry send time request",
                       config.maxSequencingDelay.asJava,
                     )
                     .onShutdown(()),

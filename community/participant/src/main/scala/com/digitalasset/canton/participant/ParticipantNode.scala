@@ -82,7 +82,11 @@ import com.digitalasset.canton.tea.TrafficEnforcementApp
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.time.admin.v30.SynchronizerTimeServiceGrpc
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.PsidLookup
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreInitializationStatus.{
+  Initialized,
+  NotInitialized,
+}
+import com.digitalasset.canton.topology.admin.grpc.{PsidLookup, TopologyStoreInitializationStatus}
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
@@ -140,15 +144,28 @@ class ParticipantNodeBootstrap(
       sys.error("mutablePackageMetadataView should be defined")
     )
 
-  override protected def sequencedTopologyStores: Seq[TopologyStore[SynchronizerStore]] =
+  override protected def sequencedTopologyStores: Seq[
+    TopologyStoreInitializationStatus[SynchronizerStore, TopologyStore]
+  ] =
     cantonSyncService.get.toList
-      .flatMap(_.syncPersistentStateManager.getAll.values)
-      .map(_.topologyStore)
+      .flatMap(sync => sync.syncPersistentStateManager.getAll.values)
+      .map(persistent =>
+        if (persistent.physical.connectivityStatusStore.isTopologyInitialized)
+          Initialized(persistent.topologyStore)
+        else
+          NotInitialized(persistent.topologyStore.storeId)
+      )
 
-  override protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager] =
-    sequencedTopologyStores.flatMap(store =>
-      cantonSyncService.get.toList.flatMap(_.lookupTopologyManager(store.storeId.psid))
-    )
+  override protected def sequencedTopologyManagers
+      : Seq[TopologyStoreInitializationStatus[SynchronizerStore, TopologyManager.Aux]] =
+    for {
+      sync <- cantonSyncService.get.toList
+      store <- sequencedTopologyStores
+      mgr <- store.traverse[SynchronizerStore, TopologyManager.Aux, Option](store =>
+        sync
+          .lookupTopologyManager(store.storeId.psid)
+      )
+    } yield mgr
 
   override protected def lookupTopologyClient(
       psid: PhysicalSynchronizerId
@@ -618,6 +635,9 @@ class ParticipantNodeBootstrap(
                   FutureUnlessShutdown.pure(
                     TrafficEnforcementApp(
                       storage = storage,
+                      token = () => getAdminToken,
+                      instanceName = name,
+                      ledgerApiPort = config.ledgerApi.clientConfig.port,
                       config = internalServerConfig,
                       loggerFactory = loggerFactory,
                       timeouts = timeouts,
@@ -631,6 +651,7 @@ class ParticipantNodeBootstrap(
                 create = () =>
                   FutureUnlessShutdown.pure(
                     TrafficEnforcementBackend(
+                      enforceCostOnSubmissions = config.trafficEnforcement.enforceCostOnSubmissions,
                       trafficEnforcementServerConfig =
                         config.trafficEnforcement.trafficEnforcementServer,
                       processingTimeout = timeouts,

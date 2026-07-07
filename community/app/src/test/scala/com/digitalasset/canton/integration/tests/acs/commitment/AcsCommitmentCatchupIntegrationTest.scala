@@ -32,6 +32,7 @@ import org.slf4j.event.Level
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.*
 
 sealed trait AcsCommitmentCatchupIntegrationTest
     extends CommunityIntegrationTest
@@ -41,6 +42,10 @@ sealed trait AcsCommitmentCatchupIntegrationTest
     with HasProgrammableSequencer {
 
   private val interval: JDuration = JDuration.ofSeconds(5)
+  // Set to 60 seconds to exceed the advanced catch-up simulation time window.
+  // The simClock moves forward by 50 seconds (5s interval * 5 catch up skip * 2 catch up intervals).
+  // A timeout lower than 50 seconds can cause the mediator to time out on an 'unresponsive' participant.
+  private val mediatorConfirmationTimeout = 60.seconds
   private implicit val intervalDuration: IntervalDuration = IntervalDuration(interval)
 
   private val alreadyDeployedContracts12: AtomicReference[Seq[Iou.Contract]] =
@@ -76,13 +81,18 @@ sealed trait AcsCommitmentCatchupIntegrationTest
         sequencer1.topology.synchronisation.await_idle()
         sequencer2.topology.synchronisation.await_idle()
         initializedSynchronizers foreach { case (_, initializedSynchronizer) =>
-          initializedSynchronizer.synchronizerOwners.foreach(
-            _.topology.synchronizer_parameters
+          initializedSynchronizer.synchronizerOwners.foreach { ownerReference =>
+            ownerReference.topology.synchronizer_parameters
               .propose_update(
                 initializedSynchronizer.synchronizerId,
-                _.update(reconciliationInterval = config.PositiveDurationSeconds(interval)),
+                _.update(
+                  reconciliationInterval = config.PositiveDurationSeconds(interval),
+                  // Increase timeouts to avoid test flakiness
+                  confirmationResponseTimeout = mediatorConfirmationTimeout,
+                  mediatorReactionTimeout = mediatorConfirmationTimeout,
+                ),
               )
-          )
+          }
         }
 
         initializedSynchronizers.foreach { case (alias, synchronizer) => synchronizer }
@@ -100,7 +110,7 @@ sealed trait AcsCommitmentCatchupIntegrationTest
 
         val simClock = environment.simClock.value
 
-        logger.debug(s"P1 and P2 share a contract and exchange a commitments")
+        logger.debug(s"P1 and P2 share a contract and compute commitments")
         deployOneContractAndCheck(daId, alreadyDeployedContracts12, participant1, participant2)
 
         val catchUpParam = initializedSynchronizers(daName).synchronizerOwners.headOption
@@ -117,14 +127,16 @@ sealed trait AcsCommitmentCatchupIntegrationTest
         val catchUpThreshold = interval.multipliedBy(
           catchUpParam.catchUpIntervalSkip.value.toLong * catchUpParam.nrIntervalsToTriggerCatchUp.value.toLong
         )
+        // Make sure that the mediator doesn't time out any participant if it hasn't responded yet before the test time advancing
+        catchUpThreshold.toMillis should be < mediatorConfirmationTimeout.toMillis
         simClock.advanceTo(simClock.now.add(catchUpThreshold))
 
         loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.DEBUG))(
           {
 
             logger.debug(
-              s"P2 and P3 share a contract and exchange a commitment. P2 also sends commitments to P1, because" +
-                s"they still share a contract. That makes P1 appear to be behind by the catch up threshold. However, P1" +
+              s"P2 and P3 share a contract and exchange a commitment. P2 also sends commitments to P1, because " +
+                s"they still share a contract. That makes P1 appear to be behind by the catch up threshold. However, P1 " +
                 s"shouldn't trigger catch-up mode because it is not actually behind."
             )
             val period23da =
@@ -137,18 +149,6 @@ sealed trait AcsCommitmentCatchupIntegrationTest
 
             val synchronizerId = daId
             val endTimestamp = period23da.toInclusive.forgetRefinement
-            participant1.commitments.lookup_sent_acs_commitments(
-              synchronizerTimeRanges = Seq(
-                SynchronizerTimeRange(
-                  synchronizerId,
-                  Some(TimeRange(endTimestamp.minusMillis(1), endTimestamp)),
-                )
-              ),
-              counterParticipants = Seq.empty,
-              commitmentState = Seq.empty,
-              verboseMode = true,
-            )
-            // user-manual-entry-end: InspectSentCommitments
             eventually() {
               val p1Computed = participant1.commitments.lookup_sent_acs_commitments(
                 synchronizerTimeRanges = Seq(

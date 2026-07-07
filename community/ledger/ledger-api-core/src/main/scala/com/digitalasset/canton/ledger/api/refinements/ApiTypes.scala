@@ -4,44 +4,43 @@
 package com.digitalasset.canton.ledger.api.refinements
 
 import com.daml.ledger.api.v2.value.Identifier
-import scalaz.{@@, Tag}
 
 object ApiTypes {
 
-  sealed trait UpdateIdTag
-  type UpdateId = String @@ UpdateIdTag
-  val UpdateId = Tag.of[UpdateIdTag]
+  final case class UpdateId(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait CommandIdTag
-  type CommandId = String @@ CommandIdTag
-  val CommandId = Tag.of[CommandIdTag]
+  final case class CommandId(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait WorkflowIdTag
-  type WorkflowId = String @@ WorkflowIdTag
-  val WorkflowId = Tag.of[WorkflowIdTag]
+  final case class WorkflowId(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait TemplateIdTag
-  type TemplateId = Identifier @@ TemplateIdTag
-  val TemplateId = Tag.of[TemplateIdTag]
+  final case class TemplateId(unwrap: Identifier) extends AnyVal {
+    override def toString: String = unwrap.toString
+  }
 
-  sealed trait InterfaceIdTag
-  type InterfaceId = Identifier @@ InterfaceIdTag
-  val InterfaceId = Tag.of[InterfaceIdTag]
+  final case class InterfaceId(unwrap: Identifier) extends AnyVal {
+    override def toString: String = unwrap.toString
+  }
 
-  sealed trait UserIdTag
-  type UserId = String @@ UserIdTag
-  val UserId = Tag.of[UserIdTag]
+  final case class UserId(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait ContractIdTag
-  type ContractId = String @@ ContractIdTag
-  val ContractId = Tag.of[ContractIdTag]
+  final case class ContractId(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait ChoiceTag
-  type Choice = String @@ ChoiceTag
-  val Choice = Tag.of[ChoiceTag]
+  final case class Choice(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
-  sealed trait PartyTag
-  type Party = String @@ PartyTag
-  val Party = Tag.of[PartyTag]
+  final case class Party(unwrap: String) extends AnyVal {
+    override def toString: String = unwrap
+  }
 
 }

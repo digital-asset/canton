@@ -1409,6 +1409,11 @@ object CantonConfig {
         deriveReader[AdminWorkflowConfig]
       implicit val commandProgressTrackerConfigReader: ConfigReader[CommandProgressTrackerConfig] =
         deriveReader[CommandProgressTrackerConfig]
+      implicit val commitmentConfigReader: ConfigReader[AcsCommitmentConfig] = {
+        implicit val commitmentTracingReader: ConfigReader[AcsDigestTracingMode] =
+          deriveEnumerationReader[AcsDigestTracingMode]
+        deriveReader[AcsCommitmentConfig]
+      }
 
       implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
         deriveReader[PackageMetadataViewConfig].applyDeprecations
@@ -2151,6 +2156,11 @@ object CantonConfig {
         deriveWriter[AdminWorkflowConfig]
       implicit val commandProgressTrackerConfigWriter: ConfigWriter[CommandProgressTrackerConfig] =
         deriveWriter[CommandProgressTrackerConfig]
+      implicit val commitmentConfigWriter: ConfigWriter[AcsCommitmentConfig] = {
+        implicit val commitmentTracingWriter: ConfigWriter[AcsDigestTracingMode] =
+          deriveEnumerationWriter[AcsDigestTracingMode]
+        deriveWriter[AcsCommitmentConfig]
+      }
 
       implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
         deriveWriter[PackageMetadataViewConfig]

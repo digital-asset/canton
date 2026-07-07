@@ -39,7 +39,6 @@ import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import org.scalatest.OptionValues
-import scalaz.Tag
 
 import java.time.Instant
 import java.util.UUID
@@ -502,7 +501,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       event_offset = offset.unwrap,
       update_id = updateId,
       party_id = party,
-      participant_id = Tag.unwrap(participant),
+      participant_id = participant.unwrap,
       participant_permission = participantPermissionInt(authorizationEvent),
       participant_authorization_event = authorizationEventInt(authorizationEvent),
       synchronizer_id = synchronizerId,

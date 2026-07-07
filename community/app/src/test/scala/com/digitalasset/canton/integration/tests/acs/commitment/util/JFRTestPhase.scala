@@ -26,7 +26,7 @@ class JFRTestPhaseEvent(
 /** Used to facilitate the instrumentation of Java Flight Record (JFR) phases in integration tests
   *
   * Note: for using Java Flight Recorder you need to run your test with the JVM param
-  * `-XX:StartFlightRecording`` that has some parameters for instance file name and profile name.
+  * `-XX:StartFlightRecording` that has some parameters for instance file name and profile name.
   * More details <a
   * href="https://docs.oracle.com/javacomponents/jmc-5-4/jfr-runtime-guide/run.htm">here</a>
   */

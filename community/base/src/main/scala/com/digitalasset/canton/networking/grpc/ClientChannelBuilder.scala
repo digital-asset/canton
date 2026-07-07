@@ -94,6 +94,7 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
     if (params.traceContextPropagation == Propagation.Enabled)
       builder.intercept(TraceContextGrpc.clientInterceptor()).discard
 
+    // TODO(#33984) Apply default TLS cipher suites to the gRPC client
     if (useTls) {
       builder
         .useTransportSecurity() // this is strictly unnecessary as is the default for the channel builder, but can't hurt either

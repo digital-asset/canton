@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.logging.pretty.Pretty
 
 import java.util.concurrent.atomic.AtomicReference
@@ -20,9 +21,8 @@ class SnapshottableList[A] {
   def snapshot: List[A] = list.get()
 
   /** Prepends an element to the list */
-  def add(x: A): Unit = {
-    val _ = list.getAndUpdate(tail => x :: tail)
-  }
+  def add(x: A): Unit =
+    list.getAndUpdate(tail => x :: tail).discard
 
   override def toString: String = list.get.toString
 }

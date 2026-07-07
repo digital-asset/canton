@@ -94,7 +94,8 @@ final class TimeAdvancingTopologySubscriberV1(
               .doNotAwaitUnlessShutdown(
                 clock
                   .scheduleAfter(
-                    _ => broadcastToAdvanceTime(effectiveTimestamp),
+                    action = _ => broadcastToAdvanceTime(effectiveTimestamp),
+                    taskName = s"${getClass.getName}: broadcast to advance time",
                     // To become less prone to clock skew-related problems, wait for the topology change delay instead of
                     //  the effective time to elapse. This provides a better chance of sequencing and observing a broadcast
                     //  message before time proofs are triggered by sequencer clients.
@@ -298,10 +299,11 @@ final class TimeAdvancingTopologySubscriberV2(
     Option.when(needsATryNow(oldRetryCounter))(oldRetryCounter)
   }
 
-  private def scheduleNextPeriodicCheck()(implicit traceContext: TraceContext) =
+  private def scheduleNextPeriodicCheck()(implicit traceContext: TraceContext): Unit =
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      clock.scheduleAfter(
+      clock.scheduleAfterCancelledOnShutdown(
         timestamp => periodicCheck(timestamp),
+        s"${getClass.getName}: periodic check",
         config.pollBackoff.asJava,
       ),
       "Time advancing topology subscriber periodic check",

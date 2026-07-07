@@ -1,0 +1,23 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module UpgradeCK where
+
+-- A keyed template used to exercise ExerciseByKey command upgrading.
+-- Contract keys require Daml-LF >= 2.3 (see daml.yaml `--target`), so this template lives in its
+-- own `UpgradeCK` package that targets 2.3, keeping the shared `Upgrade` package on LF 2.1 for the
+-- other upgrading tests.
+template UpgradingCK with
+    issuer : Party
+    owner : Party
+    field : Int
+  where
+    signatory issuer
+    observer owner
+    key (issuer, field) : (Party, Int)
+    maintainer key._1
+
+    choice ChangeOwnerCK : ContractId UpgradingCK
+        with newOwner : Party
+      controller owner
+        do create this with owner = newOwner, field = field + 1

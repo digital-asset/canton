@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.http
 
+import cats.data.EitherT
+import cats.implicits.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.logging.LoggingContextOf
@@ -16,7 +18,7 @@ import com.daml.tls.{
   TlsVersion,
 }
 import com.digitalasset.canton.auth.AuthInterceptor
-import com.digitalasset.canton.config.ApiLoggingConfig
+import com.digitalasset.canton.config.{ApiLoggingConfig, ServerConfig}
 import com.digitalasset.canton.http.HttpService.HttpServiceHandle
 import com.digitalasset.canton.http.json.v2.V2Routes
 import com.digitalasset.canton.http.metrics.{HttpApiMetrics, HttpMetricsInterceptor}
@@ -42,8 +44,6 @@ import org.apache.pekko.http.scaladsl.server.{PathMatcher, Route}
 import org.apache.pekko.http.scaladsl.settings.ServerSettings
 import org.apache.pekko.http.scaladsl.{ConnectionContext, Http, HttpsConnectionContext}
 import org.apache.pekko.stream.Materializer
-import scalaz.*
-import scalaz.Scalaz.*
 
 import java.io.InputStream
 import java.nio.file.{Files, Path}
@@ -61,6 +61,7 @@ class HttpService(
     channel: Channel,
     packageSyncService: PackageSyncService,
     packagePreferenceBackend: PackagePreferenceBackend,
+    trafficEnforcementEnabled: Boolean,
     apiLoggingConfig: ApiLoggingConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -81,7 +82,7 @@ class HttpService(
     val DummyUserId: UserId = UserId("HTTP-JSON-API-Gateway")
 
     val clientConfig = LedgerClientConfiguration(
-      userId = UserId.unwrap(DummyUserId),
+      userId = DummyUserId.unwrap,
       commandClient = CommandClientConfiguration.default,
     )
 
@@ -112,16 +113,25 @@ class HttpService(
     val settings: ServerSettings = ServerSettings(asys)
       .withTransparentHeadRequests(true)
       .mapTimeouts(_.withRequestTimeout(startSettings.requestTimeout))
+      .mapParserSettings(
+        _.withMaxContentLength(
+          startSettings.maxInboundMessageSize
+            .getOrElse(ServerConfig.defaultMaxInboundMessageSize)
+            .unwrap
+            .toLong
+        )
+      )
 
     implicit val wsConfig = startSettings.websocketConfig.getOrElse(WebsocketConfig())
 
     val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] =
       for {
-        _ <- eitherT(Future.successful(\/-(ledgerClient)))
+        _ <- eitherT(Future.successful(Right(ledgerClient)))
 
         v2Routes = V2Routes(
           ledgerClient,
           metadataServiceEnabled = startSettings.damlDefinitionsServiceEnabled,
+          trafficEnforcementEnabled = trafficEnforcementEnabled,
           packageSyncService,
           packagePreferenceBackend,
           mat.executionContext,
@@ -161,14 +171,16 @@ class HttpService(
         }
 
         _ <- either(
-          startSettings.portFile.cata(f => HttpService.createPortFile(f, binding), \/-(()))
+          startSettings.portFile.fold[Either[HttpService.Error, Unit]](Right(()))(f =>
+            HttpService.createPortFile(f, binding)
+          )
         ): ET[Unit]
 
       } yield binding
 
-    (bindingEt.run: Future[HttpService.Error \/ ServerBinding]).flatMap {
-      case -\/(error) => Future.failed(new RuntimeException(error.message))
-      case \/-(binding) => Future.successful(binding)
+    (bindingEt.value: Future[Either[HttpService.Error, ServerBinding]]).flatMap {
+      case Left(error) => Future.failed(new RuntimeException(error.message))
+      case Right(binding) => Future.successful(binding)
     }
   }
 
@@ -185,7 +197,7 @@ object HttpService extends NoTracing {
   private[http] def createPortFile(
       file: Path,
       binding: org.apache.pekko.http.scaladsl.Http.ServerBinding,
-  ): HttpService.Error \/ Unit = {
+  ): Either[HttpService.Error, Unit] = {
     import com.digitalasset.canton.http.util.ErrorOps.*
     PortFiles.write(file, Port(binding.localAddress.getPort)).liftErr(Error.apply)
   }

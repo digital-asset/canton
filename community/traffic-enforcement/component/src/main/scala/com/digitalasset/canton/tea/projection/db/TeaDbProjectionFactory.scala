@@ -11,7 +11,7 @@ import com.digitalasset.canton.tea.projection.{
   EventSource,
   EventType,
   ProjectionEvent,
-  TeaProjection,
+  TeaProjectionFactory,
 }
 import com.digitalasset.canton.tracing.Traced
 import com.typesafe.config.{Config, ConfigFactory}
@@ -30,14 +30,14 @@ import scala.concurrent.ExecutionContext
   * @param dbStorage
   *   dbStorage coming from the participant node.
   */
-private[projection] class TeaDbProjection(
+private[projection] class TeaDbProjectionFactory(
     dbStorage: DbStorage,
     override val loggerFactory: NamedLoggerFactory,
     store: TeaDbTrafficStore,
     eventSource: EventSource,
     config: ProjectionConfig,
 )(implicit system: ActorSystem[?])
-    extends TeaProjection
+    extends TeaProjectionFactory
     with NamedLogging {
   implicit val ec: ExecutionContext = system.executionContext
 
@@ -74,9 +74,18 @@ private[projection] class TeaDbProjection(
         handler = () => eventHandler(projectionId),
       )
       .withStatusObserver(loggingObserver)
+      .withRestartBackoff(
+        config.minProjectionRestartBackoff.asFiniteApproximation,
+        config.maxProjectionRestartBackoff.asFiniteApproximation,
+        config.projectionRestartRandomFactor,
+        config.projectionMaxRestarts,
+      )
       .withRecoveryStrategy(
         HandlerRecoveryStrategy
-          .retryAndFail(config.maxRetries.value, config.retryDelay.asFiniteApproximation)
+          .retryAndFail(
+            config.maxHandlerRetries.value,
+            config.handlerRetryDelay.asFiniteApproximation,
+          )
       )
   }
 

@@ -16,7 +16,6 @@ import io.circe.syntax.EncoderOps
 import org.apache.pekko.http.scaladsl.model.HttpHeader.ParsingResult
 import org.apache.pekko.http.scaladsl.model.{HttpHeader, Uri}
 import org.scalatest.Suite
-import scalaz.syntax.tag.*
 
 import scala.concurrent.{ExecutionContext, Future}
 

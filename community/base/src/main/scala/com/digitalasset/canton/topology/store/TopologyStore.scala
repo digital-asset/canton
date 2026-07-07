@@ -127,13 +127,21 @@ object TopologyStoreId {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def select[StoreId <: TopologyStoreId: ClassTag](
-      store: TopologyStore[TopologyStoreId]
-  ): Option[TopologyStore[StoreId]] = store.storeId match {
+  def select[StoreId <: TopologyStoreId: ClassTag, TopologyStoreContainer[+_ <: TopologyStoreId]
+    <: HasTopologyStoreId[? <: TopologyStoreId]](
+      container: TopologyStoreContainer[TopologyStoreId]
+  ): Option[TopologyStoreContainer[StoreId]] = container.storeId match {
     // this typecheck is safe to do, because we have a ClassTag in scope
-    case _: StoreId => Some(store.asInstanceOf[TopologyStore[StoreId]])
+    case _: StoreId => Some(container.asInstanceOf[TopologyStoreContainer[StoreId]])
     case _ => None
   }
+}
+
+/** This is a marker trait for types that refer to a
+  * [[com.digitalasset.canton.topology.store.TopologyStoreId]].
+  */
+trait HasTopologyStoreId[+StoreId <: TopologyStoreId] {
+  def storeId: StoreId
 }
 
 final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapping](
@@ -250,11 +258,10 @@ object ValidatedTopologyTransaction {
 
 abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     protected val ec: ExecutionContext
-) extends FlagCloseable
+) extends HasTopologyStoreId[StoreID]
+    with FlagCloseable
     with ChunkPurgeable {
   this: NamedLogging =>
-
-  def storeId: StoreID
 
   def protocolVersion: ProtocolVersion
 

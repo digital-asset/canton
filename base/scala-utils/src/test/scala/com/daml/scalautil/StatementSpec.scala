@@ -7,8 +7,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class StatementSpec extends AnyFlatSpec with Matchers {
-  import com.daml.scalatest.Equalz.*
-  import scalaz.std.anyVal.*
 
   behavior of Statement.getClass.getSimpleName
 
@@ -26,7 +24,7 @@ class StatementSpec extends AnyFlatSpec with Matchers {
       counter += 1
     }: Unit
 
-    counter shouldx equalz(2)
+    counter shouldBe 2
   }
 
   it should "not evaluate passed lambda expression" in {
@@ -36,6 +34,6 @@ class StatementSpec extends AnyFlatSpec with Matchers {
       counter += 1
     }
 
-    counter shouldx equalz(0)
+    counter shouldBe 0
   }
 }

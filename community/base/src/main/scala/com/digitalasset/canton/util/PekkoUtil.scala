@@ -383,6 +383,25 @@ object PekkoUtil extends HasLoggerName {
       // TODO(#13789) Should we cancel/pull a kill switch to signal upstream that no more elements are needed?
       .collect { case Outcome(x) => x }
 
+  /** accumulates a value in state and concatenates a continuation Source when the state is ready
+    */
+  def foldConcat[Mat, Mat2, T, U >: T, R](graph: FlowOps[T, Mat])(
+      init: => R,
+      update: (R, T) => R,
+      cont: R => Source[U, Mat2],
+  )(implicit ec: ExecutionContext): graph.Repr[U] = {
+    val promise = Promise[R]()
+    graph
+      .statefulMap(() => init)(
+        (state: R, e: T) => update(state, e) -> e,
+        r => {
+          promise.trySuccess(r).discard
+          None
+        },
+      )
+      .concat(Source.futureSource(promise.future.map(r => cont(r))(ec)))
+  }
+
   /** Combines two kill switches into one */
   class CombinedKillSwitch(private val killSwitch1: KillSwitch, private val killSwitch2: KillSwitch)
       extends KillSwitch {
@@ -920,7 +939,13 @@ object PekkoUtil extends HasLoggerName {
 
       def dropIf(count: Int)(condition: A => Boolean): U#Repr[A] =
         PekkoUtil.dropIf(graph, count, condition)
+
+      def foldConcat[Mat2, R, B >: A](init: => R)(update: (R, A) => R)(
+          cont: R => Source[B, Mat2]
+      )(implicit ec: ExecutionContext): U#Repr[B] =
+        PekkoUtil.foldConcat[Mat, Mat2, A, B, R](graph)(init, update, cont)(ec)
     }
+
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
     // Otherwise IntelliJ gets very resource hungry.
     implicit def pekkoUtilSyntaxForFlowOpsSource[A, Mat](

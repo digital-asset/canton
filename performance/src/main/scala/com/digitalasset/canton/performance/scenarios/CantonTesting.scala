@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   TrafficControlParameters,
 }
 import com.digitalasset.canton.concurrent.*
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.console.*
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
@@ -28,6 +29,7 @@ import com.digitalasset.canton.performance.elements.dvp.TraderDriver
 import com.digitalasset.canton.performance.model.java as M
 import com.digitalasset.canton.sequencing.client.RecordingConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeBootstrap
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PeriodicAction}
 import com.digitalasset.canton.topology.{MediatorId, SynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -36,6 +38,7 @@ import java.time.Duration as JDuration
 import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.concurrent.duration.*
+import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.Try
 
 /** Our regression test scripts */
@@ -237,14 +240,14 @@ object CantonTesting {
       payloadSize: Long = sys.env("PAYLOAD_SIZE").toLong,
       selectParticipants: ParticipantNodeReferences => Seq[ParticipantReference] = _.all,
       repositoryRoot: String = sys.env("REPOSITORY_ROOT"),
-      periodicTrafficSummaries: Option[FiniteDuration] = sys.env
+      periodicTrafficSummaries: Option[NonNegativeFiniteDuration] = sys.env
         .get("PERIODIC_TRAFFIC_SUMMARIES_DURATION")
         .map(_.toLong)
         .zip(
           sys.env.get("PERIODIC_TRAFFIC_SUMMARIES_UNIT")
         )
         .map { case (duration, unit) =>
-          FiniteDuration(duration, unit)
+          NonNegativeFiniteDuration.tryCreate(FiniteDuration(duration, unit).toJava)
         },
       targetLatencyMs: Int = sys.env.get("TARGET_LATENCY_MS").map(_.toInt).getOrElse(7500),
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
@@ -378,33 +381,20 @@ object CantonTesting {
       case Nil => Nil
     }
 
-    def schedulePeriodicTrafficSummaries(
-        runner: PerformanceRunner,
-        periodicTrafficSummaries: FiniteDuration,
-    ): FutureUnlessShutdown[Unit] =
-      unlessClosing(
-        environment.clock
-          .scheduleAfter(
-            _ => {
-              val recordTimes = runner.getRecentlyCreatedTransactionRecordTimes
-              sequencers.all.foreach { sequencer =>
-                println(
-                  s"Retrieving traffic summaries for ${recordTimes.size} events from ${sequencer.name}"
-                )
-                // Traffic summaries can fail for an individual sequencer if that sequencer has not yet
-                // reached the synchronizer time for the timestamps requested. It should eventually though,
-                // so retry until it does
-                utils.retry_until_true(
-                  Try(sequencer.traffic_control.traffic_summaries(recordTimes).discard).isSuccess
-                )
-              }
-            },
-            JDuration.ofNanos(periodicTrafficSummaries.toNanos),
-          )
-          .flatMap(_ => schedulePeriodicTrafficSummaries(runner, periodicTrafficSummaries))(
-            environment.executionContext
-          )
-      )
+    def periodicTrafficSummary(runner: PerformanceRunner): Unit = {
+      val recordTimes = runner.getRecentlyCreatedTransactionRecordTimes
+      sequencers.all.foreach { sequencer =>
+        println(
+          s"Retrieving traffic summaries for ${recordTimes.size} events from ${sequencer.name}"
+        )
+        // Traffic summaries can fail for an individual sequencer if that sequencer has not yet
+        // reached the synchronizer time for the timestamps requested. It should eventually though,
+        // so retry until it does
+        utils.retry_until_true(
+          Try(sequencer.traffic_control.traffic_summaries(recordTimes).discard).isSuccess
+        )
+      }
+    }
 
     val runnersStatusF: Seq[Future[Either[String, Unit]]] = runners.map(_.startup())
 
@@ -420,11 +410,21 @@ object CantonTesting {
       s"Testing performance for $maxTestDuration or $totalCycles cycles (whichever elapses first)..."
     )
 
-    periodicTrafficSummaries.foreach { duration =>
+    val trafficSummaryPeriodicActions = periodicTrafficSummaries.map { duration =>
       println(
-        s"Starting periodic traffic summaries every ${duration.toSeconds} seconds"
+        s"Starting periodic traffic summaries every ${duration.duration.toSeconds} seconds"
       )
-      runners.foreach(schedulePeriodicTrafficSummaries(_, duration).discard)
+      runners.map { runner =>
+        new PeriodicAction(
+          environment.clock,
+          duration,
+          loggerFactory = loggerFactory,
+          timeouts = ProcessingTimeout(),
+          s"Runner for $runner",
+        )(_ => FutureUnlessShutdown.pure(periodicTrafficSummary(runner)))(
+          environment.executionContext
+        )
+      }
     }
 
     val measurements = selectParticipants(participants).map { p =>
@@ -449,6 +449,7 @@ object CantonTesting {
     runners.foreach(_.setActive(false))
     Threading.sleep(targetLatencyMs.toLong)
 
+    trafficSummaryPeriodicActions.foreach(_.foreach(_.close()))
     runners.foreach(_.close())
 
     // Give the participants time to get idle before stopping the test.

@@ -188,7 +188,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         updateAllParticipantConfigs_(
-          // TODO(#33535): Please provide custom timeout setting on Client Side for LWideTransaction test.
+          // TODO(#33996): Please provide custom timeout setting on Client Side for LWideTransaction test.
           // Remove the custom JSON API requestTimeout setting from JsonApiConformanceIntegrationShardedTest
           // once the client side timeout setting is available and used in the test.
           _.focus(_.httpLedgerApi.requestTimeout).replace(30.seconds)

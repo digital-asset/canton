@@ -19,10 +19,9 @@ import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyTransaction}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
-import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, MonadUtil, retry}
+import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -49,65 +48,6 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
     FutureUnlessShutdown.pure(
       transactions.filter(x => x.mapping.restrictedToSynchronizer.forall(_ == psid.logical))
     )
-
-  /** Re-signs the given transactions for the synchronizer's protocol version if they are not
-    * already in it, using the keys that authorized the original transaction. Fails if any such key
-    * is unavailable on this node.
-    */
-  protected def convertTransactions(
-      transactions: Seq[GenericSignedTopologyTransaction]
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Seq[GenericSignedTopologyTransaction]] =
-    MonadUtil.parTraverseWithLimit(topologyConfig.broadcastBatchSize)(transactions)(
-      convertTransaction
-    )
-
-  private def convertTransaction(
-      tx: GenericSignedTopologyTransaction
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, GenericSignedTopologyTransaction] =
-    if (tx.transaction.isEquivalentTo(protocolVersion)) {
-      EitherT.rightT(tx)
-    } else {
-      val authorizingKeys = tx.signatures.map(_.authorizingLongTermKey)
-      for {
-        _ <- MonadUtil.sequentialTraverse_(authorizingKeys.forgetNE.toSeq)(fingerprint =>
-          crypto.cryptoPrivateStore
-            .existsSigningKey(fingerprint)
-            .leftMap(err => s"Failed to check availability of signing key $fingerprint: $err")
-            .subflatMap(exists =>
-              Either.cond(
-                exists,
-                (),
-                s"Signing key $fingerprint for topology transaction ${tx.mapping} is not available " +
-                  s"on this node to re-sign it for protocol version $protocolVersion",
-              )
-            )
-        )
-        converted = TopologyTransaction(
-          tx.transaction.operation,
-          tx.transaction.serial,
-          tx.transaction.mapping,
-          protocolVersion,
-        )
-        resigned <- SignedTopologyTransaction
-          .signAndCreate(
-            converted,
-            authorizingKeys,
-            tx.isProposal,
-            crypto.privateCrypto,
-            protocolVersion,
-          )
-          .leftMap(err =>
-            s"Failed to re-sign topology transaction ${tx.mapping} for protocol version " +
-              s"$protocolVersion: $err"
-          )
-      } yield resigned
-    }
 
   protected def isFailedState(response: TopologyTransactionsBroadcast.State): Boolean =
     response == TopologyTransactionsBroadcast.State.Failed

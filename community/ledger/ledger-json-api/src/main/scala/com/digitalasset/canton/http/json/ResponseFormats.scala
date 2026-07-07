@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.http.json
 
+import cats.Show
+import cats.syntax.show.*
 import io.circe.Json
 import org.apache.pekko.NotUsed
 import org.apache.pekko.http.scaladsl.model.StatusCode
@@ -10,14 +12,12 @@ import org.apache.pekko.http.scaladsl.model.StatusCodes.{InternalServerError, OK
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Concat, Sink, Source}
 import org.apache.pekko.util.ByteString
-import scalaz.syntax.show.*
-import scalaz.{-\/, Show, \/, \/-}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 object ResponseFormats {
   def resultJsObject[E: Show](
-      jsVals: Source[E \/ Json, NotUsed],
+      jsVals: Source[Either[E, Json], NotUsed],
       warnings: Option[Json],
   )(implicit
       ec: ExecutionContext,
@@ -26,19 +26,19 @@ object ResponseFormats {
     jsVals
       .runWith {
         Sink
-          // Collapse the stream of `E \/ JsValue` into a single pair of errors and results,
+          // Collapse the stream of `Either[E, JsValue]` into a single pair of errors and results,
           // only one of which may be non-empty.
           .fold((Vector.empty[E], Vector.empty[Json])) {
-            case ((errors, results), \/-(r)) if errors.isEmpty => (Vector.empty, results :+ r)
-            case ((errors, _), \/-(_)) => (errors, Vector.empty)
-            case ((errors, _), -\/(e)) => (errors :+ e, Vector.empty)
+            case ((errors, results), Right(r)) if errors.isEmpty => (Vector.empty, results :+ r)
+            case ((errors, _), Right(_)) => (errors, Vector.empty)
+            case ((errors, _), Left(e)) => (errors :+ e, Vector.empty)
           }
       }
       .map { case (errors, results) =>
         // Convert that into a stream containing the appropriate JSON response object
         val (name, vals, statusCode): (String, Iterator[Json], StatusCode) =
           if (errors.nonEmpty)
-            ("errors", errors.iterator.map(e => Json.fromString(e.shows)), InternalServerError)
+            ("errors", errors.iterator.map(e => Json.fromString(e.show)), InternalServerError)
           else
             ("result", results.iterator, OK)
         val payload = arrayField(name, vals)
