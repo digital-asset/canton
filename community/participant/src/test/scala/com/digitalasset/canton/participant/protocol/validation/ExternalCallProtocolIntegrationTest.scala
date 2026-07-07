@@ -35,6 +35,7 @@ import com.digitalasset.canton.protocol.messages.{
   LocalApprove,
   LocalReject,
 }
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -269,7 +270,8 @@ final class ExternalCallProtocolIntegrationTest
   }
 
   private def createResponses(
-      checkResult: ExternalCallCheck.Result
+      checkResult: ExternalCallCheck.Result,
+      timeValidationResultE: Either[TimeValidator.TimeCheckFailure, Unit] = Right(()),
   ): Seq[ConfirmationResponse] = {
     val example = factory.MultipleRoots
     val viewValidationResults = Map(
@@ -309,7 +311,7 @@ final class ExternalCallProtocolIntegrationTest
       transient = Map.empty,
       activenessResult = ConflictDetectionHelpers.mkActivenessResult(),
       viewValidationResults = viewValidationResults,
-      timeValidationResultE = Right(()),
+      timeValidationResultE = timeValidationResultE,
       hostedWitnesses = Set.empty,
       replayCheckResult = None,
       validatedExternalTransactionHash = None,
@@ -356,6 +358,30 @@ final class ExternalCallProtocolIntegrationTest
           abstain.reason.message shouldBe
             "CANNOT_PERFORM_ALL_VALIDATIONS(9,0): " +
             "Cannot perform all validations: extension service is not configured"
+          parties shouldBe confirmers
+        }
+      }
+    }
+
+    "prefer a rejection over the abstention when both apply" in {
+      val ledgerTime = CantonTimestamp.Epoch
+      val recordTime = CantonTimestamp.Epoch.plusSeconds(10)
+      val maxDelta = NonNegativeFiniteDuration.tryOfSeconds(1)
+      val responses = createResponses(
+        ExternalCallCheck.CannotValidate("extension service is not configured"),
+        timeValidationResultE = Left(
+          TimeValidator.LedgerTimeRecordTimeDeltaTooLargeError(ledgerTime, recordTime, maxDelta)
+        ),
+      )
+
+      responses should have size 2
+      forEvery(responses) { response =>
+        inside(response) { case ConfirmationResponse(_, reject: LocalReject, parties) =>
+          reject.isMalformed shouldBe false
+          reject.reason.message shouldBe
+            "LOCAL_VERDICT_LEDGER_TIME_OUT_OF_BOUND(2,0): Rejected transaction as delta of " +
+            "the ledger time and the record time exceed the time tolerance " +
+            s"ledgerTime=$ledgerTime, recordTime=$recordTime, maxDelta=$maxDelta"
           parties shouldBe confirmers
         }
       }
