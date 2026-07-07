@@ -261,7 +261,7 @@ class TransactionConfirmationResponsesFactory(
                           .Reject(description),
                       ).toLocalReject(protocolVersion)
                     )
-                  case _ => None
+                  case ExternalCallCheck.Passed | ExternalCallCheck.CannotValidate(_) => None
                 }
 
               // Approve if the consistency check succeeded, reject otherwise.
