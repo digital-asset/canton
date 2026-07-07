@@ -30,6 +30,7 @@ final case class AwsKmsDriverConfig(
     region: String,
     multiRegionKey: Boolean = false,
     auditLogging: Boolean = false,
+    customTags: Map[String, String] = Map.empty,
 )
 
 class AwsKmsDriverFactory extends KmsDriverFactory {
@@ -62,6 +63,7 @@ class AwsKmsDriverFactory extends KmsDriverFactory {
       region = config.region,
       multiRegionKey = config.multiRegionKey,
       auditLogging = config.auditLogging,
+      customTags = config.customTags,
     )
 
     // Use default timeouts and logger factory for the wrapped KMS

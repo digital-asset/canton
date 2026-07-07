@@ -85,6 +85,7 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
   - Mediators will report `readiness` `NOT_SERVING` when `liveness` is also `NOT_SERVING`, where previously it was possible for a mediator to report `readiness` `SERVING` while `liveness` was `NOT_SERVING`.
   - HTTP health checks now expose the `liveness` and `readiness`, under the URIs `/health/liveness` or `health/live` and `/health/readiness` or `/health/ready` endpoints, respectively. `/health` is still available for backward compatibility, mapping to `readiness`.
 - Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
+- AWS KMS keys created by Canton can now be configured with custom tags through the `custom-tags` setting.
 
 ### Preview Features
 - preview feature
