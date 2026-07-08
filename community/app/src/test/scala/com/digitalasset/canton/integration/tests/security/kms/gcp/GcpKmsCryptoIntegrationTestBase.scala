@@ -16,14 +16,14 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.security.kms.KmsCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
   ConfigTransforms,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
 }
 
 trait GcpKmsCryptoIntegrationTestBase extends KmsCryptoIntegrationTestBase {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected val kmsConfig: KmsConfig = KmsConfig.Gcp.defaultTestConfig
 

@@ -14,8 +14,8 @@ import com.digitalasset.canton.integration.plugins.{EncryptedPrivateStoreStatus,
 import com.digitalasset.canton.integration.tests.security.kms.KmsCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase.mockKmsDriverConfig
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
 }
 import com.typesafe.config.ConfigValueFactory
@@ -23,7 +23,7 @@ import com.typesafe.config.ConfigValueFactory
 import scala.jdk.CollectionConverters.*
 
 trait MockKmsDriverCryptoIntegrationTestBase extends KmsCryptoIntegrationTestBase {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected val kmsConfig: KmsConfig = mockKmsDriverConfig
 

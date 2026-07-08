@@ -15,8 +15,8 @@ import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, KmsCryptoPrivat
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseKms}
 import com.digitalasset.canton.integration.tests.security.kms.KmsCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.{
+  CantonEnvironmentSetup,
   CommunityIntegrationTest,
-  EnvironmentSetup,
   EnvironmentSetupPlugin,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -28,7 +28,7 @@ import scala.concurrent.Future
   * keys (i.e. keys are generated on-the-fly using a KMS and nodes are automatically initialized).
   */
 trait KmsCryptoNoPreDefinedKeysIntegrationTest extends KmsCryptoIntegrationTestBase {
-  self: CommunityIntegrationTest with EnvironmentSetup =>
+  self: CommunityIntegrationTest with CantonEnvironmentSetup =>
 
   protected def kmsConfig: KmsConfig
 

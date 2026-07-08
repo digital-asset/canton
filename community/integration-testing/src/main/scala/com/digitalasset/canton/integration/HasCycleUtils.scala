@@ -20,7 +20,7 @@ import com.digitalasset.nonempty.NonEmpty
 /** Adds the ability to run cycles to integration tests
   */
 trait HasCycleUtils {
-  this: BaseIntegrationTest =>
+  this: CantonBaseIntegrationTest =>
 
   /** @param partyId
     *   assumes that the party is hosted on participant1 AND participant2 (in the simplest case this

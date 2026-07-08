@@ -5,14 +5,14 @@ package com.digitalasset.canton.integration.tests.security.kms
 
 import com.digitalasset.canton.config.CryptoProvider
 import com.digitalasset.canton.crypto.store.KmsCryptoPrivateStore
-import com.digitalasset.canton.integration.{CommunityIntegrationTest, EnvironmentSetup}
+import com.digitalasset.canton.integration.{CantonEnvironmentSetup, CommunityIntegrationTest}
 
 /** Runs a crypto integration tests with one participant using a KMS provider with pre-generated
   * keys. Runs with persistence so we also check that it is able to recover from an unexpected
   * shutdown.
   */
 trait KmsCryptoWithPreDefinedKeysIntegrationTest extends KmsCryptoIntegrationTestBase {
-  self: CommunityIntegrationTest & EnvironmentSetup =>
+  self: CommunityIntegrationTest & CantonEnvironmentSetup =>
 
   "be able to restart from a persisted state" in { implicit env =>
     import env.*

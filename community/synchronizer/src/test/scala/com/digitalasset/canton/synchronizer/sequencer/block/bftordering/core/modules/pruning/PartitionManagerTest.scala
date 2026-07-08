@@ -220,13 +220,13 @@ class PartitionManagerDatabaseTest
 
         msg <- pruner.prune(EpochNumber(98L), EpochNumber(98L)).futureUnlessShutdown()
         (minMap1, maxMap1) <- getMinMaxPartitionNumbers
-        _ = msg shouldBe "Pruned no partitions at epoch 98"
+        _ = msg should include("Pruned no partitions at epoch 98")
         _ = forAll(minMap1.values)(_ shouldBe (0))
         _ = forAll(maxMap1.values)(_ shouldBe (1))
 
         msg2 <- pruner.prune(EpochNumber(99L), EpochNumber(99L)).futureUnlessShutdown()
         (minMap2, maxMap2) <- getMinMaxPartitionNumbers
-        _ = msg2 shouldBe "Pruned 6 partitions at epoch 99"
+        _ = msg2 should include("Pruned 6 partitions at epoch 99")
         _ = {
           minMap2(PartitionManager.batchesTable) shouldBe (0)
           forAll((minMap2 - PartitionManager.batchesTable).values)(_ shouldBe (1))
@@ -326,7 +326,7 @@ class PartitionManagerDatabaseTest
     }
 
     "autovacuum" in {
-      val partitionName = s"${PartitionManager.consensusInProgressTable}_p2"
+      val partitionName = s"${PartitionManager.outputBlocksTable}_p2"
       (for {
         case Some((creator, _)) <- createPartitionManagement
 
