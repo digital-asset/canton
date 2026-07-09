@@ -21,6 +21,7 @@ import com.digitalasset.canton.http.JsonApiConfig
 import com.digitalasset.canton.integration.ConfigTransforms
 import com.digitalasset.canton.participant.config.{
   CantonEngineConfig,
+  ExtensionServiceConfig,
   LedgerApiServerConfig,
   ParticipantNodeConfig,
   ParticipantNodeParameterConfig,
@@ -584,6 +585,60 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )
       "succeed" in {
         assertValid(config)
+      }
+    }
+  }
+
+  private def participantWithExtension(extension: ExtensionServiceConfig): CantonConfig =
+    CantonConfig(
+      participants = Map(
+        InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+          parameters = ParticipantNodeParameterConfig(engine =
+            CantonEngineConfig(extensions = Map("ext1" -> extension))
+          )
+        )
+      )
+    )
+
+  "engine extension target port checks" when {
+    "the extension port is the dynamic port" should {
+      "fail" in {
+        assertErrors(
+          participantWithExtension(
+            ExtensionServiceConfig(address = "localhost", port = Port.Dynamic)
+          )
+        )(
+          "For participant p1, engine.extensions.ext1.port must not be the dynamic port 0"
+        )
+      }
+    }
+
+    "a fixed port is configured" should {
+      "succeed" in {
+        assertValid(
+          participantWithExtension(
+            ExtensionServiceConfig(address = "localhost", port = Port.tryCreate(8080))
+          )
+        )
+      }
+    }
+  }
+
+  "engine extension retry delay checks" when {
+    "retry-initial-delay exceeds retry-max-delay" should {
+      "fail" in {
+        assertErrors(
+          participantWithExtension(
+            ExtensionServiceConfig(
+              address = "localhost",
+              port = Port.tryCreate(8080),
+              retryInitialDelay = NonNegativeFiniteDuration.ofSeconds(10),
+              retryMaxDelay = NonNegativeFiniteDuration.ofSeconds(5),
+            )
+          )
+        )(
+          "For participant p1, engine.extensions.ext1 retry delays must satisfy retry-initial-delay <= retry-max-delay; respective values are 10 seconds and 5 seconds"
+        )
       }
     }
   }
