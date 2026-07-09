@@ -8,6 +8,7 @@ import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationOffset
 import com.digitalasset.canton.data.LedgerTimeBoundaries
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.InteractiveSubmissionPreparationError
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.ledger.participant.state.{
   RoutingSynchronizerState,
@@ -164,18 +165,25 @@ class ExternalTransactionProcessorSpec
       submissionSeed: String,
       hashingSchemeVersion: HashingSchemeVersion,
       nodeSeeds: ImmArray[(NodeId, LfHash)] = ImmArray.Empty,
-  ) = {
+  ): Either[
+    InteractiveSubmissionPreparationError.Reject,
+    ExternalTransactionProcessor.PrepareResult,
+  ] = {
     val (commandExecutionResult, commands) =
       commandExecutionResultFor(transaction, protocolVersion, submissionSeed, nodeSeeds)
     val processor = processorFor(transaction)
-    processor.processPrepare(
-      commandExecutionResult,
-      commands,
-      PositiveInt.one,
-      HashTracer.NoOp,
-      maxRecordTime = None,
-      hashingSchemeVersion = hashingSchemeVersion,
-    )
+    processor
+      .processPrepare(
+        commandExecutionResult,
+        commands,
+        PositiveInt.one,
+        HashTracer.NoOp,
+        maxRecordTime = None,
+        hashingSchemeVersion = hashingSchemeVersion,
+      )
+      .value
+      .failOnShutdown("prepare transaction")
+      .futureValue
   }
 
   "ExternalTransactionProcessor" should {
@@ -190,9 +198,9 @@ class ExternalTransactionProcessorSpec
         ProtocolVersion.v35,
         "prepared-requested-hash-version-test",
         HashingSchemeVersion.V3,
-      ).valueOrFailShutdown("prepare transaction").futureValue
+      )
 
-      result.hashVersion shouldBe HashingSchemeVersion.V3
+      result.value.hashVersion shouldBe HashingSchemeVersion.V3
     }
 
     "reject VDev prepared transactions when the requested hashing scheme is V2" in {
@@ -204,7 +212,7 @@ class ExternalTransactionProcessorSpec
         "prepared-vdev-requested-v2-test",
         HashingSchemeVersion.V2,
         ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v2-node")),
-      ).value.failOnShutdown("prepare transaction").futureValue
+      )
 
       result.left.value.reason shouldBe
         "Cannot hash node with LF serialization version VDev using hashing scheme V2." +
@@ -220,9 +228,9 @@ class ExternalTransactionProcessorSpec
         "prepared-vdev-requested-v4-test",
         HashingSchemeVersion.V4,
         ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v4-node")),
-      ).valueOrFailShutdown("prepare transaction").futureValue
+      )
 
-      result.hashVersion shouldBe HashingSchemeVersion.V4
+      result.value.hashVersion shouldBe HashingSchemeVersion.V4
     }
 
     "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is stable" in {
@@ -236,7 +244,7 @@ class ExternalTransactionProcessorSpec
         ProtocolVersion.v35,
         "prepared-pv35-requested-v4-test",
         HashingSchemeVersion.V4,
-      ).value.failOnShutdown("prepare transaction").futureValue
+      )
 
       result.left.value.reason shouldBe
         "Hashing scheme version V4 is not supported on protocol version 35." +
