@@ -556,6 +556,81 @@ class TransactionViewTest
       }
     }
 
+    "the same external call is recorded with conflicting outputs in one view" must {
+      // Distinct occurrences share a semantic key but record different outputs: the participant
+      // data is well-formed on its own; the disagreement is caught when the view is validated.
+      "reject the view as malformed without leaking the payloads" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val vpd = create(
+          actionDescription = exerciseActionDescription,
+          coreInputs = exerciseCoreInputs,
+          externalCallResults = Seq(
+            viewExternalCallResult(exerciseIndex = 7, callIndex = 0),
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              result = externalCallResult.copy(output = Bytes.fromStringUtf8("other-output")),
+            ),
+          ),
+        ).value
+
+        val commonData =
+          factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0.viewCommonData
+        val subviews = TransactionSubviews(Seq.empty)(testedProtocolVersion, factory.cryptoOps)
+
+        val error = TransactionView
+          .create(hashOps)(commonData, vpd, subviews, testedProtocolVersion)
+          .left
+          .value
+        error should startWith(
+          "externalCallResults records conflicting outputs for the same external call:"
+        )
+        error should not include externalCallResult.output.toHexString
+        error should not include Bytes.fromStringUtf8("other-output").toHexString
+        error should not include externalCallResult.config.toHexString
+        error should not include externalCallResult.input.toHexString
+      }
+    }
+
+    "the same external call is recorded with conflicting outputs across a view and its subview" must {
+      // The aggregation spans the whole subtree (`flatten`): a key recorded in the parent core
+      // and again, differently, in a subview core is a disagreement even though neither view's
+      // participant data conflicts on its own.
+      "reject the parent view as malformed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
+        def withCall(output: String): TransactionView =
+          TransactionView.Optics.viewParticipantDataUnsafe.modify(vpd =>
+            vpd.tryUnwrap.copy(externalCallResults =
+              Seq(
+                viewExternalCallResult(
+                  exerciseIndex = 7,
+                  callIndex = 0,
+                  result = externalCallResult.copy(output = Bytes.fromStringUtf8(output)),
+                )
+              )
+            )
+          )(view)
+
+        val parent = withCall("output")
+        val child = withCall("other-output")
+        val subviews = TransactionSubviews(Seq(child))(testedProtocolVersion, factory.cryptoOps)
+
+        val error = TransactionView
+          .create(hashOps)(
+            parent.viewCommonData,
+            parent.viewParticipantData,
+            subviews,
+            testedProtocolVersion,
+          )
+          .left
+          .value
+        error should startWith(
+          "externalCallResults records conflicting outputs for the same external call:"
+        )
+        error should not include externalCallResult.output.toHexString
+        error should not include Bytes.fromStringUtf8("other-output").toHexString
+      }
+    }
+
     "external call results on a non-dev protocol version" must {
       "reject creation" onlyRunWithOrLessThan ProtocolVersion.v35 in {
         create(

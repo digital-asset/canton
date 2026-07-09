@@ -183,14 +183,19 @@ final class GeneratorsData(
           checkingParties,
         )
       }.map(results =>
-        results.zipWithIndex.map { case ((result, exerciseIndex, checkingParties), callIndex) =>
-          ViewParticipantData.ViewExternalCallResult(
-            result = result,
-            exerciseIndex = exerciseIndex,
-            callIndex = NonNegativeInt.tryCreate(callIndex),
-            checkingParties = checkingParties,
-          )
-        }
+        // Distinct semantic keys only: a key recorded with conflicting outputs makes the view
+        // malformed (rejected by TransactionView.validated), which must not be generated here.
+        results
+          .distinctBy { case (result, _, _) => ExternalCallKey.fromResult(result) }
+          .zipWithIndex
+          .map { case ((result, exerciseIndex, checkingParties), callIndex) =>
+            ViewParticipantData.ViewExternalCallResult(
+              result = result,
+              exerciseIndex = exerciseIndex,
+              callIndex = NonNegativeInt.tryCreate(callIndex),
+              checkingParties = checkingParties,
+            )
+          }
       )
     } else Gen.const(Seq.empty)
 

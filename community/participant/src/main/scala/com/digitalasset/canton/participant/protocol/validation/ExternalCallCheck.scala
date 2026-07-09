@@ -35,8 +35,8 @@ import scala.concurrent.ExecutionContext
   * `ExternalCallCheck.Result`: a disagreement from either part rejects the request on behalf of all
   * hosted confirming parties, and a recorded result that cannot be re-validated leads to an
   * abstention instead of an approval (see [[TransactionConfirmationResponsesFactory]]).
-  * Disagreements within the replay data of a single reinterpretation already surface as
-  * model-conformance errors independently of this check.
+  * Disagreements among the recorded results within a single view's subtree are rejected earlier, as
+  * a malformed view when the view is validated, independently of this check.
   *
   * @param externalCallValidator
   *   The validator used to re-run external calls against the extension service.

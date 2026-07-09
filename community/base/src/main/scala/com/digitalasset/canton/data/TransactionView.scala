@@ -238,11 +238,27 @@ final case class TransactionView private (
       loggingContext: NamedLoggingContext
   ): Map[LfContractId, CreatedContractInView] = getOrError(createdContractsE)
 
+  /** The single recorded output per external-call key, aggregated over this view and its subviews.
+    *
+    * @throws java.lang.IllegalStateException
+    *   if the same key was recorded with conflicting outputs, which a validated view cannot contain
+    */
+  def externalCallReplayData(implicit
+      loggingContext: NamedLoggingContext
+  ): ExternalCallReplayData = getOrError(externalCallReplayDataE)
+
   private def inputContractsE: Either[String, Map[LfContractId, InputContract]] =
     inputsAndCreatedE.map(_._1)
 
   private def createdContractsE: Either[String, Map[LfContractId, CreatedContractInView]] =
     inputsAndCreatedE.map(_._2)
+
+  private lazy val externalCallReplayDataE: Either[String, ExternalCallReplayData] =
+    ExternalCallReplayData.fromResults(
+      flatten
+        .flatMap(_.viewParticipantData.unwrap.toOption.toList.flatMap(_.externalCallResults))
+        .map(_.result)
+    )
 
   private lazy val inputsAndCreatedE: Either[
     String,
@@ -358,6 +374,10 @@ final case class TransactionView private (
         case Right(d) =>
           validateViewParticipantData(d, childParticipantData, inputContractsO)
       }
+      // Grouped with the participant-data validation above: a key recorded with conflicting
+      // outputs across this view's subtree makes the view malformed, because reinterpretation
+      // cannot proceed on an ambiguous recorded result.
+      _ <- externalCallReplayDataE
       _ <- viewCommonData.unwrap match {
         case Left(_) => Either.unit
         case Right(d) => validateViewCommonData(d, childCommonData)
