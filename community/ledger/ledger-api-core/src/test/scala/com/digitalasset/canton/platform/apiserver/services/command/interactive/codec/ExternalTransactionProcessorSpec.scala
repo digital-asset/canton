@@ -27,7 +27,13 @@ import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfi
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerUserId, LfTimestamp}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  LedgerUserId,
+  LfTimestamp,
+  ProtocolVersionChecksAnyWordSpec,
+}
 import com.digitalasset.daml.lf.command.ApiCommands
 import com.digitalasset.daml.lf.crypto.Hash as LfHash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -51,18 +57,15 @@ class ExternalTransactionProcessorSpec
     with BaseTest
     with HasExecutionContext
     with MockitoSugar
-    with ArgumentMatchersSugar {
+    with ArgumentMatchersSugar
+    with ProtocolVersionChecksAnyWordSpec {
 
   private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   private def commandExecutionResultFor(
       transaction: VersionedTransaction,
-      protocolVersion: ProtocolVersion,
-      submissionSeed: String,
       nodeSeeds: ImmArray[(NodeId, LfHash)],
   ): (CommandExecutionResult, Commands) = {
-    val physicalSynchronizerId =
-      DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = protocolVersion)
     val commandId = Ref.CommandId.assertFromString("command")
     val submitterInfo = SubmitterInfo(
       actAs = List.empty,
@@ -80,7 +83,7 @@ class ExternalTransactionProcessorSpec
       ledgerEffectiveTime = LfTimestamp.Epoch,
       workflowId = None,
       preparationTime = LfTimestamp.Epoch,
-      submissionSeed = LfHash.hashPrivateKey(submissionSeed),
+      submissionSeed = LfHash.hashPrivateKey("submission-seed"),
       timeBoundaries = LedgerTimeBoundaries.unconstrained,
       optUsedPackages = None,
       optNodeSeeds = Some(nodeSeeds),
@@ -96,7 +99,7 @@ class ExternalTransactionProcessorSpec
         interpretationTimeNanos = 0L,
         processedDisclosedContracts = ImmArray.Empty,
       ),
-      synchronizerRank = SynchronizerRank.single(physicalSynchronizerId),
+      synchronizerRank = SynchronizerRank.single(DefaultTestIdentities.physicalSynchronizerId),
       routingSynchronizerState = mock[RoutingSynchronizerState],
     )
     val commands = Commands(
@@ -161,16 +164,16 @@ class ExternalTransactionProcessorSpec
 
   private def prepare(
       transaction: VersionedTransaction,
-      protocolVersion: ProtocolVersion,
-      submissionSeed: String,
       hashingSchemeVersion: HashingSchemeVersion,
-      nodeSeeds: ImmArray[(NodeId, LfHash)] = ImmArray.Empty,
+      nodeIds: ImmArray[NodeId] = ImmArray.Empty,
   ): Either[
     InteractiveSubmissionPreparationError.Reject,
     ExternalTransactionProcessor.PrepareResult,
   ] = {
+    val nodeSeeds =
+      nodeIds.map(nodeId => nodeId -> LfHash.hashPrivateKey(s"node-seed-${nodeId.index}"))
     val (commandExecutionResult, commands) =
-      commandExecutionResultFor(transaction, protocolVersion, submissionSeed, nodeSeeds)
+      commandExecutionResultFor(transaction, nodeSeeds)
     val processor = processorFor(transaction)
     processor
       .processPrepare(
@@ -187,69 +190,50 @@ class ExternalTransactionProcessorSpec
   }
 
   "ExternalTransactionProcessor" should {
-    "honor the requested hashing scheme for non-dev prepared transactions" in {
+    "honor the requested hashing scheme for prepared transactions" in {
       val transaction = VersionedTransaction(
         LfSerializationVersion.V2,
         Map.empty,
         ImmArray.Empty,
       )
-      val result = prepare(
-        transaction,
-        ProtocolVersion.v35,
-        "prepared-requested-hash-version-test",
-        HashingSchemeVersion.V3,
-      )
+      val result = prepare(transaction, testedHashingSchemeVersion)
 
-      result.value.hashVersion shouldBe HashingSchemeVersion.V3
+      result.value.hashVersion shouldBe testedHashingSchemeVersion
     }
 
-    "reject VDev prepared transactions when the requested hashing scheme is V2" in {
+    "reject VDev prepared transactions when the requested hashing scheme is V2" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val (nodeId, transaction) = vDevCreateTransaction("prepared-vdev-requested-v2-contract")
 
-      val result = prepare(
-        transaction,
-        ProtocolVersion.dev,
-        "prepared-vdev-requested-v2-test",
-        HashingSchemeVersion.V2,
-        ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v2-node")),
-      )
+      val result = prepare(transaction, HashingSchemeVersion.V2, ImmArray(nodeId))
 
       result.left.value.reason shouldBe
         "Cannot hash node with LF serialization version VDev using hashing scheme V2." +
         " Please use hashing scheme V4 or higher."
     }
 
-    "honor the requested hashing scheme for dev prepared transactions" in {
+    "honor the requested hashing scheme for dev prepared transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
       val (nodeId, transaction) = vDevCreateTransaction("prepared-vdev-requested-v4-contract")
 
-      val result = prepare(
-        transaction,
-        ProtocolVersion.dev,
-        "prepared-vdev-requested-v4-test",
-        HashingSchemeVersion.V4,
-        ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v4-node")),
-      )
+      val result = prepare(transaction, HashingSchemeVersion.V4, ImmArray(nodeId))
 
       result.value.hashVersion shouldBe HashingSchemeVersion.V4
     }
 
-    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is stable" in {
+    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is below dev" onlyRunWhen (_ < ProtocolVersion.dev) in {
       val transaction = VersionedTransaction(
         LfSerializationVersion.V2,
         Map.empty,
         ImmArray.Empty,
       )
-      val result = prepare(
-        transaction,
-        ProtocolVersion.v35,
-        "prepared-pv35-requested-v4-test",
-        HashingSchemeVersion.V4,
-      )
+      val result = prepare(transaction, HashingSchemeVersion.V4)
 
+      val supportedSchemes = HashingSchemeVersion
+        .getHashingSchemeVersionsForProtocolVersion(testedProtocolVersion)
+        .mkString(", ")
       result.left.value.reason shouldBe
-        "Hashing scheme version V4 is not supported on protocol version 35." +
+        s"Hashing scheme version V4 is not supported on protocol version $testedProtocolVersion." +
         " Minimum protocol version for hashing version V4: dev." +
-        " Supported hashing version on protocol version 35: V2, V3"
+        s" Supported hashing version on protocol version $testedProtocolVersion: $supportedSchemes"
     }
   }
 }
