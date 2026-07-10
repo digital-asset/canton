@@ -37,13 +37,12 @@ class ExtensionServiceExternalCallHandler(
         mode = mode,
       )
       .map(_.left.map { extensionError =>
-        ResultNeedExternalCall.Error(sanitizedEngineError(extensionError))
+        // Surfaces to the submitting ledger API client in the command rejection, wrapped by the
+        // engine's "External call execution failed (extensionId=..., functionId=...)" rendering,
+        // and is not distributed to other nodes on this path -- so the whole error is forwarded.
+        // The message-content limits documented on ExtensionCallError keep it client-safe.
+        ResultNeedExternalCall.Error(extensionError.toString)
       })
-
-  private def sanitizedEngineError(extensionError: ExtensionCallError): String = {
-    val requestId = extensionError.requestId.fold("")(id => s", requestId=$id")
-    s"External call failed with status ${extensionError.statusCode}$requestId"
-  }
 }
 
 object ExtensionServiceExternalCallHandler {

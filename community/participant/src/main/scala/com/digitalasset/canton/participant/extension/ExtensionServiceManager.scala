@@ -129,8 +129,9 @@ class ExtensionServiceManager(
           )
         )
     }
-    // Log the full error here, at the last common point before the per-consumer
-    // sanitization drops the message.
+    // Log the full error here, at the last common point shared by both consumers: the
+    // Phase-3 validator reduces the error to status code and request id, and the submission
+    // handler's forwarded copy surfaces only in the ledger API command rejection.
     result.map(_.tapLeft { error =>
       logger.warn(
         s"External call to extension '$extensionId' (function '$functionId') failed: $error"

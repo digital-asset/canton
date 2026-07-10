@@ -35,7 +35,9 @@ class ExtensionServiceExternalCallHandlerTest
               )
               .failOnShutdown
               .futureValue
-            result.left.value.message should include("status 404")
+            result.left.value.message shouldBe
+              "ExtensionCallError(status code = 404, " +
+              "message = \"Extension 'unknown-ext' not configured\", retryable = false)"
           },
           _.warningMessage shouldBe
             "External call to extension 'unknown-ext' (function 'test-func') failed: " +
@@ -64,7 +66,7 @@ class ExtensionServiceExternalCallHandlerTest
 
   "ExtensionServiceExternalCallHandler" should {
 
-    "map manager errors to sanitized engine external-call errors" in {
+    "forward the full error to the engine for the submitting client" in {
       val manager = emptyManager
       val handler = new ExtensionServiceExternalCallHandler(manager)
 
@@ -83,10 +85,9 @@ class ExtensionServiceExternalCallHandlerTest
               .futureValue
               .left
               .value
-            error.message should include("status 404")
-            error.message should not include "unknown-ext"
-            error.message should not include "not configured"
-            error.message should not include "Available extensions"
+            error.message shouldBe
+              "ExtensionCallError(status code = 404, " +
+              "message = \"Extension 'unknown-ext' not configured\", retryable = false)"
           },
           _.warningMessage shouldBe
             "External call to extension 'unknown-ext' (function 'test-func') failed: " +

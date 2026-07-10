@@ -8,7 +8,14 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 
-/** Error information from external call failures. */
+/** Error information from external call failures.
+  *
+  * `message` must stay client-safe: fixed descriptions, identifiers, and non-sensitive operational
+  * limits only -- never extension-service response bodies or credentials. The submission path
+  * forwards the whole error to the submitting ledger API client in the command rejection, so
+  * anything placed here becomes client-visible. (The Phase-3 validation path reduces the error to
+  * status code and request id before it reaches confirmation responses.)
+  */
 final case class ExtensionCallError(
     statusCode: Int,
     message: String,
