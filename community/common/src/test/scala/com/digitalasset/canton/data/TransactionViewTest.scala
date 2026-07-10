@@ -592,9 +592,9 @@ class TransactionViewTest
     }
 
     "the same external call is recorded with conflicting outputs across a view and its subview" must {
-      // The aggregation spans the whole subtree (`flatten`): a key recorded in the parent core
-      // and again, differently, in a subview core is a disagreement even though neither view's
-      // participant data conflicts on its own.
+      // The aggregation spans the whole subtree: a key recorded in the parent core and again,
+      // differently, in a subview core is a disagreement even though neither view's participant
+      // data conflicts on its own.
       "reject the parent view as malformed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
         val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
         def withCall(output: String): TransactionView =
@@ -611,7 +611,13 @@ class TransactionViewTest
           )(view)
 
         val parent = withCall("output")
-        val child = withCall("other-output")
+        // A distinct salt keeps the child's viewCommonData different from the parent's, so the
+        // fixture stays valid for the equal-viewCommonData check and this test isolates the
+        // external-call disagreement.
+        val child = TransactionView.Optics.viewCommonDataUnsafe
+          .andThen(MerkleTree.Optics.unblinded[ViewCommonData])
+          .modify(_.copy(salt = TestSalt.generateSalt(1)))
+          .apply(withCall("other-output"))
         val subviews = TransactionSubviews(Seq(child))(testedProtocolVersion, factory.cryptoOps)
 
         val error = TransactionView
