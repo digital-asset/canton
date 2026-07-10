@@ -32,9 +32,20 @@ object ExternalCallReplayData {
   def fromResults(
       results: Iterable[ExternalCallResult]
   ): Either[String, ExternalCallReplayData] =
+    merge(Seq.empty, results)
+
+  /** Combines already-indexed subview replay data with a view's own recorded results. Reusing the
+    * subviews' data means the keys of a result are derived only once, at the view that records it,
+    * and a conflict is reported at the lowest view whose subtree contains it.
+    */
+  def merge(
+      subviewData: Iterable[ExternalCallReplayData],
+      ownResults: Iterable[ExternalCallResult],
+  ): Either[String, ExternalCallReplayData] =
     MapsUtil
       .toNonConflictingMap(
-        results.map(result => ExternalCallKey.fromResult(result) -> result.output)
+        subviewData.flatMap(_.outputsByKey) ++
+          ownResults.map(result => ExternalCallKey.fromResult(result) -> result.output)
       )
       .leftMap(conflictMessage)
       .map(ExternalCallReplayData(_))

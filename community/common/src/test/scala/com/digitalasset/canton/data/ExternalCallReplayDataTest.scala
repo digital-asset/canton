@@ -50,13 +50,44 @@ class ExternalCallReplayDataTest extends AnyWordSpec with BaseTest {
           .fromResults(Seq(result("output-one"), result("output-two")))
           .left
           .value
-      error should startWith(
-        "externalCallResults records conflicting outputs for the same external call:"
-      )
-      error should not include "output-one"
-      error should not include "output-two"
+      error shouldBe conflictMessageFor("function")
+      // Payloads would surface as hex renderings of the bytes, never as the raw strings.
+      error should not include Bytes.fromStringUtf8("output-one").toHexString
+      error should not include Bytes.fromStringUtf8("output-two").toHexString
       error should not include Bytes.fromStringUtf8("config").toHexString
       error should not include Bytes.fromStringUtf8("input").toHexString
     }
   }
+
+  "ExternalCallReplayData.merge" should {
+
+    "combine subview data with own results" in {
+      val subview = ExternalCallReplayData.fromResults(Seq(result("out-a"))).value
+      val merged = ExternalCallReplayData
+        .merge(Seq(subview), Seq(result("out-b", functionId = "other")))
+        .value
+      merged.outputsByKey should have size 2
+    }
+
+    "collapse identical entries across subviews and own results" in {
+      val subview = ExternalCallReplayData.fromResults(Seq(result("output"))).value
+      ExternalCallReplayData
+        .merge(Seq(subview, subview), Seq(result("output")))
+        .value shouldBe subview
+    }
+
+    "reject conflicting outputs across subviews" in {
+      val subviewA = ExternalCallReplayData.fromResults(Seq(result("output-one"))).value
+      val subviewB = ExternalCallReplayData.fromResults(Seq(result("output-two"))).value
+      ExternalCallReplayData
+        .merge(Seq(subviewA, subviewB), Seq.empty)
+        .left
+        .value shouldBe conflictMessageFor("function")
+    }
+  }
+
+  private def conflictMessageFor(functionId: String): String =
+    "externalCallResults records conflicting outputs for the same external call: " +
+      s"""ExternalCallKey(extension id = "extension", function id = "$functionId", """ +
+      """config bytes = "6 bytes", input bytes = "5 bytes") with outputs [10 bytes, 10 bytes]"""
 }

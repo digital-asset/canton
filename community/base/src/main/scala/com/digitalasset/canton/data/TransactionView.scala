@@ -254,11 +254,18 @@ final case class TransactionView private (
     inputsAndCreatedE.map(_._2)
 
   private lazy val externalCallReplayDataE: Either[String, ExternalCallReplayData] =
-    ExternalCallReplayData.fromResults(
-      flatten
-        .flatMap(_.viewParticipantData.unwrap.toOption.toList.flatMap(_.externalCallResults))
-        .map(_.result)
-    )
+    // Recurses via the subviews' memoized values, so the aggregation costs each view only its
+    // direct children plus its own results, and stays trivial for views without any results.
+    subviews.unblindedElements
+      .traverse(_.externalCallReplayDataE)
+      .flatMap(subviewData =>
+        ExternalCallReplayData.merge(
+          subviewData,
+          viewParticipantData.unwrap.toOption.toList
+            .flatMap(_.externalCallResults)
+            .map(_.result),
+        )
+      )
 
   private lazy val inputsAndCreatedE: Either[
     String,
