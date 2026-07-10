@@ -46,7 +46,10 @@ class ExternalCallReplayDataTest extends AnyWordSpec with BaseTest {
 
     "reject a key recorded with conflicting outputs without leaking the payloads" in {
       val error =
-        ExternalCallReplayData.fromResults(Seq(result("output-one"), result("output-two"))).left.value
+        ExternalCallReplayData
+          .fromResults(Seq(result("output-one"), result("output-two")))
+          .left
+          .value
       error should startWith(
         "externalCallResults records conflicting outputs for the same external call:"
       )

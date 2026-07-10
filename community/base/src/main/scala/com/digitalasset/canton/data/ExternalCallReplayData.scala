@@ -33,7 +33,9 @@ object ExternalCallReplayData {
       results: Iterable[ExternalCallResult]
   ): Either[String, ExternalCallReplayData] =
     MapsUtil
-      .toNonConflictingMap(results.map(result => ExternalCallKey.fromResult(result) -> result.output))
+      .toNonConflictingMap(
+        results.map(result => ExternalCallKey.fromResult(result) -> result.output)
+      )
       .leftMap(conflictMessage)
       .map(ExternalCallReplayData(_))
 
