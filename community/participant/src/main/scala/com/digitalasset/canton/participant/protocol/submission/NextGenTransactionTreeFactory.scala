@@ -113,6 +113,10 @@ class NextGenTransactionTreeFactory(
       )
 
     for {
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        checkExternalCallResultConsistency(transaction)
+      )
+
       submitterMetadata <- SubmitterMetadata
         .fromSubmitterInfo(cryptoOps)(
           submitterActAs = submitterInfo.actAs,
@@ -850,6 +854,24 @@ class NextGenTransactionTreeFactory(
 }
 
 object NextGenTransactionTreeFactory {
+
+  /** A transaction that records conflicting outputs for the same external call cannot form a valid
+    * transaction tree: `TransactionView.validated` fails any view whose subtree contains the
+    * conflict. Reject the transaction with a typed error before view construction instead of
+    * hitting the factory's view-invariant check.
+    */
+  private[submission] def checkExternalCallResultConsistency(
+      transaction: WellFormedTransaction[WithoutSuffixes]
+  ): Either[TransactionTreeConversionError, Unit] =
+    ExternalCallReplayData
+      .fromResults(
+        transaction.unwrap.nodes.values.toSeq.flatMap {
+          case exercise: LfNodeExercises => exercise.externalCallResults.toSeq
+          case _ => Seq.empty
+        }
+      )
+      .leftMap(ConflictingExternalCallResultsError.apply)
+      .map(_ => ())
 
   private[submission] def externalCallResultsFromCoreNode(
       exerciseIndex: NonNegativeInt,

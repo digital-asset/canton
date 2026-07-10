@@ -208,6 +208,16 @@ object TransactionTreeFactory {
     }
   }
 
+  /** Indicates that the submitted transaction records conflicting outputs for the same external
+    * call, so no valid transaction tree can be formed from it.
+    */
+  final case class ConflictingExternalCallResultsError(message: String)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[ConflictingExternalCallResultsError] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
+    )
+  }
+
   final case class ContractIdAbsolutizationError(message: String)
       extends TransactionTreeConversionError {
     override protected def pretty: Pretty[ContractIdAbsolutizationError] = prettyOfClass(

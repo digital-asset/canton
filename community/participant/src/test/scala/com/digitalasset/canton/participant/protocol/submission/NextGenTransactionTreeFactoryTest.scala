@@ -343,6 +343,35 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
+          "reject a transaction recording conflicting outputs for the same external call" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+            val treeFactory = createTransactionTreeFactory()
+            val example = factory.TransientContracts
+            val childExternalCallNodeId = LfNodeId(3)
+            val parentExternalCallNodeId = LfNodeId(5)
+
+            createTransactionTree(
+              treeFactory,
+              withExternalCallResults(
+                example,
+                Map(
+                  childExternalCallNodeId -> ImmArray(
+                    externalCallResult.copy(output = Bytes.fromStringUtf8("output-1"))
+                  ),
+                  parentExternalCallNodeId -> ImmArray(
+                    externalCallResult.copy(output = Bytes.fromStringUtf8("output-2"))
+                  ),
+                ),
+              ),
+              successfulLookup(example),
+            ).value.map { result =>
+              result.left.value shouldBe ConflictingExternalCallResultsError(
+                "externalCallResults records conflicting outputs for the same external call: " +
+                  "ExternalCallKey(extension id = \"extension\", function id = \"function\", " +
+                  "config bytes = \"6 bytes\", input bytes = \"5 bytes\") with outputs [8 bytes, 8 bytes]"
+              )
+            }
+          }
+
           "record external call checking parties from signatories and actors" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.SingleExerciseWithNonstakeholderActor(factory.deriveNodeSeed(0))
