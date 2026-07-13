@@ -664,7 +664,7 @@ class TransactionViewTest
 
         val blindedHash = created.subviews.blindedElements.loneElement
         loggerFactory.assertInternalError[IllegalStateException](
-          created.externalCallReplayData,
+          created.tryExternalCallReplayData,
           _.getMessage shouldBe s"External-call replay data of view ${created.viewHash} can be" +
             s" computed only if all subviews are unblinded, but $blindedHash is blinded",
         )
@@ -685,7 +685,7 @@ class TransactionViewTest
           .value
 
         loggerFactory.assertInternalError[IllegalStateException](
-          created.externalCallReplayData,
+          created.tryExternalCallReplayData,
           _.getMessage shouldBe s"External-call replay data of view ${created.viewHash} can be" +
             s" computed only if the view participant data is unblinded",
         )

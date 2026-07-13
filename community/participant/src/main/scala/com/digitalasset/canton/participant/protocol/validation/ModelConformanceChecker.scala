@@ -311,7 +311,7 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
-          () => view.externalCallReplayData,
+          () => view.tryExternalCallReplayData,
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]

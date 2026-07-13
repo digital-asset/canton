@@ -244,7 +244,7 @@ final case class TransactionView private (
     *   if the [[ViewParticipantData]] of this view or any subview is blinded, or if the same key
     *   was recorded with conflicting outputs, which a validated view cannot contain
     */
-  def externalCallReplayData(implicit
+  def tryExternalCallReplayData(implicit
       loggingContext: NamedLoggingContext
   ): ExternalCallReplayData = getOrError(externalCallReplayDataE)
 
