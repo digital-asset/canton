@@ -629,9 +629,10 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
             Seq(simpleConf.toJava, overrideFile.toJava),
             defaultPorts = None,
           ),
-          _.errorMessage should (include("external-call-test") and include("port") and include(
-            "between 1"
-          )),
+          _.errorMessage should include(
+            "For participant participant1, engine.extensions.external-call-test.port" +
+              " must not be the dynamic port 0"
+          ),
         )
 
         result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
