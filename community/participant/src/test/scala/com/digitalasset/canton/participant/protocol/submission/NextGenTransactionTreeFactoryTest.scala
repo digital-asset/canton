@@ -364,7 +364,7 @@ final class NextGenTransactionTreeFactoryTest
               ),
               successfulLookup(example),
             ).value.map { result =>
-              result.left.value shouldBe ConflictingExternalCallResultsError(
+              result.left.value shouldBe InvalidTransactionViewError(
                 "externalCallResults records conflicting outputs for the same external call: " +
                   "ExternalCallKey(extension id = \"extension\", function id = \"function\", " +
                   "config bytes = \"6 bytes\", input bytes = \"5 bytes\") with outputs [8 bytes, 8 bytes]"

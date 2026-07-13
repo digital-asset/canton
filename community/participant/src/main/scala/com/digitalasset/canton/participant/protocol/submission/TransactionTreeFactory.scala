@@ -208,12 +208,12 @@ object TransactionTreeFactory {
     }
   }
 
-  /** Indicates that the submitted transaction records conflicting outputs for the same external
-    * call, so no valid transaction tree can be formed from it.
+  /** Indicates that a constructed view failed validation, e.g. because the submitted transaction
+    * records conflicting outputs for the same external call.
     */
-  final case class ConflictingExternalCallResultsError(message: String)
+  final case class InvalidTransactionViewError(message: String)
       extends TransactionTreeConversionError {
-    override protected def pretty: Pretty[ConflictingExternalCallResultsError] = prettyOfClass(
+    override protected def pretty: Pretty[InvalidTransactionViewError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
