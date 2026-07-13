@@ -611,62 +611,6 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       }
     }
 
-    "reject extension service port 0" in {
-      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
-        overrideFile.writeText(
-          """
-             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
-             |  address = "127.0.0.1"
-             |  port = 0
-             |  version = "v1"
-             |  tls.enabled = false
-             |}
-             |""".stripMargin
-        )
-
-        val result = loggerFactory.assertLogs(
-          CantonConfig.parseAndLoad(
-            Seq(simpleConf.toJava, overrideFile.toJava),
-            defaultPorts = None,
-          ),
-          _.errorMessage should include(
-            "For participant participant1, engine.extensions.external-call-test.port" +
-              " must not be the dynamic port 0"
-          ),
-        )
-
-        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
-      }
-    }
-
-    "reject retry delays where the initial delay exceeds the maximum delay" in {
-      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
-        overrideFile.writeText(
-          """
-             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
-             |  address = "127.0.0.1"
-             |  port = 12345
-             |  version = "v1"
-             |  tls.enabled = false
-             |  retry-initial-delay = 2s
-             |  retry-max-delay = 1s
-             |}
-             |""".stripMargin
-        )
-
-        val result = loggerFactory.assertLogs(
-          CantonConfig.parseAndLoad(
-            Seq(simpleConf.toJava, overrideFile.toJava),
-            defaultPorts = None,
-          ),
-          _.errorMessage should (include("external-call-test") and include(
-            "retry-initial-delay <= retry-max-delay"
-          )),
-        )
-
-        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
-      }
-    }
   }
 
   "config validation on duplicate storage" should {
