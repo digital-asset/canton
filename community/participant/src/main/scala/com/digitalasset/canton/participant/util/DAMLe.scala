@@ -5,7 +5,8 @@ package com.digitalasset.canton.participant.util
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
+import com.digitalasset.canton.data.ExternalCallPayloadDescription.{byteCount, byteSize}
+import com.digitalasset.canton.data.{CantonTimestamp, ExternalCallKey, LedgerTimeBoundaries}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -14,11 +15,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
-import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
-  byteCount,
-  byteSize,
-  hexPayloadSize,
-}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -154,38 +150,6 @@ object DAMLe {
     override protected def pretty: Pretty[ExternalCallReplayMissing] = prettyOfClass(
       param("key", _.key)
     )
-  }
-
-  /** Deterministic external-call identity. Config and input are engine-emitted canonical hex
-    * strings. The pretty-printed form deliberately shows only payload sizes, never the payloads.
-    */
-  final case class ExternalCallKey(
-      extensionId: String,
-      functionId: String,
-      config: String,
-      input: String,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[ExternalCallKey] = prettyOfClass(
-      param("extension id", _.extensionId.doubleQuoted),
-      param("function id", _.functionId.doubleQuoted),
-      param("config bytes", key => hexPayloadSize(key.config).doubleQuoted),
-      param("input bytes", key => hexPayloadSize(key.input).doubleQuoted),
-    )
-  }
-
-  object ExternalCallKey {
-
-    /** Orders by the semantic identity fields, lexicographically. */
-    implicit val externalCallKeyOrdering: Ordering[ExternalCallKey] =
-      Ordering.by(key => (key.extensionId, key.functionId, key.config, key.input))
-
-    def fromResult(result: ExternalCallResult): ExternalCallKey =
-      ExternalCallKey(
-        result.extensionId,
-        result.functionId,
-        result.config.toHexString,
-        result.input.toHexString,
-      )
   }
 
   /** External-call replay data: recorded outputs indexed by semantic key. Multiple outputs for one

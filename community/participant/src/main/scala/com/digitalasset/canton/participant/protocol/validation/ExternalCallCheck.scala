@@ -4,14 +4,18 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.{ParticipantTransactionView, ViewParticipantData, ViewPosition}
+import com.digitalasset.canton.data.{
+  ExternalCallKey,
+  ParticipantTransactionView,
+  ViewParticipantData,
+  ViewPosition,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsistencyChecker.{
   ExternalCallOccurrence,
   Inconsistency,
 }
-import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
@@ -99,10 +103,9 @@ class ExternalCallCheck(
   }
 
   /** Re-validates the recorded results, one validator call per distinct semantic call
-    * ([[com.digitalasset.canton.participant.util.DAMLe.ExternalCallKey]]). At this point every key
-    * has a single recorded output: a key with disagreeing outputs is a visible inconsistency and
-    * was rejected before re-validation. Outcomes are examined in key order, so the result is
-    * deterministic.
+    * ([[com.digitalasset.canton.data.ExternalCallKey]]). At this point every key has a single
+    * recorded output: a key with disagreeing outputs is a visible inconsistency and was rejected
+    * before re-validation. Outcomes are examined in key order, so the result is deterministic.
     */
   private def validateRecordedResults(
       requestId: RequestId,
@@ -112,7 +115,7 @@ class ExternalCallCheck(
       ec: ExecutionContext,
   ): FutureUnlessShutdown[Result] = {
     val occurrencesByKey = recordedResults
-      .groupMap { case (_, result) => DAMLe.ExternalCallKey.fromResult(result.result) } {
+      .groupMap { case (_, result) => ExternalCallKey.fromResult(result.result) } {
         case (viewPosition, result) =>
           ExternalCallOccurrence(viewPosition, result.exerciseIndex, result.callIndex) ->
             result.result.output

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.util
 
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, ExternalCallKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.store.ReplayContractLookup
@@ -79,7 +79,7 @@ final class DAMLeExternalCallTest
   )
   private val defaultReplayData =
     DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult))
-  private val externalCallKey = DAMLe.ExternalCallKey.fromResult(externalCallResult)
+  private val externalCallKey = ExternalCallKey.fromResult(externalCallResult)
 
   private val packageResolver = new PackageResolver {
     override protected def resolveInternal(packageId: PackageId)(implicit
