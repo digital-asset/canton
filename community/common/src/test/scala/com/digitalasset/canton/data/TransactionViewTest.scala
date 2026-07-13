@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
+import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
 import com.digitalasset.canton.util.ShowUtil.*
@@ -634,6 +635,60 @@ class TransactionViewTest
         )
         error should not include externalCallResult.output.toHexString
         error should not include Bytes.fromStringUtf8("other-output").toHexString
+      }
+    }
+
+    "parts of the view are blinded" must {
+      // Blinding legitimately constructs views with blinded participant data or subviews (and
+      // `validated` runs on them), so validation must tolerate blinded parts; the replay-data
+      // accessor must instead refuse them, so replay never runs on silently-partial data.
+      "validate the view but refuse to compute the replay data" in {
+        implicit val namedLoggingContext: NamedLoggingContext =
+          NamedLoggingContext(loggerFactory, traceContext)
+        val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
+        val child = TransactionView.Optics.viewCommonDataUnsafe
+          .andThen(MerkleTree.Optics.unblinded[ViewCommonData])
+          .modify(_.copy(salt = TestSalt.generateSalt(1)))
+          .apply(view)
+        val subviews =
+          TransactionSubviews(Seq(child.blindFully))(testedProtocolVersion, factory.cryptoOps)
+
+        val created = TransactionView
+          .create(hashOps)(
+            view.viewCommonData,
+            view.viewParticipantData,
+            subviews,
+            testedProtocolVersion,
+          )
+          .value
+
+        val blindedHash = created.subviews.blindedElements.loneElement
+        loggerFactory.assertInternalError[IllegalStateException](
+          created.externalCallReplayData,
+          _.getMessage shouldBe s"External-call replay data of view ${created.viewHash} can be" +
+            s" computed only if all subviews are unblinded, but $blindedHash is blinded",
+        )
+      }
+
+      "validate a view whose own participant data is blinded but refuse the replay data" in {
+        implicit val namedLoggingContext: NamedLoggingContext =
+          NamedLoggingContext(loggerFactory, traceContext)
+        val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
+        val subviews = TransactionSubviews(Seq.empty)(testedProtocolVersion, factory.cryptoOps)
+        val created = TransactionView
+          .create(hashOps)(
+            view.viewCommonData,
+            view.viewParticipantData.blindFully,
+            subviews,
+            testedProtocolVersion,
+          )
+          .value
+
+        loggerFactory.assertInternalError[IllegalStateException](
+          created.externalCallReplayData,
+          _.getMessage shouldBe s"External-call replay data of view ${created.viewHash} can be" +
+            s" computed only if the view participant data is unblinded",
+        )
       }
     }
 
