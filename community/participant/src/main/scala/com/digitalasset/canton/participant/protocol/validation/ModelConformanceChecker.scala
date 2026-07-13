@@ -294,8 +294,6 @@ class ModelConformanceChecker(
       view.viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.contracts),
     )
 
-    lazy val externalCallReplayData = view.externalCallReplayData
-
     for {
 
       packagePreference <- buildPackageNameMap(packageIdPreference, topologySnapshot, ledgerTime)
@@ -313,7 +311,7 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
-          () => externalCallReplayData,
+          () => view.externalCallReplayData,
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]
