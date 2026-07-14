@@ -28,6 +28,17 @@ create index idx_event_sequence on par_traffic_enforcement_event (sequence_nb);
 -- For fast querying by account ID, event type and timestamp
 create index account_id_timestamp_index on par_traffic_enforcement_event (account_id, event_type, timestamp);
 
+create or replace view debug.par_traffic_enforcement_event as
+select
+    sequence_nb,
+    event_source,
+    event_type,
+    event_id,
+    account_id,
+    amount,
+    debug.canton_timestamp(timestamp) as timestamp
+from par_traffic_enforcement_event;
+
 -- Balance table for each account
 -- Contains one row per account, continuously updated with the total debits and credits for that account
 -- as events are processed.
@@ -50,6 +61,16 @@ create table par_traffic_enforcement_balance
     primary key (account_id, event_type)
 );
 
+create or replace view debug.par_traffic_enforcement_balance as
+select
+    account_id,
+    event_sequence_nb,
+    event_type,
+    total_debits,
+    total_credits,
+    debug.canton_timestamp(updated_at) as updated_at
+from par_traffic_enforcement_balance;
+
 -- Offset tables used by pekko projection
 -- See https://pekko.apache.org/docs/pekko-projection/current/jdbc.html#schema
 create table pekko_projection_offset_store
@@ -63,6 +84,16 @@ create table pekko_projection_offset_store
     primary key (projection_name, projection_key)
 );
 
+create or replace view debug.pekko_projection_offset_store as
+select
+    projection_name,
+    projection_key,
+    current_offset,
+    manifest,
+    mergeable,
+    last_updated
+from pekko_projection_offset_store;
+
 create index projection_name_index on pekko_projection_offset_store (projection_name);
 
 create table pekko_projection_management
@@ -73,3 +104,11 @@ create table pekko_projection_management
     last_updated    bigint              not null,
     primary key (projection_name, projection_key)
 );
+
+create or replace view debug.pekko_projection_management as
+select
+    projection_name,
+    projection_key,
+    paused,
+    last_updated
+from pekko_projection_management;

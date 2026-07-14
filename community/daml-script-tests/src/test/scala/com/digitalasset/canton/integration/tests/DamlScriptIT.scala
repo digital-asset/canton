@@ -184,7 +184,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
 
     env = Seq(
       "DAML_VERSION" -> getEnv("damlVersion", BuildInfo.damlLibrariesVersion),
-      "DPM_REGISTRY" -> getEnv("dpmRegistry", "europe-docker.pkg.dev/da-images/public-unstable"),
+      "DPM_REGISTRY" -> getEnv("dpmRegistry", BuildInfo.dpmRegistry),
     )
   }
 

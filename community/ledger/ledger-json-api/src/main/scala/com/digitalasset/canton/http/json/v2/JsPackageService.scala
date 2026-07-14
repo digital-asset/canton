@@ -109,32 +109,38 @@ class JsPackageService(
   private def list(
       caller: CallerContext
   ): TracedInput[Unit] => Future[Either[JsCantonError, package_service.ListPackagesResponse]] = {
-    _ =>
-      packageClient.listPackages(caller.token())(caller.traceContext()).resultToRight
+    implicit val traceContext: TraceContext = caller.traceContext()
+    _ => packageClient.listPackages(caller.token()).resultToRight
   }
 
   private def status(
       @unused caller: CallerContext
   ): TracedInput[String] => Future[
     Either[JsCantonError, package_service.GetPackageStatusResponse]
-  ] = req =>
-    packageClient.getPackageStatus(req.in, caller.token())(caller.traceContext()).resultToRight
+  ] = {
+    implicit val traceContext: TraceContext = caller.traceContext()
+    req => packageClient.getPackageStatus(req.in, caller.token()).resultToRight
+  }
 
   private def listVettedPackages(
       @unused caller: CallerContext
   ): TracedInput[package_service.ListVettedPackagesRequest] => Future[
     Either[JsCantonError, package_service.ListVettedPackagesResponse]
-  ] = req =>
-    packageClient.listVettedPackages(req.in, caller.token())(caller.traceContext()).resultToRight
+  ] = {
+    implicit val traceContext: TraceContext = caller.traceContext()
+    req => packageClient.listVettedPackages(req.in, caller.token()).resultToRight
+  }
 
   private def updateVettedPackages(
       @unused caller: CallerContext
   ): TracedInput[package_management_service.UpdateVettedPackagesRequest] => Future[
     Either[JsCantonError, package_management_service.UpdateVettedPackagesResponse]
-  ] = req =>
+  ] = { req =>
+    implicit val traceContext: TraceContext = caller.traceContext()
     packageManagementClient
-      .updateVettedPackages(req.in, caller.token())(caller.traceContext())
+      .updateVettedPackages(req.in, caller.token())
       .resultToRight
+  }
 
   private def validateDar(caller: CallerContext) = {
     (tracedInput: TracedInput[(Source[util.ByteString, Any], Option[String])]) =>
@@ -171,8 +177,9 @@ class JsPackageService(
   }
 
   private def getPackage(caller: CallerContext) = { (tracedInput: TracedInput[String]) =>
+    implicit val traceContext: TraceContext = caller.traceContext()
     packageClient
-      .getPackage(tracedInput.in, caller.token())(caller.traceContext())
+      .getPackage(tracedInput.in, caller.token())
       .map(response =>
         (
           Source.fromIterator(() =>

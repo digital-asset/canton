@@ -183,14 +183,17 @@ private[service] class GrpcManagedSubscription[T](
           s"Closing subscription for $member and completing subscription observer with $closeSignal"
         )
 
-        subscriptionRef
-          .get()
-          .fold(logger.debug("Closing but underlying subscription has not been created"))(_.close())
-
+        // important to complete grpcObserverHandle before subscription
+        // in order to avoid a race condition where an element is accepted
+        // by grpcObserverHandle while subscription is being closed, which
+        // can cause the subscription to get stuck and prevent shutdown
         closeSignal match {
           case CompleteSignal => grpcObserverHandle.onCompleted()
           case ErrorSignal(cause) => grpcObserverHandle.onError(cause)
         }
+        subscriptionRef
+          .get()
+          .fold(logger.debug("Closing but underlying subscription has not been created"))(_.close())
       } finally notifyClosed()
   }
 

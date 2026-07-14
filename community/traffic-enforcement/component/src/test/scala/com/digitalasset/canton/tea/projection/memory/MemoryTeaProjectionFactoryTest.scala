@@ -4,13 +4,17 @@
 package com.digitalasset.canton.tea.projection.memory
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.tea.projection.{TeaProjection, TeaProjectionTest, TeaTrafficStore}
+import com.digitalasset.canton.tea.projection.{
+  TeaProjectionFactory,
+  TeaProjectionTest,
+  TeaTrafficStore,
+}
 import org.apache.pekko.actor.typed.ActorSystem
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.ExecutionContext
 
-class MemoryTeaProjectionTest extends AnyWordSpec with BaseTest with TeaProjectionTest {
+class MemoryTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProjectionTest {
 
   // The in-memory projection uses the pekko TestProjection which does not persist offsets across
   // restarts, so a restarted projection replays from the beginning and relies on store-level
@@ -22,8 +26,8 @@ class MemoryTeaProjectionTest extends AnyWordSpec with BaseTest with TeaProjecti
     val memoryStore = new TeaMemoryTrafficStore()
     new Backend {
       override val store: TeaTrafficStore = memoryStore
-      override def newProjection(): TeaProjection =
-        new TeaMemoryProjection(loggerFactory, memoryStore)
+      override def newProjection(): TeaProjectionFactory =
+        new TeaMemoryProjectionFactory(loggerFactory, memoryStore)
     }
   }
 

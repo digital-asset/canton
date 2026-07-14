@@ -16,6 +16,13 @@ import scala.language.implicitConversions
 sealed trait TopologyStoreId extends Product with Serializable {
   def toProtoV30: adminProto.StoreId
 
+  /** Converts the admin API `grpc.TopologyStoreId` into the internal
+    * `topology.store.TopologyStoreId`. Logical synchronizer ids are resolved to the currently
+    * active physical synchronizer via the provided `PsidLookup`. If no active synchronizer config
+    * can be found, returns the logical synchronizer as `Left`.
+    *
+    * All other store ids are transformed trivially.
+    */
   private[canton] def toInternal(
       lookup: PsidLookup
   ): Either[SynchronizerId, store.TopologyStoreId]

@@ -12,7 +12,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, MigrationMode, PostgresTest}
 import com.digitalasset.canton.tea.projection.{
   EventSource,
-  TeaProjection,
+  TeaProjectionFactory,
   TeaProjectionTest,
   TeaTrafficStore,
 }
@@ -21,7 +21,7 @@ import com.typesafe.config.Config
 import org.apache.pekko.actor.typed.ActorSystem
 import org.scalatest.wordspec.AnyWordSpec
 
-trait DbTeaProjectionTest extends AnyWordSpec with BaseTest with TeaProjectionTest {
+trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProjectionTest {
   this: DbTest =>
 
   override def cleanDb(
@@ -55,8 +55,8 @@ trait DbTeaProjectionTest extends AnyWordSpec with BaseTest with TeaProjectionTe
     new Backend {
       override val store: TeaTrafficStore = dbStore
       // The slick projection needs the raw single/multi storage, not the idempotency wrapper.
-      override def newProjection(): TeaProjection =
-        new TeaDbProjection(
+      override def newProjection(): TeaProjectionFactory =
+        new TeaDbProjectionFactory(
           storage.underlying,
           loggerFactory,
           dbStore,
@@ -70,12 +70,12 @@ trait DbTeaProjectionTest extends AnyWordSpec with BaseTest with TeaProjectionTe
   }
 }
 
-class DbTeaProjectionPostgresTest extends DbTeaProjectionTest with PostgresTest {
+class DbTeaProjectionFactoryPostgresTest extends DbTeaProjectionFactoryTest with PostgresTest {
   // TODO(i33278): remove when migrations are stable
   override def migrationMode: MigrationMode = MigrationMode.DevVersion
 }
 
-class DbTeaProjectionH2Test extends DbTeaProjectionTest with H2Test {
+class DbTeaProjectionFactoryH2Test extends DbTeaProjectionFactoryTest with H2Test {
   // TODO(i33278): remove when migrations are stable
   override def migrationMode: MigrationMode = MigrationMode.DevVersion
 }

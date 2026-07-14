@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochNumber,
+  WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
@@ -38,6 +39,7 @@ final class StateTransferMessageSender[E <: Env[E]](
     thisNode: BftNodeId,
     consensusDependencies: ConsensusModuleDependencies[E],
     epochStore: EpochStore[E],
+    workflowId: WorkflowId,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit synchronizerProtocolVersion: ProtocolVersion, metricsContext: MetricsContext)
     extends NamedLogging {
@@ -46,15 +48,25 @@ final class StateTransferMessageSender[E <: Env[E]](
 
   def sendBlockTransferRequest(
       blockTransferRequest: SignedMessage[StateTransferMessage.BlockTransferRequest],
-      to: BftNodeId,
-  )(implicit traceContext: TraceContext): Unit = {
-    logger.debug(
-      s"Sending a block transfer request for epoch ${blockTransferRequest.message.epoch} to '$to'"
-    )
+      possibleRecipients: Seq[BftNodeId],
+      nodeThatTimedOut: Option[BftNodeId],
+      onRecipientDecision: Option[Option[BftNodeId] => Unit],
+  )(implicit traceContext: TraceContext): Unit =
+    // Ask a single node for an entire epoch of blocks to compromise between noise for different nodes
+    //  and load balancing. Note that we're shuffling (instead of round-robin), so the same node might be chosen
+    //  multiple times in a row, resulting in uneven load balancing for certain periods. On the other hand, shuffling
+    //  is more straightforward code-wise. A potentially irrelevant implication is that the order in which nodes
+    //  are chosen is less predictable (e.g., by malicious nodes), and, at the same time, harder to reason about.
+    // TODO(#24940) consider not rotating when everything runs smoothly
     consensusDependencies.p2pNetworkOut.asyncSend(
-      P2PNetworkOut.send(wrapSignedMessage(blockTransferRequest), to)
+      P2PNetworkOut.SendToRandomAuthenticated(
+        wrapSignedMessage(blockTransferRequest),
+        possibleRecipients,
+        Some(workflowId),
+        nodeThatTimedOut,
+        onRecipientDecision,
+      )
     )
-  }
 
   def sendBlockTransferResponses(
       activeCryptoProvider: CryptoProvider[E],

@@ -149,24 +149,23 @@ object SegmentInProgress {
           }
           .sortBy(_.message.viewNumber)
 
-      // we only care about this node's view change message if it is for the latest view and there is
-      // no new-view message at that view. before that, the new-view messages are enough.
-      val viewChangeAtLatestView: Option[SignedMessage[ViewChange]] = {
+      // We only care about this node's view change messages that are higher than the latest new-view message.
+      // We might need more than one to help other nodes get unstuck from previous views, using retransmissions.
+      val viewChangeAtLatestView: Seq[SignedMessage[ViewChange]] = {
         val highestNewViewViewNumber = segmentInProgressMessages
           .collect { case SignedMessage(newView: NewView, _) => newView.viewNumber }
           .maxOption
           .getOrElse(ViewNumber.First)
         segmentInProgressMessages
-          .collectFirst {
-            case s @ SignedMessage(vc: ViewChange, _)
-                if vc.viewNumber == highestView && vc.viewNumber > highestNewViewViewNumber =>
+          .collect {
+            case s @ SignedMessage(vc: ViewChange, _) if vc.viewNumber > highestNewViewViewNumber =>
               s.asInstanceOf[SignedMessage[ViewChange]]
           }
       }
 
       val messages = (initialPrePreparesPerBlock: Seq[
         SignedMessage[PbftNetworkMessage]
-      ]) ++ newViews ++ viewChangeAtLatestView.toList
+      ]) ++ newViews ++ viewChangeAtLatestView
       RehydrationMessages(
         prepares = preparesPerView.values.flatten.toList,
         oldViewsMessages = messages.filter(_.message.viewNumber < highestView),

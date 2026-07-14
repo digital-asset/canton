@@ -36,6 +36,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Env,
   Module,
   ModuleName,
+  ModuleRef,
+  ModuleSystem,
   P2PConnectionEventListener,
   P2PNetworkManager,
   PureFun,
@@ -152,30 +154,40 @@ object PipeTest {
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
   ): SystemInitializer[E, P2PNetworkManagerT, String, String] =
-    (system, createP2PNetworkManager) => {
-      val inputModuleRef = system.newModuleRef[String](ModuleName("module"))()
-      val p2pNetworkManager =
-        createP2PNetworkManager(P2PConnectionEventListener.NoOp, inputModuleRef)
-      val module = new PipeNode[E](pipeStore, reporter, loggerFactory, timeouts)
-      system.setModule(inputModuleRef, module)
-      val p2PAdminModuleRef =
-        system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
-      val consensusAdminModuleRef =
-        system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
-      val outputModuleRef =
-        system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
-      val pruningModuleRef =
-        system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
-      inputModuleRef.asyncSendNoTrace("init")
-      SystemInitializationResult(
-        inputModuleRef,
-        inputModuleRef,
-        p2PAdminModuleRef,
-        consensusAdminModuleRef,
-        outputModuleRef,
-        pruningModuleRef,
-        p2pNetworkManager,
-      )
+    new SystemInitializer[E, P2PNetworkManagerT, String, String] {
+      override def initialize(
+          system: ModuleSystem[E],
+          createP2PNetworkManager: (
+              P2PConnectionEventListener,
+              ModuleRef[String],
+          ) => P2PNetworkManagerT,
+      )(implicit
+          traceContext: TraceContext
+      ): SystemInitializationResult[E, P2PNetworkManagerT, String, String] = {
+        val inputModuleRef = system.newModuleRef[String](ModuleName("module"))()
+        val p2pNetworkManager =
+          createP2PNetworkManager(P2PConnectionEventListener.NoOp, inputModuleRef)
+        val module = new PipeNode[E](pipeStore, reporter, loggerFactory, timeouts)
+        system.setModule(inputModuleRef, module)
+        val p2PAdminModuleRef =
+          system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
+        val consensusAdminModuleRef =
+          system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
+        val outputModuleRef =
+          system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
+        val pruningModuleRef =
+          system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
+        inputModuleRef.asyncSendNoTrace("init")
+        SystemInitializationResult(
+          inputModuleRef,
+          inputModuleRef,
+          p2PAdminModuleRef,
+          consensusAdminModuleRef,
+          outputModuleRef,
+          pruningModuleRef,
+          p2pNetworkManager,
+        )
+      }
     }
 }
 

@@ -52,7 +52,9 @@ import scala.concurrent.{ExecutionContext, Future}
   *   crypto types.
   */
 class GrpcTopologyManagerWriteService(
-    managers: => Seq[TopologyManager[TopologyStoreId, BaseCrypto]],
+    managers: => Seq[
+      TopologyStoreInitializationStatus[TopologyStoreId, TopologyManager.Aux]
+    ],
     physicalSynchronizerIdLookup: PsidLookup,
     temporaryStoreRegistry: TemporaryStoreRegistry,
     override val loggerFactory: NamedLoggerFactory,
@@ -369,11 +371,13 @@ class GrpcTopologyManagerWriteService(
       )
       targetStoreInternal <- EitherT
         .fromEither[FutureUnlessShutdown](targetStore.toInternal(physicalSynchronizerIdLookup))
-        .leftMap(TopologyManagerError.InvalidSynchronizer.Failure(_))
+        .leftMap(TopologyManagerError.TopologyStoreUnknown.NoActiveSynchronizer(_))
       manager <- EitherT
-        .fromOption[FutureUnlessShutdown](
-          managers.find(_.store.storeId == targetStoreInternal),
-          TopologyManagerError.TopologyStoreUnknown.Failure(targetStoreInternal),
+        .fromEither[FutureUnlessShutdown](
+          managers
+            .find(_.storeId == targetStoreInternal)
+            .toRight(TopologyManagerError.TopologyStoreUnknown.Failure(targetStoreInternal))
+            .flatMap(_.toEither)
         )
         .leftWiden[RpcError]
     } yield manager

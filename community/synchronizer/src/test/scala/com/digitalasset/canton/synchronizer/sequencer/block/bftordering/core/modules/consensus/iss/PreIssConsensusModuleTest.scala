@@ -59,7 +59,6 @@ import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Instant
-import scala.util.Random
 
 class PreIssConsensusModuleTest
     extends AsyncWordSpec
@@ -212,13 +211,13 @@ class PreIssConsensusModuleTest
             cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
             latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
             epochInProgress: EpochInProgress,
+            _traceContext: TraceContext,
         )(
             segmentState: SegmentState,
             metricsAccumulator: EpochMetricsAccumulator,
         ): IgnoringSegmentModuleRef[ConsensusSegment.Message] =
           new IgnoringSegmentModuleRef(latestCompletedEpochLastCommits)
       },
-      new Random(4),
       new ConsensusModuleDependencies[ProgrammableUnitTestEnv](
         fakeModuleExpectingSilence,
         fakeModuleExpectingSilence,

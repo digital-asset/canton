@@ -11,11 +11,13 @@ import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.PekkoUtil.{
+  Commit,
   ContextualizedFlowOps,
   FutureQueue,
   FutureQueueConsumer,
@@ -24,6 +26,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   PekkoSourceQueueToFutureQueue,
   RecoveringFutureQueueImpl,
   RecoveringQueueMetrics,
+  ShutdownInProgress,
   WithKillSwitch,
   noOpKillSwitch,
 }
@@ -2119,6 +2122,300 @@ class PekkoUtilTest
       val testTookMillis = (end - start) / 1000 / 1000
       logger.info(s"1M elem processing took $testTookMillis millis")
       testTookMillis should be < (100000L)
+    }
+
+    "report unhealthy status if indexer cannot process element after restart" in {
+
+      val lastConsumedIdx = new AtomicLong(0)
+      var shouldBreakOn5 = true
+
+      def rejectingFutureQueue(commit: Commit) = new FutureQueue[(Long, Int)] {
+        val reached5Promise = Promise[Done]()
+
+        override def shutdown(): Unit = reached5Promise.trySuccess(Done)
+
+        override def done: Future[Done] = reached5Promise.future
+
+        override def offer(elem: (Long, Int)): Future[Done] = Future {
+          if (elem._2 == 5 && shouldBreakOn5) {
+            reached5Promise.failure(new Exception("Reached 5"))
+          } else {
+            lastConsumedIdx.accumulateAndGet(elem._1, Math.max)
+            commit(lastConsumedIdx.get())
+
+          }
+          Done
+        }
+
+      }
+
+      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+        maxBlockedOffer = 1,
+        bufferSize = 20,
+        loggerFactory = loggerFactory,
+        retryStategy = PekkoUtil.exponentialRetryWithCap(
+          minWait = 2,
+          multiplier = 2,
+          cap = 10,
+        ),
+        retryAttemptWarnThreshold = 100,
+        retryAttemptErrorThreshold = 200,
+        uncommittedWarnTreshold = 100,
+        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+        consumerFactory = commit =>
+          _ =>
+            Future.successful(
+              Future.successful(
+                FutureQueueConsumer(
+                  rejectingFutureQueue(commit),
+                  lastConsumedIdx.get(),
+                )
+              )
+            ),
+      )
+
+      recoveringQueue.healthStatus shouldBe (HealthStatus.healthy)
+      recoveringQueue.offer(1).futureValue
+      recoveringQueue.healthStatus shouldBe (HealthStatus.healthy)
+      recoveringQueue.offer(2).discard
+      recoveringQueue.offer(3).discard
+      recoveringQueue.offer(5).futureValue
+      eventually() {
+        recoveringQueue.healthStatus shouldBe (HealthStatus.unhealthy)
+      }
+      shouldBreakOn5 = false
+      eventually() {
+        recoveringQueue.healthStatus shouldBe (HealthStatus.healthy)
+      }
+      recoveringQueue.shutdown()
+    }
+
+    "report unhealthy status intil indexer is initialized" in {
+      val indexerReady = Promise[Done]()
+      val indexerFinished = Promise[Done]()
+
+      val mockIndexer = mock[FutureQueue[(Long, Int)]]
+      when(mockIndexer.done).thenReturn(indexerFinished.future)
+
+      val mockIndexerFactory
+          : (Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[Int]]]) = _ =>
+        _ => indexerReady.future.map(_ => Future.successful(FutureQueueConsumer(mockIndexer, 0)))
+
+      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+        maxBlockedOffer = 1,
+        bufferSize = 20,
+        loggerFactory = loggerFactory,
+        retryStategy = PekkoUtil.exponentialRetryWithCap(
+          minWait = 2,
+          multiplier = 2,
+          cap = 10,
+        ),
+        retryAttemptWarnThreshold = 100,
+        retryAttemptErrorThreshold = 200,
+        uncommittedWarnTreshold = 100,
+        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+        consumerFactory = mockIndexerFactory,
+      )
+
+      always(durationOfSuccess = 100.millis) {
+        recoveringQueue.healthStatus shouldBe (HealthStatus.unhealthy)
+      }
+
+      indexerReady.success(Done)
+      eventually() {
+        recoveringQueue.healthStatus shouldBe (HealthStatus.healthy)
+      }
+      recoveringQueue.shutdown()
+    }
+
+    "report unhealthy when indexer initialization fails" in {
+      loggerFactory.suppressWarnings {
+        val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+          maxBlockedOffer = 1,
+          bufferSize = 20,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(
+            minWait = 2,
+            multiplier = 2,
+            cap = 10,
+          ),
+          retryAttemptWarnThreshold = 100,
+          retryAttemptErrorThreshold = 200,
+          uncommittedWarnTreshold = 100,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = _ => _ => Future.failed(new Exception("initialization failed")),
+        )
+
+        always(durationOfSuccess = 100.millis) {
+          recoveringQueue.healthStatus shouldBe (HealthStatus.unhealthy)
+        }
+        recoveringQueue.shutdown()
+      }
+    }
+
+    "report unhealthy when indexer restart fails" in {
+      val indexerFailed = Promise[Done]()
+
+      def simpleFutureQueue(commit: Commit) = new FutureQueue[(Long, Int)] {
+        override def shutdown(): Unit = throw new NotImplementedError()
+        override def done: Future[Done] = indexerFailed.future
+        override def offer(elem: (Long, Int)): Future[Done] = Future {
+          commit(elem._1)
+          Done
+        }
+      }
+
+      val mockIndexerFactory =
+        mock[Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[Int]]]]
+
+      when(mockIndexerFactory.apply(any[Commit]))
+        .thenAnswer((c: Commit) =>
+          _ =>
+            Future.successful(
+              Future.successful(
+                FutureQueueConsumer(simpleFutureQueue(c), 0)
+              )
+            )
+        )
+        .andThen(_ => Future.failed(new Exception("Initialization failed")))
+
+      loggerFactory.suppressWarnings {
+
+        val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+          maxBlockedOffer = 1,
+          bufferSize = 20,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(
+            minWait = 2,
+            multiplier = 2,
+            cap = 10,
+          ),
+          retryAttemptWarnThreshold = 100,
+          retryAttemptErrorThreshold = 200,
+          uncommittedWarnTreshold = 100,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = mockIndexerFactory,
+        )
+
+        eventually() {
+          recoveringQueue.healthStatus shouldBe (HealthStatus.healthy)
+        }
+        recoveringQueue.offer(1).futureValue
+        recoveringQueue.healthStatus shouldBe (HealthStatus.healthy)
+        indexerFailed.failure(new Exception("Indexer failed"))
+        eventuallyForever(durationOfSuccess = 100.millis) {
+          recoveringQueue.healthStatus shouldBe (HealthStatus.unhealthy)
+        }
+        recoveringQueue.shutdown()
+      }
+    }
+
+    "report unhealthly when shutdown was requested" in {
+      val futureQueueMock = mock[FutureQueue[(Long, Int)]]
+      val futureQueueDone = Promise[Done]()
+
+      when(futureQueueMock.done).thenReturn(futureQueueDone.future)
+
+      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+        maxBlockedOffer = 1,
+        bufferSize = 20,
+        loggerFactory = loggerFactory,
+        retryStategy = PekkoUtil.exponentialRetryWithCap(
+          minWait = 2,
+          multiplier = 2,
+          cap = 10,
+        ),
+        retryAttemptWarnThreshold = 100,
+        retryAttemptErrorThreshold = 200,
+        uncommittedWarnTreshold = 100,
+        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+        consumerFactory = _ =>
+          _ =>
+            Future.successful(
+              Future.successful(
+                FutureQueueConsumer[Int](
+                  futureQueueMock,
+                  0,
+                )
+              )
+            ),
+      )
+
+      eventually() {
+        recoveringQueue.healthStatus shouldBe HealthStatus.healthy
+      }
+
+      recoveringQueue.shutdown()
+
+      eventually(retryOnTestFailuresOnly = false) { // Retry on mockito verify fail as well
+        recoveringQueue.healthStatus shouldBe HealthStatus.unhealthy // Should be unhealthy before indexer closed
+        verify(futureQueueMock).shutdown()
+      }
+
+      futureQueueDone.success(Done)
+      always(durationOfSuccess = 200.millis) {
+        recoveringQueue.healthStatus shouldBe HealthStatus.unhealthy // Still unhealthy after indexer closed
+      }
+    }
+
+    "report unhealthly when update was committed while shutdown in progress" in {
+      val futureQueueDone = Promise[Done]()
+      val commitPromise = Promise[Done]()
+
+      def delayedFutureQueue(commit: Commit) = new FutureQueue[(Long, Int)] {
+        override def shutdown(): Unit = () // Noop, in the test we are triggering stop externally
+
+        override def done: Future[Done] = futureQueueDone.future
+
+        override def offer(elem: (Long, Int)): Future[Done] = commitPromise.future.map { _ =>
+          commit(elem._1)
+          Done
+        }
+      }
+
+      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+        maxBlockedOffer = 1,
+        bufferSize = 20,
+        loggerFactory = loggerFactory,
+        retryStategy = PekkoUtil.exponentialRetryWithCap(
+          minWait = 2,
+          multiplier = 2,
+          cap = 10,
+        ),
+        retryAttemptWarnThreshold = 100,
+        retryAttemptErrorThreshold = 200,
+        uncommittedWarnTreshold = 100,
+        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+        consumerFactory = commit =>
+          _ =>
+            Future.successful(
+              Future.successful(
+                FutureQueueConsumer(
+                  delayedFutureQueue(commit),
+                  0,
+                )
+              )
+            ),
+      )
+
+      eventually() {
+        recoveringQueue.healthStatus shouldBe HealthStatus.healthy
+      }
+
+      recoveringQueue.offer(1).discard
+
+      recoveringQueue.shutdown()
+      eventually() {
+        recoveringQueue.healthStatus shouldBe HealthStatus.unhealthy
+      }
+
+      commitPromise.success(Done)
+
+      always(durationOfSuccess = 200.millis) {
+        recoveringQueue.healthStatus shouldBe HealthStatus.unhealthy
+      }
+
+      futureQueueDone.success(Done)
     }
   }
 

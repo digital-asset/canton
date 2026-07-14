@@ -1808,13 +1808,14 @@ class OutputModuleTest
       blockSubscription: BlockSubscription = new EmptyBlockSubscription
   ): OutputModule[E] = {
     val thisNode = BftNodeId("node1")
+    val config = new BftBlockOrdererConfig()
     val constructedLeaderSelectionInitializer =
       leaderSelectionInitializer.getOrElse(
         LeaderSelectionInitializer.create(
           thisNode,
           testedProtocolVersion,
           store,
-          timeouts,
+          config.initQueryTimeout,
           error => _ => fail(error),
           SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
           loggerFactory,
@@ -1841,7 +1842,6 @@ class OutputModuleTest
         initialLowerBound = None,
         leaderSelectionPolicy,
       )
-    val config = new BftBlockOrdererConfig()
     new OutputModule(
       startupState,
       orderingTopologyProvider,

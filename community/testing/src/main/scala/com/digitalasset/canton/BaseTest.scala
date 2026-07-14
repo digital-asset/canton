@@ -645,11 +645,13 @@ object BaseTest {
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer
 
-  def testedPartiesKind(hashingSchemeVersion: HashingSchemeVersion): PartyKind = sys.env
-    .get("CANTON_TEST_EXTERNAL_PARTIES")
-    .filter(_ == "true")
-    .map[PartyKind](_ => PartyKind.External(hashingSchemeVersion))
-    .getOrElse[PartyKind](PartyKind.Local)
+  /** True when the test run is configured for external parties. */
+  val cantonTestExternalParties: Boolean =
+    sys.env.get("CANTON_TEST_EXTERNAL_PARTIES").contains("true")
+
+  def testedPartiesKind(hashingSchemeVersion: HashingSchemeVersion): PartyKind =
+    if (cantonTestExternalParties) PartyKind.External(hashingSchemeVersion)
+    else PartyKind.Local
 
   lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
     ProtocolVersionValidation(testedProtocolVersion)

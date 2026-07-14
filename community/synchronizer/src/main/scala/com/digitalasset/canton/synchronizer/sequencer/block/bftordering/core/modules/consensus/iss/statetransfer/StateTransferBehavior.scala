@@ -25,6 +25,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochNumber,
+  WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
@@ -50,7 +51,8 @@ import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
-import scala.util.{Failure, Random, Success}
+import java.util.UUID
+import scala.util.{Failure, Success}
 
 /** A state transfer behavior for [[IssConsensusModule]]. There are 2 types of state transfer:
   * onboarding (for new nodes) and catch-up (for lagging-behind nodes). These two types work
@@ -92,7 +94,6 @@ final class StateTransferBehavior[E <: Env[E]](
     clock: Clock,
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
-    random: Random,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
@@ -121,12 +122,14 @@ final class StateTransferBehavior[E <: Env[E]](
       ),
     )
 
+  @VisibleForTesting
+  private[iss] val workflowId = WorkflowId(s"StateTransferBehavior-$thisNode-${UUID.randomUUID()}")
   private val stateTransferManager = maybeCustomStateTransferManager.getOrElse(
     new StateTransferManager(
       thisNode,
       dependencies,
       epochStore,
-      random,
+      workflowId,
       metrics,
       loggerFactory,
     )()
@@ -145,8 +148,10 @@ final class StateTransferBehavior[E <: Env[E]](
   private[iss] var maybeLastReceivedEpochTopology: Option[Consensus.NewEpochTopology[E]] =
     None
 
-  override def ready(self: ModuleRef[Consensus.Message[E]]): Unit =
-    self.asyncSendNoTrace(Consensus.Init.KickOff)
+  override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
+      traceContext: TraceContext
+  ): Unit =
+    self.asyncSend(Consensus.Init.KickOff)
 
   override protected def receiveInternal(
       message: Consensus.Message[E]
@@ -200,7 +205,7 @@ final class StateTransferBehavior[E <: Env[E]](
         val newEpochNumber = newEpochTopologyMessage.epochNumber
 
         if (newEpochNumber == currentEpochNumber + 1) {
-          stateTransferManager.cancelTimeoutForEpoch(currentEpochNumber)
+          stateTransferManager.emitEpochTransferLatency(currentEpochNumber)
           maybeLastReceivedEpochTopology = Some(newEpochTopologyMessage)
 
           // Update the active topology in Availability as well to use the most recently available topology
@@ -254,6 +259,7 @@ final class StateTransferBehavior[E <: Env[E]](
           newEpochInfo.number,
           membership,
           initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
+          nodeThatTimedOut = None,
         )(abort)
 
       case Consensus.Admin.GetOrderingTopology(callback) =>
@@ -362,7 +368,6 @@ final class StateTransferBehavior[E <: Env[E]](
 
       case StateTransferMessageResult.NothingToStateTransfer(from) =>
         val currentEpochNumber = epochState.epoch.info.number
-        stateTransferManager.cancelTimeoutForEpoch(currentEpochNumber)
         maybeLastReceivedEpochTopology match {
           // Transition back to consensus only if we transferred at least up to the minimum end epoch (if it's defined).
           case Some(newEpochTopologyMessage)
@@ -370,16 +375,19 @@ final class StateTransferBehavior[E <: Env[E]](
             logger.info(
               s"$messageType: nothing to state transfer for epoch $currentEpochNumber from '$from', completing state transfer"
             )
+            stateTransferManager.cancelTimeoutForEpoch(currentEpochNumber)
             transitionBackToConsensus(newEpochTopologyMessage)
           case _ =>
             logger.info(
               s"$messageType: nothing to state transfer from '$from', while there should be at least one epoch to transfer; " +
                 s"likely reached out to a lagging-behind or malicious node, state-transferring epoch $currentEpochNumber again"
             )
+            stateTransferManager.cancelTimeoutForEpoch(currentEpochNumber)
             stateTransferManager.stateTransferNewEpoch(
               currentEpochNumber,
               activeTopologyInfo.currentMembership,
               initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
+              nodeThatTimedOut = Some(from),
             )(abort)
         }
     }
@@ -479,29 +487,30 @@ final class StateTransferBehavior[E <: Env[E]](
         latestCompletedEpoch,
         sequencerSnapshotAdditionalInfo = None,
       )
-    val consensusBehavior =
-      new IssConsensusModule[E](
-        consensusInitialState,
-        epochStore,
-        clock,
+    val consensusBehavior = new IssConsensusModule[E](
+      consensusInitialState,
+      epochStore,
+      clock,
+      metrics,
+      segmentModuleRefFactory,
+      new RetransmissionsManager[E](
+        thisNode,
+        dependencies.p2pNetworkOut,
+        abort,
+        previousEpochsCommitCerts = Map.empty,
         metrics,
-        segmentModuleRefFactory,
-        new RetransmissionsManager[E](
-          thisNode,
-          dependencies.p2pNetworkOut,
-          abort,
-          previousEpochsCommitCerts = Map.empty,
-          metrics,
-          clock,
-          loggerFactory,
-        ),
-        random,
-        dependencies,
+        clock,
         loggerFactory,
-        timeouts,
-        futurePbftMessageQueue = initialState.pbftMessageQueue,
-        postponedConsensusMessageQueue = Some(postponedConsensusMessages),
-      )()(catchupDetector)
+      ),
+      dependencies,
+      loggerFactory,
+      timeouts,
+      futurePbftMessageQueue = initialState.pbftMessageQueue,
+      postponedConsensusMessageQueue = Some(postponedConsensusMessages),
+    )(initTraceContext = traceContext)(catchupDetector)
+
+    // Clear workflow blacklist info
+    dependencies.p2pNetworkOut.asyncSend(P2PNetworkOut.EndWorkflow(workflowId))
 
     context.become(consensusBehavior)
 

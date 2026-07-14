@@ -118,6 +118,7 @@ class LedgerApiServer(
     cantonParameterConfig: ParticipantNodeParameters,
     testingTimeService: Option[TimeServiceBackend],
     adminTokenDispenser: CantonAdminTokenDispenser,
+    teaTokenDispenserO: Option[CantonAdminTokenDispenser],
     participantContractStore: Eval[LedgerApiContractStore],
     enableCommandInspection: Boolean,
     tracerProvider: TracerProvider,
@@ -174,6 +175,7 @@ class LedgerApiServer(
             adminTokenConfig,
           )
         ) ++
+          teaTokenDispenserO.map(new TeaTokenAuthService(_)).toList ++
           serverConfig.authServices.map(
             _.create(
               serverConfig.jwksCacheConfig,
@@ -424,7 +426,7 @@ class LedgerApiServer(
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
-        trafficEnforcementBackendO = trafficEnforcementBackendO.map(_.value),
+        trafficEnforcementBackendO = trafficEnforcementBackendO,
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
@@ -564,6 +566,7 @@ class LedgerApiServer(
           loggerFactory,
           authInterceptor,
           packagePreferenceBackend = packagePreferenceBackend,
+          trafficEnforcementEnabled = trafficEnforcementBackendO.isDefined,
           apiLoggingConfig,
         )(
           jsonApiMetrics
@@ -575,6 +578,7 @@ object LedgerApiServer {
   def initialize(
       adminParty: Party,
       adminTokenDispenser: CantonAdminTokenDispenser,
+      teaTokenDispenserO: Option[CantonAdminTokenDispenser],
       commandProgressTracker: CommandProgressTracker,
       config: ParticipantNodeConfig,
       httpApiMetrics: HttpApiMetrics,
@@ -624,6 +628,7 @@ object LedgerApiServer {
       cantonParameterConfig = parameters,
       testingTimeService = ledgerTestingTimeService,
       adminTokenDispenser = adminTokenDispenser,
+      teaTokenDispenserO = teaTokenDispenserO,
       participantContractStore = participantNodePersistentState.map(state =>
         LedgerApiContractStoreImpl(state.contractStore, loggerFactory, metrics)
       ),

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap
@@ -26,7 +26,7 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
     thisNode: BftNodeId,
     protocolVersion: ProtocolVersion,
     store: OutputMetadataStore[E],
-    timeouts: ProcessingTimeout,
+    initQueryTimeout: config.NonNegativeFiniteDuration,
     failBootstrap: String => TraceContext => Nothing,
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
@@ -132,8 +132,7 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
     logger.debug(description)
     moduleSystem.rootActorContext.blockingAwait(
       future,
-      timeouts.default.asFiniteApproximation,
+      initQueryTimeout.underlying,
     )
   }
-
 }

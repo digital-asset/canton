@@ -33,10 +33,9 @@ trait SynchronizerConnectivityStatusStoreTest extends FailOnShutdown {
         for {
           _ <- store.setParameters(params)
           last <- store.lastParameters
-          initialized <- store.isTopologyInitialized()
         } yield {
           last shouldBe Some(params)
-          initialized shouldBe false
+          store.isTopologyInitialized shouldBe false
         }
       }
 
@@ -92,16 +91,14 @@ trait SynchronizerConnectivityStatusStoreTest extends FailOnShutdown {
         val params = defaultStaticSynchronizerParameters
         for {
           _ <- store.setParameters(params)
-          initialized1 <- store.isTopologyInitialized()
-          _ = initialized1 shouldBe false
+          _ = store.isTopologyInitialized shouldBe false
 
           _ <- store.setTopologyInitialized()
-          initialized2 <- store.isTopologyInitialized()
-          _ = initialized2 shouldBe true
+          _ = store.isTopologyInitialized shouldBe true
 
           _ <- store.setParameters(params)
-          initialized3 <- store.isTopologyInitialized()
-        } yield initialized3 shouldBe true
+          _ = store.isTopologyInitialized shouldBe true
+        } yield succeed
       }
     }
   }

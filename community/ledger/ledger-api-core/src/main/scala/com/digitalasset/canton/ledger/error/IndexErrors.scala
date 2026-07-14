@@ -53,6 +53,27 @@ object IndexErrors extends IndexErrorGroup {
             throwableO = Some(throwable),
           )
     }
+
+    @Explanation(
+      "This error occurs if a network timeout happens during the execution of a query against the index database."
+    )
+    @Resolution(
+      "Try increasing the network timeout value in indexer or ledger-api configuration " +
+        "(indexer.postgres_data_source.network_timeout or ledger-api.postgres_data_source.network_timeout)."
+    )
+    object SqlNetworkTimeoutError
+        extends ErrorCode(
+          id = "INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR",
+          ErrorCategory.SystemInternalAssumptionViolated,
+        ) {
+      final case class Reject(throwable: Throwable)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends DbError(
+            cause =
+              s"Processing the request failed due to a network timeout database error: ${throwable.getMessage}",
+            throwableO = Some(throwable),
+          )
+    }
   }
 
   // Decorator that returns a specialized StatusRuntimeException (IndexDbException)

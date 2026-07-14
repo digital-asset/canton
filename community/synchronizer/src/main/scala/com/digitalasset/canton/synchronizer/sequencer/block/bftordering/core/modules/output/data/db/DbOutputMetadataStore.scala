@@ -251,7 +251,7 @@ class DbOutputMetadataStore(
             bft_ts
           from ord_metadata_output_blocks
           where bft_ts <= $timestamp
-          order by block_number desc
+          order by bft_ts desc
           limit 1
           """.as[OutputBlockMetadata]
     val future = () => storage.query(query, functionFullName).map(_.headOption)

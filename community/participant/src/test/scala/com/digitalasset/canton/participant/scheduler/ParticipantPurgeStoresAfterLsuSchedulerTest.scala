@@ -108,7 +108,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       val purgeableStoresComputation = mock[PostLsuPurgeableStoresComputation]
 
       when(purgeableStoresComputation.compute()(any[TraceContext]))
-        .thenReturn(FutureUnlessShutdown.pure(Seq(store1, store2)))
+        .thenReturn(Seq(store1, store2))
 
       val scheduler = new ParticipantPurgeStoresAfterLsuScheduler(
         schedule = Some(schedule),
