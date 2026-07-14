@@ -39,13 +39,26 @@ class ExtensionServiceExternalCallHandler(
       .map(_.left.map { extensionError =>
         // Surfaces to the submitting ledger API client in the command rejection, wrapped by the
         // engine's "External call execution failed (extensionId=..., functionId=...)" rendering,
-        // and is not distributed to other nodes on this path -- so the whole error is forwarded.
-        // The message-content limits documented on ExtensionCallError keep it client-safe.
-        ResultNeedExternalCall.Error(extensionError.toString)
+        // and is not distributed to other nodes on this path. Errors carrying actionable
+        // feedback are forwarded whole; communication problems between the participant and the
+        // extension service surface only generically, since the client cannot act on their
+        // details. The full error is always logged by ExtensionServiceManager.
+        val clientMessage =
+          if (extensionError.clientActionable) extensionError.toString
+          else ExtensionServiceExternalCallHandler.genericClientMessage(extensionError)
+        ResultNeedExternalCall.Error(clientMessage)
       })
 }
 
 object ExtensionServiceExternalCallHandler {
+
+  /** The client-facing rendering for errors that are not actionable for the client: only the retry
+    * status and the request id (for correlation with the participant's log) are exposed.
+    */
+  private[extension] def genericClientMessage(error: ExtensionCallError): String = {
+    val requestId = error.requestId.fold("")(id => s", request id = '$id'")
+    s"External call failed (retryable = ${error.retryable}$requestId)"
+  }
 
   /** Create an ExternalCallHandler from an optional ExtensionServiceManager.
     *

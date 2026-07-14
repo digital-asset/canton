@@ -10,18 +10,25 @@ import com.digitalasset.canton.tracing.TraceContext
 
 /** Error information from external call failures.
   *
-  * `message` must stay client-safe: fixed descriptions, identifiers, and non-sensitive operational
-  * limits only -- never extension-service response bodies or credentials. The submission path
-  * forwards the whole error to the submitting ledger API client in the command rejection, so
-  * anything placed here becomes client-visible. (The Phase-3 validation path reduces the error to
-  * status code and request id before it reaches confirmation responses.)
+  * `clientActionable` marks errors whose message is actionable feedback for the submitting ledger
+  * API client (unknown extension, oversized response, invalid header value): the submission path
+  * forwards their full rendering in the command rejection. All other errors concern the
+  * communication between the participant and the extension service, and the client receives only a
+  * generic message with the retry status. The full error is always logged by
+  * [[ExtensionServiceManager.handleExternalCall]]. `message` must stay client-safe regardless:
+  * fixed descriptions, identifiers, and non-sensitive operational limits only -- never
+  * extension-service response bodies or credentials. (The Phase-3 validation path reduces every
+  * error to status code and request id before it reaches confirmation responses.)
   */
 final case class ExtensionCallError(
     statusCode: Int,
     message: String,
     requestId: Option[String],
     retryable: Boolean,
+    clientActionable: Boolean,
 ) extends PrettyPrinting {
+  // `clientActionable` is deliberately not rendered: the rendering doubles as the client-facing
+  // payload for actionable errors, and the flag is control metadata rather than error content.
   override protected def pretty: Pretty[ExtensionCallError] = prettyOfClass(
     param("status code", _.statusCode),
     param("message", _.message.doubleQuoted),

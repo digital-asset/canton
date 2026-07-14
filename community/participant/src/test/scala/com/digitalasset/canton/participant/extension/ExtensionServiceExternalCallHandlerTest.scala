@@ -4,7 +4,9 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.platform.execution.ExternalCallMode
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -66,7 +68,7 @@ class ExtensionServiceExternalCallHandlerTest
 
   "ExtensionServiceExternalCallHandler" should {
 
-    "forward the full error to the engine for the submitting client" in {
+    "forward the full client-actionable error to the engine for the submitting client" in {
       val manager = emptyManager
       val handler = new ExtensionServiceExternalCallHandler(manager)
 
@@ -98,15 +100,91 @@ class ExtensionServiceExternalCallHandlerTest
 
   }
 
+  "ExtensionServiceExternalCallHandler" when {
+    "the error is not actionable for the client" should {
+      "reduce it to the generic client message" in {
+        val manager: ExtensionServiceManager =
+          new ExtensionServiceManager(Map.empty, loggerFactory, ProcessingTimeout()) {
+            override def handleExternalCall(
+                extensionId: String,
+                functionId: String,
+                configHash: String,
+                input: String,
+                mode: ExternalCallMode,
+            )(implicit
+                tc: TraceContext
+            ): FutureUnlessShutdown[Either[ExtensionCallError, String]] =
+              FutureUnlessShutdown.pure(
+                Left(
+                  ExtensionCallError(
+                    statusCode = 503,
+                    message = "Connection failed",
+                    requestId = Some("req-1"),
+                    retryable = true,
+                    clientActionable = false,
+                  )
+                )
+              )
+          }
+        val handler = new ExtensionServiceExternalCallHandler(manager)
+
+        try {
+          val error = handler
+            .handleExternalCall(
+              "some-ext",
+              "some-func",
+              "00000000",
+              "deadbeef",
+              ExternalCallMode.Submission,
+            )
+            .failOnShutdown
+            .futureValue
+            .left
+            .value
+          error.message shouldBe "External call failed (retryable = true, request id = 'req-1')"
+        } finally manager.close()
+      }
+    }
+  }
+
+  "ExtensionServiceExternalCallHandler.genericClientMessage" should {
+    "expose only the retry status and the request id" in {
+      ExtensionServiceExternalCallHandler.genericClientMessage(
+        ExtensionCallError(
+          statusCode = 503,
+          message = "Connection failed",
+          requestId = Some("req-1"),
+          retryable = true,
+          clientActionable = false,
+        )
+      ) shouldBe "External call failed (retryable = true, request id = 'req-1')"
+    }
+
+    "omit the request id when absent" in {
+      ExtensionServiceExternalCallHandler.genericClientMessage(
+        ExtensionCallError(
+          statusCode = 500,
+          message = "Unexpected error",
+          requestId = None,
+          retryable = false,
+          clientActionable = false,
+        )
+      ) shouldBe "External call failed (retryable = false)"
+    }
+  }
+
   "ExtensionCallError" should {
     // The full-error log interpolates `$error`, so its rendering (via PrettyPrinting) must cover
-    // every field -- in particular the optional request id, which the 404 cases above omit.
-    "render all fields, including the request id, via pretty-printing" in {
+    // every client-relevant field -- in particular the optional request id, which the 404 cases
+    // above omit. `clientActionable` is deliberately not rendered: it is control metadata, and
+    // the rendering doubles as the client payload for actionable errors.
+    "render the client-relevant fields, including the request id, via pretty-printing" in {
       ExtensionCallError(
         statusCode = 503,
         message = "boom",
         requestId = Some("req-1"),
         retryable = true,
+        clientActionable = false,
       ).toString shouldBe
         "ExtensionCallError(status code = 503, message = \"boom\", request id = 'req-1', retryable = true)"
     }

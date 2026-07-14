@@ -105,6 +105,7 @@ class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseT
               message = "internal detail",
               requestId = Some("request-1"),
               retryable = true,
+              clientActionable = false,
             )
           )
         )

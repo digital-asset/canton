@@ -125,6 +125,7 @@ class ExtensionServiceManager(
               message = s"Extension '$extensionId' not configured",
               requestId = None,
               retryable = false,
+              clientActionable = true,
             )
           )
         )

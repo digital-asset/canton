@@ -280,6 +280,7 @@ class HttpExtensionServiceClient(
               s"Invalid external-call HTTP header value for $headerName",
               Some(requestId),
               retryable = false,
+              clientActionable = true,
             )
           )
         )
@@ -307,6 +308,7 @@ class HttpExtensionServiceClient(
                     s"Invalid extension service authentication configuration: $error",
                     Some(requestId),
                     retryable = false,
+                    clientActionable = false,
                   )
                 )
               )
@@ -397,30 +399,55 @@ class HttpExtensionServiceClient(
           s"External call response body exceeded maximum size of ${tooLarge.maxResponseBodyBytes} bytes",
           Some(requestId),
           retryable = false,
+          clientActionable = true,
         )
 
       case timeout: java.net.http.HttpTimeoutException =>
         logger.warn(s"External call to extension '$extensionId' timed out: requestId=$requestId")
-        ExtensionCallError(408, "Request timeout", Some(requestId), retryable = true)
+        ExtensionCallError(
+          408,
+          "Request timeout",
+          Some(requestId),
+          retryable = true,
+          clientActionable = false,
+        )
 
       case connect: java.net.ConnectException =>
         logger.warn(
           s"External call to extension '$extensionId' connection failed: requestId=$requestId"
         )
-        ExtensionCallError(503, "Connection failed", Some(requestId), retryable = true)
+        ExtensionCallError(
+          503,
+          "Connection failed",
+          Some(requestId),
+          retryable = true,
+          clientActionable = false,
+        )
 
       case io: java.io.IOException =>
         logger.warn(
           s"External call to extension '$extensionId' I/O error: requestId=$requestId"
         )
-        ExtensionCallError(503, "I/O error", Some(requestId), retryable = true)
+        ExtensionCallError(
+          503,
+          "I/O error",
+          Some(requestId),
+          retryable = true,
+          clientActionable = false,
+        )
 
       case other =>
         logger.error(
           s"External call to extension '$extensionId' unexpected error: requestId=$requestId",
           other,
         )
-        ExtensionCallError(500, "Unexpected error", Some(requestId), retryable = false)
+        ExtensionCallError(
+          500,
+          "Unexpected error",
+          Some(requestId),
+          retryable = false,
+          clientActionable = false,
+        )
     }
 
   private def errorFromStatus(
@@ -434,6 +461,7 @@ class HttpExtensionServiceClient(
       defaultMessage,
       Some(requestId),
       retryable = HttpExtensionServiceClient.isRetryableHttpStatus(resp.statusCode()),
+      clientActionable = false,
     )
   }
 
