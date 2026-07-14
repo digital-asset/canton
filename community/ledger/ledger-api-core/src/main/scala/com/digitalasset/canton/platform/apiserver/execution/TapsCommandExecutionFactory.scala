@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.api.{Commands, PackageReference}
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerState, SyncService}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,

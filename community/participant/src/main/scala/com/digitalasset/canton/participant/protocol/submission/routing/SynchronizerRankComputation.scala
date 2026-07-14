@@ -6,12 +6,13 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.{Chain, EitherT}
 import cats.implicits.catsSyntaxAlternativeSeparate
 import cats.syntax.bifunctor.*
-import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.data.ReassignmentRef
 import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerState, SynchronizerRank}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.reassignment.{
   ReassigningParticipantsComputation,
@@ -47,8 +48,9 @@ private[routing] class SynchronizerRankComputation(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerRank] =
     EitherT(
-      synchronizerIds.forgetNE.toList
-        .parTraverse(targetSynchronizer =>
+      // Avoid nesting asynchronous computation, `compute` uses a parallel traverse over `contracts`
+      MonadUtil
+        .sequentialTraverse(synchronizerIds)(targetSynchronizer =>
           compute(contracts, Target(targetSynchronizer), readers, synchronizerState)
             .leftMap(targetSynchronizer -> _)
             .value
@@ -90,7 +92,7 @@ private[routing] class SynchronizerRankComputation(
     val reassignmentsET
         : EitherT[FutureUnlessShutdown, TransactionRoutingError, Chain[SingleReassignment]] =
       MonadUtil
-        .sequentialTraverse(contracts) { c =>
+        .parTraverseWithLimit(Threading.detectNumberOfThreads(noTracingLogger))(contracts) { c =>
           val contractAssignation = c.synchronizerId
 
           if (contractAssignation == targetSynchronizer.unwrap) {

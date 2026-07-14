@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.api.messages.command.completion.Completion
 import com.digitalasset.canton.ledger.api.validation.CompletionServiceRequestValidator.GetCompletionsStreamRequest
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.daml.lf.data.Ref
+import com.google.protobuf.ByteString
 import io.grpc.Status.Code.*
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AnyWordSpec
@@ -221,6 +222,26 @@ class CompletionServiceRequestValidatorTest
           )
         ) { case Right(req) =>
           req.offset shouldBe None
+        }
+      }
+    }
+
+    "validating the transaction hash for GetCompletionByHash" should {
+
+      "reject an empty hash" in {
+        requestMustFailWith(
+          request = validator.validateCompletionByHash(ByteString.EMPTY),
+          code = INVALID_ARGUMENT,
+          description =
+            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: Missing field: transaction_hash",
+          metadata = Map.empty,
+        )
+      }
+
+      "accept a non-empty hash" in {
+        val hash = ByteString.copyFrom(Array.fill(32)(1.toByte))
+        inside(validator.validateCompletionByHash(hash)) { case Right(result) =>
+          result shouldBe hash
         }
       }
     }

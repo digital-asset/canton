@@ -11,7 +11,8 @@ package object lifecycle {
     * @see
     *   FutureUnlessShutdownSig.Ops for extension methods on the abstract type
     */
-  type FutureUnlessShutdown[+A] = FutureUnlessShutdownImpl.Instance.FutureUnlessShutdown[A]
+  type FutureUnlessShutdown[+A] =
+    FutureUnlessShutdownImpl.FutureUnlessShutdownInstance.FutureUnlessShutdown[A]
 
   /** A wrapper for [[scala.concurrent.Promise]] with [[UnlessShutdown]] with convenience methods
     * that hide the [[UnlessShutdown]] type parameter.

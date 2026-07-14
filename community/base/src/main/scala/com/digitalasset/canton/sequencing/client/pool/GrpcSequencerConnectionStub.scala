@@ -13,6 +13,7 @@ import com.digitalasset.canton.connection.v30
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc.ApiInfoServiceStub
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters

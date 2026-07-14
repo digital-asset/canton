@@ -19,7 +19,7 @@ import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogg
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.{ReassignmentCommand, SubmissionSyncService}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.TimerAndTrackOnShutdownSyntax
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.{TimerAndTrackOnShutdownSyntax, *}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{

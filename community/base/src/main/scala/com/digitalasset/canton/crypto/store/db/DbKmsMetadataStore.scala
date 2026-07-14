@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.store.KmsMetadataStore
 import com.digitalasset.canton.crypto.store.KmsMetadataStore.KmsMetadata
 import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose, SigningKeyUsage}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.IdempotentInsert.insertVerifyingConflicts
 import com.digitalasset.canton.resource.{DbParameterUtils, DbStorage, DbStore}

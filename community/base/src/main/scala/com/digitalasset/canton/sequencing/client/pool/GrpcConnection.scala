@@ -9,6 +9,7 @@ import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.GrpcServiceInvocationMethod
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

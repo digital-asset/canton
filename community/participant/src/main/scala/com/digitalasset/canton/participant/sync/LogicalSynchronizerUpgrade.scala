@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.{
   SynchronizerPredecessor,
   SynchronizerSuccessor,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LifeCycleContainer

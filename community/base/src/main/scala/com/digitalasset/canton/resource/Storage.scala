@@ -5,7 +5,6 @@ package com.digitalasset.canton.resource
 
 import cats.data.{Chain, EitherT, OptionT}
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.{Eval, Functor, Monad}
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.*
@@ -18,6 +17,7 @@ import com.digitalasset.canton.health.{
   CloseableHealthComponent,
   ComponentHealthState,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, *}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{

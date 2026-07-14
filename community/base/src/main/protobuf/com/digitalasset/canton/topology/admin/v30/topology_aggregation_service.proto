@@ -52,6 +52,11 @@ service TopologyAggregationService {
   rpc ListKeyOwners(ListKeyOwnersRequest) returns (ListKeyOwnersResponse);
 }
 
+message BaseAggregationRequest {
+  // The canton version of the client issuing the request, e.g. "3.5.0-rc3"
+  string client_version = 1;
+}
+
 message ListPartiesRequest {
   google.protobuf.Timestamp as_of = 1;
   int32 limit = 2;
@@ -93,13 +98,16 @@ message ListKeyOwnersRequest {
   repeated string synchronizer_ids = 3;
   string filter_key_owner_type = 4;
   string filter_key_owner_uid = 5;
+  optional BaseAggregationRequest base_aggregation_request = 6;
 }
 
 message ListKeyOwnersResponse {
   message Result {
     string synchronizer_id = 1;
     string key_owner = 2;
-    repeated com.digitalasset.canton.crypto.v30.SigningPublicKey signing_keys = 3;
+    // signing_keys_v30 will only be set if the client_version in the request indicates
+    // that v31 signing keys are not supported
+    repeated com.digitalasset.canton.crypto.v30.SigningPublicKey signing_keys_v30 = 3;
     repeated com.digitalasset.canton.crypto.v30.EncryptionPublicKey encryption_keys = 4;
     string physical_synchronizer_id = 5;
   }

@@ -10,6 +10,7 @@ import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.crypto.{Encrypted, SymmetricKey, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.{ProtocolSymmetricKey, StaticSynchronizerParameters}
 import com.digitalasset.canton.sequencing.channel.ConnectToSequencerChannelRequest
 import com.digitalasset.canton.sequencing.protocol.channel.{

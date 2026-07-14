@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.syntax.bifunctor.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.commitment.AcsDigestTrace
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.commitment.{AcsDigestTrace, Timepoint}
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{InternedPartyId, LedgerParticipantId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.ParticipantId
@@ -27,10 +28,17 @@ trait AcsDigestStore {
   /** Stores running digests per party and order as sparse journal for a given synchronizer */
   def party: DigestJournal[PartyAndOrder[InternedPartyId], RawDigest] = party_
   protected def party_ : AcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest]
+  @VisibleForTesting @inline
+  private[store] final def partyInternal
+      : AcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest] =
+    party_
 
   /** Stores running digests per counterparticipant as sparse journal for a given synchronizer */
   def participant: DigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] = participant_
   protected def participant_ : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)]
+  @VisibleForTesting @inline
+  private[store] final def participantInternal
+      : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] = participant_
 
   /** Inserts the given offset as a checkpoint.
     *
@@ -60,6 +68,10 @@ trait AcsDigestStore {
   protected def deleteCheckpointsAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
+  @VisibleForTesting @inline
+  private[store] final def deleteCheckpointsAfterInternal(fromExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = deleteCheckpointsAfter(fromExclusive)
 
   /** Deletes all checkpoints that are lower than `toExclusive`. Then deletes all digest entries in
     * [[party]] and [[participant]] whose offset is lower than `toExclusive` and that satisfies one
@@ -84,6 +96,10 @@ trait AcsDigestStore {
   protected def deleteCheckpointsUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
+  @VisibleForTesting @inline
+  private[store] final def deleteCheckpointsUpToInternal(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = deleteCheckpointsUpTo(toExclusive)
 
   final type Checkpoint = (Offset, CantonTimestamp)
 
@@ -124,9 +140,6 @@ object AcsDigestStore {
     * [[com.digitalasset.canton.data.Offset]] as part of an [[AcsDigestStore]].
     */
   trait DigestJournal[K, V] {
-
-    /** The synchronizer to which the digests belong to */
-    protected def indexedSynchronizer: IndexedSynchronizer
 
     /** Upserts new entries for the given keys, i.e., inserts new entries or updates existing rows.
       *
@@ -257,10 +270,35 @@ object AcsDigestStore {
       digestO: Option[V],
       trace: Option[AcsDigestTrace],
   ) {
+
+    /** Returns the timepoint of the ACS digest.
+      *
+      * We keep `offset` and `timestamp` as separate fields in this case class because this class
+      * serves as the DTO for storage and we do not want to omit `timestamp` from the `==` checks
+      * for DTOs.
+      */
+    def timepoint: Timepoint = Timepoint(offset)(timestamp)
+
     def map[L](f: K => L): AcsDigest[L, V] = copy(key = f(key))
+
+    def partitionMap[K1, K2](f: K => Either[K1, K2]): Either[AcsDigest[K1, V], AcsDigest[K2, V]] =
+      f(key).bimap(k1 => copy(key = k1), k2 => copy(key = k2))
+
+    def mapValue[W](f: V => W): AcsDigest[K, W] = copy(digestO = digestO.map(f))
   }
 
-  object AcsDigest {
+  trait AcsDigestCompanion {
+    def apply[K, V](
+        key: K,
+        timepoint: Timepoint,
+        digestO: Option[V],
+        trace: Option[AcsDigestTrace],
+    ): AcsDigest[K, V] = AcsDigest(key, timepoint.offset, timepoint.recordTime, digestO, trace)
+
+    def empty[K, V](key: K, timepoint: Timepoint): AcsDigest[K, V] =
+      AcsDigest(key, timepoint, None, None)
+  }
+  object AcsDigest extends AcsDigestCompanion {
     implicit def getAcsDigest[K: GetResult, V](implicit
         vO: GetResult[Option[V]]
     ): GetResult[AcsDigestStore.AcsDigest[K, V]] = GetResult { pr =>
@@ -282,9 +320,28 @@ object AcsDigestStore {
       replacesOffset: Option[Offset],
   ) {
     def map[L](f: K => L): AcsDigestUpdate[L, V] = copy(digestUpdate = digestUpdate.map(f))
+
+    def partitionMap[K1, K2](
+        f: K => Either[K1, K2]
+    ): Either[AcsDigestUpdate[K1, V], AcsDigestUpdate[K2, V]] =
+      digestUpdate
+        .partitionMap(f)
+        .bimap(d1 => copy(digestUpdate = d1), d2 => copy(digestUpdate = d2))
+
+    def mapValue[W](f: V => W): AcsDigestUpdate[K, W] =
+      copy(digestUpdate = digestUpdate.mapValue(f))
   }
 
-  object AcsDigestUpdate {
+  trait AcsDigestUpdateCompanion {
+    def apply[K, V](
+        digestUpdate: AcsDigest[K, V],
+        replacesOffset: Option[Offset],
+    ): AcsDigestUpdate[K, V] = new AcsDigestUpdate(digestUpdate, replacesOffset)
+
+    def empty[K, V](key: K, timepoint: Timepoint): AcsDigestUpdate[K, V] =
+      AcsDigestUpdate(AcsDigest.empty(key, timepoint), None)
+  }
+  object AcsDigestUpdate extends AcsDigestUpdateCompanion {
     implicit def getAcsDigestUpdate[K: GetResult, V](implicit
         vO: GetResult[Option[V]]
     ): GetResult[AcsDigestStore.AcsDigestUpdate[K, V]] = GetResult { pr =>
@@ -329,7 +386,7 @@ object AcsDigestStore {
   }
 
   type PartyAcsDigest[+Party] = AcsDigest[PartyAndOrder[Party], RawDigest]
-  object PartyAcsDigest {
+  object PartyAcsDigest extends AcsDigestCompanion {
     def internalize(
         stringInterning: StringInterning,
         pad: PartyAcsDigest[LfPartyId],
@@ -342,7 +399,7 @@ object AcsDigestStore {
   }
 
   type PartyAcsDigestUpdate[+Party] = AcsDigestUpdate[PartyAndOrder[Party], RawDigest]
-  object PartyAcsDigestUpdate {
+  object PartyAcsDigestUpdate extends AcsDigestUpdateCompanion {
     def internalize(
         stringInterning: StringInterning,
         pad: PartyAcsDigestUpdate[LfPartyId],
@@ -378,7 +435,7 @@ object AcsDigestStore {
   type InternedParticipantId = Int
 
   type ParticipantAcsDigest[+Participant] = AcsDigest[Participant, (RawDigest, HashedDigest)]
-  object ParticipantAcsDigest {
+  object ParticipantAcsDigest extends AcsDigestCompanion {
     def internalize(
         stringInterning: StringInterning,
         pad: ParticipantAcsDigest[ParticipantId],

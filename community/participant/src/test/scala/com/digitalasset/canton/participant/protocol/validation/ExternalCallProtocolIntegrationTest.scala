@@ -7,7 +7,6 @@ import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
-  ExternalCallKey,
   ParticipantTransactionView,
   PathRollbackContextFactory,
   TransactionView,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.data.{
   ViewPosition,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers
@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsi
   ExternalCallOccurrence,
   Inconsistency,
 }
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   signatory,
@@ -66,8 +67,8 @@ final class ExternalCallProtocolIntegrationTest
 
   private val confirmers: Set[LfPartyId] = Set(submitter, signatory)
 
-  private val externalCallKey: ExternalCallKey =
-    ExternalCallKey.fromResult(externalCallResult)
+  private val externalCallKey: DAMLe.ExternalCallKey =
+    DAMLe.ExternalCallKey.fromResult(externalCallResult)
 
   private val leftViewPosition: ViewPosition =
     ViewPosition(
@@ -79,15 +80,15 @@ final class ExternalCallProtocolIntegrationTest
     )
 
   private final class RecordingExternalCallValidator(
-      results: Map[ExternalCallKey, ExternalCallValidator.Result]
+      results: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result]
   ) extends ExternalCallValidator {
-    private val observedKeys: ConcurrentLinkedQueue[ExternalCallKey] =
-      new ConcurrentLinkedQueue[ExternalCallKey]
+    private val observedKeys: ConcurrentLinkedQueue[DAMLe.ExternalCallKey] =
+      new ConcurrentLinkedQueue[DAMLe.ExternalCallKey]
 
-    def observed: Seq[ExternalCallKey] = observedKeys.asScala.toSeq
+    def observed: Seq[DAMLe.ExternalCallKey] = observedKeys.asScala.toSeq
 
     override def validate(
-        key: ExternalCallKey,
+        key: DAMLe.ExternalCallKey,
         recordedOutput: Bytes,
     )(implicit
         traceContext: TraceContext

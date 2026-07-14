@@ -28,11 +28,13 @@ import com.digitalasset.canton.crypto.{
   Signature,
   SignatureCheckError,
   SignatureDelegation,
+  SignatureWithoutSigner,
   SigningKeyUsage,
   SigningPublicKey,
   SynchronizerCryptoPureApi,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{
   DecryptionHistograms,
@@ -42,12 +44,13 @@ import com.digitalasset.canton.metrics.{
 }
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{Member, SynchronizerId}
+import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
+import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.{FiniteDuration, *}
@@ -572,6 +575,58 @@ class SyncCryptoVerifier(
           ): SignatureCheckError,
         )
       }
+    } yield ()
+
+  /** @see
+    *   com.digitalasset.canton.crypto.SyncCryptoApi.verifyPartyJwtSignature
+    */
+  def verifyPartyJwtSignature(
+      topologySnapshot: TopologySnapshot,
+      bytes: ByteString,
+      signer: PartyId,
+      signature: SignatureWithoutSigner,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    for {
+      signingKeysWithThresholdO <-
+        EitherT.liftF(topologySnapshot.signingKeysWithThreshold(signer))
+      signingKeysWithThreshold <- EitherT.fromEither[FutureUnlessShutdown](
+        signingKeysWithThresholdO.toRight[SignatureCheckError](
+          SignatureCheckError.PartyKeysDoNotExist(signer)
+        )
+      )
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        signingKeysWithThreshold.threshold == PositiveInt.one,
+        (),
+        SignatureCheckError.PartyKeysInvalidThreshold(
+          partyId = signer,
+          configuredThreshold = signingKeysWithThreshold.threshold,
+          expectedThreshold = PositiveInt.one,
+        ): SignatureCheckError,
+      )
+      (errs, oks) = signingKeysWithThreshold.keys.toList.partitionMap { key =>
+        verifyPublicApiWithLongTermKeys.verifySignature(
+          bytes = bytes,
+          publicKey = key,
+          signature = Signature.fromExternalSigning(
+            format = signature.format,
+            signedBy = key.fingerprint,
+            signature = signature.signature,
+            signingAlgorithmSpec = signature.signingAlgorithmSpec,
+          ),
+          usage = usage,
+        )
+      }
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        !oks.isEmpty,
+        (),
+        errs match {
+          case Seq(single) => single
+          case _ => SignatureCheckError.MultipleErrors(errs)
+        },
+      )
     } yield ()
 
   override def close(): Unit = {

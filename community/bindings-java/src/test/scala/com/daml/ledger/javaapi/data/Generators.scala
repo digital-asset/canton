@@ -313,29 +313,6 @@ object Generators {
         .build()
     }
 
-  val packagePreferenceGen: Gen[
-    v2.interactive.InteractiveSubmissionServiceOuterClass.PackagePreference
-  ] =
-    for {
-      packageId <- Arbitrary.arbString.arbitrary
-      packageVersion <- packageVersionGen
-      packageName <- packageNameGen
-      synchronizerId <- Arbitrary.arbString.arbitrary
-    } yield {
-      v2.interactive.InteractiveSubmissionServiceOuterClass.PackagePreference
-        .newBuilder()
-        .setPackageReference(
-          v2.PackageReferenceOuterClass.PackageReference
-            .newBuilder()
-            .setPackageId(packageId)
-            .setPackageName(packageName)
-            .setPackageVersion(packageVersion)
-            .build()
-        )
-        .setSynchronizerId(synchronizerId)
-        .build()
-    }
-
   def createdEventGen(nodeId: Integer): Gen[v2.EventOuterClass.CreatedEvent] =
     for {
       contractId <- contractIdValueGen.map(_.getContractId)
@@ -775,37 +752,6 @@ object Generators {
     }
   }
 
-  def getPreferredPackageVersionRequestGen: Gen[
-    v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionRequest
-  ] = {
-    import v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionRequest as Request
-    for {
-      packageNameGen <- packageNameGen
-      synchronizerId <- Arbitrary.arbOption[String].arbitrary
-      vettingValidAt <- protoTimestampGen
-      parties <- Gen.listOf(Arbitrary.arbString.arbitrary)
-    } yield {
-      val intermediate = Request
-        .newBuilder()
-        .setPackageName(packageNameGen)
-        .addAllParties(parties.asJava)
-        .setVettingValidAt(vettingValidAt)
-      synchronizerId.fold(intermediate)(intermediate.setSynchronizerId).build()
-    }
-  }
-
-  def getPreferredPackageVersionResponseGen: Gen[
-    v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionResponse
-  ] = {
-    import v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionResponse as Response
-    for {
-      packagePreferenceO <- Gen.option(packagePreferenceGen)
-    } yield {
-      val builder = Response.newBuilder()
-      packagePreferenceO.map(builder.setPackagePreference).getOrElse(builder).build()
-    }
-  }
-
   def completionStreamRequestGen
       : Gen[v2.CommandCompletionServiceOuterClass.CompletionStreamRequest] = {
     import v2.CommandCompletionServiceOuterClass.CompletionStreamRequest as Request
@@ -899,6 +845,32 @@ object Generators {
       .newBuilder()
       .pipe(response)
       .build()
+  }
+
+  def getCompletionByHashRequestGen
+      : Gen[v2.CommandCompletionServiceOuterClass.GetCompletionByHashRequest] = {
+    import v2.CommandCompletionServiceOuterClass.GetCompletionByHashRequest as Request
+    for {
+      hashBytes <- Gen.listOf(Arbitrary.arbByte.arbitrary).map(_.toArray)
+    } yield Request
+      .newBuilder()
+      .setTransactionHash(ByteString.copyFrom(hashBytes))
+      .build()
+  }
+
+  def getCompletionByHashResponseGen
+      : Gen[v2.CommandCompletionServiceOuterClass.GetCompletionByHashResponse] = {
+    import v2.CommandCompletionServiceOuterClass.GetCompletionByHashResponse as Response
+    for {
+      acceptedCompletionO <- Gen.option(completionGen)
+      lastRejectedCompletions <- Gen.listOf(completionGen)
+    } yield {
+      val builder = Response
+        .newBuilder()
+        .addAllLastRejectedCompletions(lastRejectedCompletions.asJava)
+      acceptedCompletionO.foreach(builder.setAcceptedCompletion)
+      builder.build()
+    }
   }
 
   final case class Node(children: Seq[Node])

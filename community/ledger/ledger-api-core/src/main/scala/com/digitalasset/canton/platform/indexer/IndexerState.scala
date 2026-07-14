@@ -6,8 +6,10 @@ package com.digitalasset.canton.platform.indexer
 import cats.arrow.FunctionK
 import cats.data.EitherT
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, SynchronizerUpdate, Update}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasSynchronizeWithClosing}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -36,6 +38,8 @@ class IndexerState(
   private val lock = new Mutex()
 
   private implicit val traceContext: TraceContext = TraceContext.empty
+
+  def healthStatus: HealthStatus = state.healthStatus
 
   // Requesting a Repair Indexer turns off normal indexing, therefore it needs to be ensured, before calling:
   //   - no synchronizers are connected
@@ -356,16 +360,26 @@ class RepairQueueProxy(
 object IndexerState {
   sealed trait State {
     def shutdownInitiated: Boolean
+    def healthStatus: HealthStatus
   }
 
   final case class Normal(queue: RecoveringFutureQueue[Update], shutdownInitiated: Boolean)
-      extends State
+      extends State {
+    override def healthStatus: HealthStatus = queue.healthStatus
+
+  }
 
   final case class Repair(
       queue: Future[FutureQueue[RepairUpdate]],
       repairDone: Future[Unit],
       shutdownInitiated: Boolean,
-  ) extends State
+  ) extends State {
+    override def healthStatus: HealthStatus = queue.value match {
+      case Some(Success(q)) if !q.done.isCompleted =>
+        HealthStatus.healthy // We report healthy status when repair indexer is running to prevet pod being torn down during long repair operation
+      case _ => HealthStatus.unhealthy
+    }
+  }
 
   // repairDone should never fail, and only complete if normal indexing is resumed
   class RepairInProgress(val repairDone: Future[Unit])

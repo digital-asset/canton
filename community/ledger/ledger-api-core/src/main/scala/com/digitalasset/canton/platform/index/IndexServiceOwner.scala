@@ -125,7 +125,7 @@ final class IndexServiceOwner(
 
       bufferedCommandCompletionsReader = BufferedCommandCompletionsReader(
         inMemoryFanoutBuffer = inMemoryState.inMemoryFanoutBuffer,
-        delegate = ledgerDao.completions,
+        dbReader = ledgerDao.completions,
         metrics = metrics,
         loggerFactory = loggerFactory,
       )(queryExecutionContext)
@@ -149,6 +149,7 @@ final class IndexServiceOwner(
         executionContext = commandExecutionContext,
         ledgerEndCache = inMemoryState.ledgerEndCache,
         updateServiceConfig = updateServiceConfig,
+        maxRejectedCompletionsByHash = config.maxRejectedCompletionsByHash,
       )
     } yield new TimedIndexService(indexService, metrics)
   }

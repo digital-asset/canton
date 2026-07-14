@@ -28,6 +28,7 @@ final class OpenApiTests
     "users",
     "version",
     "contracts",
+    "jose",
   )
 
   private val expectedRootOpenApiServices = Seq(

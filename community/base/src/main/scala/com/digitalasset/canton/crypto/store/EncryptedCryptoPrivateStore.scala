@@ -17,6 +17,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError.{
 }
 import com.digitalasset.canton.crypto.store.db.{DbCryptoPrivateStore, StoredPrivateKey}
 import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{
   HasLoggerName,

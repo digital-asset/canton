@@ -8,6 +8,8 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CommandCompletionServiceGrpc,
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionByHashRequest,
+  GetCompletionByHashResponse,
   GetCompletionsRequest,
 }
 import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
@@ -16,11 +18,12 @@ import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.auth.services.CommandCompletionServiceAuthorization.completionStreamClaims
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.platform.apiserver.services.ApiCommandCompletionService
+import com.digitalasset.canton.platform.apiserver.services.ApiCommandCompletionService.InternalGetCompletionByHashRequest
 import io.grpc.ServerServiceDefinition
 import io.grpc.stub.StreamObserver
 import scalapb.lenses.Lens
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 final class CommandCompletionServiceAuthorization(
     protected val service: ApiCommandCompletionService,
@@ -55,6 +58,25 @@ final class CommandCompletionServiceAuthorization(
       request,
       responseObserver,
     )
+
+  /** Look up a completion by its transaction hash. This is only available for completions received
+    * after upgrading to Canton version 3.5. If:
+    *
+    *   - there is no completion with this transaction hash,
+    *   - or the completion is not visible to the user,
+    *   - or the completion was populated before upgrading to Canton version 3.5,
+    *   - or respective completions are all pruned,
+    *
+    * a COMPLETION_NOT_FOUND error will be raised.
+    */
+  override def getCompletionByHash(
+      request: GetCompletionByHashRequest
+  ): Future[GetCompletionByHashResponse] =
+    authorizer.rpc[InternalGetCompletionByHashRequest, GetCompletionByHashResponse](
+      service.getCompletionByHash
+    )(
+      RequiredClaim.MatchReadAsParties(InternalGetCompletionByHashRequest.partiesLens)
+    )(InternalGetCompletionByHashRequest(request.transactionHash, Set.empty))
 }
 
 object CommandCompletionServiceAuthorization {

@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.synchronizer.sequencer.config.LsuSequencingBoundsOverride
 import com.digitalasset.canton.topology.processing.SequencedTime

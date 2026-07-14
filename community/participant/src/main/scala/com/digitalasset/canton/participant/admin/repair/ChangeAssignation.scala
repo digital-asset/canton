@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
 import com.digitalasset.canton.data.{CantonTimestamp, ContractsReassignmentBatch, UnassignmentData}
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.repair.ChangeAssignation.Changes
 import com.digitalasset.canton.participant.store.*

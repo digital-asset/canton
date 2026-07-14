@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeNumeric, PositiveInt}
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,

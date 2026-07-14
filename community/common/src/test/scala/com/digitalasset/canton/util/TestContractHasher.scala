@@ -6,6 +6,7 @@ package com.digitalasset.canton.util
 import cats.data.EitherT
 import com.daml.crypto.MessageDigestPrototype
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.{LfHash, LfNodeCreate}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.Hash

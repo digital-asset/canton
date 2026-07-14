@@ -349,6 +349,113 @@ class AuthorizerSpec
     ),
   ).foreach(generateAuthorizationTest)
 
+  behavior of s"$className.authorize for RequiredClaim.MatchReadAsParties"
+
+  private val testPartiesL: Lens[TestPartyReq, Set[String]] =
+    Lens[TestPartyReq, Set[String]](_.parties)((q, p) => q.copy(parties = p))
+  private val testPartyReqRes: TestPartyReq => Future[Set[String]] = q =>
+    Future.successful(q.parties)
+  private val emptyPartyReq: TestPartyReq = TestPartyReq(Set.empty)
+
+  it should "backfill Set.empty and succeed for ClaimReadAsAnyParty" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimReadAsAnyParty))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.map(_ shouldBe Set.empty[String])
+  }
+
+  it should "backfill Set.empty and succeed for ClaimActAsAnyParty" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimActAsAnyParty))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.map(_ shouldBe Set.empty[String])
+  }
+
+  it should "backfill the party set and succeed for ClaimReadAsParty" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimReadAsParty(party)))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.map(_ shouldBe Set(party.toString))
+  }
+
+  it should "backfill the party set and succeed for ClaimActAsParty" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimActAsParty(party)))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.map(_ shouldBe Set(party.toString))
+  }
+
+  it should "backfill the union of act-as and read-as parties" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty
+        .copy(claims = Seq[Claim](ClaimActAsParty(party), ClaimReadAsParty(party2)))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.map(_ shouldBe Set(party.toString, party2.toString))
+  }
+
+  it should "return permission denied for empty claims" in {
+    contextWithClaims(ClaimSet.Claims.Empty) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
+  }
+
+  it should "return permission denied for ClaimPublic without party read access" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimPublic))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
+  }
+
+  it should "return permission denied for ClaimAdmin without party read access" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimAdmin))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
+  }
+
+  it should "return permission denied for ClaimExecuteAsParty without read access" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimExecuteAsParty(party)))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
+  }
+
+  it should "return permission denied for ClaimExecuteAsAnyParty without read access" in {
+    contextWithClaims(
+      ClaimSet.Claims.Empty.copy(claims = Seq(ClaimExecuteAsAnyParty))
+    ) {
+      authorizer().rpc(testPartyReqRes)(RequiredClaim.MatchReadAsParties(testPartiesL))(
+        emptyPartyReq
+      )
+    }.transform(assertExpectedFailure(Status.PERMISSION_DENIED.getCode))
+  }
+
   val userId1 = "userId1"
   val userId2 = "userId2"
 
@@ -950,6 +1057,8 @@ object AuthorizerSpec {
   sealed trait ExpectedResult
   final case object ExpectedSuccess extends ExpectedResult
   final case class ExpectedFailure(code: Status.Code) extends ExpectedResult
+
+  final case class TestPartyReq(parties: Set[String])
 
   val expectedPermissionDenied: ExpectedFailure = ExpectedFailure(Status.PERMISSION_DENIED.getCode)
   val expectedInternal: ExpectedFailure = ExpectedFailure(Status.INTERNAL.getCode)

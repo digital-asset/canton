@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ReassignmentSynchronizer
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{

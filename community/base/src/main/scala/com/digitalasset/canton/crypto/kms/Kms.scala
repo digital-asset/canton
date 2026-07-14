@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{ExponentialBackoffConfig, KmsConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.health.CloseableAtomicHealthComponent
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger

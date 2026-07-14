@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}

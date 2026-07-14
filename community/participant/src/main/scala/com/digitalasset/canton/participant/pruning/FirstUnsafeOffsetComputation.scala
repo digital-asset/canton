@@ -13,6 +13,7 @@ import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning
@@ -190,7 +191,7 @@ class FirstUnsafeOffsetComputation(
       }
 
       // Other checks
-      // TODO(#33650) – replace with unboundedTraverseFilter; safe because logicalPersistentStates are realistically bounded low-digit
+      // TODO(#33650) - Replace with unboundedTraverseFilter; safe because bound to synchronizers (1 to 10)
       unsafeIncompleteReassignmentOffsets <- logicalPersistentStates.values.toSeq.parTraverseFilter(
         FirstUnsafeOffsetComputation.firstUnsafeReassignmentEventFor(
           _,

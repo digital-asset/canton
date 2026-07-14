@@ -76,6 +76,7 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
   private[metrics] val currentLedgerEnd: Item = extend("current_ledger_end", baseInfo)
   private[metrics] val latestPrunedOffsets: Item = extend("latest_pruned_offsets", baseInfo)
   private[metrics] val getCompletions: Item = extend("get_completions", baseInfo)
+  private[metrics] val getCompletionByHash: Item = extend("get_completion_by_hash", baseInfo)
   private[metrics] val updates: Item = extend("updates", baseInfo)
   private[metrics] val getUpdate: Item = extend("get_update", baseInfo)
   private[metrics] val getUpdatesPage: Item = extend("get_updates_page", baseInfo)
@@ -196,6 +197,8 @@ final class ServicesMetrics private[metrics] (
     val latestPrunedOffsets: Timer =
       openTelemetryMetricsFactory.timer(inventory.latestPrunedOffsets.info)
     val getCompletions: Timer = openTelemetryMetricsFactory.timer(inventory.getCompletions.info)
+    val getCompletionByHash: Timer =
+      openTelemetryMetricsFactory.timer(inventory.getCompletionByHash.info)
     val updates: Timer = openTelemetryMetricsFactory.timer(inventory.updates.info)
     val getUpdate: Timer =
       openTelemetryMetricsFactory.timer(inventory.getUpdate.info)

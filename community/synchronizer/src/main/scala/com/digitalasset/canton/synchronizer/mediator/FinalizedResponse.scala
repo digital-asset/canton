@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.mediator
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponse,

@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.sync
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -24,6 +23,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.ConnectedSynchronizerResponse
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   NamedLoggerFactory,
@@ -139,6 +139,7 @@ private[sync] class SynchronizerConnectionsManager(
     parameters: ParticipantNodeParameters,
     connectedSynchronizerFactory: ConnectedSynchronizer.Factory[ConnectedSynchronizer],
     pendingLsuOperationsStore: PendingLsuOperation.Store,
+    pendingOnboardingTransactionsStore: PendingOnboardingTransactions.Store,
     metrics: ParticipantMetrics,
     sequencerInfoLoader: SequencerInfoLoader,
     isActive: () => Boolean,
@@ -727,6 +728,7 @@ private[sync] class SynchronizerConnectionsManager(
         performHandshake(
           synchronizerAlias,
           skipStatusCheck = skipStatusCheck,
+          onboardingTransactions = onboardingTransactions,
         )
       case _ =>
         performSynchronizerConnection(
@@ -759,6 +761,7 @@ private[sync] class SynchronizerConnectionsManager(
   private def performHandshake(
       synchronizerAlias: SynchronizerAlias,
       skipStatusCheck: Boolean,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
@@ -781,10 +784,18 @@ private[sync] class SynchronizerConnectionsManager(
           _ = logger.debug(
             s"Performing handshake with synchronizer with id ${synchronizerConnectionConfig.configuredPsid} and config: ${synchronizerConnectionConfig.config}"
           )
+          effectiveOnboardingTransactions <- EitherT.right(
+            onboardingTransactions.fold(loadPersistedOnboardingTransactions(synchronizerAlias))(
+              transactions => FutureUnlessShutdown.pure(Option(transactions))
+            )
+          )
+          // whether the transactions were loaded from the pending store (and thus need clearing)
+          loadedFromStore =
+            onboardingTransactions.isEmpty && effectiveOnboardingTransactions.isDefined
           synchronizerHandle <- EitherT(
             synchronizerRegistry.connect(
               synchronizerConnectionConfig,
-              onboardingTransactions = None,
+              onboardingTransactions = effectiveOnboardingTransactions,
             )
           )
             .leftMap[SyncServiceError](err =>
@@ -802,10 +813,51 @@ private[sync] class SynchronizerConnectionsManager(
                 .Error(synchronizerAlias, psid, err.message)
             )
 
+          _ <- EitherT.right(
+            if (loadedFromStore) clearPersistedOnboardingTransactions(synchronizerAlias, psid)
+            else FutureUnlessShutdown.unit
+          )
+
           _ = syncCrypto.remove(psid)
           _ = synchronizerHandle.close()
         } yield psid
     }
+
+  /** Loads the onboarding transactions persisted at registration for the given alias, if any. */
+  private def loadPersistedOnboardingTransactions(
+      synchronizerAlias: SynchronizerAlias
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]]] =
+    // The synchronizer id is not yet known at this point (pre-handshake), so we look up by alias
+    // only. The alias uniquely identifies a connection, so at most one entry is expected.
+    pendingOnboardingTransactionsStore
+      .getAll(
+        PendingOnboardingTransactions.operationName,
+        operationKey = Some(PendingOnboardingTransactions.operationKey(synchronizerAlias)),
+      )
+      .map { pending =>
+        if (pending.sizeIs > 1)
+          ErrorUtil.invalidState(
+            s"Found ${pending.size} persisted onboarding transaction entries for alias $synchronizerAlias, expected at most one."
+          )
+        pending.headOption.map(_.operation.transactions)
+      }
+
+  /** Deletes the onboarding transactions persisted at registration, as they are obsolete once the
+    * participant connects to the synchronizer.
+    */
+  private def clearPersistedOnboardingTransactions(
+      synchronizerAlias: SynchronizerAlias,
+      psid: PhysicalSynchronizerId,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    pendingOnboardingTransactionsStore.delete(
+      psid.logical,
+      PendingOnboardingTransactions.operationKey(synchronizerAlias),
+      PendingOnboardingTransactions.operationName,
+    )
 
   /** Perform a handshake with the given synchronizer. Does only the static (protocol version,
     * crypto schemes) unlike `performHandshake` above. In particular: does not download the
@@ -1031,16 +1083,29 @@ private[sync] class SynchronizerConnectionsManager(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] = {
+    // returns the synchronizer handle and whether the onboarding transactions were loaded from the
+    // pending store (and thus need clearing)
     def connect(
         config: StoredSynchronizerConnectionConfig
     ): EitherT[
       FutureUnlessShutdown,
       SyncServiceFailedSynchronizerConnection,
-      SynchronizerHandle,
+      (SynchronizerHandle, Boolean),
     ] =
-      EitherT(synchronizerRegistry.connect(config, onboardingTransactions)).leftMap(err =>
-        SyncServiceError.SyncServiceFailedSynchronizerConnection(synchronizerAlias, err)
-      )
+      for {
+        effectiveOnboardingTransactions <- EitherT.right(
+          onboardingTransactions.fold(loadPersistedOnboardingTransactions(synchronizerAlias))(
+            transactions => FutureUnlessShutdown.pure(Option(transactions))
+          )
+        )
+        loadedFromStore =
+          onboardingTransactions.isEmpty && effectiveOnboardingTransactions.isDefined
+        handle <- EitherT(
+          synchronizerRegistry.connect(config, effectiveOnboardingTransactions)
+        ).leftMap(err =>
+          SyncServiceError.SyncServiceFailedSynchronizerConnection(synchronizerAlias, err)
+        )
+      } yield (handle, loadedFromStore)
 
     def handleCloseDegradation(connectedSynchronizer: ConnectedSynchronizer, fatal: Boolean)(
         err: RpcError
@@ -1075,7 +1140,8 @@ private[sync] class SynchronizerConnectionsManager(
           _ = logger.debug(
             s"Connecting to synchronizer with id ${synchronizerConnectionConfig.configuredPsid} config: ${synchronizerConnectionConfig.config}"
           )
-          synchronizerHandle <- connect(synchronizerConnectionConfig)
+          connectResult <- connect(synchronizerConnectionConfig)
+          (synchronizerHandle, loadedFromStore) = connectResult
           psid = synchronizerHandle.psid
 
           _ = logger.debug(
@@ -1087,6 +1153,11 @@ private[sync] class SynchronizerConnectionsManager(
               SyncServiceError.SyncServicePhysicalIdRegistration
                 .Error(synchronizerAlias, psid, err.message)
             )
+
+          _ <- EitherT.right(
+            if (loadedFromStore) clearPersistedOnboardingTransactions(synchronizerAlias, psid)
+            else FutureUnlessShutdown.unit
+          )
 
           synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
           persistent = synchronizerHandle.syncPersistentState
@@ -1418,7 +1489,7 @@ private[sync] class SynchronizerConnectionsManager(
     connectedSynchronizers.lsids.toList
       .mapFilter(aliasManager.aliasForSynchronizerId)
       .distinct
-      // TODO(#33650) – Safe because there is one to a few synchronizers ever
+      // TODO(#33650) – Replace with unboundedTraverse_; safe because there is one to a few synchronizers ever
       .parTraverse_(disconnectSynchronizer)
 
   /** Start the upgrade of the participant to the successor (automatic workflow).

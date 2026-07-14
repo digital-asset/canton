@@ -7,6 +7,9 @@ package com.digitalasset.canton.participant.protocol.v30;
 
 import "scalapb/scalapb.proto";
 
+// Proto definitions for locally storing data around ACS commitments and possibly exposing them over APIs.
+// These messages are not exchanged as part of the Canton protocols.
+
 // Holds trace data for a particular ACS digest.
 message AcsDigestTrace {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
@@ -36,4 +39,11 @@ message TraceElement {
     TraceGroup group = 1;
     SingleTrace single = 2;
   }
+}
+
+message ReceivedAcsCommitments {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  // contains versioned AcsCommitmentProtocolMessages
+  repeated bytes commitment = 1;
 }

@@ -1,0 +1,17 @@
+# Toolchain config for the Python scripts under scripts/ (see issue #33211).
+# ruff for lint and format. The pytest config and CI gate land in a follow-up.
+
+[tool.ruff]
+# ruff is pinned once, via the nixpkgs revision in nix/sources.json (used by
+# shell.nix), so local (nix shell) and CI (nix_run) always run the same version.
+# We deliberately keep no separate version pin here. The CI ruff format --check
+# gate catches any drift from a ruff run outside nix.
+# Match the repo's Scala line width (.scalafmt.conf maxColumn) for a single
+# consistent column across languages.
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.format]
+# Leave existing quotes as-authored. The codebase is double-quote-majority and
+# flipping them adds pure noise, so this keeps the format pass minimal.
+quote-style = "preserve"

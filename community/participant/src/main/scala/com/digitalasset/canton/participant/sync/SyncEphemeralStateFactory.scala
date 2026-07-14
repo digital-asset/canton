@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCa
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler

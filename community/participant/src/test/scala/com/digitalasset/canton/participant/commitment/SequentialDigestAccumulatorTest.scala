@@ -7,6 +7,7 @@ import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.crypto.{LtHash16Blake3, TestHash}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
@@ -58,7 +59,6 @@ trait SequentialDigestAccumulatorTest
     with HasExecutionContext
     with ProtocolVersionChecksAnyWordSpec {
 
-  private val synchronizerId = DefaultTestIdentities.synchronizerId
   private val p1 = DefaultTestIdentities.participant1.toLf
   private val p2 = DefaultTestIdentities.participant2.toLf
   private val alice = DefaultTestIdentities.party1.toLf
@@ -73,20 +73,14 @@ trait SequentialDigestAccumulatorTest
 
   protected def minimumVersionToRunTest: ProtocolVersion
 
-  protected def createStore(
-      indexedSynchronizer: IndexedSynchronizer,
-      stringInterning: StringInterning,
-  ): AcsDigestStore
+  protected def createStore(stringInterning: StringInterning): AcsDigestStore
 
   class Fixture(
       participant: LedgerParticipantId,
       tracingMode: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
   ) {
     val stringInterning = new MockStringInterning()
-    val digestStore = createStore(
-      IndexedSynchronizer.tryCreate(synchronizerId, 1),
-      stringInterning,
-    )
+    val digestStore = createStore(stringInterning)
     val accumulator =
       new SequentialDigestAccumulator(
         participant,
@@ -98,13 +92,11 @@ trait SequentialDigestAccumulatorTest
       )
 
     def process(
-        inputs: ((CantonTimestamp, Offset), CheckpointFenceOr[Classification])*
+        inputs: (Timepoint, CheckpointFenceOr[Classification])*
     ): FutureUnlessShutdown[Seq[CheckpointWritten]] =
       MonadUtil
-        .sequentialTraverse(inputs) { case ((rt, offset), classification) =>
-          accumulator.process(
-            ProcessingContext(rt, offset, classification)
-          )
+        .sequentialTraverse(inputs) { case (timepoint, classification) =>
+          accumulator.process(ProcessingContext(timepoint, classification))
         }
         .map(_.flatten)
 
@@ -139,7 +131,7 @@ trait SequentialDigestAccumulatorTest
       import fixture.*
 
       process(
-        (ts(1), off(1)) ->
+        tp(1) ->
           AcsUpdate(
             stakeholders = Map(alice -> Set(p1)),
             locallyHostedStakeholders = Seq(alice),
@@ -165,7 +157,7 @@ trait SequentialDigestAccumulatorTest
 
       fixtureBobOnboarded
         .process(
-          (ts(1), off(1)) ->
+          tp(1) ->
             AcsUpdate(
               stakeholders = Map(alice -> Set(p1), bob -> Set()),
               locallyHostedStakeholders = Seq(alice),
@@ -174,7 +166,7 @@ trait SequentialDigestAccumulatorTest
               isActivation = true,
             ),
           // simulate onboarding of bob
-          (ts(2), off(2)) ->
+          tp(2) ->
             AcsUpdate(
               stakeholders = Map(alice -> Set(p1), bob -> Set()),
               locallyHostedStakeholders = Seq(bob),
@@ -182,14 +174,14 @@ trait SequentialDigestAccumulatorTest
               rc0,
               isActivation = true,
             ),
-          (ts(2), off(2)) -> PartyAddedToParticipant(bob, p1),
+          tp(2) -> PartyAddedToParticipant(bob, p1),
         )
         .futureValueUS shouldBe empty
 
       val fixtureBobAlreadyHosted = new Fixture(p1)
       fixtureBobAlreadyHosted
         .process(
-          (ts(1), off(1)) ->
+          tp(1) ->
             AcsUpdate(
               stakeholders = Map(alice -> Set(p1), bob -> Set(p1)),
               locallyHostedStakeholders = Seq(alice, bob),
@@ -234,7 +226,7 @@ trait SequentialDigestAccumulatorTest
 
       fixtureBobOffboarded
         .process(
-          (ts(1), off(1)) ->
+          tp(1) ->
             AcsUpdate(
               stakeholders = Map(alice -> Set(p1), bob -> Set(p1)),
               locallyHostedStakeholders = Seq(alice, bob),
@@ -243,8 +235,8 @@ trait SequentialDigestAccumulatorTest
               isActivation = true,
             ),
           // simulate offboarding of bob
-          (ts(2), off(2)) -> PartyRemovedFromParticipant(bob, p1),
-          (ts(2), off(2)) ->
+          tp(2) -> PartyRemovedFromParticipant(bob, p1),
+          tp(2) ->
             AcsUpdate(
               stakeholders = Map(alice -> Set(p1), bob -> Set()),
               locallyHostedStakeholders = Seq(bob),
@@ -258,7 +250,7 @@ trait SequentialDigestAccumulatorTest
       val fixtureBobNotHosted = new Fixture(p1)
       fixtureBobNotHosted
         .process(
-          (ts(2), off(2)) ->
+          tp(2) ->
             AcsUpdate(
               stakeholders = Map(alice -> Set(p1), bob -> Set()),
               locallyHostedStakeholders = Seq(alice),
@@ -300,7 +292,7 @@ trait SequentialDigestAccumulatorTest
       val targetCheckpoint = (off(17), ts(1))
 
       val checkpoint = process(
-        (ts(1), off(17)) -> CheckpointFence
+        Timepoint(off(17))(ts(1)) -> CheckpointFence
       ).futureValueUS.loneElement
 
       // verify that the right CheckpointWritten notification is emitted
@@ -323,8 +315,8 @@ trait SequentialDigestAccumulatorTest
       lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
 
       process(
-        (ts(1), off(2)) -> PartyAddedToParticipant(alice, p2),
-        (ts(2), off(3)) -> PartyRemovedFromParticipant(alice, p2),
+        tp(1) -> PartyAddedToParticipant(alice, p2),
+        Timepoint(off(3))(ts(2)) -> PartyRemovedFromParticipant(alice, p2),
       ).futureValueUS shouldBe empty // no checkpoints written
 
       lookupParticipantDigest(p2) shouldBe empty
@@ -342,7 +334,7 @@ trait SequentialDigestAccumulatorTest
 
       // add a contract to alice, bob, p1, p2
       process(
-        (ts(1), off(2)) -> AcsUpdate(
+        Timepoint(off(2))(ts(1)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid0,
@@ -355,7 +347,7 @@ trait SequentialDigestAccumulatorTest
         .isEmpty shouldBe false
 
       process(
-        (ts(2), off(3)) -> AcsUpdate(
+        Timepoint(off(3))(ts(2)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid0,
@@ -389,7 +381,7 @@ trait SequentialDigestAccumulatorTest
       import fixture.*
 
       process(
-        (ts(1), off(1)) ->
+        tp(1) ->
           AcsUpdate(
             stakeholders = Map(alice -> Set(p1), bob -> Set(p1)),
             locallyHostedStakeholders = Seq(alice, bob),
@@ -410,7 +402,7 @@ trait SequentialDigestAccumulatorTest
 
       // now process two acs updates of cid1 and cid2 at the same offset
       process(
-        (ts(2), off(2)) -> AcsUpdate(
+        tp(2) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p1)),
           locallyHostedStakeholders = Seq(alice, bob),
           cid1,
@@ -430,7 +422,7 @@ trait SequentialDigestAccumulatorTest
 
       // now process another update at the same time and offset
       process(
-        (ts(2), off(2)) ->
+        tp(2) ->
           AcsUpdate(
             stakeholders = Map(alice -> Set(p1), bob -> Set()),
             locallyHostedStakeholders = Seq(bob),
@@ -461,7 +453,7 @@ trait SequentialDigestAccumulatorTest
       lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
 
       process(
-        (ts(1), off(2)) -> AcsUpdate(
+        Timepoint(off(2))(ts(1)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid0,
@@ -477,7 +469,7 @@ trait SequentialDigestAccumulatorTest
       )
 
       process(
-        (ts(2), off(3)) -> AcsUpdate(
+        Timepoint(off(3))(ts(2)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid0,
@@ -494,7 +486,7 @@ trait SequentialDigestAccumulatorTest
 
       // observe the activation of another contract at the same time and offset as the previous deactivation
       process(
-        (ts(2), off(3)) -> AcsUpdate(
+        Timepoint(off(3))(ts(2)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid1,
@@ -511,7 +503,7 @@ trait SequentialDigestAccumulatorTest
       )
 
       process(
-        (ts(3), off(4)) -> PartyAddedToParticipant(alice, p2)
+        Timepoint(off(4))(ts(3)) -> PartyAddedToParticipant(alice, p2)
       ).futureValueUS shouldBe empty // no checkpoints written
 
       lookupParticipantDigest(
@@ -540,7 +532,7 @@ trait SequentialDigestAccumulatorTest
 
       // add a contract to alice, bob, p1, p2
       process(
-        (ts(1), off(2)) -> AcsUpdate(
+        Timepoint(off(2))(ts(1)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid0,
@@ -556,7 +548,7 @@ trait SequentialDigestAccumulatorTest
       )
 
       process(
-        (ts(2), off(3)) -> AcsUpdate(
+        Timepoint(off(3))(ts(2)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid0,
@@ -581,7 +573,7 @@ trait SequentialDigestAccumulatorTest
 
       // observe the activation of another contract at the same time and offset as the previous deactivation
       process(
-        (ts(2), off(3)) -> AcsUpdate(
+        Timepoint(off(3))(ts(2)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
           locallyHostedStakeholders = Seq(alice),
           cid1,
@@ -607,7 +599,7 @@ trait SequentialDigestAccumulatorTest
       )
 
       process(
-        (ts(3), off(4)) -> PartyAddedToParticipant(alice, p2)
+        Timepoint(off(4))(ts(3)) -> PartyAddedToParticipant(alice, p2)
       ).futureValueUS shouldBe empty // no checkpoints written
 
       lookupParticipantDigest(
@@ -632,6 +624,7 @@ trait SequentialDigestAccumulatorTest
   private def ts(offsetFromEpoch: Int): CantonTimestamp =
     CantonTimestamp.Epoch.plusSeconds(offsetFromEpoch.toLong)
   private def off(offset: Int): Offset = Offset.tryFromLong(offset.toLong)
+  private def tp(i: Int): Timepoint = Timepoint(off(i))(ts(i))
 
   private def cid(i: Int): LfContractId = ExampleTransactionFactory.suffixedId(i, i)
 }
@@ -641,11 +634,8 @@ class SequentialDigestAccumulatorTestInMemory extends SequentialDigestAccumulato
   // the in-memory test runs with any version, because it doesn't depend on dev-DB migrations
   override protected def minimumVersionToRunTest: ProtocolVersion = ProtocolVersion.minimum
 
-  override protected def createStore(
-      indexedSynchronizer: IndexedSynchronizer,
-      stringInterning: StringInterning,
-  ): AcsDigestStore =
-    new InMemoryAcsDigestStore(indexedSynchronizer, stringInterning, loggerFactory)
+  override protected def createStore(stringInterning: StringInterning): AcsDigestStore =
+    InMemoryAcsDigestStore.create(stringInterning, loggerFactory)
 }
 
 abstract class BaseDbSequentialDigestAccumulatorTest
@@ -657,11 +647,10 @@ abstract class BaseDbSequentialDigestAccumulatorTest
     ProtocolVersion.acsCommitmentRedesign
 
   override protected def createStore(
-      indexedSynchronizer: IndexedSynchronizer,
-      stringInterning: StringInterning,
+      stringInterning: StringInterning
   ): AcsDigestStore =
     new DbAcsDigestStore(
-      indexedSynchronizer,
+      IndexedSynchronizer.tryCreate(DefaultTestIdentities.synchronizerId, 1),
       stringInterning,
       ReleaseProtocolVersion.acsCommitmentRedesign,
       storage,

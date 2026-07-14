@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.~>
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try

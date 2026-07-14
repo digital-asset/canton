@@ -165,7 +165,7 @@ class SegmentInProgressTest extends AsyncWordSpec with BftSequencerBaseTest {
       )
     }
 
-    "only include the highest view-change after the latest new-view" in {
+    "only include view-change messages after the latest new-view" in {
       rehydrationMessages(
         Seq[SignedMessage[PbftNetworkMessage]](
           ppView0,
@@ -184,6 +184,7 @@ class SegmentInProgressTest extends AsyncWordSpec with BftSequencerBaseTest {
         oldViewsMessages = Seq[SignedMessage[PbftNetworkMessage]](
           ppView0,
           newView1,
+          viewChange2,
         ),
         currentViewMessages = Seq(
           viewChange3

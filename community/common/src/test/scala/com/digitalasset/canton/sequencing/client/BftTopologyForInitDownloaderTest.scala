@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

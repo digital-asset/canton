@@ -80,6 +80,7 @@ import com.digitalasset.canton.platform.{
   ResourceOwnerOps,
 }
 import com.digitalasset.canton.time.{Clock, RemoteClock, SimClock}
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, TracerProvider}
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, User, UserRight}
@@ -305,6 +306,11 @@ class LedgerApiServer(
 
       contractValidator = ContractValidator(syncService.pureCryptoApi, engine, packageResolver)
 
+      lookupTopologyClient = (synchronizerId: SynchronizerId) =>
+        syncService
+          .activePsidForLsid(synchronizerId)
+          .flatMap(psid => syncService.lookupTopologyClient(psid))
+
       // TODO(i21582) The prepare endpoint of the interactive submission service does not suffix
       // contract IDs of the transaction yet. This means enrichment of the transaction may fail
       // when processing unsuffixed contract IDs. For that reason we disable this requirement via the flag below.
@@ -380,6 +386,8 @@ class LedgerApiServer(
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
         externalCallHandler = externalCallHandler,
+        lookupTopologyClient = lookupTopologyClient,
+        pureCryptoApi = syncService.pureCryptoApi,
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,

@@ -10,6 +10,7 @@ import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerState, SynchronizerRank}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.participant.protocol.submission.SynchronizerSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.SynchronizerSelectionFixture.Transactions.{

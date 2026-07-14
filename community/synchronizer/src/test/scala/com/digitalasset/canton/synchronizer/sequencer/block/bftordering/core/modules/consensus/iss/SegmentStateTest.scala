@@ -1587,7 +1587,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       }
     }
 
-    "retransmit new-view if we are ahead (even if we are in view-change)" in {
+    "retransmit new-view if we are ahead (even if we are in view-change), including view change messages for later views" in {
       val segmentState = createSegmentState()
 
       val viewChanges = Seq(
@@ -1595,17 +1595,28 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         createViewChange(1, otherId1),
         createViewChange(1, otherId2),
       )
-      val prePrepares =
-        slotNumbers.map(blockNumber => createPrePrepare(blockNumber, 1, otherId1))
-      val newView = createNewView(1, otherId1, viewChanges, prePrepares)
+
+      val newView = {
+        val prePrepares =
+          slotNumbers.map(blockNumber => createPrePrepare(blockNumber, 1, otherId1))
+        createNewView(1, otherId1, viewChanges, prePrepares)
+      }
 
       segmentState.processEvent(PbftSignedNetworkMessage(newView))
       segmentState.currentView shouldBe 1
 
+      val viewChange1 = createViewChange(1, myId)
       val viewChange2 = createViewChange(2, myId)
+      val viewChange3 = createViewChange(3, myId)
+
+      segmentState.processEvent(PbftSignedNetworkMessage(viewChange1))
+      segmentState.processEvent(PbftSignedNetworkMessage(newView))
+      segmentState.currentView shouldBe 1
 
       segmentState.processEvent(PbftSignedNetworkMessage(viewChange2))
       segmentState.currentView shouldBe 2
+      segmentState.processEvent(PbftSignedNetworkMessage(viewChange3))
+      segmentState.currentView shouldBe 3
       segmentState.isViewChangeInProgress shouldBe true
 
       // get a retransmission request from node that is in lower view number
@@ -1623,7 +1634,50 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segmentState.messagesToRetransmit(otherId1, zeroProgressSegmentStatus)
 
       retransmissionResult.commitCerts shouldBe empty
-      retransmissionResult.messages should contain allOf (newView, viewChange2)
+      retransmissionResult.messages should contain allOf (newView, viewChange2, viewChange3)
+    }
+
+    "return all view change messages between originating node's view number and current latest view" in {
+      val segmentState = createSegmentState()
+
+      val viewChange1 = createViewChange(1, myId)
+      val viewChange2 = createViewChange(2, myId)
+      val viewChange3 = createViewChange(3, myId)
+      val other2viewChange = createViewChange(1, otherId2)
+
+      val viewChanges = Seq(
+        viewChange1,
+        createViewChange(1, otherId1),
+        other2viewChange,
+        viewChange2,
+        viewChange3,
+      )
+
+      viewChanges.foreach(msg => segmentState.processEvent(PbftSignedNetworkMessage(msg)).discard)
+
+      segmentState.currentView shouldBe 3
+      segmentState.isViewChangeInProgress shouldBe true
+
+      val retransmissionResult = {
+        val view2ProgressSegmentStatus =
+          ConsensusStatus.SegmentStatus.InProgress(ViewNumber(2), Seq.empty)
+        segmentState.messagesToRetransmit(otherId1, view2ProgressSegmentStatus)
+      }
+      retransmissionResult.commitCerts shouldBe empty
+      retransmissionResult.messages should contain allOf (viewChange2, viewChange3)
+
+      val retransmissionResult2 = {
+        val view1ProgressSegmentStatus =
+          ConsensusStatus.SegmentStatus.InViewChange(
+            ViewNumber(1),
+            // take this information into account as well
+            Seq(true, false, false, true),
+            Seq(false, false, false, false),
+          )
+        segmentState.messagesToRetransmit(otherId1, view1ProgressSegmentStatus)
+      }
+      retransmissionResult2.commitCerts shouldBe empty
+      retransmissionResult2.messages should contain allOf (other2viewChange, viewChange2, viewChange3)
     }
 
     "retransmit completed block to remote nodes that are in higher view" in {

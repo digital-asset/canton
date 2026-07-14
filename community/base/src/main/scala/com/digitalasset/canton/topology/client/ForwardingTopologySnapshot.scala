@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.crypto.SigningKeysWithThreshold
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{

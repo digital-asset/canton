@@ -15,6 +15,7 @@ import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.Pru
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidArgument
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{GrpcETFUSExtended, wrapErrUS}

@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.client.configuration.{
   LedgerClientConfiguration,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder

@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing
 import cats.Monoid
 import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 
 import scala.concurrent.ExecutionContext
 

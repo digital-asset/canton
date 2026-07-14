@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.{HashOps, Signature, SynchronizerSnapshotS
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, ViewType}
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.{AcsChangeFactory, SequencedEventUpdate}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

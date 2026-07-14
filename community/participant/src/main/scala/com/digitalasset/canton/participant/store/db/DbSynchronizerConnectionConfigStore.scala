@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
   Active,

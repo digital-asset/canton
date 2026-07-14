@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.*

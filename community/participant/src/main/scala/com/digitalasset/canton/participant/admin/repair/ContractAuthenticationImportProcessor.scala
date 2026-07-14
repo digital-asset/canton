@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.admin.repair
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.*
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup

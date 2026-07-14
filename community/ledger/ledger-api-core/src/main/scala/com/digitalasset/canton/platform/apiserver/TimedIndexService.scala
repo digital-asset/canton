@@ -51,6 +51,17 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       delegate.getCompletions(begin, userId, parties),
     )
 
+  override def getCompletionByHash(
+      hash: com.google.protobuf.ByteString,
+      parties: Set[Party],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[com.daml.ledger.api.v2.command_completion_service.GetCompletionByHashResponse] =
+    Timed.future(
+      metrics.services.index.getCompletionByHash,
+      delegate.getCompletionByHash(hash, parties),
+    )
+
   override def updates(
       begin: Option[Offset],
       endAt: Option[Offset],

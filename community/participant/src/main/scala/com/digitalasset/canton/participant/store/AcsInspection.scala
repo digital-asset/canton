@@ -11,6 +11,7 @@ import cats.{Eval, Foldable}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsInspection.*
 import com.digitalasset.canton.participant.util.TimeOfChange

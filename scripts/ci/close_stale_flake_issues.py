@@ -42,7 +42,9 @@ def run_gh(*args: str, retries: int = _RETRY_ATTEMPTS) -> subprocess.CompletedPr
             print(f"Transient gh error, retrying in {_RETRY_DELAY_SECONDS}s... ({retries} left)")
             time.sleep(_RETRY_DELAY_SECONDS)
             return run_gh(*args, retries=retries - 1)
-        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
     return result
 
 
@@ -102,8 +104,13 @@ def close_issue(number: int, last_date: datetime, assignees: list[str], dry_run:
         return
     if assignees:
         run_gh(
-            "issue", "edit", str(number), "--repo", REPO,
-            "--remove-assignee", ",".join(assignees),
+            "issue",
+            "edit",
+            str(number),
+            "--repo",
+            REPO,
+            "--remove-assignee",
+            ",".join(assignees),
         )
     run_gh("issue", "close", str(number), "--repo", REPO, "--comment", comment)
 
@@ -138,14 +145,20 @@ def main(dry_run: bool) -> None:
         age = (datetime.now(tz=timezone.utc) - last_date).days
         if last_date < cutoff:
             if has_todo_reference(number):
-                print(f"  #{number} {title}: last flake {last_date.date()} ({age}d ago) → skipping (TODO reference found)")
+                print(
+                    f"  #{number} {title}: last flake {last_date.date()} ({age}d ago) → skipping (TODO reference found)"
+                )
                 skipped_todo.append(f"#{number} {title}")
             else:
                 assignees = [a["login"] for a in issue.get("assignees", {}).get("nodes", [])]
                 assignee_note = f" (assigned to: {', '.join(assignees)})" if assignees else ""
-                print(f"  #{number} {title}: last flake {last_date.date()} ({age}d ago) → closing{assignee_note}")
+                print(
+                    f"  #{number} {title}: last flake {last_date.date()} ({age}d ago) → closing{assignee_note}"
+                )
                 close_issue(number, last_date, assignees, dry_run)
-                closed.append(f"#{number} {title} (last flake {last_date.date()}, {age}d ago){assignee_note}")
+                closed.append(
+                    f"#{number} {title} (last flake {last_date.date()}, {age}d ago){assignee_note}"
+                )
         else:
             print(f"  #{number} {title}: last flake {last_date.date()} ({age}d ago) → keeping open")
             kept_open += 1

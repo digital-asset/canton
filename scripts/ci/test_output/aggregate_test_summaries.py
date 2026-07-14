@@ -218,17 +218,41 @@ def build_summary(files, shards, parse_errors, limit):
     lines.append("## Test summary (all shards)")
     lines.append("")
     lines.append(f"- Summary files found: {len(files)}")
-    lines.append(f"- Shards reported: {reported_shards}" + (f"/{expected_shards}" if expected_shards else ""))
-    lines.append(f"- JUnit files found: {total_junit_files}" + (f" (missing in {missing_junit_files} shard(s))" if missing_junit_files else ""))
-    lines.append(f"- Total: {total_tests}" + (f" (missing in {missing_total} shard(s))" if missing_total else ""))
-    lines.append(f"- Passed: {total_passed}" + (f" (missing in {missing_passed} shard(s))" if missing_passed else ""))
-    lines.append(f"- Failed: {total_failures}" + (f" (missing in {missing_failures} shard(s))" if missing_failures else ""))
-    lines.append(f"- Errors: {total_errors}" + (f" (missing in {missing_errors} shard(s))" if missing_errors else ""))
-    lines.append(f"- Skipped: {total_skipped}" + (f" (missing in {missing_skipped} shard(s))" if missing_skipped else ""))
+    lines.append(
+        f"- Shards reported: {reported_shards}" + (f"/{expected_shards}" if expected_shards else "")
+    )
+    lines.append(
+        f"- JUnit files found: {total_junit_files}"
+        + (f" (missing in {missing_junit_files} shard(s))" if missing_junit_files else "")
+    )
+    lines.append(
+        f"- Total: {total_tests}"
+        + (f" (missing in {missing_total} shard(s))" if missing_total else "")
+    )
+    lines.append(
+        f"- Passed: {total_passed}"
+        + (f" (missing in {missing_passed} shard(s))" if missing_passed else "")
+    )
+    lines.append(
+        f"- Failed: {total_failures}"
+        + (f" (missing in {missing_failures} shard(s))" if missing_failures else "")
+    )
+    lines.append(
+        f"- Errors: {total_errors}"
+        + (f" (missing in {missing_errors} shard(s))" if missing_errors else "")
+    )
+    lines.append(
+        f"- Skipped: {total_skipped}"
+        + (f" (missing in {missing_skipped} shard(s))" if missing_skipped else "")
+    )
     if total_parse_errors:
         lines.append(
             f"- XML parse errors: {total_parse_errors}"
-            + (f" (missing in {missing_xml_parse_errors} shard(s))" if missing_xml_parse_errors else "")
+            + (
+                f" (missing in {missing_xml_parse_errors} shard(s))"
+                if missing_xml_parse_errors
+                else ""
+            )
         )
     elif missing_xml_parse_errors:
         lines.append(f"- XML parse errors: n/a (missing in {missing_xml_parse_errors} shard(s))")
@@ -239,7 +263,9 @@ def build_summary(files, shards, parse_errors, limit):
             f"- Missing shard indices: {', '.join(missing_shards)} (count: {len(missing_shards)})"
         )
 
-    shards_with_missing_data = [s for s in shards if s.get("missing_fields") or s.get("invalid_fields")]
+    shards_with_missing_data = [
+        s for s in shards if s.get("missing_fields") or s.get("invalid_fields")
+    ]
     if shards_with_missing_data:
         lines.append(f"- Shards with missing/invalid fields: {len(shards_with_missing_data)}")
     lines.append("")
@@ -247,7 +273,9 @@ def build_summary(files, shards, parse_errors, limit):
     if shards:
         lines.append("### Shard breakdown")
         lines.append("")
-        lines.append("| Shard | JUnit files | Total | Passed | Failed | Errors | Skipped | XML parse errors | Data status |")
+        lines.append(
+            "| Shard | JUnit files | Total | Passed | Failed | Errors | Skipped | XML parse errors | Data status |"
+        )
         lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
 
         def display(value):
@@ -400,7 +428,9 @@ def test_load_shard_summaries_records_parse_errors_for_invalid_json():
 
         shards, parse_errors = load_shard_summaries([broken_path])
         assert shards == [], f"Expected no shards from invalid input, got {shards}"
-        assert parse_errors == [broken_path], f"Expected parse_errors to contain invalid file, got {parse_errors}"
+        assert parse_errors == [broken_path], (
+            f"Expected parse_errors to contain invalid file, got {parse_errors}"
+        )
 
 
 def test_load_previous_state_reads_persisted_shards():
@@ -450,7 +480,9 @@ def test_build_summary_reports_missing_shards_and_deduplicates_tests():
         ),
     ]
     summary = build_summary(["a.json", "b.json"], shards, ["broken.json"], limit=10)
-    assert "- Missing shard indices: 1 (count: 1)" in summary, f"Missing shard summary not found in: {summary}"
+    assert "- Missing shard indices: 1 (count: 1)" in summary, (
+        f"Missing shard summary not found in: {summary}"
+    )
     assert "- Invalid summary files: 1" in summary
     assert summary.count("- com.example.Bar.testB") == 1, "Expected deduplicated failed tests"
     assert "- Shards reported: 2/3" in summary

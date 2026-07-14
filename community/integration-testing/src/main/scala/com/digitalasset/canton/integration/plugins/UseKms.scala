@@ -23,6 +23,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.WallClock

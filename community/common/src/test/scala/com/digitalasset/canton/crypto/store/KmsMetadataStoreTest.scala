@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.store.db.DbKmsMetadataStore
 import com.digitalasset.canton.crypto.store.memory.InMemoryKmsMetadataStore
 import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose, SigningKeyUsage}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}

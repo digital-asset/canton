@@ -763,7 +763,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d6abad4bee17 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d13720cbe1c2 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1101,7 +1101,7 @@ commands:
                     if [ -n "$FIXED" ]; then
                       SELECTED_VOLUNTEER="$FIXED"
                     else
-                      SELECTED_VOLUNTEER=$(bash scripts/ci/select_volunteer.sh)
+                      SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
                     fi
 
                     echo "$SELECTED_VOLUNTEER"
@@ -1110,7 +1110,7 @@ commands:
                 when: always
             - slack/status:
                 fail_only: true
-                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: The person on the CI rota takes care of failed nightly jobs.)'
+                failure_message: A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. You are on rota, so please take a look.
                 mentions: ${SELECTED_VOLUNTEER}
                 only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
                 webhook: << parameters.webhook_url >>
@@ -1283,13 +1283,6 @@ commands:
                 when: always
             - store_test_results:
                 path: test-reports
-    use_new_sequencer_aggregator:
-        steps:
-            - run:
-                command: |
-                    echo 'export USE_NEW_SEQUENCER_AGGREGATOR=true' >> "$BASH_ENV"
-                    echo "Using new sequencer aggregator for tests"
-                name: Use new sequencer aggregator
 executors:
     canton-2xlarge-docker:
         docker:
@@ -2128,7 +2121,6 @@ jobs:
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
-            - use_new_sequencer_aggregator
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
@@ -2901,7 +2893,7 @@ jobs:
                 condition: << parameters.only_for_selected_users >>
                 steps:
                     - run:
-                        command: .circleci/skip-variations-test.sh
+                        command: scripts/ci/skip-variations-test.sh
                         name: Skip test (except for selected users)
             - set_canton_protocol_version:
                 protocol_version: << parameters.protocol_version >>

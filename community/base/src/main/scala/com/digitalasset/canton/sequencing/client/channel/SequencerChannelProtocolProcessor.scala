@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client.channel
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcServiceUnavailable

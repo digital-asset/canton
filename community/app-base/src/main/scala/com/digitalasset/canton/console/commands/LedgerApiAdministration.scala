@@ -23,7 +23,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionResponse as ExecuteResponseProto,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
-  PackagePreference,
   PrepareSubmissionResponse as PrepareResponseProto,
   PreparedTransaction,
 }
@@ -920,46 +919,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             )
           )
         }.getTransaction
-
-      @Help.Summary("Get the preferred package version for constructing a command submission")
-      @Help.Description(
-        """A preferred package is the highest-versioned package for a provided package-name that is
-          |vetted by all the participants hosting the provided parties.
-          |
-          |Ledger API clients should use this endpoint for constructing command submissions that are
-          |compatible with the provided preferred package, by making informed decisions on:
-          |- which are the compatible packages that can be used to create contracts
-          |- which contract or exercise choice argument version can be used in the command
-          |- which choices can be executed on a template or interface of a contract
-          |
-          |Parameters:
-          |- parties: The parties whose vetting state should be considered when computing the
-          |  preferred package.
-          |- packageName: The package name for which the preferred package is requested.
-          |- synchronizerId: The synchronizer whose topology state to use for resolving this query.
-          |  If not specified. the topology state of all the synchronizers the participant is
-          |  connected to will be used.
-          |- vettingValidAt: The timestamp at which the package vetting validity should be computed
-          |  If not provided, the participant's current clock time is used.
-          """
-      )
-      def preferred_package_version(
-          parties: Set[Party],
-          packageName: LfPackageName,
-          synchronizerId: Option[SynchronizerId] = None,
-          vettingValidAt: Option[CantonTimestamp] = None,
-      ): Option[PackagePreference] =
-        consoleEnvironment.run {
-          ledgerApiCommand(
-            LedgerApiCommands.InteractiveSubmissionService
-              .PreferredPackageVersion(
-                parties.map(_.toLf),
-                packageName,
-                synchronizerId,
-                vettingValidAt,
-              )
-          )
-        }
 
       @Help.Summary("Get the preferred packages for constructing a command submission")
       @Help.Description(

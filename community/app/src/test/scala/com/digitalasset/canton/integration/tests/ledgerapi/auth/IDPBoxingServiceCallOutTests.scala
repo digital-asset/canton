@@ -3,11 +3,18 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
-import com.daml.ledger.api.v2.admin.user_management_service as uproto
+import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
+import com.daml.ledger.api.v2.admin.{
+  party_management_service as pproto,
+  user_management_service as uproto,
+}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
-import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthServiceJWTSuppressionRule
+import com.digitalasset.canton.integration.{ConfigTransforms, TestConsoleEnvironment}
+import com.digitalasset.canton.logging.SuppressionRule
+import com.google.protobuf.field_mask.FieldMask
+import monocle.macros.syntax.lens.*
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -17,6 +24,15 @@ trait IDPBoxingServiceCallOutTests
     with IdentityProviderConfigAuth
     with UserManagementAuth
     with ErrorsAssertions {
+
+  // Allow the use of the admin API console, this is needed for setup in one of the tests,
+  // where we explicitly want to exercise parties created through this path.
+  override lazy val environmentDefinition = super.environmentDefinition
+    .addConfigTransform(ConfigTransforms.updateParticipantConfig("participant1") { config =>
+      config
+        .focus(_.ledgerApi.adminTokenConfig.adminClaim)
+        .replace(true)
+    })
 
   override protected def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment
@@ -209,6 +225,41 @@ trait IDPBoxingServiceCallOutTests
                 )
               )
           } yield ()
+        }
+      }
+    }
+
+    "deny IDP Admin updating details on unassigned parties" taggedAs adminSecurityAsset
+      .setAttack(
+        attackUnknownResource(threat = "Claim parties without a party record")
+      ) in { implicit env =>
+      import env.*
+      loggerFactory.suppress(SuppressionRule.LoggerNameContains("PartyManagementService")) {
+        val suffix = UUID.randomUUID().toString
+        // Use the admin console to create the party.
+        // This does not create a party record associating this with an IDP.
+        val partyId = participant1.parties.enable(s"party-$suffix")
+        val (_, idpAdminContext, idpConfig) = createIDPBundle(canBeAnAdmin, suffix).futureValue
+        expectInvalidArgument {
+          stub(pproto.PartyManagementServiceGrpc.stub(channel), idpAdminContext.token)
+            .updatePartyDetails(
+              pproto.UpdatePartyDetailsRequest(
+                partyDetails = Some(
+                  pproto.PartyDetails(
+                    party = partyId.toProtoPrimitive,
+                    isLocal = true,
+                    identityProviderId = idpConfig.identityProviderId,
+                    localMetadata = Some(
+                      ObjectMeta(
+                        resourceVersion = "",
+                        annotations = Map("hello" -> "potato"),
+                      )
+                    ),
+                  )
+                ),
+                updateMask = Some(FieldMask(paths = Seq("local_metadata.annotations"))),
+              )
+            )
         }
       }
     }

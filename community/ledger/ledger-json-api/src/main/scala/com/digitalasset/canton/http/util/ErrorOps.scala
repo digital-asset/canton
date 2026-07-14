@@ -20,9 +20,6 @@ object ErrorOps {
   implicit final class EitherWssExtras[L, R](private val self: Either[L, R]) extends AnyVal {
     def liftErr[M](f: String => M)(implicit L: Show[L]): Either[M, R] =
       self leftMap (e => f(e.show))
-
-    def liftErrS[M](msg: String)(f: String => M)(implicit L: Show[L]): Either[M, R] =
-      liftErr(x => f(msg + " " + x))
   }
 
   implicit final class EitherTWssExtras[F[_]: Functor, L, R](private val self: EitherT[F, L, R])

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.Id
+import cats.{Functor, Id}
 import com.daml.grpc.adapter.{ExecutionSequencerFactory, PekkoExecutionSequencerPool}
 import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{
@@ -17,6 +17,8 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.HealthStatus
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -47,6 +49,7 @@ import org.apache.pekko.stream.scaladsl.{
   SourceQueueWithComplete,
 }
 import org.apache.pekko.stream.stage.{
+  GraphStage,
   GraphStageLogic,
   GraphStageWithMaterializedValue,
   InHandler,
@@ -142,6 +145,14 @@ object PekkoUtil extends HasLoggerName {
       namePrefix + "-execution-sequencer",
       actorCount = Threading.detectNumberOfThreads(logger).value,
     )
+
+  def pekkoSourceFunctor[Mat]: Functor[Source[*, Mat]] = new Functor[Source[*, Mat]] {
+    override def map[A, B](source: Source[A, Mat])(f: A => B): Source[B, Mat] = source.map(f)
+  }
+
+  def pekkoFlowFunctor[In, Mat]: Functor[Flow[In, *, Mat]] = new Functor[Flow[In, *, Mat]] {
+    override def map[A, B](flow: Flow[In, A, Mat])(f: A => B): Flow[In, B, Mat] = flow.map(f)
+  }
 
   /** Remembers the last `memory` many elements that have already been emitted previously. Passes
     * those remembered elements downstream with each new element. The current element is the
@@ -322,7 +333,7 @@ object PekkoUtil extends HasLoggerName {
   )(implicit loggingContext: NamedLoggingContext): graph.Repr[B] =
     mapAsyncUS(graph, parallelism)(f)
       // Important to use `collect` instead of `takeWhile` here
-      // so that the return source completes only after all `source`'s elements have been consumed.
+      // so that the returned source/flow completes only after all `source`'s elements have been consumed.
       // TODO(#13789) Should we cancel/pull a kill switch to signal upstream that no more elements are needed?
       .collect { case Outcome(x) => x }
 
@@ -867,6 +878,105 @@ object PekkoUtil extends HasLoggerName {
     override def abort(ex: Throwable): Unit = delegate.onComplete(_.foreach(_.abort(ex)))
   }
 
+  /** Aggregates stream elements until downstream pulls them or the aggregation state is full.
+    * Ensures that all aggregation functions (`initial`, `aggregate`, `emit`) execute sequentially
+    * in the order of received elements. For example, if `e1`, ..., `eN` are the elements of the
+    * streams received, the methods execute in the following order:
+    *
+    *   - `initial(e1)`,
+    *   - `aggregate(_, e2)`, ..., `aggregate(_, eI)`,
+    *   - `emit(_)`,
+    *   - `initial(eI+1)`,
+    *   - `aggregate(_, eI_2)`, ..., `aggregate(_, eJ)`,
+    *   - `emit(_)`
+    *   - ...
+    *
+    * In particular, `emit` executes before `initial` of the next aggregation.
+    *
+    * @param initial
+    *   Turns an element into an aggregation state for only this element.
+    * @param aggregate
+    *   Adds an element into the aggregation state.
+    * @param full
+    *   Determines whether the aggregation state is full and no further elements shall be pulled
+    *   from upstream until the aggregated state has been emitted.
+    * @param emit
+    *   Converts an aggregation state into an element to be emitted downstream.
+    */
+  def aggregate[A, Acc, B, Mat](graph: FlowOps[A, Mat])(
+      initial: A => Acc
+  )(full: Acc => Boolean, aggregate: (Acc, A) => Acc, emit: Acc => B): graph.Repr[B] =
+    graph.via(new Aggregator[A, Acc, B](initial, aggregate, emit, full))
+
+  private class Aggregator[A, Acc, B](
+      initial: A => Acc,
+      aggregate: (Acc, A) => Acc,
+      emit: Acc => B,
+      full: Acc => Boolean,
+  ) extends GraphStage[FlowShape[A, B]] {
+    private val in: Inlet[A] = Inlet[A]("Aggregator.in")
+    private val out: Outlet[B] = Outlet[B]("Aggregator.out")
+    override val shape: FlowShape[A, B] = FlowShape(in, out)
+
+    override def initialAttributes: Attributes = Attributes.name("Aggregator")
+
+    @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
+    override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+      new GraphStageLogic(shape) with InHandler with OutHandler {
+        private var accumulator: Acc = _
+
+        override def preStart(): Unit = pull(in)
+
+        override def onPush(): Unit = {
+          val elem = grab(in)
+          val oldAcc = accumulator
+          attempt {
+            accumulator = if (oldAcc == null) initial(elem) else aggregate(oldAcc, elem)
+          }
+          if (isAvailable(out)) {
+            flush()
+          }
+          attempt {
+            if (accumulator == null || !full(accumulator)) {
+              pull(in)
+            }
+          }
+        }
+
+        override def onPull(): Unit =
+          if (accumulator == null) {
+            if (isClosed(in)) completeStage()
+            else if (!hasBeenPulled(in)) pull(in)
+          } else if (isClosed(in)) {
+            flush()
+            completeStage()
+          } else {
+            flush()
+            if (!hasBeenPulled(in)) pull(in)
+          }
+
+        override def onUpstreamFinish(): Unit =
+          if (accumulator == null) completeStage()
+
+        @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+        private def flush(): Unit =
+          attempt {
+            val b = Aggregator.this.emit(accumulator)
+            push(out, b)
+            accumulator = null.asInstanceOf[Acc]
+          }
+
+        private def attempt(x: => Unit): Unit =
+          try {
+            x
+          } catch {
+            case NonFatal(ex) => failStage(ex)
+          }
+
+        setHandlers(in, out, this)
+      }
+  }
+
   object syntax {
 
     /** Defines extension methods for [[org.apache.pekko.stream.scaladsl.FlowOpsMat]] that map to
@@ -944,6 +1054,11 @@ object PekkoUtil extends HasLoggerName {
           cont: R => Source[B, Mat2]
       )(implicit ec: ExecutionContext): U#Repr[B] =
         PekkoUtil.foldConcat[Mat, Mat2, A, B, R](graph)(init, update, cont)(ec)
+
+      def aggregate[Agg, B](
+          initial: A => Agg
+      )(full: Agg => Boolean, aggregate: (Agg, A) => Agg, emit: Agg => B): U#Repr[B] =
+        PekkoUtil.aggregate(graph)(initial)(full, aggregate, emit)
     }
 
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
@@ -1069,6 +1184,11 @@ object PekkoUtil extends HasLoggerName {
       ContextualizedFlow[Context, A, B, Mat],
       C,
     ] = new PekkoUtilSyntaxForContextualizedFlowOps(graph)
+
+    implicit def pekkoUtilSourceFunctor[Mat]: Functor[Source[*, Mat]] =
+      PekkoUtil.pekkoSourceFunctor[Mat]
+    implicit def pekkoUtilSourceFlow[In, Mat]: Functor[Flow[In, *, Mat]] =
+      PekkoUtil.pekkoFlowFunctor[In, Mat]
   }
 
   type ContextualizedFlowOps[+Context[+_], +A, +Mat] =
@@ -1189,6 +1309,7 @@ object PekkoUtil extends HasLoggerName {
     def firstSuccessfulConsumerInitialization: Future[Unit]
 
     def uncommittedQueueSnapshot: Vector[(Long, T)]
+    def healthStatus: HealthStatus
   }
 
   def exponentialRetryWithCap(
@@ -1222,6 +1343,7 @@ object PekkoUtil extends HasLoggerName {
       recoveringQueueMetrics: RecoveringQueueMetrics,
       consumerFactory: Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[T]]],
   ) extends RecoveringFutureQueue[T] {
+
     assert(maxBlockedOffer > 0)
     assert(retryAttemptWarnThreshold > 0)
     assert(retryAttemptErrorThreshold > 0)
@@ -1230,6 +1352,7 @@ object PekkoUtil extends HasLoggerName {
     private val logger = loggerFactory.getLogger(this.getClass)
     private implicit val directEC: ExecutionContext = DirectExecutionContext(logger)
 
+    @volatile
     private var consumer: Consumer[T] = Consumer.InitializationInProgress
 
     private val recoveringQueue: RecoveringQueue[T] = new RecoveringQueue(
@@ -1291,12 +1414,20 @@ object PekkoUtil extends HasLoggerName {
 
     override def done: Future[Done] = donePromise.future
 
+    override def healthStatus: HealthStatus =
+      if (shuttingDown.get()) HealthStatus.unhealthy else isConsumerHealthy
+
+    private def isConsumerHealthy: HealthStatus = consumer match {
+      case Consumer.Initialized(_, consumerHealthStatus) => consumerHealthStatus.get()
+      case _ => HealthStatus.unhealthy
+    }
+
     private def shutdownStepTwo(): Unit = blockingSynchronized {
       logger.info("Shutdown initiated")
       shuttingDown.set(true)
       recoveringQueue.shutdown()
       consumer match {
-        case Consumer.Initialized(c) =>
+        case Consumer.Initialized(c, _) =>
           logger.info("Consumer shutdown initiated")
           c.shutdown()
 
@@ -1311,30 +1442,46 @@ object PekkoUtil extends HasLoggerName {
       }
     }
 
+    private def commitProxy(consumerHealthStatus: AtomicReference[HealthStatus]): Commit = commit =>
+      {
+        consumerHealthStatus.set(HealthStatus.healthy)
+        recoveringQueue.commit(commit)
+      }
+
     private def initializeConsumer(attempt: Int = 1): Unit = blockingSynchronized {
       logger.info("Initializing consumer...")
+      val atomicHealthStatus =
+        new AtomicReference(
+          HealthStatus.unhealthy // At this point we don't know it there will be uncomitted updates when consumer is up. Some late ayncrhonous commit may still arrive from previous consumer that died. We assume unhealthy, it will be updated in consumerInitialized
+        )
       consumer = Consumer.InitializationInProgress
-      consumerFactory(recoveringQueue.commit)(() => shuttingDown.get())
+      consumerFactory(commitProxy(atomicHealthStatus))(() => shuttingDown.get())
         .flatMap { innerFuture =>
           firstSuccessfulConsumerInitializationPromise.trySuccess(()).discard
           innerFuture
         }(directEC)
-        .onComplete(consumerInitialized(_, attempt))(directEC)
+        .onComplete(consumerInitialized(_, attempt, atomicHealthStatus))(directEC)
     }
 
     private def consumerInitialized(
         result: Try[FutureQueueConsumer[T]],
         attempt: Int,
+        consumerHealthStatus: AtomicReference[HealthStatus],
     ): Unit = blockingSynchronized {
       result match {
         case Success(queueConsumer) =>
-          try {
-            recoveringQueue.recover(queueConsumer.fromExclusive)
-          } catch {
-            case t: Throwable =>
-              logger.error(s"Exception caught while recovering: ${t.getMessage}. Shutting down.", t)
-              shutdown()
-          }
+          val haveUncommittedElements =
+            try {
+              recoveringQueue.recover(queueConsumer.fromExclusive)
+            } catch {
+              case t: Throwable =>
+                logger.error(
+                  s"Exception caught while recovering: ${t.getMessage}. Shutting down.",
+                  t,
+                )
+                shutdown()
+                false // We don't care about uncommitted elements when we are going down
+            }
           if (shuttingDown.get()) {
             logger.info(
               "Consumer initialized, but since shutdown already in progress, consumer shutdown initiated"
@@ -1343,13 +1490,17 @@ object PekkoUtil extends HasLoggerName {
             queueConsumer.futureQueue.done.onComplete(consumerTerminated)(directEC)
           } else {
             logger.info("Consumer initialized")
+            if (!haveUncommittedElements) { // If there are no outstanding uncommitted elements, we assume healthy, so idle indexer is healthy
+              consumerHealthStatus.set(HealthStatus.healthy)
+            }
             consumer = Consumer.Initialized(
               new FutureQueuePullProxy(
                 initialEndIndex = queueConsumer.fromExclusive,
                 pull = recoveringQueue.dequeue,
                 delegate = queueConsumer.futureQueue,
                 loggerFactory = loggerFactory,
-              )
+              ),
+              consumerHealthStatus,
             )
             consumer.ifInitialized(
               _.done.onComplete(consumerTerminated)(directEC)
@@ -1412,7 +1563,7 @@ object PekkoUtil extends HasLoggerName {
   sealed trait Consumer[+T] {
     def ifInitialized(f: FutureQueuePullProxy[T] => Unit): Unit =
       this match {
-        case Consumer.Initialized(consumer) => f(consumer)
+        case Consumer.Initialized(consumer, _) => f(consumer)
         case _ => ()
       }
   }
@@ -1422,7 +1573,10 @@ object PekkoUtil extends HasLoggerName {
 
     case object WaitingForRetry extends Consumer[Nothing]
 
-    final case class Initialized[+T](consumer: FutureQueuePullProxy[T]) extends Consumer[T]
+    final case class Initialized[+T](
+        consumer: FutureQueuePullProxy[T],
+        consumerHealthStatus: AtomicReference[HealthStatus],
+    ) extends Consumer[T]
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -1595,8 +1749,12 @@ object PekkoUtil extends HasLoggerName {
           updateMetrics()
         }
 
-    def recover(fromExclusive: Long): Unit = blockingSynchronized {
+    /** @return
+      *   If there were any uncomitted elements
+      */
+    def recover(fromExclusive: Long): Boolean = blockingSynchronized {
       commit(fromExclusive)
+      val ret = uncommitted.nonEmpty
       uncommitted.headOption.foreach { case (uncommittedHeadIndex, _) =>
         assert(
           uncommittedHeadIndex == fromExclusive + 1,
@@ -1609,6 +1767,7 @@ object PekkoUtil extends HasLoggerName {
         .map(_._2)
         .foreach(buffered.prepend)
       updateMetrics()
+      ret
     }
 
     // complete all blocked futures with success (anyway no guarantees that an offered elem makes it through),

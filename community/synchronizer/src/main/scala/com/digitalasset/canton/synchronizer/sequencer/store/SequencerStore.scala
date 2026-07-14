@@ -15,6 +15,7 @@ import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

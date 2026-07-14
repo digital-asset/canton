@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client.time.fetcher
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.sequencing.client.time.fetcher.SequencingTimeFetcher.*
 import com.digitalasset.canton.sequencing.client.time.fetcher.SequencingTimeReadings.TimeReading
 import com.digitalasset.canton.sequencing.client.time.fetcher.TimeSourcesAccessor.TimeSources

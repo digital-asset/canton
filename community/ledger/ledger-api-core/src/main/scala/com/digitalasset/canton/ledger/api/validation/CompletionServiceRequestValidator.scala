@@ -9,13 +9,26 @@ import com.daml.ledger.api.v2.command_completion_service.{
 }
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.command.completion.CompletionStreamRequest
+import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
+import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
 
 object CompletionServiceRequestValidator {
 
   import FieldValidator.*
+
+  def validateCompletionByHash(
+      hash: ByteString
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, ByteString] =
+    Either.cond(
+      !hash.isEmpty,
+      hash,
+      invalidArgument("Missing field: transaction_hash"),
+    )
 
   def validateGrpcCompletionStreamRequest(
       request: GrpcCompletionStreamRequest

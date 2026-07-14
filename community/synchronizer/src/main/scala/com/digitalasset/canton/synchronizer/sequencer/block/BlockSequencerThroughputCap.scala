@@ -81,6 +81,10 @@ class BlockSequencerThroughputCap(
         config.messages.topology,
         SubmissionRequestType.TopologyTransaction,
       ),
+      SubmissionRequestType.ConfirmationResponse -> makeIndividualCap(
+        config.messages.confirmationResponse,
+        SubmissionRequestType.ConfirmationResponse,
+      ),
     )
   )
 
@@ -91,6 +95,7 @@ class BlockSequencerThroughputCap(
     new IndividualBlockSequencerThroughputCap(
       config.observationPeriodSeconds,
       config.strict,
+      config.delayedActivation,
       config.thresholds,
       config.updateEveryMs,
       individualConfig,
@@ -246,6 +251,7 @@ object BlockSequencerThroughputCap {
   class IndividualBlockSequencerThroughputCap(
       observationPeriodSeconds: Int,
       strict: Boolean,
+      delayedActivation: Boolean,
       thresholdsConfig: NonEmpty[Seq[PositiveDouble]],
       updateEveryMs: NonNegativeInt,
       val config: IndividualThroughputCapConfig,
@@ -257,7 +263,7 @@ object BlockSequencerThroughputCap {
   ) extends NamedLogging
       with FlagCloseable {
 
-    private var initialized: Boolean = false
+    private var initialized: Boolean = !delayedActivation
 
     private val thresholds = thresholdsConfig.sorted.reverse.zipWithIndex
     private val maximumGlobalTransactionsPerObservationPeriod =
@@ -299,7 +305,6 @@ object BlockSequencerThroughputCap {
           Right(())
         case _ =>
           val key = ThroughputCapKey(member)
-
           if (!initialized) Right(())
           else
             for {

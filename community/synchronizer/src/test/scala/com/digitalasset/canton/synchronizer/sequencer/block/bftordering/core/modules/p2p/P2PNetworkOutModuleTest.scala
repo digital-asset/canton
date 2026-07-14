@@ -20,13 +20,17 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   P2PEndpoint,
   PlainTextP2PEndpoint,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultSendBlacklistTtl
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.memory.GenericInMemoryP2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   ProgrammableUnitTestContext,
   ProgrammableUnitTestEnv,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  WorkflowId,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopology,
@@ -51,8 +55,10 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
   BftOrderingMessage,
   BftOrderingMessageBody,
 }
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import org.mockito.captor.ArgCaptor
 import org.scalatest.Assertions.fail
 import org.scalatest.wordspec.AnyWordSpec
 import shapeless.*
@@ -61,6 +67,8 @@ import shapeless.syntax.std.traversable.*
 
 import java.time.Instant
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.{Failure, Random, Success, Try}
 
 class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
@@ -68,6 +76,8 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
   import P2PNetworkOutModuleTest.*
 
   implicit val pv: ProtocolVersion = testedProtocolVersion
+
+  private val simClock = new SimClock(loggerFactory = loggerFactory)
 
   "p2p output" when {
     "ready" should {
@@ -387,34 +397,235 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           )
         }
       }
-    }
 
-    "do nothing" when {
-      "none among the possible recipients is authenticated" in {
-        val sendActionSpy =
-          spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
-        val (context, _, module, _) = setupWithIgnoringDefaultDeps(sendActionSpy)
+      "do nothing" when {
+        "none among the possible recipients is authenticated" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, _) = setupWithIgnoringDefaultDeps(sendActionSpy)
 
-        implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
 
-        val possibleRecipients =
-          Seq(
+          val possibleRecipients =
+            Seq(
+              endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+              endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+              endpointToTestBftNodeId(anotherEndpoint),
+            )
+
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+            )
+          )
+
+          verify(sendActionSpy, never).apply(
+            any[P2PEndpoint],
+            any[BftOrderingMessage],
+          )
+        }
+      }
+
+      "blacklist peers" when {
+        "they get retried for a given workflow" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+          val onRecipientDecisionSpy = spyLambda((_: Option[BftNodeId]) => ())
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          val possibleRecipients = Seq(
             endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
             endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
-            endpointToTestBftNodeId(anotherEndpoint),
           )
 
-        module.receive(
-          P2PNetworkOut.SendToRandomAuthenticated(
-            P2PNetworkOut.BftOrderingNetworkMessage.Empty,
-            possibleRecipients,
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+              Some(WorkflowId("test-workflow")),
+              nodeThatFailed = None,
+              Some(onRecipientDecisionSpy),
+            )
           )
-        )
 
-        verify(sendActionSpy, never).apply(
-          any[P2PEndpoint],
-          any[BftOrderingMessage],
-        )
+          // The `onRecipientDecision` callback is also called when there's no authenticated peer
+          verify(onRecipientDecisionSpy, times(1)).apply(None)
+
+          reset(onRecipientDecisionSpy)
+
+          Seq(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val networkMessageBody = BftOrderingMessageBody(BftOrderingMessageBody.Message.Empty)
+          val p2pEndpointCaptor = ArgCaptor[P2PEndpoint]
+          var initial = true
+          for (
+            nodeThatTimedOutF <- Seq[() => Option[BftNodeId]](
+              () => None,
+              () => Some(endpointToTestBftNodeId(p2pEndpointCaptor.value)),
+              () => None,
+            )
+          ) {
+            val nodeThatTimedOut = nodeThatTimedOutF()
+            module.receive(
+              P2PNetworkOut.SendToRandomAuthenticated(
+                P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+                possibleRecipients,
+                Some(WorkflowId("test-workflow")),
+                nodeThatTimedOut,
+                Some(onRecipientDecisionSpy),
+              )
+            )
+            verify(sendActionSpy, times(1)).apply(
+              if (initial) p2pEndpointCaptor.capture else any[P2PEndpoint],
+              eqTo(
+                BftOrderingMessage(
+                  "",
+                  Some(networkMessageBody),
+                  sentBy = selfNode,
+                  sentAt = None,
+                )
+              ),
+            )
+            verify(onRecipientDecisionSpy, times(1)).apply(any[Option[BftNodeId]])
+
+            reset(sendActionSpy)
+            reset(onRecipientDecisionSpy)
+            initial = false
+          }
+
+          module.state.workflowBlacklists
+            .get(WorkflowId("test-workflow"))
+            .map(_.keys.toSet) shouldBe Some(
+            Set(endpointToTestBftNodeId(p2pEndpointCaptor.value))
+          )
+
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+              Some(WorkflowId("test-workflow")),
+              nodeThatFailed = None,
+            )
+          )
+
+          verify(sendActionSpy, times(1)).apply(
+            argThat((e: P2PEndpoint) => e != p2pEndpointCaptor.value),
+            eqTo(
+              BftOrderingMessage(
+                "",
+                Some(networkMessageBody),
+                sentBy = selfNode,
+                sentAt = None,
+              )
+            ),
+          )
+        }
+      }
+
+      "remove blacklists" when {
+        "they expire" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          Seq(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val possibleRecipients = Seq(
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+          )
+
+          for (
+            nodeThatTimedOut <- Seq(
+              None,
+              Some(endpointToTestBftNodeId(otherInitialEndpointsTupled._1)),
+            )
+          ) {
+            module.receive(
+              P2PNetworkOut.SendToRandomAuthenticated(
+                P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+                possibleRecipients,
+                Some(WorkflowId("test-workflow")),
+                nodeThatTimedOut,
+              )
+            )
+          }
+
+          simClock.advance(DefaultSendBlacklistTtl.plus(1.second).toJava)
+
+          // Trigger expiration check by sending a new message
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+              Some(WorkflowId("test-workflow")),
+              nodeThatFailed = None,
+            )
+          )
+
+          module.state.workflowBlacklists.get(WorkflowId("test-workflow")) shouldBe Some(
+            Map.empty
+          )
+        }
+      }
+
+      "clean all blacklist info" when {
+        "requested to end a workflow" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          Seq(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val possibleRecipients = Seq(
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+          )
+
+          for (
+            nodeThatTimedOut <- Seq(
+              None,
+              Some(endpointToTestBftNodeId(otherInitialEndpointsTupled._1)),
+            )
+          ) {
+            module.receive(
+              P2PNetworkOut.SendToRandomAuthenticated(
+                P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+                possibleRecipients,
+                Some(WorkflowId("test-workflow")),
+                nodeThatTimedOut,
+              )
+            )
+          }
+
+          module.receive(
+            P2PNetworkOut.EndWorkflow(WorkflowId("test-workflow"))
+          )
+
+          module.state.workflowBlacklists.get(WorkflowId("test-workflow")) shouldBe None
+        }
       }
     }
 
@@ -882,12 +1093,14 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       output,
       pruning,
     )
+    simClock.reset()
     val module =
       new P2PNetworkOutModule[ProgrammableUnitTestEnv, FakeP2PNetworkManager](
         selfNode,
         isGenesis,
         state,
         new Random(4),
+        simClock,
         p2pEndpointsStore,
         SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
         dependencies,

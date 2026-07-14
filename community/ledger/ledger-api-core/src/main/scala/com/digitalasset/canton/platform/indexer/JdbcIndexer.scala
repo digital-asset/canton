@@ -71,7 +71,11 @@ object JdbcIndexer {
       val DBLockStorageBackend = factory.createDBLockStorageBackend
       val stringInterningStorageBackend = factory.createStringInterningStorageBackend
       val completionStorageBackend =
-        factory.createCompletionStorageBackend(inMemoryState.stringInterningView, loggerFactory)
+        factory.createCompletionStorageBackend(
+          inMemoryState.stringInterningView,
+          inMemoryState.ledgerEndCache,
+          loggerFactory,
+        )
       val eventStorageBackend = factory.createEventStorageBackend(
         inMemoryState.ledgerEndCache,
         inMemoryState.stringInterningView,

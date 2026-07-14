@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.{FloatingUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler

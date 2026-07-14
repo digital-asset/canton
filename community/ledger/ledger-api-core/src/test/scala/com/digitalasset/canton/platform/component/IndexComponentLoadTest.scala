@@ -119,10 +119,8 @@ class IndexComponentLoadTest
       lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(0L),
       aggregationThreshold = 10000L,
     )
-    restartIndexer(config =
-      IndexerConfig(
-        achsConfig = Some(achsConfig)
-      )
+    restartServices(
+      serviceParams.copy(indexerConfig = IndexerConfig(achsConfig = Some(achsConfig)))
     )
     cnNFRIngestionFixture(
       passes = 432,
@@ -130,7 +128,7 @@ class IndexComponentLoadTest
     )
 
     // Restart to default indexer to not impact other tests
-    restartIndexer()
+    restartServices()
   }
 
   it should "10% CN NFR with ACHS enabled (big survival region)" ignore {
@@ -140,10 +138,8 @@ class IndexComponentLoadTest
       lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(20000L),
       aggregationThreshold = 10000L,
     )
-    restartIndexer(config =
-      IndexerConfig(
-        achsConfig = Some(achsConfig)
-      )
+    restartServices(
+      serviceParams.copy(indexerConfig = IndexerConfig(achsConfig = Some(achsConfig)))
     )
     cnNFRIngestionFixture(
       passes = 432,
@@ -151,7 +147,7 @@ class IndexComponentLoadTest
     )
 
     // Restart to default indexer to not impact other tests
-    restartIndexer()
+    restartServices()
   }
 
   it should "Fetch ACS" ignore TraceContext.withNewTraceContext("ACS fetch") {
@@ -161,12 +157,14 @@ class IndexComponentLoadTest
 
   it should "Fetch ACS with ACHS" ignore TraceContext.withNewTraceContext("ACS fetch with ACHS") {
     implicit traceContext =>
-      restartIndexer(
-        config = IndexerConfig(
-          achsConfig = Some(
-            AchsConfig(
-              validAtDistanceTarget = NonNegativeLong.tryCreate(40000L),
-              lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(20000L),
+      restartServices(
+        serviceParams.copy(indexerConfig =
+          IndexerConfig(
+            achsConfig = Some(
+              AchsConfig(
+                validAtDistanceTarget = NonNegativeLong.tryCreate(40000L),
+                lastPopulatedDistanceTarget = NonNegativeLong.tryCreate(20000L),
+              )
             )
           )
         )
@@ -174,7 +172,7 @@ class IndexComponentLoadTest
       fetchAcs()
 
       // Restart to default indexer to not impact other tests
-      restartIndexer()
+      restartServices()
   }
 
   it should "Fetch ACS paginated" ignore TraceContext.withNewTraceContext("ACS paginated fetch") {
@@ -228,12 +226,12 @@ class IndexComponentLoadTest
 
   private def measureAchsInitializationTime(regionName: String, achsConfig: AchsConfig): Unit = {
     // Step 1: Clear any existing ACHS state by restarting without ACHS
-    restartIndexer(config = IndexerConfig(achsConfig = None))
+    restartServices(serviceParams.copy(indexerConfig = IndexerConfig(achsConfig = None)))
 
     // Step 2: Measure baseline restart time without ACHS (no rendering work)
     logger.warn("Measuring baseline restart time without ACHS...")
     val baselineStart = System.currentTimeMillis()
-    restartIndexer(config = IndexerConfig(achsConfig = None))
+    restartServices(serviceParams.copy(indexerConfig = IndexerConfig(achsConfig = None)))
     val baselineTime = System.currentTimeMillis() - baselineStart
     logger.warn(s"Baseline restart (no ACHS) completed in ${seconds(baselineTime)} s")
 
@@ -251,7 +249,9 @@ class IndexComponentLoadTest
         s"lastPopulatedDistance=${achsConfig.lastPopulatedDistanceTarget})..."
     )
     val renderStart = System.currentTimeMillis()
-    restartIndexer(config = IndexerConfig(achsConfig = Some(achsConfig)))
+    restartServices(
+      serviceParams.copy(indexerConfig = IndexerConfig(achsConfig = Some(achsConfig)))
+    )
     val renderTime = System.currentTimeMillis() - renderStart
     val renderOverhead = renderTime - baselineTime
     logger.warn(

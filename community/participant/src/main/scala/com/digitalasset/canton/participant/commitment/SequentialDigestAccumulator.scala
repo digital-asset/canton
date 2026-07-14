@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.commitment
 import cats.syntax.foldable.*
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose, LtHash16Blake3}
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.*
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
@@ -43,12 +43,12 @@ class SequentialDigestAccumulator(
   ): FutureUnlessShutdown[Option[CheckpointWritten]] =
     // for now use the offset as the tiebreaker
     input match {
-      case ProcessingContext(_, _, CheckpointFence) =>
+      case ProcessingContext(_, CheckpointFence) =>
         acsDigestStore
           .insertCheckpointTime(input.offset, input.recordTime)
-          .map(_ => Some(CheckpointWritten(input.recordTime, input.offset)))
+          .map(_ => Some(CheckpointWritten(input.timepoint)))
 
-      case ProcessingContext(_, _, NotCheckpointFence(_, classification)) =>
+      case ProcessingContext(_, NotCheckpointFence(_, classification)) =>
         classification match {
           case update: AcsUpdate =>
             val deltas = DigestOps.computeDeltas(
@@ -61,8 +61,7 @@ class SequentialDigestAccumulator(
               .sequentialTraverse_(deltas) {
                 case DigestDelta.Party(partyAndOrder, digestDelta, operation) =>
                   updateDigest(acsDigestStore.party)(
-                    input.offset,
-                    input.recordTime,
+                    input.timepoint,
                     partyAndOrder.map(stringInterning.party.internalize),
                     digestDelta,
                     operation,
@@ -73,8 +72,7 @@ class SequentialDigestAccumulator(
 
                 case DigestDelta.Participant(participant, digestDelta, operation) =>
                   updateDigest(acsDigestStore.participant)(
-                    input.offset,
-                    input.recordTime,
+                    input.timepoint,
                     stringInterning.participantId.internalize(participant),
                     digestDelta,
                     operation,
@@ -95,8 +93,7 @@ class SequentialDigestAccumulator(
 
           case PartyAddedToParticipant(party, participant) =>
             handleTopologyChange(
-              input.offset,
-              input.recordTime,
+              input.timepoint,
               party,
               participant,
               isAddition = true,
@@ -104,8 +101,7 @@ class SequentialDigestAccumulator(
 
           case PartyRemovedFromParticipant(party, participant) =>
             handleTopologyChange(
-              input.offset,
-              input.recordTime,
+              input.timepoint,
               party,
               participant,
               isAddition = false,
@@ -119,15 +115,15 @@ class SequentialDigestAccumulator(
   /** Generic logic for updating the digest for a party or participant.
     */
   private def updateDigest[Key, V](journal: DigestJournal[Key, V])(
-      offset: Offset,
-      recordTime: CantonTimestamp,
+      timepoint: Timepoint,
       key: Key,
       update: TracedLtHash16Blake3,
       operation: DigestOperation,
   )(
       toLtHash16Blake3: V => LtHash16Blake3,
       toV: LtHash16Blake3 => V,
-  ): FutureUnlessShutdown[Unit] =
+  ): FutureUnlessShutdown[Unit] = {
+    val offset = timepoint.offset
     journal
       .lookup(key, offset)
       .flatMap { acsDigestUpdateO =>
@@ -170,8 +166,7 @@ class SequentialDigestAccumulator(
               AcsDigestUpdate(
                 AcsDigest(
                   key,
-                  offset,
-                  recordTime,
+                  timepoint,
                   Some(toV(updatedDigest.digest)),
                   updatedDigest.trace,
                 ),
@@ -181,6 +176,7 @@ class SequentialDigestAccumulator(
           )
         }
       }
+  }
 
   /** Adding a party to a participant means the party's digest needs to be added to the
     * participant's digest.
@@ -189,8 +185,7 @@ class SequentialDigestAccumulator(
     * participant's digest.
     */
   private def handleTopologyChange(
-      offset: Offset,
-      recordTime: CantonTimestamp,
+      timepoint: Timepoint,
       party: LfPartyId,
       participant: LedgerParticipantId,
       isAddition: Boolean,
@@ -201,7 +196,7 @@ class SequentialDigestAccumulator(
       PartyOrder.orderFor(thisLfParticipant, participant),
     )
     for {
-      partyDigestUpdateO <- acsDigestStore.party.lookup(partyKey, offset)
+      partyDigestUpdateO <- acsDigestStore.party.lookup(partyKey, timepoint.offset)
       nonEmptyPartyDigestO = partyDigestUpdateO
         .flatMap(_.digestUpdate.digestO)
         .map(LtHash16Blake3.tryCreate)
@@ -212,8 +207,7 @@ class SequentialDigestAccumulator(
         val partyTraceO = partyDigestUpdateO.flatMap(_.digestUpdate.trace)
         val tracedPartyDigest = TracedLtHash16Blake3(partyDigest, partyTraceO)
         updateDigest(acsDigestStore.participant)(
-          offset,
-          recordTime,
+          timepoint,
           internedPid,
           update =
             if (isAddition) tracedPartyDigest.asBulkAddition(s"onboarded $party")

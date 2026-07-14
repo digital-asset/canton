@@ -17,6 +17,7 @@ import com.digitalasset.canton.crypto.SyncCryptoError.KeyNotAvailable
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.TopologyTimestampVerificationError

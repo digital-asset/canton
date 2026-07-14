@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.EncryptionError.FailedToEncrypt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.ProtocolSymmetricKey
 import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeserializationError}
 import com.digitalasset.canton.topology.Member

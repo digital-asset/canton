@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
@@ -277,6 +278,18 @@ trait CompletionStorageBackend {
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse]
+
+  def acceptedCompletionByHash(
+      hash: Array[Byte],
+      parties: Set[Party],
+  )(connection: Connection): Option[Completion]
+
+  def rejectedCompletionsByHash(
+      hash: Array[Byte],
+      limit: Int,
+      beforeOffset: Option[Offset],
+      parties: Set[Party],
+  )(connection: Connection): Vector[Completion]
 
   def commandCompletionsForRecovery(
       startInclusive: Offset,

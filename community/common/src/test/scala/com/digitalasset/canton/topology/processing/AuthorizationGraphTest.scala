@@ -16,7 +16,12 @@ class AuthorizationGraphTest
     with BaseAuthorizationGraphTest {
 
   private def mkGraph: AuthorizationGraph =
-    new AuthorizationGraph(namespace, extraDebugInfo = true, loggerFactory)
+    new AuthorizationGraph(
+      namespace,
+      extraDebugInfo = true,
+      warnAboutDanglingKeys = true,
+      loggerFactory,
+    )
 
   import factory.SigningKeys.*
 

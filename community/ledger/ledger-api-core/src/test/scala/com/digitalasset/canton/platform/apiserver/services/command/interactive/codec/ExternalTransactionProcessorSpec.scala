@@ -8,7 +8,6 @@ import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationOffset
 import com.digitalasset.canton.data.LedgerTimeBoundaries
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
-import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.InteractiveSubmissionPreparationError
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.ledger.participant.state.{
   RoutingSynchronizerState,
@@ -27,13 +26,7 @@ import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfi
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.canton.{
-  BaseTest,
-  HasExecutionContext,
-  LedgerUserId,
-  LfTimestamp,
-  ProtocolVersionChecksAnyWordSpec,
-}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerUserId, LfTimestamp}
 import com.digitalasset.daml.lf.command.ApiCommands
 import com.digitalasset.daml.lf.crypto.Hash as LfHash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -57,15 +50,18 @@ class ExternalTransactionProcessorSpec
     with BaseTest
     with HasExecutionContext
     with MockitoSugar
-    with ArgumentMatchersSugar
-    with ProtocolVersionChecksAnyWordSpec {
+    with ArgumentMatchersSugar {
 
   private implicit val loggingContext: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   private def commandExecutionResultFor(
       transaction: VersionedTransaction,
+      protocolVersion: ProtocolVersion,
+      submissionSeed: String,
       nodeSeeds: ImmArray[(NodeId, LfHash)],
   ): (CommandExecutionResult, Commands) = {
+    val physicalSynchronizerId =
+      DefaultTestIdentities.physicalSynchronizerId.copy(protocolVersion = protocolVersion)
     val commandId = Ref.CommandId.assertFromString("command")
     val submitterInfo = SubmitterInfo(
       actAs = List.empty,
@@ -83,7 +79,7 @@ class ExternalTransactionProcessorSpec
       ledgerEffectiveTime = LfTimestamp.Epoch,
       workflowId = None,
       preparationTime = LfTimestamp.Epoch,
-      submissionSeed = LfHash.hashPrivateKey("submission-seed"),
+      submissionSeed = LfHash.hashPrivateKey(submissionSeed),
       timeBoundaries = LedgerTimeBoundaries.unconstrained,
       optUsedPackages = None,
       optNodeSeeds = Some(nodeSeeds),
@@ -99,7 +95,7 @@ class ExternalTransactionProcessorSpec
         interpretationTimeNanos = 0L,
         processedDisclosedContracts = ImmArray.Empty,
       ),
-      synchronizerRank = SynchronizerRank.single(DefaultTestIdentities.physicalSynchronizerId),
+      synchronizerRank = SynchronizerRank.single(physicalSynchronizerId),
       routingSynchronizerState = mock[RoutingSynchronizerState],
     )
     val commands = Commands(
@@ -164,76 +160,88 @@ class ExternalTransactionProcessorSpec
 
   private def prepare(
       transaction: VersionedTransaction,
+      protocolVersion: ProtocolVersion,
+      submissionSeed: String,
       hashingSchemeVersion: HashingSchemeVersion,
-      nodeIds: ImmArray[NodeId] = ImmArray.Empty,
-  ): Either[
-    InteractiveSubmissionPreparationError.Reject,
-    ExternalTransactionProcessor.PrepareResult,
-  ] = {
-    val nodeSeeds =
-      nodeIds.map(nodeId => nodeId -> LfHash.hashPrivateKey(s"node-seed-${nodeId.index}"))
+      nodeSeeds: ImmArray[(NodeId, LfHash)] = ImmArray.Empty,
+  ) = {
     val (commandExecutionResult, commands) =
-      commandExecutionResultFor(transaction, nodeSeeds)
+      commandExecutionResultFor(transaction, protocolVersion, submissionSeed, nodeSeeds)
     val processor = processorFor(transaction)
-    processor
-      .processPrepare(
-        commandExecutionResult,
-        commands,
-        PositiveInt.one,
-        HashTracer.NoOp,
-        maxRecordTime = None,
-        hashingSchemeVersion = hashingSchemeVersion,
-      )
-      .value
-      .failOnShutdown("prepare transaction")
-      .futureValue
+    processor.processPrepare(
+      commandExecutionResult,
+      commands,
+      PositiveInt.one,
+      HashTracer.NoOp,
+      maxRecordTime = None,
+      hashingSchemeVersion = hashingSchemeVersion,
+    )
   }
 
   "ExternalTransactionProcessor" should {
-    "honor the requested hashing scheme for prepared transactions" in {
+    "honor the requested hashing scheme for non-dev prepared transactions" in {
       val transaction = VersionedTransaction(
         LfSerializationVersion.V2,
         Map.empty,
         ImmArray.Empty,
       )
-      val result = prepare(transaction, testedHashingSchemeVersion)
+      val result = prepare(
+        transaction,
+        ProtocolVersion.v35,
+        "prepared-requested-hash-version-test",
+        HashingSchemeVersion.V3,
+      ).valueOrFailShutdown("prepare transaction").futureValue
 
-      result.value.hashVersion shouldBe testedHashingSchemeVersion
+      result.hashVersion shouldBe HashingSchemeVersion.V3
     }
 
-    "reject VDev prepared transactions when the requested hashing scheme is V2" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject VDev prepared transactions when the requested hashing scheme is V2" in {
       val (nodeId, transaction) = vDevCreateTransaction("prepared-vdev-requested-v2-contract")
 
-      val result = prepare(transaction, HashingSchemeVersion.V2, ImmArray(nodeId))
+      val result = prepare(
+        transaction,
+        ProtocolVersion.dev,
+        "prepared-vdev-requested-v2-test",
+        HashingSchemeVersion.V2,
+        ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v2-node")),
+      ).value.failOnShutdown("prepare transaction").futureValue
 
       result.left.value.reason shouldBe
         "Cannot hash node with LF serialization version VDev using hashing scheme V2." +
         " Please use hashing scheme V4 or higher."
     }
 
-    "honor the requested hashing scheme for dev prepared transactions" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "honor the requested hashing scheme for dev prepared transactions" in {
       val (nodeId, transaction) = vDevCreateTransaction("prepared-vdev-requested-v4-contract")
 
-      val result = prepare(transaction, HashingSchemeVersion.V4, ImmArray(nodeId))
+      val result = prepare(
+        transaction,
+        ProtocolVersion.dev,
+        "prepared-vdev-requested-v4-test",
+        HashingSchemeVersion.V4,
+        ImmArray(nodeId -> LfHash.hashPrivateKey("prepared-vdev-requested-v4-node")),
+      ).valueOrFailShutdown("prepare transaction").futureValue
 
-      result.value.hashVersion shouldBe HashingSchemeVersion.V4
+      result.hashVersion shouldBe HashingSchemeVersion.V4
     }
 
-    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is below dev" onlyRunWhen (_ < ProtocolVersion.dev) in {
+    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is stable" in {
       val transaction = VersionedTransaction(
         LfSerializationVersion.V2,
         Map.empty,
         ImmArray.Empty,
       )
-      val result = prepare(transaction, HashingSchemeVersion.V4)
+      val result = prepare(
+        transaction,
+        ProtocolVersion.v35,
+        "prepared-pv35-requested-v4-test",
+        HashingSchemeVersion.V4,
+      ).value.failOnShutdown("prepare transaction").futureValue
 
-      val supportedSchemes = HashingSchemeVersion
-        .getHashingSchemeVersionsForProtocolVersion(testedProtocolVersion)
-        .mkString(", ")
       result.left.value.reason shouldBe
-        s"Hashing scheme version V4 is not supported on protocol version $testedProtocolVersion." +
+        "Hashing scheme version V4 is not supported on protocol version 35." +
         " Minimum protocol version for hashing version V4: dev." +
-        s" Supported hashing version on protocol version $testedProtocolVersion: $supportedSchemes"
+        " Supported hashing version on protocol version 35: V2, V3"
     }
   }
 }

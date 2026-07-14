@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError
 import com.digitalasset.canton.sequencing.protocol.HandshakeRequest
@@ -194,9 +195,32 @@ class SynchronizerOnboardingOutboxTest
     }
 
     "reject provided onboarding transactions missing the encryption key" in {
-      val (result, client) = onboard(Seq(namespaceDelegation, trustCertificate))
+      val otkWithoutEncryptionKey =
+        sign(OwnerToKeyMapping.tryCreate(participant, NonEmpty(Seq, signingKey)))
+      val (result, client) =
+        onboard(Seq(namespaceDelegation, otkWithoutEncryptionKey, trustCertificate))
       result.left.value.cause should include("encryption key")
       client.recorded.get() shouldBe None
+    }
+
+    "reject provided onboarding transactions without an owner-to-key mapping" in {
+      val (result, client) = onboard(Seq(namespaceDelegation, trustCertificate))
+      result.left.value.cause should include("exactly one owner-to-key mapping")
+      client.recorded.get() shouldBe None
+    }
+
+    "reject provided onboarding transactions with several owner-to-key mappings" in {
+      val (result, client) =
+        onboard(Seq(namespaceDelegation, ownerToKeyMapping, ownerToKeyMapping, trustCertificate))
+      result.left.value.cause should include("exactly one owner-to-key mapping")
+      client.recorded.get() shouldBe None
+    }
+
+    "order provided onboarding transactions before dispatching them" in {
+      val provided = Seq(namespaceDelegation, ownerToKeyMapping, trustCertificate)
+      val (result, client) = onboard(provided.reverse)
+      result.valueOrFail("onboarding failed") shouldBe true
+      client.recorded.get() shouldBe Some(provided)
     }
 
     // TODO(i33335): enable this test.

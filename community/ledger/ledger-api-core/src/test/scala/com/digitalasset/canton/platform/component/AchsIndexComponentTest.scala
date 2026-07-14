@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.platform.component.IndexComponentTest.ServiceParams
 import com.digitalasset.canton.platform.config.{
   ActiveContractsServiceStreamsConfig,
   IndexServiceConfig,
@@ -38,9 +39,12 @@ class AchsIndexComponentTest
     initAggregationThreshold = aggregationThreshold,
   )
 
-  override protected val indexerConfig: IndexerConfig = IndexerConfig(
+  val indexerConfig: IndexerConfig = IndexerConfig(
     achsConfig = Some(achsConfig)
   )
+
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams.copy(indexerConfig = indexerConfig)
 
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 
@@ -236,8 +240,8 @@ class AchsIndexComponentTest
         contractProcessingParallelism = 1,
       )
     )
-    restartIndexer(
-      serviceConfig = indexServiceConfig
+    restartServices(
+      serviceParams.copy(indexServiceConfig = indexServiceConfig)
     )
     verifyAchsConsistency(lastEventSeqId)
 
@@ -321,15 +325,15 @@ class AchsIndexComponentTest
     achsContractIds should not be empty
 
     // The ACHS-enabled result should match the ACHS-disabled reference
-    restartIndexer(
-      config = indexerConfig.copy(achsConfig = None)
+    restartServices(
+      serviceParams.copy(indexerConfig = indexerConfig.copy(achsConfig = None))
     )
     val referenceContractIds = activeContractIds(queryOffset)
     referenceContractIds should not be empty
     achsContractIds shouldBe referenceContractIds
 
     // Restart with original config for the next tests
-    restartIndexer(config = this.indexerConfig)
+    restartServices()
   }
 
   it should "return same active contracts with ACHS enabled and disabled" in {
@@ -364,10 +368,8 @@ class AchsIndexComponentTest
     achsContracts should not be empty
 
     // restart indexer with ACHS disabled and fetch ACS again (ACHS should not be used, but result should be the same)
-    restartIndexer(
-      config = indexerConfig.copy(
-        achsConfig = None
-      )
+    restartServices(
+      serviceParams.copy(indexerConfig = indexerConfig.copy(achsConfig = None))
     )
 
     val noAchsContracts = activeContractIds(ledgerEnd)
@@ -376,14 +378,14 @@ class AchsIndexComponentTest
     achsContracts shouldBe noAchsContracts
 
     // restart with original config for the next tests
-    restartIndexer(config = indexerConfig)
+    restartServices()
   }
 
   behavior of "ACHS in repair mode"
 
   it should "leave ACHS unchanged when ingesting repair transactions" in {
     // Ensure we start from the original config
-    restartIndexer(indexerConfig)
+    restartServices()
 
     val txsCreatedThenArchived = 1
     val txsCreatedNotArchived = 1
@@ -419,7 +421,11 @@ class AchsIndexComponentTest
     getAchsStateRowCount shouldBe 1
 
     // restart indexer in repair mode
-    restartIndexer(config = indexerConfig, repairMode = true)
+    restartServices(
+      serviceParams.copy(buildFutureQueue =
+        (indexerF, _) => indexingFutureQueue(indexerF, repairMode = true)
+      )
+    )
 
     // ingest repair transactions
     val repairTxSize = 3
@@ -441,7 +447,7 @@ class AchsIndexComponentTest
     getAchsState shouldBe ((validAtBefore, lastPopulatedBefore, lastRemovedBefore))
 
     // restart indexer in normal mode and verify ACHS catches up with the new data
-    restartIndexer(config = indexerConfig)
+    restartServices()
 
     verifyAchsConsistency(lastEventSeqIdAfterRepair)
 
@@ -505,7 +511,7 @@ class AchsIndexComponentTest
     getAchsEventSeqIds shouldBe getActivateEventSeqIds
 
     // restart with ACHS enabled and verify ACHS rebuilds consistently
-    restartIndexer(config = indexerConfig)
+    restartServices()
     verifyAchsConsistency(getLastEventSeqId)
   }
 
@@ -541,7 +547,7 @@ class AchsIndexComponentTest
 
   it should "clear ACHS state and snapshot when disabling ACHS" in {
     // ensure we start from the original config
-    restartIndexer(indexerConfig)
+    restartServices()
 
     val txsCreatedThenArchived = 5
     val txsCreatedNotArchived = 1
@@ -575,8 +581,8 @@ class AchsIndexComponentTest
     getAchsStateRowCount shouldBe 1
 
     // Phase 2: restart with ACHS disabled (achsConfig = None)
-    restartIndexer(
-      config = indexerConfig.copy(achsConfig = None)
+    restartServices(
+      serviceParams.copy(indexerConfig = indexerConfig.copy(achsConfig = None))
     )
 
     // Both the ACHS state row and filter data should be cleared
@@ -584,7 +590,7 @@ class AchsIndexComponentTest
     getAchsStateRowCount shouldBe 0
 
     // Phase 3: restart again with ACHS enabled and verify consistency is rebuilt
-    restartIndexer(config = indexerConfig)
+    restartServices()
 
     verifyAchsConsistency(lastEventSeqId)
 
@@ -596,7 +602,7 @@ class AchsIndexComponentTest
 
   it should "skip removal phase when initializing fresh ACHS with large lastPopulatedDistanceTarget" in {
     // Start with ACHS disabled so that we get a fresh ACHS (lastPopulated = 0)
-    restartIndexer(config = indexerConfig.copy(achsConfig = None))
+    restartServices(serviceParams.copy(indexerConfig = indexerConfig.copy(achsConfig = None)))
 
     val txsCreatedThenArchived = 5
     val txsCreatedNotArchived = 1
@@ -643,7 +649,11 @@ class AchsIndexComponentTest
     loggerFactory.assertLogsSeq(
       SuppressionRule.LevelAndAbove(Level.DEBUG)
     )(
-      restartIndexer(config = indexerConfig.copy(achsConfig = Some(largePopDistConfig))),
+      restartServices(
+        serviceParams.copy(indexerConfig =
+          indexerConfig.copy(achsConfig = Some(largePopDistConfig))
+        )
+      ),
       logs => {
         val skipLogs = logs.filter(_.message.contains(skipMessage))
         withClue(
@@ -656,7 +666,7 @@ class AchsIndexComponentTest
   }
 
   it should "terminate ACHS initialization early when shutdown is invoked" in {
-    restartIndexer(config = indexerConfig.copy(achsConfig = None))
+    restartServices(serviceParams.copy(indexerConfig = indexerConfig.copy(achsConfig = None)))
 
     // at least one update is needed to trigger ACHS initialization on the next restart
     val allUpdates = createsAndArchives(
@@ -713,12 +723,8 @@ class AchsIndexComponentTest
     )
     indexerResource.release().futureValue
 
-    acquireServices(
-      config = indexerConfig,
-      serviceConfig = indexServiceConfig,
-      repairMode = false,
-      incompleteOffsets = Seq.empty,
-    )
+    // Restart with original config for the next tests
+    restartServices()
   }
 
   // Ingest data, restart with ACHS config adjusted by the given diffs, verify consistency, ingest more data, verify consistency again.
@@ -727,7 +733,7 @@ class AchsIndexComponentTest
       lastPopulatedDistanceDiff: Long,
   ): Unit = {
     // Ensure we start from the original config (a previous test may have left a different config active)
-    restartIndexer(indexerConfig)
+    restartServices()
 
     val txsCreatedThenArchived = 5
     val txsCreatedNotArchived = 1
@@ -765,10 +771,8 @@ class AchsIndexComponentTest
       ),
     )
 
-    restartIndexer(
-      config = indexerConfig.copy(
-        achsConfig = Some(newAchsConfig)
-      )
+    restartServices(
+      serviceParams.copy(indexerConfig = indexerConfig.copy(achsConfig = Some(newAchsConfig)))
     )
 
     // After restart, for each dimension use the old config if the work is negative (debt, no-op)

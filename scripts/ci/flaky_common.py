@@ -34,17 +34,17 @@ NIGHTLY_BROKEN_LABEL: Final[str] = "broken-nightly"
 # Nightly cron from .circleci/config/workflows/canton_nightly.yml: "0 22 * * 1-5".
 NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
 
-milestone = "Flaky Tests" # flaky tests milestone M97 (milestone number 31)
-flaky_test_project = "PVT_kwDOAJX-Fc4AbncN" # https://github.com/orgs/DACH-NY/projects/38/
+milestone = "Flaky Tests"  # flaky tests milestone M97 (milestone number 31)
+flaky_test_project = "PVT_kwDOAJX-Fc4AbncN"  # https://github.com/orgs/DACH-NY/projects/38/
 
-release_line_field = "PVTSSF_lADOAJX-Fc4AbncNzgcWE1k" # ID of the custom field "Release Line"
+release_line_field = "PVTSSF_lADOAJX-Fc4AbncNzgcWE1k"  # ID of the custom field "Release Line"
 
 # The value of this dictionary points to the ID of the field value of the `Release Line` field in the
 # flaky test kanban board.
 # If you add a new field, execute listReleaseLineFields.graphql to find the new ID
 branches_to_report = {
-    "main" : "733298b6", # ID of the value "main" for the Release Line field in the project
-    "main-2.x" : "073b4df3" # ID of the value "main-2.x" for the Release Line field in the project
+    "main": "733298b6",  # ID of the value "main" for the Release Line field in the project
+    "main-2.x": "073b4df3",  # ID of the value "main-2.x" for the Release Line field in the project
 }
 
 GH_RETRY_ATTEMPTS: Final[int] = 3
@@ -57,8 +57,10 @@ TRANSIENT_HTTP_CODES: Final[frozenset] = frozenset({"502", "503", "504"})
 def is_github_actions_ci() -> bool:
     return os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
 
+
 def is_circle_ci() -> bool:
     return os.environ.get("CIRCLECI", "").lower() == "true"
+
 
 def get_ci_branch() -> str:
     if is_github_actions_ci():
@@ -66,6 +68,7 @@ def get_ci_branch() -> str:
     if is_circle_ci():
         return os.environ.get("CIRCLE_BRANCH", "")
     return os.environ.get("CIRCLE_BRANCH", "")
+
 
 def get_ci_build_url() -> str:
     if is_github_actions_ci():
@@ -79,12 +82,14 @@ def get_ci_build_url() -> str:
         return os.environ.get("CIRCLE_BUILD_URL", "")
     return os.environ.get("CIRCLE_BUILD_URL", "")
 
+
 def get_ci_node_index() -> str:
     if is_github_actions_ci():
         return os.environ.get("MATRIX_SHARD", "0")
     if is_circle_ci():
         return os.environ.get("CIRCLE_NODE_INDEX", "0")
     return os.environ.get("CIRCLE_NODE_INDEX", "0")
+
 
 def get_ci_job_name() -> str:
     if is_circle_ci():
@@ -93,12 +98,14 @@ def get_ci_job_name() -> str:
         return os.environ.get("GITHUB_JOB", "unknown")
     return os.environ.get("CIRCLE_JOB", "unknown")
 
+
 def get_ci_commit_hash() -> str:
     if is_github_actions_ci():
         return os.environ.get("GITHUB_SHA", "unknown")
     if is_circle_ci():
         return os.environ.get("CIRCLE_SHA1", "unknown")
     return os.environ.get("CIRCLE_SHA1", "unknown")
+
 
 def get_ci_parallel_run_url(build_url: str, node_index: str) -> str:
     if is_github_actions_ci():
@@ -116,6 +123,7 @@ gh_flaky_test_env = os.environ.copy()
 if "GITHUB_FLAKY_TEST_TOKEN" in gh_flaky_test_env:
     gh_flaky_test_env["GITHUB_TOKEN"] = os.environ["GITHUB_FLAKY_TEST_TOKEN"]
 
+
 def should_report_issues():
     return branch in branches_to_report
 
@@ -131,17 +139,24 @@ def is_nightly_job(job: str) -> bool:
 
 # --- gh CLI wrapper -------------------------------------------------------
 
+
 def is_transient_gh_error(result) -> bool:
     combined = result.stderr + result.stdout
     return any(code in combined for code in TRANSIENT_HTTP_CODES)
 
-def run_gh_with_retries(args: list, attempts: int = GH_RETRY_ATTEMPTS) -> subprocess.CompletedProcess:
+
+def run_gh_with_retries(
+    args: list, attempts: int = GH_RETRY_ATTEMPTS
+) -> subprocess.CompletedProcess:
     result = subprocess.run(["gh"] + args, capture_output=True, text=True, env=gh_flaky_test_env)
     if result.returncode != 0 and is_transient_gh_error(result) and attempts > 1:
-        print(f"Transient gh error (attempt {GH_RETRY_ATTEMPTS - attempts + 1}/{GH_RETRY_ATTEMPTS}), retrying in {GH_RETRY_DELAY_SECONDS}s...")
+        print(
+            f"Transient gh error (attempt {GH_RETRY_ATTEMPTS - attempts + 1}/{GH_RETRY_ATTEMPTS}), retrying in {GH_RETRY_DELAY_SECONDS}s..."
+        )
         time.sleep(GH_RETRY_DELAY_SECONDS)
         return run_gh_with_retries(args, attempts - 1)
     return result
+
 
 def check_result(result):
     if result.returncode != 0:
@@ -153,6 +168,7 @@ def check_result(result):
 
 
 # --- formatting -----------------------------------------------------------
+
 
 # Datadog only accepts ASCII characters in their tag names
 def remove_non_ascii_characters(test_name: str):
@@ -181,6 +197,7 @@ def remove_everything_after_first_slash(test_name: str) -> str:
 def format_issue_title(test_name: str) -> str:
     return f"[{branch}] Flaky {format_test_name(test_name)}"
 
+
 def format_test_name(test_name: str):
     test_name = remove_everything_after_first_slash(remove_non_ascii_characters(test_name))
     # Collapse shard partitions so all `FooShard0Test`, `FooShard1Test`, ... map to the same
@@ -193,6 +210,7 @@ def format_test_name(test_name: str):
 
 def create_issue_table_header():
     return "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
+
 
 def create_issue_table_row():
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -218,19 +236,28 @@ def create_issue_table_row():
 
 ARTIFACT_VERSION: Final[int] = 1
 
+
 def artifact_dir() -> str:
-    return os.environ.get("FLAKY_ARTIFACT_DIR") or os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()
+    return (
+        os.environ.get("FLAKY_ARTIFACT_DIR")
+        or os.environ.get("RUNNER_TEMP")
+        or tempfile.gettempdir()
+    )
+
 
 def failing_tests_path() -> str:
     return os.path.join(artifact_dir(), "failing_tests.json")
 
+
 def streaks_path() -> str:
     return os.path.join(artifact_dir(), "streaks.json")
+
 
 def write_failing_tests(path: str, tests) -> None:
     with open(path, "w") as f:
         json.dump({"version": ARTIFACT_VERSION, "failing_tests": sorted(set(tests))}, f, indent=2)
     print(f"Wrote {len(set(tests))} failing test(s) to {path}")
+
 
 def read_failing_tests(path: str) -> list:
     if not path or not os.path.exists(path):
@@ -239,12 +266,14 @@ def read_failing_tests(path: str) -> list:
     with open(path) as f:
         return list(json.load(f).get("failing_tests", []))
 
+
 def write_streaks(path: str, streaks) -> None:
     """`streaks` is an iterable of (issue_id, title, commit_hash) tuples."""
     payload = [{"issue_id": i, "title": t, "commit_hash": h} for (i, t, h) in streaks]
     with open(path, "w") as f:
         json.dump({"version": ARTIFACT_VERSION, "streaks": payload}, f, indent=2)
     print(f"Wrote {len(payload)} streak(s) to {path}")
+
 
 def read_streaks(path: str) -> list:
     """Returns a list of (issue_id, title, commit_hash) tuples."""
@@ -258,6 +287,7 @@ def read_streaks(path: str) -> list:
 
 # --- env validation + self-test harness ----------------------------------
 
+
 def ci_required_context_vars() -> list:
     if is_github_actions_ci():
         return ['GITHUB_SHA', 'GITHUB_JOB', 'GITHUB_RUN_ID', 'GITHUB_REPOSITORY', 'MATRIX_SHARD']
@@ -267,11 +297,15 @@ def ci_required_context_vars() -> list:
         # Keep backward compatibility in unknown CI contexts with CircleCI-style vars.
         return ['CIRCLE_SHA1', 'CIRCLE_BUILD_URL', 'CIRCLE_JOB', 'CIRCLE_NODE_INDEX']
 
+
 def assert_required_env_vars(required: list):
     """Ensures the given environment variables are present before execution."""
     missing = [var for var in required if not os.environ.get(var)]
     if missing:
-        raise RuntimeError(f"Cannot execute CI script. Missing required environment variables: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Cannot execute CI script. Missing required environment variables: {', '.join(missing)}"
+        )
+
 
 def run_guarded_self_test(self_test_fn) -> None:
     """Run a script's self_test() and fail loudly if it leaked os.environ changes."""
@@ -281,7 +315,11 @@ def run_guarded_self_test(self_test_fn) -> None:
     finally:
         env_after = dict(os.environ)
         if env_before != env_after:
-            leaked = {k: (env_before.get(k), env_after.get(k)) for k in env_before.keys() | env_after.keys() if env_before.get(k) != env_after.get(k)}
+            leaked = {
+                k: (env_before.get(k), env_after.get(k))
+                for k in env_before.keys() | env_after.keys()
+                if env_before.get(k) != env_after.get(k)
+            }
             raise RuntimeError(f"self_test() polluted os.environ (before -> after): {leaked}")
 
 
@@ -296,8 +334,14 @@ def self_test():
 
 def test_format_test_name_collapses_shards():
     # Shard partitions of the same logical test must collapse to the same name
-    assert format_test_name("LedgerApiShard0ConformanceTestPostgres") == "LedgerApiConformanceTestPostgres"
-    assert format_test_name("LedgerApiShard5ConformanceTestPostgres") == "LedgerApiConformanceTestPostgres"
+    assert (
+        format_test_name("LedgerApiShard0ConformanceTestPostgres")
+        == "LedgerApiConformanceTestPostgres"
+    )
+    assert (
+        format_test_name("LedgerApiShard5ConformanceTestPostgres")
+        == "LedgerApiConformanceTestPostgres"
+    )
     # Two-digit shard indices
     assert format_test_name("LedgerApiShard10ConformanceTest") == "LedgerApiConformanceTest"
     # Non-shard names are unchanged
@@ -305,17 +349,21 @@ def test_format_test_name_collapses_shards():
     # "Shard" without a digit suffix must not be stripped
     assert format_test_name("ShardingLayerTest") == "ShardingLayerTest"
 
+
 def test_gh_flags():
     checks = [
         (["issue", "create", "--help"], ["--title", "--body", "--milestone", "--repo"]),
-        (["issue", "edit",   "--help"], ["--title", "--body", "--repo"]),
+        (["issue", "edit", "--help"], ["--title", "--body", "--repo"]),
         (["issue", "reopen", "--help"], ["--repo"]),
     ]
     for subcommand, flags in checks:
         result = subprocess.run(["gh"] + subcommand, capture_output=True, text=True)
         help_text = result.stdout + result.stderr
         for flag in flags:
-            assert flag in help_text, f"`gh {' '.join(subcommand[:-1])}` help does not mention flag `{flag}` — was it renamed?"
+            assert flag in help_text, (
+                f"`gh {' '.join(subcommand[:-1])}` help does not mention flag `{flag}` — was it renamed?"
+            )
+
 
 def test_create_issue_table_row():
     # Test CircleCI (DACH-NY)
@@ -334,8 +382,14 @@ def test_create_issue_table_row():
         line = create_issue_table_row()
         assert '| test_with_java17 |' in line, f"Missing job in: {line}"
         assert '| 5 |' in line, f"Missing node_index in: {line}"
-        assert '[3196076](https://app.circleci.com/jobs/github/DACH-NY/canton/3196076/parallel-runs/5)' in line, f"Missing parallel-run build link in: {line}"
-        assert '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)' in line, f"Missing commit in: {line}"
+        assert (
+            '[3196076](https://app.circleci.com/jobs/github/DACH-NY/canton/3196076/parallel-runs/5)'
+            in line
+        ), f"Missing parallel-run build link in: {line}"
+        assert (
+            '[a1b2c3d4](https://github.com/DACH-NY/canton/commit/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2)'
+            in line
+        ), f"Missing commit in: {line}"
 
     # Test CircleCI (OSS digital-asset)
     env_circleci_oss = {
@@ -349,8 +403,14 @@ def test_create_issue_table_row():
     }
     with patch.dict(os.environ, env_circleci_oss, clear=False):
         line = create_issue_table_row()
-        assert '[1491](https://app.circleci.com/jobs/github/digital-asset/canton/1491/parallel-runs/6)' in line, f"Missing OSS canton build link in: {line}"
-        assert '[b2c3d4e5](https://github.com/digital-asset/canton/commit/b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3)' in line, f"Missing OSS canton commit link in: {line}"
+        assert (
+            '[1491](https://app.circleci.com/jobs/github/digital-asset/canton/1491/parallel-runs/6)'
+            in line
+        ), f"Missing OSS canton build link in: {line}"
+        assert (
+            '[b2c3d4e5](https://github.com/digital-asset/canton/commit/b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3)'
+            in line
+        ), f"Missing OSS canton commit link in: {line}"
 
     # Test GitHub Actions
     env_gha = {
@@ -367,8 +427,14 @@ def test_create_issue_table_row():
         line = create_issue_table_row()
         assert '| integration-tests-shard-2 |' in line, f"Missing GHA job name in: {line}"
         assert '| 2 |' in line, f"Missing GHA matrix shard in: {line}"
-        assert '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210)' in line, f"Missing GHA build link in: {line}"
-        assert '[c3d4e5f6](https://github.com/DACH-NY/canton/commit/c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4)' in line, f"Missing GHA commit in: {line}"
+        assert '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210)' in line, (
+            f"Missing GHA build link in: {line}"
+        )
+        assert (
+            '[c3d4e5f6](https://github.com/DACH-NY/canton/commit/c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4)'
+            in line
+        ), f"Missing GHA commit in: {line}"
+
 
 def test_is_nightly_job():
     assert is_nightly_job("nightly_integration_test")

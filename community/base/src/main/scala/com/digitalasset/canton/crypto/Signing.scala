@@ -21,6 +21,7 @@ import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPriv
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.{CantonBaseError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -35,7 +36,7 @@ import com.digitalasset.canton.serialization.{
   ProtoConverter,
 }
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.{Member, SynchronizerId}
+import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
 import com.digitalasset.canton.version.*
@@ -423,6 +424,15 @@ object Signature
 
 }
 
+/** This is a variation of Signature without signedBy, used when we don't know which key was used to
+  * sign.
+  */
+final case class SignatureWithoutSigner(
+    val format: SignatureFormat,
+    val signature: ByteString,
+    val signingAlgorithmSpec: SigningAlgorithmSpec,
+)
+
 /** Defines the validity period of a session signing key delegation within a specific synchronizer
   * timeframe. This period starts at a creation 'from' timestamp and extends for a specified
   * duration.
@@ -764,7 +774,7 @@ sealed trait SigningKeyUsage extends Product with Serializable with PrettyPrinti
   // NOTE: If you add a new dbType, add them also to `function debug.key_usage` in sql for debugging
   def dbType: Byte
 
-  def toProtoEnum: v30.SigningKeyUsage
+  def toProtoEnumV30: v30.SigningKeyUsage
 
   override def prettyCompanion: PrettyPrintingCompanion[SigningKeyUsage] = SigningKeyUsage
 }
@@ -824,7 +834,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     * converted to their proto enum integer values and sorted to ensure determinism.
     */
   def encodeUsageForHash(usage: NonEmpty[Set[SigningKeyUsage]]): ByteString = {
-    val orderedUsages = usage.forgetNE.toSeq.map(_.toProtoEnum.value).sorted
+    val orderedUsages = usage.forgetNE.toSeq.map(_.toProtoEnumV30.value).sorted
     DeterministicEncoding.encodeSeqWith(orderedUsages)(usageInt =>
       DeterministicEncoding.encodeInt(usageInt)
     )
@@ -833,7 +843,8 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   case object Namespace extends SigningKeyUsage {
     override val identifier: String = "namespace"
     override val dbType: Byte = 0
-    override def toProtoEnum: v30.SigningKeyUsage = v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE
+    override def toProtoEnumV30: v30.SigningKeyUsage =
+      v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE
   }
 
   // IdentifyDelegation (dbType = 1) usage was deprecated and has now been removed.
@@ -841,7 +852,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   case object SequencerAuthentication extends SigningKeyUsage {
     override val identifier: String = "sequencer-auth"
     override val dbType: Byte = 2
-    override def toProtoEnum: v30.SigningKeyUsage =
+    override def toProtoEnumV30: v30.SigningKeyUsage =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION
   }
 
@@ -850,7 +861,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     // that we use to search for keys during node bootstrap.
     override val identifier: String = "signing"
     override val dbType: Byte = 3
-    override def toProtoEnum: v30.SigningKeyUsage =
+    override def toProtoEnumV30: v30.SigningKeyUsage =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL
   }
 
@@ -861,7 +872,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   private case object ProofOfOwnership extends SigningKeyUsage {
     override val identifier: String = "proof-of-ownership"
     override val dbType: Byte = 4
-    override def toProtoEnum: v30.SigningKeyUsage =
+    override def toProtoEnumV30: v30.SigningKeyUsage =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP
 
   }
@@ -1421,7 +1432,7 @@ final case class SigningPublicKey private (
       // we no longer use this field so we set this scheme as unspecified
       scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
       keySpec = keySpec.toProtoEnum,
-      usage = usage.map(_.toProtoEnum).toSeq,
+      usage = usage.map(_.toProtoEnumV30).toSeq,
     )
 
   override protected def toProtoPublicKeyKeyV30: v30.PublicKey.Key =
@@ -1662,7 +1673,7 @@ final case class SigningPrivateKey private (
       // we no longer use this field so we set this scheme as unspecified
       scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
       keySpec = keySpec.toProtoEnum,
-      usage = usage.map(_.toProtoEnum).toSeq,
+      usage = usage.map(_.toProtoEnumV30).toSeq,
     )
 
   override def purpose: KeyPurpose = KeyPurpose.Signing
@@ -2299,6 +2310,32 @@ object SignatureCheckError extends CantonErrorGroups.AuthorizationChecksErrorGro
       extends PrettyPrintingCompanion[MissingDynamicSynchronizerParameters] {
     override val pretty: Pretty[MissingDynamicSynchronizerParameters] = prettyOfClass(
       unnamedParam(_.message.unquoted)
+    )
+  }
+
+  final case class PartyKeysDoNotExist(partyId: PartyId) extends SignatureCheckError {
+    override def prettyCompanion: PrettyPrintingCompanion[PartyKeysDoNotExist] =
+      PartyKeysDoNotExist
+  }
+  object PartyKeysDoNotExist extends PrettyPrintingCompanion[PartyKeysDoNotExist] {
+    override val pretty: Pretty[PartyKeysDoNotExist] = prettyOfClass(
+      param("partyId", _.partyId)
+    )
+  }
+
+  final case class PartyKeysInvalidThreshold(
+      partyId: PartyId,
+      configuredThreshold: PositiveInt,
+      expectedThreshold: PositiveInt,
+  ) extends SignatureCheckError {
+    override def prettyCompanion: PrettyPrintingCompanion[PartyKeysInvalidThreshold] =
+      PartyKeysInvalidThreshold
+  }
+  object PartyKeysInvalidThreshold extends PrettyPrintingCompanion[PartyKeysInvalidThreshold] {
+    override val pretty: Pretty[PartyKeysInvalidThreshold] = prettyOfClass(
+      param("partyId", _.partyId),
+      param("configuredThreshold", _.configuredThreshold),
+      param("expectedThreshold", _.expectedThreshold),
     )
   }
 

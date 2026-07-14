@@ -235,12 +235,14 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             isGenesis = initialEpoch == Bootstrap.BootstrapEpochNumber,
             p2pNetworkOutModuleStateFactory(bootstrapTopologyInfo.currentMembership),
             random,
+            clock,
             stores.p2pEndpointsStore,
             metrics,
             dependencies,
             loggerFactory,
             timeouts,
             config.blockingDbReadTimeout,
+            config.sendBlacklistTtl,
           )
           (p2pNetworkOutModule, p2pNetworkOutModule.p2pNetworkManager)
         },

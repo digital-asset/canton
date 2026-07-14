@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdown,

@@ -32,6 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochNumber,
+  WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
@@ -74,6 +75,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 import java.time.Instant
+import java.util.UUID
 import scala.util.{Failure, Success}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -118,6 +120,7 @@ final class IssConsensusModule[E <: Env[E]](
 
   private val thisNode = initialState.topologyInfo.thisNode
 
+  private val workflowId = WorkflowId(s"IssConsensus-$thisNode-${UUID.randomUUID()}")
   // An instance of state transfer manager to be used only in a server role.
   private val serverStateTransferManager =
     customOnboardingAndServerStateTransferManager.getOrElse(
@@ -125,6 +128,7 @@ final class IssConsensusModule[E <: Env[E]](
         thisNode,
         dependencies,
         epochStore,
+        workflowId,
         metrics,
         loggerFactory,
       )()

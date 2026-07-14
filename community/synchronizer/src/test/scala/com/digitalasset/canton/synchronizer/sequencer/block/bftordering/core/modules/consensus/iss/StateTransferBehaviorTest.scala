@@ -250,6 +250,7 @@ class StateTransferBehaviorTest
               eqTo(epochNumber),
               eqTo(aMembership),
               eqTo(aFakeCryptoProviderInstance),
+              nodeThatTimedOut = eqTo(Some(otherIds.head)),
             )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
             succeed
           }
@@ -264,6 +265,7 @@ class StateTransferBehaviorTest
           Some(EpochNumber(anEpochInfo.number)), // the same as the "current epoch", see below
         ).forEvery { minimumEndEpoch =>
           val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
+          val p2pNetworkOutModuleRefMock = mock[ModuleRef[P2PNetworkOut.Message]]
           when(epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext]))
             .thenReturn(() => Some(anEpochStoreEpoch))
           when(epochStoreMock.loadEpochProgress(eqTo(anEpochInfo))(any[TraceContext]))
@@ -272,6 +274,7 @@ class StateTransferBehaviorTest
             createStateTransferBehavior(
               epochStore = epochStoreMock,
               minimumStateTransferEndEpoch = minimumEndEpoch,
+              p2pNetworkOutModuleRef = p2pNetworkOutModuleRefMock,
             )
           implicit val ctx: ContextType = context
 
@@ -287,6 +290,12 @@ class StateTransferBehaviorTest
             StateTransferMessageResult.NothingToStateTransfer(otherIds.head),
             "aMessageType",
           )
+
+          verify(p2pNetworkOutModuleRefMock, times(1)).asyncSend(
+            eqTo(
+              P2PNetworkOut.EndWorkflow(stateTransferBehavior.workflowId)
+            )
+          )(any[TraceContext], any[MetricsContext])
 
           val becomes = context.extractBecomes()
           val aTopologyInfoWithPV = aTopologyInfo
@@ -342,7 +351,7 @@ class StateTransferBehaviorTest
         )
       )
 
-      verify(stateTransferManagerMock, times(1)).cancelTimeoutForEpoch(eqTo(startEpochNumber))(
+      verify(stateTransferManagerMock, times(1)).emitEpochTransferLatency(eqTo(startEpochNumber))(
         any[TraceContext]
       )
       verify(epochStoreMock, times(1)).completeEpoch(startEpochNumber)
@@ -413,6 +422,7 @@ class StateTransferBehaviorTest
             eqTo(anEpochInfo.number),
             eqTo(aMembership),
             eqTo(aFakeCryptoProviderInstance),
+            nodeThatTimedOut = eqTo(None),
           )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
 
           succeed

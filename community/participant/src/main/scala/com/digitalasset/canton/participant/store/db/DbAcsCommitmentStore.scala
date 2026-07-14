@@ -10,6 +10,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
@@ -88,9 +89,9 @@ class DbAcsCommitmentStore(
 
   override protected[this] implicit def setParameterIndexedSynchronizer
       : SetParameter[IndexedSynchronizer] = IndexedString.setParameterIndexedString
-  override protected[this] def partitionColumn: String = "synchronizer_idx"
+  override protected[this] def partitionColumn: String & Singleton = "synchronizer_idx"
 
-  override protected[this] val pruning_status_table = "par_commitment_pruning"
+  override protected[this] val pruning_status_table: String & Singleton = "par_commitment_pruning"
 
   implicit val getSignedCommitment: GetResult[SignedProtocolMessage[LegacyAcsCommitment]] =
     GetResult(r =>

@@ -7,8 +7,10 @@ import cats.data.EitherT
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
@@ -32,15 +34,12 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
+import com.digitalasset.canton.version.ReleaseVersion
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Aggregates topology info across synchronizer stores.
-  *
-  * Concurrency Design: Uses strict **sequential traversal** over synchronizers. Nodes typically
-  * connect to only a few synchronizers (!), making sequential latency negligible.
-  */
+/** Aggregates topology info across synchronizer stores. */
 class GrpcTopologyAggregationService(
     stores: => Seq[
       TopologyStoreInitializationStatus[InternalTopologyStoreId.SynchronizerStore, TopologyStore]
@@ -48,6 +47,7 @@ class GrpcTopologyAggregationService(
     physicalSynchronizerIdLookup: PsidLookup,
     ips: IdentityProvidingServiceClient,
     val loggerFactory: NamedLoggerFactory,
+    batchingConfig: BatchingConfig,
 )(implicit val ec: ExecutionContext)
     extends v30.TopologyAggregationServiceGrpc.TopologyAggregationService
     with NamedLogging {
@@ -217,6 +217,14 @@ class GrpcTopologyAggregationService(
           .traverse(code => MemberCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
       ): EitherT[FutureUnlessShutdown, RpcError, Option[MemberCode]]
 
+      clientVersion <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          request.baseAggregationRequest
+            .map(_.clientVersion)
+            .traverse(ReleaseVersion.fromProtoPrimitive(_, "client_version"))
+        )
+        .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
+
       synchronizerIds <- EitherT
         .fromEither[FutureUnlessShutdown](
           request.synchronizerIds.traverse(SynchronizerId.fromProtoPrimitive(_, "synchronizer_ids"))
@@ -225,15 +233,14 @@ class GrpcTopologyAggregationService(
 
       matched <- snapshots(synchronizerIds.toSet, request.asOf)
 
-      // We iterate over the synchronizers sequentially rather than in parallel.
-      // Sequential traversal ensures we only enqueue one DB task at a time per request,
-      // preventing API traffic spikes from starving other critical node operations that
-      // share the same ExecutionContext.
-      res <- EitherT.right(MonadUtil.sequentialTraverse(matched) { case (storeId, client) =>
-        client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
-          (storeId, res)
+      res <- EitherT.right(
+        MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(matched) {
+          case (storeId, client) =>
+            client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
+              (storeId, res)
+            }
         }
-      })
+      )
     } yield {
       val records = for {
         (storeId, keyPerMember) <- res
@@ -248,7 +255,11 @@ class GrpcTopologyAggregationService(
             v30.ListKeyOwnersResponse.Result(
               keyOwner = owner.toProtoPrimitive,
               synchronizerId = psid.logical.toProtoPrimitive,
-              signingKeys = keys.signingKeys.map(_.toProtoV30),
+              signingKeysV30 =
+                if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(clientVersion))
+                  Seq()
+                else
+                  keys.signingKeys.map(_.toProtoV30),
               encryptionKeys = keys.encryptionKeys.map(_.toProtoV30),
               physicalSynchronizerId = psid.toProtoPrimitive,
             )
@@ -261,11 +272,9 @@ class GrpcTopologyAggregationService(
 }
 
 object GrpcTopologyAggregationService {
-
   private final case class MemberKeyRecord[K](
       owner: Member,
       storeId: PhysicalSynchronizerId,
       keys: K,
   )
-
 }

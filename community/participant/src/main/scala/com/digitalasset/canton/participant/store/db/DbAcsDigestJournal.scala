@@ -7,6 +7,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.commitment.AcsDigestTrace
 import com.digitalasset.canton.participant.store.data.AcsDigestJournalData.JournalTable
@@ -32,7 +33,7 @@ import DbStorage.Implicits.BuilderChain.*
 
 class DbAcsDigestJournal[K, V](
     override protected val storage: DbStorage,
-    override val indexedSynchronizer: IndexedSynchronizer,
+    indexedSynchronizer: IndexedSynchronizer,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val timeouts: ProcessingTimeout,
     prettyKey: K => String,

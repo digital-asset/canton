@@ -13,6 +13,7 @@ import com.digitalasset.canton.ledger.api.validation.ValidationErrors
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.{invalidField, missingField}
 import com.digitalasset.canton.ledger.error.JsonApiErrors
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.PackagePreferenceBackend
 import com.digitalasset.canton.store.packagemeta.PackageMetadata

@@ -47,6 +47,8 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   the timeout duration for checking if a new OffsetCheckpoint is created
   * @param maxLookupLimit
   *   the maximum limit for contract key lookups. Requests will be capped at this value.
+  * @param maxRejectedCompletionsByHash
+  *   maximum number of rejected completions returned by a lookup-by-hash query.
   */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
@@ -76,6 +78,7 @@ final case class IndexServiceConfig(
     contractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
       IndexServiceConfig.DefaultContractPruningDelayBeforeRetry,
     maxLookupLimit: Int = IndexServiceConfig.DefaultMaxLookupLimit,
+    maxRejectedCompletionsByHash: Int = IndexServiceConfig.DefaultMaxRejectedCompletionsByHash,
 )
 
 object IndexServiceConfig {
@@ -97,6 +100,7 @@ object IndexServiceConfig {
   val DefaultContractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(2)
   val DefaultMaxLookupLimit: Int = 1000
+  val DefaultMaxRejectedCompletionsByHash: Int = 10
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {
     val numberOfThreads = Threading.detectNumberOfThreads(logger).value

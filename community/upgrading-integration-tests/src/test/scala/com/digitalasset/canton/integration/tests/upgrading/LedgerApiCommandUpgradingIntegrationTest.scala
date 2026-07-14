@@ -22,7 +22,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
-  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.Party
@@ -50,9 +49,6 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
   private val byPackageNameIdentifierCK: Identifier =
     Identifier.fromJavaProto(v1ck.upgradeck.UpgradingCK.TEMPLATE_ID.toProto)
 
-  private def party(name: String)(implicit env: TestConsoleEnvironment): Party =
-    env.participant1.parties.list(name).headOption.valueOrFail("where is " + name).party
-
   private var alice1: Party = _
   private var bob1: Party = _
   private var alice3: Party = _
@@ -76,6 +72,14 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
 
       participant2.dars.upload(UpgradingBaseTest.UpgradeV1)
       participant2.dars.upload(UpgradingBaseTest.UpgradeV2)
+
+      // The keyed UpgradeCK templates require Daml-LF >= 2.3 / protocol version >= 3.5, so only
+      // upload them when the tested protocol version supports them. Uploading here (rather than in
+      // the by-key test) ensures their vetting is effective before that test submits.
+      if (testedProtocolVersion >= ProtocolVersion.v35) {
+        participant1.dars.upload(UpgradingBaseTest.UpgradeCKV1)
+        participant1.dars.upload(UpgradingBaseTest.UpgradeCKV2)
+      }
 
       // Participant 3 initially has just V1
 
@@ -138,17 +142,14 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
     "commands are submitted by key with a package-name-scoped template id" should {
       // Contract keys require Daml-LF >= 2.3 and protocol version >= 3.5, so this uses the keyed
       // UpgradingCK template, which lives in its own LF 2.3 UpgradeCK package (the shared Upgrade
-      // package stays on LF 2.1). The UpgradeCK DARs are uploaded here rather than in the shared
-      // setup so environments below the required protocol version are unaffected.
+      // package stays on LF 2.1). The UpgradeCK DARs are uploaded in the shared setup so their
+      // package vetting is effective well before this test submits.
       "resolve ExerciseByKey to the newest uploaded package" onlyRunWithOrGreaterThan
         ProtocolVersion.v35 in { implicit env =>
           import env.*
 
-          participant1.dars.upload(UpgradingBaseTest.UpgradeCKV1)
-          participant1.dars.upload(UpgradingBaseTest.UpgradeCKV2)
-
-          val alice = party("alice1")
-          val bob = party("bob1")
+          val alice = alice1
+          val bob = bob1
 
           val ckPackageName = byPackageNameIdentifierCK.packageId
 

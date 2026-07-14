@@ -7,6 +7,7 @@ import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.tracing.TestTelemetry.eventsOrderedByTime
 import com.digitalasset.canton.util.CheckedT

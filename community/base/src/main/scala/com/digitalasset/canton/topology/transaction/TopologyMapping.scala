@@ -47,7 +47,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.{
   newSigningKeys,
 }
 import com.digitalasset.canton.util.LoggerUtil
-import com.digitalasset.canton.version.ProtoVersion
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError, SequencerAlias}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting

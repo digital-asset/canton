@@ -80,7 +80,9 @@ object Phase37Processor {
   trait PublishUpdateViaRecordOrderPublisher[-Event] extends (Option[Event] => Unit)
 
   object PublishUpdateViaRecordOrderPublisher {
-    val Noop: PublishUpdateViaRecordOrderPublisher[Any] = _ => ()
+    object Noop extends PublishUpdateViaRecordOrderPublisher[Any] {
+      override def apply(event: Option[Any]): Unit = ()
+    }
     def noop[Event]: PublishUpdateViaRecordOrderPublisher[Event] = Noop
   }
 }

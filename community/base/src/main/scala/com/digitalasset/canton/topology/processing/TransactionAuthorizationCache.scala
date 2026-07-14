@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.topology.cache.TopologyStateLookupByNamespace
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
@@ -51,6 +52,8 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
       Namespace,
       Option[DecentralizedNamespaceAuthorizationGraph],
     ]()
+
+  protected val warnAboutDanglingKeys: Boolean
 
   protected def lookup: TopologyStateLookupByNamespace
   protected def synchronizerId: Option[PhysicalSynchronizerId] = lookup.synchronizerId
@@ -228,6 +231,7 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
           val graph = new AuthorizationGraph(
             namespace,
             extraDebugInfo = false,
+            warnAboutDanglingKeys,
             loggerFactory,
           )
           graph.replace(transactions.map(AuthorizedTopologyTransaction(_)))
@@ -251,6 +255,7 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
             new AuthorizationGraph(
               namespace,
               extraDebugInfo = false,
+              warnAboutDanglingKeys,
               loggerFactory,
             ),
           )

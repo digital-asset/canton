@@ -15,6 +15,10 @@ import com.digitalasset.canton.util.ReleaseUtils
   * respect to the Ledger API. The tests are executed against the latest patch (stable or
   * snapshot/RC, whichever is most recent) of the most recent supported `(major, minor)` release
   * line.
+  *
+  * If you add new config parameters, these tests may start to fail to start up (check the log files
+  * starting with "external-<node>". You need to remove these new config parameters via
+  * [[ProtocolContinuityConformanceTest.removeConfigPaths]].
   */
 trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
   override lazy val testedReleases: List[ReleaseUtils.TestedRelease] = {

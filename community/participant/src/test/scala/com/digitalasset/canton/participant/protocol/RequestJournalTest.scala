@@ -8,6 +8,7 @@ import cats.data.OptionT
 import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.*
 import com.digitalasset.canton.participant.protocol.RequestJournal.{

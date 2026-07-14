@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{RequestType, Wrapped}

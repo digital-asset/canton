@@ -70,7 +70,7 @@ object HashPurpose {
   val _ParticipantStateSignature = HashPurpose(20, "ParticipantStateSignature")
   val _SynchronizerTopologyTransactionMessageSignature =
     HashPurpose(21, "SynchronizerTopologyTransactionMessageSignature")
-  val _AcsCommitment = HashPurpose(22, "AcsCommitment")
+  val AcsCommitment = HashPurpose(22, "AcsCommitment")
   val Stakeholders = HashPurpose(23, "Stakeholders")
   val UnassignmentCommonData = HashPurpose(24, "UnassignmentCommonData")
   val UnassignmentView = HashPurpose(25, "UnassignmentView")

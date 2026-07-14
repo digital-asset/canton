@@ -748,7 +748,7 @@ private[reassignment] class UnassignmentProcessingSteps(
     else if (activenessResult.contracts.notActive.nonEmpty) {
       Some(
         LocalRejectError.ConsistencyRejections.InactiveContracts
-          .Reject(activenessResult.contracts.notFree.keys.toSeq.map(_.coid))
+          .Reject(activenessResult.contracts.notActive.keys.toSeq.map(_.coid))
       )
     } else if (activenessResult.contracts.alreadyLocked.nonEmpty) {
       Some(

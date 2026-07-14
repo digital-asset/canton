@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.store
 
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference

@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.{
   ExternalPartyAlreadyExists,

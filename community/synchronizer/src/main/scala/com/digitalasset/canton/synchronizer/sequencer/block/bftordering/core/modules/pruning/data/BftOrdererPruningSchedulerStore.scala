@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.Instance.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.FutureUnlessShutdownInstance.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.PruningSchedulerStore

@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.SignatureCheckError.{InvalidSignature, Uns
 import com.digitalasset.canton.crypto.{Signature, SigningPublicKey, SynchronizerCryptoPureApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SequencingParameters}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant2
@@ -79,6 +80,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         Factory.syncCryptoClient.crypto.pureCrypto,
         new StoreBasedTopologyStateLookupByNamespace(store),
         validationIsFinal = validationIsFinal,
+        warnAboutDanglingKeys = true,
         store.loggerFactory,
       )
     validator

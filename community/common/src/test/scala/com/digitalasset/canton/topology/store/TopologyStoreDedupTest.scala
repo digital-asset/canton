@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, RequireTypes}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.topology.*

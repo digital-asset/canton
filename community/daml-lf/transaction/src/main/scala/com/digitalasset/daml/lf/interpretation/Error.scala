@@ -235,10 +235,10 @@ object Error {
         srcPackageName: Ref.PackageName,
         dstPackageName: Ref.PackageName,
         originalSignatories: Set[Party],
-        originalObservers: Set[Party],
+        originalSignatoryStakeholders: Set[Party],
         originalKeyOpt: Option[GlobalKeyWithMaintainers],
         recomputedSignatories: Set[Party],
-        recomputedObservers: Set[Party],
+        recomputedSignatoryStakeholders: Set[Party],
         recomputedKeyOpt: Option[GlobalKeyWithMaintainers],
         msg: String,
     ) extends Error

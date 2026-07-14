@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.processing.EffectiveTime

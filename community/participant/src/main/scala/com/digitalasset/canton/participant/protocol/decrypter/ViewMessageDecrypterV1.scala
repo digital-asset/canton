@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.decrypter
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{
@@ -21,6 +20,7 @@ import com.digitalasset.canton.data.{
   LightTransactionViewTree,
   SubviewReferenceAndKey,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

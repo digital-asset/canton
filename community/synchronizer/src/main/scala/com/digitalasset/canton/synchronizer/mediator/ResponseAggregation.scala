@@ -19,6 +19,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.ParticipantEquivocation
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

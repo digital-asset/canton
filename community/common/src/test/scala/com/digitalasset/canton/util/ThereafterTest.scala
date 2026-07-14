@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import cats.{Applicative, Functor, Id, Traverse}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.nonempty.NonEmpty

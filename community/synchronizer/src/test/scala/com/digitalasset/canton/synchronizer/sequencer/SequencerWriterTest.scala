@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.resource.{MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,

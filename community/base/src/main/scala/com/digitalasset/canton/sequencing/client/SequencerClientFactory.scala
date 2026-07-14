@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.metrics.SequencerClientMetrics

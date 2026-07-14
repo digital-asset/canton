@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.kms.KmsError.{KmsDeleteKeyError, KmsKeyDis
 import com.digitalasset.canton.crypto.kms.aws.AwsKms
 import com.digitalasset.canton.crypto.provider.kms.HasPredefinedAwsKmsKeys
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
 import com.digitalasset.canton.util.ResourceUtil

@@ -9,6 +9,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceSequencerWithTrafficControlApiTestBase
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.PostgresTest
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics

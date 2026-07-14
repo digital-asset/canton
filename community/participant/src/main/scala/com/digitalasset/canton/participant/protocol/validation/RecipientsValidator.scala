@@ -10,6 +10,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.{ViewPosition, ViewTree}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   WrongRecipients,

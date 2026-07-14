@@ -8,6 +8,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.metrics.MetricsUtils
 import com.digitalasset.canton.sequencing.traffic.TrafficPurchased

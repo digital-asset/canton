@@ -11,8 +11,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionRequest,
-  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   InteractiveSubmissionServiceGrpc,
@@ -59,11 +57,6 @@ final class InteractiveSubmissionServiceAuthorization(
         userIdForExecuteSubmissionL,
       )*
     )(request)
-
-  override def getPreferredPackageVersion(
-      request: GetPreferredPackageVersionRequest
-  ): Future[GetPreferredPackageVersionResponse] =
-    authorizer.rpc(service.getPreferredPackageVersion)(RequiredClaim.Public())(request)
 
   override def getPreferredPackages(
       request: GetPreferredPackagesRequest

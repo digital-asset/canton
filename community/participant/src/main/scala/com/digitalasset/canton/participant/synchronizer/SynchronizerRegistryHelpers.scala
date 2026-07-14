@@ -26,6 +26,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.environment.StoreBasedSynchronizerTopologyInitializationCallback
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters

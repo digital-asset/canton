@@ -9,7 +9,10 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config
 import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelApplicativeFutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.{
+  parallelApplicativeFutureUnlessShutdown,
+  *,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkManager

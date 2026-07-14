@@ -6,6 +6,7 @@ package com.digitalasset.canton.util.retry
 import cats.Eval
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ExponentialBackoffConfig
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,

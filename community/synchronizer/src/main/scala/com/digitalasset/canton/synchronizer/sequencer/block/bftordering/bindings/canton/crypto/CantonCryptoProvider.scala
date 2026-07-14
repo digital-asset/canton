@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId

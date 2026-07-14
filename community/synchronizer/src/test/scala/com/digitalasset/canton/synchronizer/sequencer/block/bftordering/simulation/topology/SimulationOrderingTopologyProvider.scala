@@ -62,8 +62,11 @@ class SimulationOrderingTopologyProvider(
           BaseTest.defaultMaxBytesToDecompress,
           activationTime,
           // Switch the value deterministically so that we trigger all code paths.
-          areTherePendingCantonTopologyChanges =
-            Option.when(checkPendingChanges)(activationTime.value.toMicros % 2 == 0),
+          areTherePendingCantonTopologyChanges = Option.when(checkPendingChanges) {
+            val inMicros = activationTime.value.toMicros
+            // we don't have any changes in genesis
+            inMicros % 2 == 0 && inMicros > 0
+          },
         )
       Success(
         Some(

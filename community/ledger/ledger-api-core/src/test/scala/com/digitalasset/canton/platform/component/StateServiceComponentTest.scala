@@ -19,7 +19,7 @@ class StateServiceComponentTest extends AnyWordSpec with IndexComponentTest {
       val synch1Create3 =
         creates(nextRecordTime, payloadLength = 10, synchronizer = synchronizer1)(size = 1)
 
-      restartIndexer()
+      restartServices()
       index.currentLedgerEnd() shouldBe None
 
       val offset1 = ingestUpdates(synch1Create1)

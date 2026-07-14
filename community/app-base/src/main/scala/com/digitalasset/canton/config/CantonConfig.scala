@@ -504,6 +504,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         enableAllLedgerApiReassignments = participantParameters.enableAllLedgerApiReassignments,
         commitAfterFailedActivenessCheck = participantParameters.commitAfterFailedActivenessCheck,
         validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
+        acsCommitments = participantParameters.acsCommitments,
       )
     }
 

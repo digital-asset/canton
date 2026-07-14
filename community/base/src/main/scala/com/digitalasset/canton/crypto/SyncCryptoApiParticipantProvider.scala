@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOv
 import com.digitalasset.canton.crypto.verifier.SyncCryptoVerifier
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CryptoMetrics
@@ -576,6 +576,14 @@ class SynchronizerSnapshotSyncCryptoApi(
         usage,
       )
     } yield ()
+
+  override def verifyPartyJwtSignature(
+      bytes: ByteString,
+      signer: PartyId,
+      signature: SignatureWithoutSigner,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
+    syncCryptoVerifier.verifyPartyJwtSignature(ipsSnapshot, bytes, signer, signature, usage)
 
   override def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]

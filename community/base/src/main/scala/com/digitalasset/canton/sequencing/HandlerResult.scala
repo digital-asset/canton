@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 
 import scala.concurrent.{ExecutionContext, Future}

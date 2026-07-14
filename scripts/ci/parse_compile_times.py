@@ -36,10 +36,5 @@ with open(sys.argv[1], "r") as f:
                 else:
                     gather = False
 
-for k,v in data.items():
-    print(k,v["#total compile time"])
-
-
-
-
-
+for k, v in data.items():
+    print(k, v["#total compile time"])

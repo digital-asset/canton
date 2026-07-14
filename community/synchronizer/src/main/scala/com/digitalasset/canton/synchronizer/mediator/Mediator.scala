@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.mediator
 
 import cats.data.EitherT
 import cats.implicits.toFoldableOps
-import cats.instances.future.*
 import cats.syntax.bifunctor.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -15,6 +14,7 @@ import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.protocol.messages.{
@@ -272,9 +272,8 @@ private[mediator] class Mediator(
         .right(sequencerCounterTrackerStore.preheadSequencerCounter)
       preHeadTsO = preHeadCounterO.map(_.timestamp)
       cleanTimestamp <- EitherT
-        .fromOption(preHeadTsO, PruningError.NoDataAvailableForPruning)
+        .fromOption[FutureUnlessShutdown](preHeadTsO, PruningError.NoDataAvailableForPruning)
         .leftWiden[PruningError]
-        .mapK(FutureUnlessShutdown.outcomeK)
 
       _ <- EitherT
         .cond[FutureUnlessShutdown](

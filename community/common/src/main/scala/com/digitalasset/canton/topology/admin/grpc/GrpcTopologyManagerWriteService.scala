@@ -16,6 +16,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -35,13 +36,22 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, GrpcStreamingUtils}
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.canton.{ProtoDeserializationError, config}
 import com.google.protobuf.ByteString
 import com.google.protobuf.duration.Duration
 import io.grpc.stub.StreamObserver
 
 import scala.concurrent.{ExecutionContext, Future}
+
+final case class BaseWriteRequest(
+    clientVersion: Option[ReleaseVersion]
+) {
+  def toProtoV30: v30.BaseWriteRequest =
+    v30.BaseWriteRequest(
+      clientVersion.map(_.toProtoPrimitive)
+    )
+}
 
 /** @param managers
   *   A sequence of topology managers. The type [[com.digitalasset.canton.crypto.BaseCrypto]] is
@@ -119,13 +129,20 @@ class GrpcTopologyManagerWriteService(
             .when(serial != 0)(serial)
             .traverse(ProtoConverter.parsePositiveInt("serial", _))
           op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", op)
-          mapping <- ProtoConverter.required("AuthorizeRequest.mapping", mapping)
           signingKeys <- signedBy.traverse(Fingerprint.fromProtoPrimitive)
           forceFlags <- ForceFlags.fromProtoV30(forceChanges)
-          validatedMapping <- TopologyMapping.fromProtoV30(mapping)
+          validatedMapping <- mapping match {
+            case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
+              TopologyMapping.fromProtoV30(value)
+            case v30.AuthorizeRequest.Proposal.Mapping.Empty =>
+              ProtoConverter.required("AuthorizeRequest.mapping", None)
+          }
         } yield {
-          if (mapping.mapping.isPartyToKeyMapping)
-            logger.info("PartyToKeyMapping is deprecated. Please use PartyToParticipant instead.")
+          validatedMapping match {
+            case _: PartyToKeyMapping =>
+              logger.info("PartyToKeyMapping is deprecated. Please use PartyToParticipant instead.")
+            case _ => ()
+          }
           (op, serial, validatedMapping, signingKeys, forceFlags)
         }
 
@@ -395,8 +412,12 @@ class GrpcTopologyManagerWriteService(
           .when(serialP != 0)(serialP)
           .traverse(ProtoConverter.parsePositiveInt("serial", _))
         op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
-        mappingP <- ProtoConverter.required("mapping", mappingPO)
-        mapping <- TopologyMapping.fromProtoV30(mappingP)
+        mapping <- mappingPO match {
+          case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
+            TopologyMapping.fromProtoV30(value)
+          case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
+            ProtoConverter.required("mapping", None)
+        }
       } yield (serial, op, mapping)
 
       for {

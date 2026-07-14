@@ -436,6 +436,7 @@ class MainIndexDBMetrics(
   val execAll: Timer = overall.executionTimer
 
   val getCompletions: DatabaseMetrics = createDbMetrics("get_completions")
+  val getCompletionByHash: DatabaseMetrics = createDbMetrics("get_completion_by_hash")
   val getParticipantId: DatabaseMetrics = createDbMetrics("get_participant_id")
   val getLedgerEnd: DatabaseMetrics = createDbMetrics("get_ledger_end")
   val getTopologyEventOffsetPublishedOnRecordTime: DatabaseMetrics = createDbMetrics(

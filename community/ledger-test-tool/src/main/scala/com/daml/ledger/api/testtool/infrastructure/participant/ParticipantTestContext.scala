@@ -9,7 +9,12 @@ import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestCo
   topologyResultFilter,
 }
 import com.daml.ledger.api.testtool.infrastructure.time.DelayMechanism
-import com.daml.ledger.api.testtool.infrastructure.{ChannelEndpoint, ExternalParty, Party}
+import com.daml.ledger.api.testtool.infrastructure.{
+  ChannelEndpoint,
+  ExternalParty,
+  ExternalPartyKeySpec,
+  Party,
+}
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.package_management_service.{
   PackageDetails,
@@ -23,6 +28,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionByHashResponse,
   GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
@@ -46,11 +52,11 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionResponse,
   GetPreferredPackagesResponse,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
 }
+import com.daml.ledger.api.v2.jose_service.{GetJwksRequest, GetJwksResponse}
 import com.daml.ledger.api.v2.package_service.{
   GetPackageResponse,
   ListVettedPackagesRequest,
@@ -156,12 +162,6 @@ trait ParticipantTestContext extends UserManagementTestContext {
   def executeSubmissionAndWaitForTransaction(
       executeSubmissionAndWaitForTransactionRequest: ExecuteSubmissionAndWaitForTransactionRequest
   ): Future[ExecuteSubmissionAndWaitForTransactionResponse]
-  def getPreferredPackageVersion(
-      parties: Seq[Party],
-      packageName: String,
-      vettingValidAt: Option[Instant] = None,
-      synchronizerIdO: Option[String] = None,
-  ): Future[GetPreferredPackageVersionResponse]
   def getPreferredPackages(
       vettingRequirements: Map[String, Seq[Party]],
       vettingValidAt: Option[Instant] = None,
@@ -177,6 +177,7 @@ trait ParticipantTestContext extends UserManagementTestContext {
   def allocateExternalPartyFromHint(
       partyIdHint: Option[String] = None,
       minSynchronizers: Int = 1,
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[ExternalParty]
 
   /** Non managed version of party allocation. Use exclusively when testing the party management
@@ -194,11 +195,13 @@ trait ParticipantTestContext extends UserManagementTestContext {
       keyPair: KeyPair,
       partyIdHint: Option[String] = None,
       synchronizer: String = "",
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[AllocateExternalPartyRequest]
 
   def generateExternalPartyTopologyRequest(
       namespacePublicKey: Array[Byte],
       partyIdHint: Option[String] = None,
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[GenerateExternalPartyTopologyResponse]
 
   def allocateExternalParty(
@@ -653,6 +656,7 @@ trait ParticipantTestContext extends UserManagementTestContext {
   )(p: Completion => Boolean): Future[Option[Completion]]
 
   def offsets(n: Int, request: CompletionStreamRequest): Future[Vector[Long]]
+  def completionByHash(hash: ByteString): Future[GetCompletionByHashResponse]
   def checkHealth(): Future[HealthCheckResponse]
   def watchHealth(): Future[Seq[HealthCheckResponse]]
 
@@ -704,6 +708,8 @@ trait ParticipantTestContext extends UserManagementTestContext {
       .flatMap(_.topologyTransaction)
       .getOrElse(throw new RuntimeException("at least one transaction should have been found"))
   )
+
+  def getJwks(request: GetJwksRequest): Future[GetJwksResponse]
 }
 
 object ParticipantTestContext {

@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   PositiveFiniteDuration,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

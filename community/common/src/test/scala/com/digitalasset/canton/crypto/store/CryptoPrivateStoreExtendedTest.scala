@@ -15,6 +15,7 @@ import com.digitalasset.canton.crypto.{
   SigningPrivateKey,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait CryptoPrivateStoreExtendedTest extends CryptoPrivateStoreTest {

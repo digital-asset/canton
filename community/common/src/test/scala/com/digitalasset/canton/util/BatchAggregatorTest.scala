@@ -7,6 +7,7 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FutureUnlessShutdown,

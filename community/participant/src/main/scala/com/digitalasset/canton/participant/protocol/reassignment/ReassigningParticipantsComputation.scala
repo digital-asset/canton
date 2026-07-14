@@ -10,6 +10,7 @@ import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors.{
   stakeholderNotHostedOnSynchronizer,

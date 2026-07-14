@@ -110,6 +110,12 @@ message RegisterSynchronizerRequest {
   // persisted. The more paranoid the validation, the higher the chance of the command failing,
   // as it will require the sequencers to be online and responsive.
   com.digitalasset.canton.admin.sequencer.v30.SequencerConnectionValidation sequencer_connection_validation = 3;
+
+  // Optional onboarding topology transactions to use for onboarding. They must contain exactly
+  // one SynchronizerTrustCertificate, exactly one OwnerToKeyMapping and at least one NamespaceDelegation,
+  // each serialized with the synchronizer's protocol version and signed.
+  // If empty, the participant uses the ones it automatically generates and persists.
+  repeated bytes onboarding_transactions = 4;
 }
 
 message RegisterSynchronizerResponse {}
@@ -185,10 +191,10 @@ message ConnectSynchronizerRequest {
   // as it will require the sequencers to be online and responsive.
   com.digitalasset.canton.admin.sequencer.v30.SequencerConnectionValidation sequencer_connection_validation = 2;
 
-  // Optional onboarding topology transactions to use for onboarding. They should be a
-  // SynchronizerTrustCertificate, an OwnerToKeyMapping and at least one NamespaceDelegation, each
-  // serialized with the synchronizer's protocol version and signed. If empty, the participant uses
-  // the ones it automatically generates and persists.
+  // Optional onboarding topology transactions to use for onboarding. They must contain exactly
+  // one SynchronizerTrustCertificate, exactly one OwnerToKeyMapping and at least one NamespaceDelegation,
+  // each serialized with the synchronizer's protocol version and signed.
+  // If empty, the participant uses the ones it automatically generates and persists.
   repeated bytes onboarding_transactions = 3;
 }
 

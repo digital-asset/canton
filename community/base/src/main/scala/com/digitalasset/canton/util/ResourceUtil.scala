@@ -5,6 +5,7 @@ package com.digitalasset.canton.util
 
 import cats.MonadThrow
 import cats.data.EitherT
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 
 import scala.concurrent.ExecutionContext

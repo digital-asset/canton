@@ -47,6 +47,8 @@ class InMemoryFanoutBuffer(
     Map.empty[String, TransactionLogUpdate]
   @volatile private[cache] var _acceptedByHash =
     Map.empty[ByteString, TransactionLogUpdate.TransactionAccepted]
+  @volatile private[cache] var _rejectionsByHash =
+    Map.empty[ByteString, Vector[TransactionLogUpdate.TransactionRejected]]
 
   private val bufferMetrics = metrics.services.index.inMemoryFanoutBuffer
   private val pushTimer = bufferMetrics.push
@@ -84,6 +86,10 @@ class InMemoryFanoutBuffer(
           }
           extractHashFromEntry(entry).foreach { case (hash, value) =>
             _acceptedByHash = _acceptedByHash.updated(hash, value)
+          }
+          extractRejectionHash(entry).foreach { case (hash, rejected) =>
+            val existing = _rejectionsByHash.getOrElse(hash, Vector.empty)
+            _rejectionsByHash = _rejectionsByHash.updated(hash, rejected +: existing)
           }
         }
       }),
@@ -192,6 +198,20 @@ class InMemoryFanoutBuffer(
     case LookupKey.ByHash(hash) => _acceptedByHash.get(hash)
   }
 
+  /** Lookup completions by transaction hash. Returns (accepted transaction if buffered, rejections
+    * in newest-first order).
+    */
+  def lookupCompletionsByHash(
+      hash: ByteString
+  ): (
+      Option[TransactionLogUpdate.TransactionAccepted],
+      Vector[TransactionLogUpdate.TransactionRejected],
+  ) = {
+    val accepted = _acceptedByHash.get(hash)
+    val rejections = _rejectionsByHash.getOrElse(hash, Vector.empty)
+    (accepted, rejections)
+  }
+
   /** Lookup the accepted transaction log update by update id. */
   private def lookup(
       updateId: String
@@ -234,6 +254,7 @@ class InMemoryFanoutBuffer(
     _bufferLog = Vector.empty
     _lookupMap = Map.empty
     _acceptedByHash = Map.empty
+    _rejectionsByHash = Map.empty
   })
 
   private def ensureSize(targetSize: Int)(implicit traceContext: TraceContext): Unit = (
@@ -269,6 +290,19 @@ class InMemoryFanoutBuffer(
     _bufferLog = remainingBufferLog
     _lookupMap = _lookupMap -- lookupKeysToEvict
     _acceptedByHash = _acceptedByHash -- hashKeysToEvict
+
+    val evictedRejectionHashes: View[ByteString] =
+      evicted.view.map(_._2).flatMap(extractRejectionHash).map(_._1)
+
+    _rejectionsByHash = evictedRejectionHashes.foldLeft(_rejectionsByHash) { (acc, hash) =>
+      acc.get(hash) match {
+        case Some(vec) if vec.nonEmpty =>
+          val remaining = vec.dropRight(1)
+          if (remaining.isEmpty) acc - hash
+          else acc.updated(hash, remaining)
+        case _ => acc // nothing buffered for this hash; leave the map unchanged
+      }
+    }
   })
 
   private def extractEntryFromMap(
@@ -291,6 +325,17 @@ class InMemoryFanoutBuffer(
     transactionLogUpdate match {
       case txAccepted: TransactionLogUpdate.TransactionAccepted =>
         txAccepted.transactionHash.map(_.unwrap -> txAccepted)
+      case _ => None
+    }
+
+  private def extractRejectionHash(
+      entry: TransactionLogUpdate
+  ): Option[(ByteString, TransactionLogUpdate.TransactionRejected)] =
+    entry match {
+      case rejected: TransactionLogUpdate.TransactionRejected =>
+        rejected.completionStreamResponse.completionResponse.completion
+          .flatMap(_.transactionHash)
+          .map(_ -> rejected)
       case _ => None
     }
 

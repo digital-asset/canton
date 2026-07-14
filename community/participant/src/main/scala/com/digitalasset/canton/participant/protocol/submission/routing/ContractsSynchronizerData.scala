@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.EitherT
 import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.{LfContractId, Stakeholders}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext

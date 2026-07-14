@@ -29,7 +29,6 @@ import com.digitalasset.canton.participant.config.{
 import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
-import com.digitalasset.canton.sequencing.SequencerAggregatorTesting
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
@@ -131,7 +130,7 @@ object ConfigTransforms {
       _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(Some(10000)),
       // disable exit on fatal error in tests
       ConfigTransforms.setExitOnFatalFailures(false),
-      ConfigTransforms.useNewAggregator(SequencerAggregatorTesting.useNewAggregatorForTests),
+      ConfigTransforms.useNewAggregator(true),
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(

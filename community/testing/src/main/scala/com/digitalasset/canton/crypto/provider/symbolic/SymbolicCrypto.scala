@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.store.memory.{
 }
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.tracing.TraceContext

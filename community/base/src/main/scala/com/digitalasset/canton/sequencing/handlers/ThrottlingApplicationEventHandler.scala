@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.handlers
 import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric.SubtractionResult
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics

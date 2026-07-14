@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.SigningKeyUsage.matchesRelevantUsages
 import com.digitalasset.canton.crypto.kms.{Kms, KmsKeyId}
 import com.digitalasset.canton.crypto.store.KmsMetadataStore.KmsMetadata
 import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose, SigningKeyUsage}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage

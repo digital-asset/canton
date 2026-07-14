@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.CryptoKeyFormat.Symbolic
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.tracing.TraceContext

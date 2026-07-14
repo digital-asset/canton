@@ -17,6 +17,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.ParticipantCommitmentData
 import com.digitalasset.canton.participant.store.db.DbAcsCommitmentStore

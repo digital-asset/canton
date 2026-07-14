@@ -61,6 +61,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 }
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
@@ -540,6 +541,11 @@ private[apiserver] final class ApiPartyManagementService private (
                 .asGrpcError
             )
         }
+        fetchedIdentityProviderId <- partyRecordStore
+          .getPartyRecordO(partyRecord.party)
+          .flatMap(handlePartyRecordStoreResult("retrieving party record")(_))
+          .map(_.fold[IdentityProviderId](IdentityProviderId.Default)(_.identityProviderId))
+
         partyRecordUpdate: PartyRecordUpdate <- {
           if (partyDetailsUpdate.isLocalUpdate.exists(_ != fetchedPartyDetails.isLocal)) {
             Future.failed(
@@ -547,6 +553,15 @@ private[apiserver] final class ApiPartyManagementService private (
                 .Reject(
                   party = partyRecord.party,
                   reason = s"Update request attempted to modify not-modifiable 'is_local' attribute",
+                )
+                .asGrpcError
+            )
+          } else if (partyDetailsUpdate.identityProviderId != fetchedIdentityProviderId) {
+            Future.failed(
+              PartyManagementServiceErrors.InvalidUpdatePartyDetailsRequest
+                .Reject(
+                  party = partyRecord.party,
+                  reason = "Use UpdatePartyIdentityProviderId to change identity provider IDs",
                 )
                 .asGrpcError
             )
@@ -562,10 +577,6 @@ private[apiserver] final class ApiPartyManagementService private (
             )
           }
         }
-        _ <- verifyPartyIsNonExistentOrInIdp(
-          partyRecordUpdate.identityProviderId,
-          partyRecordUpdate.party,
-        )
         updatedPartyRecordResult <- partyRecordStore.updatePartyRecord(
           partyRecordUpdate = partyRecordUpdate,
           ledgerPartyIsLocal = fetchedPartyDetailsO.exists(_.isLocal),
@@ -645,17 +656,20 @@ private[apiserver] final class ApiPartyManagementService private (
       loggingContextWithTrace: LoggingContextWithTrace,
       errorLoggingContext: ErrorLoggingContext,
   ): Future[Unit] =
-    partyRecordStore.getPartyRecordO(party).flatMap {
-      case Right(Some(party)) if party.identityProviderId != identityProviderId =>
-        Future.failed(
-          AuthorizationChecksErrors.PermissionDenied
-            .Reject(
-              s"Party $party belongs to an identity provider that differs from the one specified in the request"
-            )
-            .asGrpcError
-        )
-      case _ => Future.unit
-    }
+    partyRecordStore
+      .getPartyRecordO(party)
+      .flatMap(handlePartyRecordStoreResult("retrieving a party record")(_))
+      .flatMap {
+        case Some(party) if party.identityProviderId != identityProviderId =>
+          Future.failed(
+            AuthorizationChecksErrors.PermissionDenied
+              .Reject(
+                s"Party $party belongs to an identity provider that differs from the one specified in the request"
+              )
+              .asGrpcError
+          )
+        case _ => Future.unit
+      }
 
   private def fetchPartyRecords(
       partyDetails: List[IndexerPartyDetails]

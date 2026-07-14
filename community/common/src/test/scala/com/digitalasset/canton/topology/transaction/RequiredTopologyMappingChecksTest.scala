@@ -9,6 +9,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeysWithThreshold, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, OnboardingRestriction}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.{

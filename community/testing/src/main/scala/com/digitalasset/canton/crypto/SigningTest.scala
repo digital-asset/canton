@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.SignatureCheckError.{
 }
 import com.digitalasset.canton.crypto.SigningError.UnknownSigningKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec

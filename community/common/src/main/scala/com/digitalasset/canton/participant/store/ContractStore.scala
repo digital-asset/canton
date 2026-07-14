@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.instances.list.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

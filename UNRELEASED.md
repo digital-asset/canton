@@ -12,6 +12,11 @@ _Write summary of release_
 
 Added experimental support for ML-DSA. Currently only ML-DSA-65 is supported. Experimental algorithms need to be explicitly enabled via a node's crypto configuration in `<node>.crypto.enable-experimental = true`.
 
+### New Sequencer Aggregator
+
+Re-implemented the Sequencer Aggregator to be more resilient to misbehaving sequencers. Switching between the old and new implementation is controlled by the `sequencer-client.use-new-aggregator` configuration option, which defaults to `true`.
+One of the improvements allows the aggregator to detect sequencers that provide an incorrect event after that event has already reached consensus with sufficiently many other sequencers. A cache of past processed events is kept for that purpose, whose size is controlled by the `sequencer-client.past-events-cache-size` configuration option (default: 1000).
+
 ### Topic A
 Template for a bigger topic
 #### Background
@@ -31,6 +36,19 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
 
 - gRPC: `UpdateService.GetUpdateByHash`
 - JSON API: `POST /v2/updates/update-by-hash`
+
+### Completion Lookup by Transaction Hash (Ledger API)
+
+The Ledger API command completion service now exposes a `GetCompletionByHash` endpoint. Given a transaction hash, it returns the accepted completion (if any) and recent rejected completions for that hash. The hash is available on externally-signed (Interactive Submission Service) transactions.
+
+- gRPC: `CommandCompletionService.GetCompletionByHash`
+- JSON API: `POST /v2/commands/completion-by-hash`
+
+### Party JWTs (self-signed JWTs)
+
+- The Ledger API now exposes a `GetJwks` endpoint. This can be used to obtain public keys for specific parties in JWK format.
+  * gRPC: `JoseService.GetJwks`
+  * JSON API: `GET /v2/jose/jwks/synchronizer/<synchronizer-id>/party/<party-id>`
 
 ### Minor Improvements
 - The HTTP server for the Ledger JSON API is now explicitly configured with a maximum content length. A new config option `http-ledger-api.max-inbound-message-size` has been added. If not configured, the gRPC setting `ledger-api.max-inbound-message-size` will be used.
@@ -87,6 +105,7 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
   - Mediators will report `readiness` `NOT_SERVING` when `liveness` is also `NOT_SERVING`, where previously it was possible for a mediator to report `readiness` `SERVING` while `liveness` was `NOT_SERVING`.
   - HTTP health checks now expose the `liveness` and `readiness`, under the URIs `/health/liveness` or `health/live` and `/health/readiness` or `/health/ready` endpoints, respectively. `/health` is still available for backward compatibility, mapping to `readiness`.
 - Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
+- *BREAKING*: Removed the deprecated `GetPreferredPackageVersion` endpoint of the `InteractiveSubmissionService`. Clients should use `GetPreferredPackages` instead, which resolves the preferred packages for one or more package-name vetting requirements in a single call. This affects both the Ledger API (gRPC `InteractiveSubmissionService.GetPreferredPackageVersion`) and the Ledger JSON API (`GET /v2/interactive-submission/preferred-package-version`). The `GetPreferredPackages` endpoint (gRPC and `POST /v2/interactive-submission/preferred-packages`) is now considered stable.
 - *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
 
   The list of removed suites:
@@ -142,6 +161,13 @@ The Ledger API update service now exposes a `GetUpdateByHash` endpoint. Given a 
     ]
   ```
 - AWS KMS keys created by Canton can now be configured with custom tags through the `custom-tags` setting.
+- The default of the indexer's uncommitted-queue warning threshold (`<participant>.ledger-api.indexer.queue-uncommitted-warn-threshold`) has been increased from 5000 to 14000. This threshold controls when the `Uncommitted queue is growing too large` warning is emitted.
+- *BREAKING*: The sequencers now also enforce confirmation throughput caps. If throughput caps are
+  configured, they will also apply to confirmations. The cap for confirmations can be configured with `confirmation-response.per-client-tps-cap`.
+  It should be set slightly above the global confirmation request cap, as a member should not need to confirm more
+  requests than can be submitted globally. The `confirmation-response.global-tps-cap` can be set to the maximum
+  sequencer event capacity.
+- Changing identity providers for a party through `UpdatePartyDetails` is no longer possible, `UpdatePartyIdentityProviderId` must be used instead.
 
 ### Preview Features
 - preview feature

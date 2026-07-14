@@ -425,7 +425,7 @@ class TestSubmissionService(
       case ResultPrefetch(_, _, resume) =>
         resolve(disclosedContracts, disclosedKeyContracts, resume())
 
-      // TODO(https://github.com/digital-asset/canton/issues/513): Double-check whether
+      // TODO(https://github.com/digital-asset/canton/issues/564): Double-check whether
       // tests using this helper can safely skip external calls, or whether this should
       // mock the external-call response instead.
       case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>

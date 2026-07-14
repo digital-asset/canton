@@ -10,6 +10,7 @@ import com.digitalasset.canton.examples.java.iou.Dummy
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.ledger.participant.state.PackageDescription
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarMainPackageId}
 import com.digitalasset.canton.participant.store.DamlPackageStore

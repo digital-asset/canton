@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.store.ActiveContractStoreTest
 import com.digitalasset.canton.participant.store.db.DbActiveContractStoreTest.maxSynchronizerIndex
 import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDbContractStoreForTesting

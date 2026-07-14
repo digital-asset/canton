@@ -15,6 +15,7 @@ import com.digitalasset.canton.crypto.{
   SigningKeySpec,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ByteString4096, ResourceUtil}
 import org.scalatest.Assertion

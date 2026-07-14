@@ -22,6 +22,7 @@ import com.digitalasset.canton.data.{
   ViewTree,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.ParsedTransactionRequest
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ParsedReassignmentRequest

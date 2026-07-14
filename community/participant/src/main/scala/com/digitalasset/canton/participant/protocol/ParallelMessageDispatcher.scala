@@ -6,8 +6,10 @@ package com.digitalasset.canton.participant.protocol
 import cats.Monoid
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidator
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.MessageDispatcher.TicksAfter.{
@@ -67,7 +69,8 @@ class ParallelMessageDispatcher(
     override protected val requestProcessors: RequestProcessors,
     override protected val topologyProcessor: ParticipantTopologyProcessor,
     override protected val trafficProcessor: TrafficControlProcessor,
-    override protected val acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+    override protected val legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+    override protected val acsCommitmentValidator: ReceivedAcsCommitmentValidator,
     override protected val requestCounterAllocator: RequestCounterAllocator,
     override protected val recordOrderPublisher: RecordOrderPublisher,
     override protected val badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
@@ -133,8 +136,8 @@ class ParallelMessageDispatcher(
       case TrafficControlTransaction(run) =>
         // Traffic control messages are processed synchronously, so we can tick synchronously
         runSynchronously(run)(TickDecision.tickSynchronous, NoEventPublication)
-      case AcsCommitment(run) =>
-        runAsynchronously(run)(TickDecision.tickSynchronous, NoEventPublication)
+      case AcsCommitment(futureEventPublication, run) =>
+        runAsynchronously(run)(TickDecision.tickSynchronous, futureEventPublication)
       case MalformedMessage(run) =>
         runSynchronously(run)(TickDecision.tickSynchronous, NoEventPublication)
       case UnspecifiedMessageKind(run) =>
@@ -274,8 +277,8 @@ class ParallelMessageDispatcher(
             }
           case Some(futureEvent) =>
             val tickF =
-              futureEvent.subflatMap { case EventPublicationData(event, rc) =>
-                recordOrderPublisher.tick(event, sc, Some(rc))
+              futureEvent.subflatMap { case EventPublicationData(event, rcO) =>
+                recordOrderPublisher.tick(event, sc, rcO)
               }
             // We cannot await the ticking of the record order publisher here because the ticking happens only
             // when the request is decided, i.e., after a mediator verdict arrives or whan a timeout happens.

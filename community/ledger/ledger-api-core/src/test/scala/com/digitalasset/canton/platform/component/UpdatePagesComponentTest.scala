@@ -43,7 +43,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
         requestChecksum = ByteString.EMPTY,
         participantChecksum = ByteString.EMPTY,
       )
-      restartIndexer()
+      restartServices()
       val page = index.updatesPage(request).futureValue
 
       page.updates shouldBe empty
@@ -64,7 +64,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
         requestChecksum = ByteString.EMPTY,
         participantChecksum = ByteString.EMPTY,
       )
-      restartIndexer()
+      restartServices()
       val page = index.updatesPage(request).futureValue
 
       page.updates shouldBe empty

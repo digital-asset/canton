@@ -19,6 +19,7 @@ import com.digitalasset.canton.crypto.CryptoKeyFormat.Raw
 import com.digitalasset.canton.crypto.CryptoTestHelper.TestMessage
 import com.digitalasset.canton.crypto.SigningKeySpec.{EcSecp256k1, MlDsa65}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage

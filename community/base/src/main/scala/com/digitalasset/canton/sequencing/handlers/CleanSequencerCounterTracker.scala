@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.{
   PeanoQueue,
   SynchronizedPeanoTreeQueue,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Envelope

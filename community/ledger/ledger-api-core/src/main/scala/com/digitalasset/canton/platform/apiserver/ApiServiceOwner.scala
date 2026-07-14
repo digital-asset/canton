@@ -10,6 +10,7 @@ import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.auth.*
@@ -43,6 +44,8 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
+import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.user.IdentityProviderConfig
 import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
@@ -119,6 +122,8 @@ object ApiServiceOwner {
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
       externalCallHandler: ExternalCallHandler,
+      lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
+      pureCryptoApi: CryptoPureApi,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -214,6 +219,8 @@ object ApiServiceOwner {
         safeToPruneCommitmentState = safeToPruneCommitmentState,
         logger = loggerFactory.getTracedLogger(this.getClass),
         apiContractService = apiContractService,
+        lookupTopologyClient = lookupTopologyClient,
+        pureCryptoApi = pureCryptoApi,
         partyReplicationEndpointsO = partyReplicationEndpointsO,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
         externalCallHandler = externalCallHandler,

@@ -7,6 +7,7 @@ import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorServic
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager

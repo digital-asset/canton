@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.ContractState.SynchronizerState.State
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection

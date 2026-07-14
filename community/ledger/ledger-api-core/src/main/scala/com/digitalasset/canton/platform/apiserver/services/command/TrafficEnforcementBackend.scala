@@ -7,6 +7,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.TrafficAccountValidationFailed
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient

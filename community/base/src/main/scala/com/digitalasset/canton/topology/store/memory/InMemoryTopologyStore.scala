@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}

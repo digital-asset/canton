@@ -49,9 +49,13 @@ def merge_previous_as_fallback(current, previous):
 
 def validate_current_timings(paths, merged):
     if not paths:
-        raise ValueError("No timing files matched --input-glob. Failing to avoid silently dropping timing history.")
+        raise ValueError(
+            "No timing files matched --input-glob. Failing to avoid silently dropping timing history."
+        )
     if not merged:
-        raise ValueError("Merged current timings are empty before applying --previous-timings. Failing to avoid silent fallback to default timings.")
+        raise ValueError(
+            "Merged current timings are empty before applying --previous-timings. Failing to avoid silent fallback to default timings."
+        )
 
 
 def main():
@@ -124,21 +128,35 @@ def test_validate_current_timings_accepts_non_empty_input():
 
 def test_merge_timings_sums_values():
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
-        p0 = _write_timings(tmp, "s0.json", {"com.example.FooTest": 1.5, "com.example.BarTest": 2.0})
-        p1 = _write_timings(tmp, "s1.json", {"com.example.FooTest": 0.5, "com.example.BazTest": 3.0})
+        p0 = _write_timings(
+            tmp, "s0.json", {"com.example.FooTest": 1.5, "com.example.BarTest": 2.0}
+        )
+        p1 = _write_timings(
+            tmp, "s1.json", {"com.example.FooTest": 0.5, "com.example.BazTest": 3.0}
+        )
         result = merge_timings([p0, p1])
-        assert result["com.example.FooTest"] == 2.0, f"Expected 2.0, got {result['com.example.FooTest']}"
-        assert result["com.example.BarTest"] == 2.0, f"Expected 2.0, got {result['com.example.BarTest']}"
-        assert result["com.example.BazTest"] == 3.0, f"Expected 3.0, got {result['com.example.BazTest']}"
+        assert result["com.example.FooTest"] == 2.0, (
+            f"Expected 2.0, got {result['com.example.FooTest']}"
+        )
+        assert result["com.example.BarTest"] == 2.0, (
+            f"Expected 2.0, got {result['com.example.BarTest']}"
+        )
+        assert result["com.example.BazTest"] == 3.0, (
+            f"Expected 3.0, got {result['com.example.BazTest']}"
+        )
 
 
 def test_merge_timings_missing_file_is_skipped():
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         p0 = _write_timings(tmp, "s0.json", {"com.example.FooTest": 1.0})
         result = merge_timings([p0, "/nonexistent/path/shard.json"])
-        assert result == {"com.example.FooTest": 1.0}, f"Expected only valid file merged, got: {result}"
+        assert result == {"com.example.FooTest": 1.0}, (
+            f"Expected only valid file merged, got: {result}"
+        )
 
 
 def test_merge_timings_empty_input():
@@ -148,23 +166,30 @@ def test_merge_timings_empty_input():
 
 def test_merge_timings_deduplicates_across_shards():
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         # Same test appearing in 3 shards: timings must be summed, not overwritten
         p0 = _write_timings(tmp, "s0.json", {"com.example.FooTest": 10.0})
         p1 = _write_timings(tmp, "s1.json", {"com.example.FooTest": 20.0})
         p2 = _write_timings(tmp, "s2.json", {"com.example.FooTest": 30.0})
         result = merge_timings([p0, p1, p2])
-        assert result["com.example.FooTest"] == 60.0, \
+        assert result["com.example.FooTest"] == 60.0, (
             f"Expected 60.0 (sum across shards), got {result['com.example.FooTest']}"
+        )
 
 
 def test_merge_timings_with_previous_timings_fallback_only():
     import tempfile
+
     with tempfile.TemporaryDirectory() as tmp:
         # Current shard timings
-        current = _write_timings(tmp, "current.json", {"com.example.FooTest": 5.0, "com.example.BarTest": 2.0})
+        current = _write_timings(
+            tmp, "current.json", {"com.example.FooTest": 5.0, "com.example.BarTest": 2.0}
+        )
         # Previous timings from a rerun
-        previous = _write_timings(tmp, "previous.json", {"com.example.FooTest": 3.0, "com.example.BazTest": 1.0})
+        previous = _write_timings(
+            tmp, "previous.json", {"com.example.FooTest": 3.0, "com.example.BazTest": 1.0}
+        )
 
         # Merge current with previous as fallback-only
         result = merge_timings([current])
@@ -172,12 +197,17 @@ def test_merge_timings_with_previous_timings_fallback_only():
             previous_data = json.load(f)
         merge_previous_as_fallback(result, previous_data)
 
-        assert result["com.example.FooTest"] == 5.0, f"Expected 5.0 (no inflation), got {result['com.example.FooTest']}"
-        assert result["com.example.BarTest"] == 2.0, f"Expected 2.0, got {result['com.example.BarTest']}"
-        assert result["com.example.BazTest"] == 1.0, f"Expected 1.0, got {result['com.example.BazTest']}"
+        assert result["com.example.FooTest"] == 5.0, (
+            f"Expected 5.0 (no inflation), got {result['com.example.FooTest']}"
+        )
+        assert result["com.example.BarTest"] == 2.0, (
+            f"Expected 2.0, got {result['com.example.BarTest']}"
+        )
+        assert result["com.example.BazTest"] == 1.0, (
+            f"Expected 1.0, got {result['com.example.BazTest']}"
+        )
 
 
 if __name__ == "__main__":
     self_test()
     main()
-

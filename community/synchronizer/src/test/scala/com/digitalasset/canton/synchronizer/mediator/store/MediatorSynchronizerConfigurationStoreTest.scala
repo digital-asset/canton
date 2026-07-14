@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.mediator.store
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}

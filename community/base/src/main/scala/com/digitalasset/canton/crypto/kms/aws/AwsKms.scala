@@ -29,6 +29,7 @@ import com.digitalasset.canton.crypto.{
   SigningKeySpec,
 }
 import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, TracerProvider}

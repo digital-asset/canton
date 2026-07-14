@@ -23,6 +23,7 @@ import com.digitalasset.canton.{ProtoDeserializationError, protocol}
 import com.digitalasset.nonempty.NonEmpty
 
 import java.time.Instant
+import scala.annotation.nowarn
 
 sealed trait TopologyResult[M <: TopologyMapping] {
   def context: BaseResult
@@ -116,8 +117,12 @@ object ListNamespaceDelegationResult {
     for {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV30(contextProto)
-      itemProto <- ProtoConverter.required("item", value.item)
-      item <- NamespaceDelegation.fromProtoV30(itemProto)
+      item <- value.item match {
+        case v30.ListNamespaceDelegationResponse.Result.Item.V30(i) =>
+          NamespaceDelegation.fromProtoV30(i)
+        case v30.ListNamespaceDelegationResponse.Result.Item.Empty =>
+          ProtoConverter.required("item", None)
+      }
     } yield ListNamespaceDelegationResult(context, item)
 }
 
@@ -150,8 +155,12 @@ object ListOwnerToKeyMappingResult {
     for {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV30(contextProto)
-      itemProto <- ProtoConverter.required("item", value.item)
-      item <- OwnerToKeyMapping.fromProtoV30(itemProto)
+      item <- value.item match {
+        case v30.ListOwnerToKeyMappingResponse.Result.Item.V30(i) =>
+          OwnerToKeyMapping.fromProtoV30(i)
+        case v30.ListOwnerToKeyMappingResponse.Result.Item.Empty =>
+          ProtoConverter.required("item", None)
+      }
     } yield ListOwnerToKeyMappingResult(context, item)
 }
 
@@ -161,14 +170,19 @@ final case class ListPartyToKeyMappingResult(
 ) extends TopologyResult[PartyToKeyMapping]
 
 object ListPartyToKeyMappingResult {
+  @nowarn("msg=PartyToKeyMapping in package v30 is deprecated")
   def fromProtoV30(
       value: v30.ListPartyToKeyMappingResponse.Result
   ): ParsingResult[ListPartyToKeyMappingResult] =
     for {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV30(contextProto)
-      itemProto <- ProtoConverter.required("item", value.item)
-      item <- PartyToKeyMapping.fromProtoV30(itemProto)
+      item <- value.item match {
+        case v30.ListPartyToKeyMappingResponse.Result.Item.V30(i) =>
+          PartyToKeyMapping.fromProtoV30(i)
+        case v30.ListPartyToKeyMappingResponse.Result.Item.Empty =>
+          ProtoConverter.required("item", None)
+      }
     } yield ListPartyToKeyMappingResult(context, item)
 }
 
@@ -252,8 +266,12 @@ object ListPartyToParticipantResult {
     for {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV30(contextProto)
-      itemProto <- ProtoConverter.required("item", value.item)
-      item <- PartyToParticipant.fromProtoV30(itemProto)
+      item <- value.item match {
+        case v30.ListPartyToParticipantResponse.Result.Item.V30(i) =>
+          PartyToParticipant.fromProtoV30(i)
+        case v30.ListPartyToParticipantResponse.Result.Item.Empty =>
+          ProtoConverter.required("item", None)
+      }
     } yield ListPartyToParticipantResult(context, item)
 }
 

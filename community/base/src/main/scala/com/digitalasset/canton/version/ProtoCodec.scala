@@ -116,7 +116,7 @@ final case class UnsupportedProtoCodec[F[
   override val isVersioned: Boolean = false
   override val isSupported: Boolean = false
 
-  private def valueClassName: String = implicitly[ClassTag[ValueClass]].getClass.getSimpleName
+  private def valueClassName: String = implicitly[ClassTag[ValueClass]].runtimeClass.getSimpleName
 
   def deserializationError: ProtoDeserializationError = ProtoDeserializationError.OtherError(
     s"Cannot deserialize $valueClassName in protocol version equivalent to ${fromInclusive.representative}"

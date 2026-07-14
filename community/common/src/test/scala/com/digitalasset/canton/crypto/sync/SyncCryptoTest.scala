@@ -22,7 +22,13 @@ import com.digitalasset.canton.crypto.{
   Hash,
   RequiredEncryptionSpecs,
   RequiredSigningSpecs,
+  SignatureCheckError,
+  SignatureWithoutSigner,
+  SigningAlgorithmSpec,
+  SigningKeySpec,
   SigningKeyUsage,
+  SigningKeysWithThreshold,
+  SigningPublicKey,
   SynchronizerCryptoClient,
   TestHash,
 }
@@ -44,6 +50,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.nonempty.NonEmpty
+import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigValueFactory
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.BeforeAndAfterAll
@@ -96,6 +103,30 @@ trait SyncCryptoTest
       .withSimpleParticipants(participant1, participant2)
       .withStaticSynchronizerParams(jceStaticSynchronizerParameters)
       .withCryptoConfig(cryptoConfigWithSessionSigningKeysConfig(sessionSigningKeysConfig))
+      .withExternalParty(
+        partyId = externalParty1Id,
+        participantId = participant1,
+        signingKeys = SigningKeysWithThreshold(
+          keys = NonEmpty.mk(Set, externalParty1Key),
+          threshold = PositiveInt.tryCreate(1),
+        ),
+      )
+      .withExternalParty(
+        partyId = externalParty2Id,
+        participantId = participant1,
+        signingKeys = SigningKeysWithThreshold(
+          keys = NonEmpty.mk(Set, externalParty2Key),
+          threshold = PositiveInt.tryCreate(1),
+        ),
+      )
+      .withExternalParty(
+        partyId = externalDaoPartyId,
+        participantId = participant1,
+        signingKeys = SigningKeysWithThreshold(
+          keys = NonEmpty.mk(Set, externalParty1Key, externalParty2Key),
+          threshold = PositiveInt.tryCreate(2),
+        ),
+      )
       .build(crypto, loggerFactory)
 
   protected lazy val testingTopology: TestingIdentityFactory =
@@ -165,6 +196,24 @@ trait SyncCryptoTest
 
   protected lazy val syncCryptoVerifierP1: SyncCryptoVerifier = p1.syncCryptoVerifier
   protected lazy val syncCryptoVerifierP2: SyncCryptoVerifier = p2.syncCryptoVerifier
+
+  protected lazy val externalParty1Id = DefaultTestIdentities.party1
+  protected lazy val externalParty1Key: SigningPublicKey = crypto
+    .generateSigningKey(
+      keySpec = SigningKeySpec.EcCurve25519,
+      usage = SigningKeyUsage.ProtocolOnly,
+    )
+    .futureValueUS
+    .value
+  protected lazy val externalParty2Id = DefaultTestIdentities.party2
+  protected lazy val externalParty2Key: SigningPublicKey = crypto
+    .generateSigningKey(
+      keySpec = SigningKeySpec.EcCurve25519,
+      usage = SigningKeyUsage.ProtocolOnly,
+    )
+    .futureValueUS
+    .value
+  protected lazy val externalDaoPartyId = DefaultTestIdentities.party3
 
   def syncCryptoSignerTest(): Unit = {
     "correctly sign and verify a message" in {
@@ -307,6 +356,73 @@ trait SyncCryptoTest
 
     }
 
+    "correctly verify party signatures" in {
+
+      val signature = crypto.privateCrypto
+        .signBytes(
+          bytes = ByteString.copyFromUtf8("hello, world!"),
+          signingKeyId = externalParty1Key.fingerprint,
+          usage = SigningKeyUsage.ProtocolOnly,
+          signingAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
+        )
+        .valueOrFail("sign failed")
+        .futureValueUS
+
+      val signatureWithoutSigner = SignatureWithoutSigner(
+        format = signature.format,
+        signature = signature.unwrap,
+        signingAlgorithmSpec = signature.signingAlgorithmSpec.valueOrFail("no algorithm spec"),
+      )
+
+      List(syncCryptoVerifierP1, syncCryptoVerifierP2).foreach { verifier =>
+        verifier
+          .verifyPartyJwtSignature(
+            topologySnapshot = testSnapshot,
+            bytes = ByteString.copyFromUtf8("hello, world!"),
+            signer = externalParty1Id,
+            signature = signatureWithoutSigner,
+            usage = SigningKeyUsage.ProtocolOnly,
+          )
+          .valueOrFail("verification failed")
+          .futureValueUS
+      }
+
+      syncCryptoVerifierP1
+        .verifyPartyJwtSignature(
+          topologySnapshot = testSnapshot,
+          bytes = ByteString.copyFromUtf8("goodbye, cruel world!"), // Wrong
+          signer = externalParty1Id,
+          signature = signatureWithoutSigner,
+          usage = SigningKeyUsage.ProtocolOnly,
+        )
+        .futureValueUS
+        .left
+        .value shouldBe a[SignatureCheckError.InvalidSignature]
+
+      syncCryptoVerifierP1
+        .verifyPartyJwtSignature(
+          topologySnapshot = testSnapshot,
+          bytes = ByteString.copyFromUtf8("hello, world!"),
+          signer = externalParty2Id, // Wrong
+          signature = signatureWithoutSigner,
+          usage = SigningKeyUsage.ProtocolOnly,
+        )
+        .futureValueUS
+        .left
+        .value shouldBe a[SignatureCheckError.InvalidSignature]
+
+      syncCryptoVerifierP1
+        .verifyPartyJwtSignature(
+          topologySnapshot = testSnapshot,
+          bytes = ByteString.copyFromUtf8("hello, world!"),
+          signer = externalDaoPartyId, // Dao with threshold
+          signature = signatureWithoutSigner,
+          usage = SigningKeyUsage.ProtocolOnly,
+        )
+        .futureValueUS
+        .left
+        .value shouldBe a[SignatureCheckError.PartyKeysInvalidThreshold]
+    }
   }
 
   override def afterAll(): Unit = {

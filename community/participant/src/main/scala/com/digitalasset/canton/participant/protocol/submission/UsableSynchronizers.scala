@@ -10,6 +10,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.protocol.{
   LfActionNode,

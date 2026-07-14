@@ -236,13 +236,206 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
       prepareResponse <- ledger.prepareSubmission(prepareSubmissionRequest)
       executeRequest = ledger.executeSubmissionRequest(externalParty, prepareResponse)
       _ <- ledger.executeSubmission(executeRequest)
-      _ <- ledger.firstCompletions(externalParty)
+      completions <- ledger.firstCompletions(externalParty)
       transactions <- ledger.transactions(LedgerEffects, externalParty)
     } yield {
       val transaction = assertSingleton("expected one transaction", transactions)
       val event = transaction.events.headOption.value.event
       assert(event.isCreated)
-      assert(transaction.transactionHash.contains(prepareResponse.preparedTransactionHash))
+      assert(
+        transaction.transactionHash.contains(prepareResponse.preparedTransactionHash),
+        "Expected transactionHash on transaction",
+      )
+      assert(
+        completions.headOption.exists(
+          _.transactionHash.contains(prepareResponse.preparedTransactionHash)
+        ),
+        "Expected completion to contain the prepared transaction hash",
+      )
+    }
+  })
+
+  test(
+    "ISSGetCompletionByHashAccepted",
+    "Look up a completion by its transaction hash",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(externalParty: ExternalParty))) =>
+    val prepareSubmissionRequest = ledger.prepareSubmissionRequest(
+      externalParty,
+      new Dummy(externalParty).create.commands,
+    )
+    for {
+      prepareResponse <- ledger.prepareSubmission(prepareSubmissionRequest)
+      hash = prepareResponse.preparedTransactionHash
+      executeRequest = ledger.executeSubmissionRequest(externalParty, prepareResponse)
+      _ <- ledger.executeSubmission(executeRequest)
+      _ <- ledger.firstCompletions(externalParty)
+      response <- ledger.completionByHash(hash)
+    } yield {
+      assert(
+        response.acceptedCompletion.isDefined,
+        "Expected accepted_completion to be present",
+      )
+      val accepted = response.getAcceptedCompletion
+      assert(
+        accepted.transactionHash.contains(hash),
+        s"Expected transaction_hash on accepted completion to match prepared hash",
+      )
+      assert(
+        response.lastRejectedCompletions.isEmpty,
+        "Expected last_rejected_completions to be empty for a successful submission",
+      )
+    }
+  })
+
+  test(
+    "ISSGetCompletionByHashNotFound",
+    "Return COMPLETION_NOT_FOUND for a non-existent hash",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(_: ExternalParty))) =>
+    import com.digitalasset.canton.crypto.{HashAlgorithm, HashPurpose, Hash as CantonHash}
+    val fakeHash = CantonHash
+      .digest(
+        HashPurpose.PreparedSubmission,
+        com.google.protobuf.ByteString.copyFromUtf8("non_existent"),
+        HashAlgorithm.Sha256,
+      )
+      .getCryptographicEvidence
+    ledger
+      .completionByHash(fakeHash)
+      .mustFailWith(
+        "Non-existent hash",
+        RequestValidationErrors.NotFound.Completion,
+        Some("COMPLETION_NOT_FOUND"),
+      )
+  })
+
+  test(
+    "ISSGetCompletionByHashRejected",
+    "Rejected completion is returned in lastRejectedCompletions",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party: ExternalParty))) =>
+    for {
+      // Create a Dummy contract
+      createPrepare <- ledger.prepareSubmission(
+        ledger.prepareSubmissionRequest(party, new Dummy(party).create.commands)
+      )
+      createResponse <- ledger.executeSubmissionAndWait(
+        ledger.executeSubmissionAndWaitRequest(party, createPrepare)
+      )
+      transaction <- ledger.transactionById(createResponse.updateId, Seq(party))
+      contractId = new Dummy.ContractId(
+        transaction.events.headOption.value.getCreated.contractId
+      )
+
+      // Prepare an archive on the contract (this is the one we'll execute later, after it's stale)
+      staleArchivePrepare <- ledger.prepareSubmission(
+        ledger.prepareSubmissionRequest(party, contractId.exerciseArchive().commands)
+      )
+      staleHash = staleArchivePrepare.preparedTransactionHash
+
+      // Archive the contract via a different submission
+      freshArchivePrepare <- ledger.prepareSubmission(
+        ledger.prepareSubmissionRequest(party, contractId.exerciseArchive().commands)
+      )
+      _ <- ledger.executeSubmissionAndWait(
+        ledger.executeSubmissionAndWaitRequest(party, freshArchivePrepare)
+      )
+
+      // Execute the stale archive (contract already archived).
+      // The activeness check at Phase 3 detects the inactive contract and produces a
+      // LOCAL_VERDICT_INACTIVE_CONTRACTS rejection that the submitter observes at Phase 7.
+      _ <- ledger.executeSubmission(
+        ledger.executeSubmissionRequest(party, staleArchivePrepare)
+      )
+
+      // Wait for the rejected completion to appear in the stream
+      _ <- ledger.findCompletion(party)(c =>
+        c.transactionHash.contains(staleHash) && c.status.exists(_.code != 0)
+      )
+
+      // Verify completionByHash returns the rejection
+      response <- ledger.completionByHash(staleHash)
+    } yield {
+      assert(
+        response.acceptedCompletion.isEmpty,
+        "Expected acceptedCompletion to be empty for a rejected submission",
+      )
+      assert(
+        response.lastRejectedCompletions.nonEmpty,
+        "Expected lastRejectedCompletions to contain the rejected completion",
+      )
+      val rejected = response.lastRejectedCompletions.headOption.value
+      assert(
+        rejected.transactionHash.contains(staleHash),
+        s"Expected rejected completion to carry the transaction hash, got: ${rejected.transactionHash}",
+      )
+      assert(
+        rejected.status.exists(_.message.contains("LOCAL_VERDICT_INACTIVE_CONTRACTS")),
+        s"Expected LOCAL_VERDICT_INACTIVE_CONTRACTS rejection, got: ${rejected.status.map(_.message)}",
+      )
+    }
+  })
+
+  test(
+    "ISSGetCompletionByHashEmptyHash",
+    "Return INVALID_ARGUMENT for an empty transaction hash",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(_: ExternalParty))) =>
+    ledger
+      .completionByHash(com.google.protobuf.ByteString.EMPTY)
+      .mustFailWith(
+        "Empty hash",
+        RequestValidationErrors.InvalidArgument,
+        Some("Missing field: transaction_hash"),
+      )
+  })
+
+  test(
+    "ISSGetCompletionByHashAcceptedAndRejectedWithCap",
+    "Return both accepted and rejected completions, capping rejections at the configured maximum (10)",
+    allocate(SingleExternalParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party: ExternalParty))) =>
+    val prepareRequest = ledger.prepareSubmissionRequest(
+      party,
+      new Dummy(party).create.commands,
+    )
+    val totalRetries = 12 // more than the default cap of 10
+    for {
+      prepareResponse <- ledger.prepareSubmission(prepareRequest)
+      hash = prepareResponse.preparedTransactionHash
+      // Submit first to get an accepted completion.
+      _ <- ledger.executeSubmissionAndWait(
+        ledger.executeSubmissionAndWaitRequest(party, prepareResponse)
+      )
+      // Submit more duplicate re-executions than the cap.
+      _ <- (1 to totalRetries).foldLeft(Future.unit) { (previous, _) =>
+        previous.flatMap { _ =>
+          ledger
+            .submitRequestAndTolerateGrpcError(
+              ConsistencyErrors.SubmissionAlreadyInFlight,
+              _.executeSubmissionAndWait(
+                ledger.executeSubmissionAndWaitRequest(party, prepareResponse)
+              ),
+            )
+            .mustFail("re-executing the same prepared transaction should be a duplicate")
+            .map(_ => ())
+        }
+      }
+      response <- ledger.completionByHash(hash)
+    } yield {
+      assert(
+        response.acceptedCompletion.isDefined,
+        "Expected accepted_completion to be present",
+      )
+      assert(
+        response.lastRejectedCompletions.nonEmpty,
+        "Expected last_rejected_completions to contain duplicate rejections",
+      )
+      assert(
+        response.lastRejectedCompletions.sizeIs == 10,
+        s"Expected exactly 10 capped rejections, got ${response.lastRejectedCompletions.size}",
+      )
     }
   })
 
@@ -275,7 +468,13 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
         retrievedTransaction.transactionHash.contains(
           prepareResponse.preparedTransactionHash
         ),
-        "Transaction hash was not set or incorrect",
+        s"externalTransactionHash was not set or incorrect: got ${retrievedTransaction.externalTransactionHash}, expected ${prepareResponse.preparedTransactionHash}",
+      )
+      assert(
+        retrievedTransaction.transactionHash.contains(
+          prepareResponse.preparedTransactionHash
+        ),
+        s"transactionHash was not set or incorrect: got ${retrievedTransaction.transactionHash}, expected ${prepareResponse.preparedTransactionHash}",
       )
     }
   })
@@ -799,125 +998,6 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
       unknownSynchronizerIdFailure <- ledger
         .getPreferredPackages(
           Map(Dummy.PACKAGE_NAME -> Seq(party1, party2)),
-          synchronizerIdO = Some("unknownSynchronizerId::ns"),
-        )
-        .mustFail("unknown synchronizer-id")
-    } yield {
-      assertGrpcError(
-        invalidSynchronizerIdFailure,
-        InvalidField,
-        Some("synchronizer_id/synchronizerId"),
-      )
-      assertGrpcError(
-        unknownSynchronizerIdFailure,
-        InvalidPrescribedSynchronizerId,
-        None,
-      )
-    }
-  })
-
-  test(
-    "ISSPreferredPackageVersionKnown",
-    "Getting preferred package version should return a valid result",
-    allocate(TwoParties),
-  )(implicit ec => { case Participants(Participant(ledger, Seq(party1, party2))) =>
-    for {
-      result <- ledger.getPreferredPackageVersion(Seq(party1, party2), Dummy.PACKAGE_NAME)
-    } yield {
-      result.packagePreference
-        .flatMap(_.packageReference)
-        .map(
-          assertEquals(
-            _,
-            PackageReference(
-              packageId = dummyCompanion.PACKAGE_ID,
-              packageName = Dummy.PACKAGE_NAME,
-              packageVersion = Dummy.PACKAGE_VERSION.toString,
-            ),
-          )
-        )
-        .getOrElse(fail(s"Invalid preference response: $result"))
-    }
-  })
-
-  test(
-    "ISSPreferredPackageVersionUnknownParty",
-    "Getting preferred package version for an unknown party should fail",
-    allocate(NoParties),
-  )(implicit ec => { case Participants(Participant(ledger, Seq())) =>
-    for {
-      invalidPartyFailure <- ledger
-        .getPreferredPackageVersion(
-          // Manually craft invalid party
-          Seq(Party(new data.Party("invalid-party"))),
-          Dummy.PACKAGE_NAME,
-        )
-        .mustFail("invalid party")
-      unknownPartyFailure <- ledger
-        .getPreferredPackageVersion(
-          // Manually craft invalid party
-          Seq(Party(new data.Party("unknownParty::ns"))),
-          Dummy.PACKAGE_NAME,
-        )
-        .mustFail("unknown party")
-    } yield {
-      assertGrpcError(
-        // TODO(#25385): Here we should first report the invalid party-id format
-        invalidPartyFailure,
-        UnknownInformees,
-        None,
-      )
-      assertGrpcError(
-        unknownPartyFailure,
-        UnknownInformees,
-        None,
-      )
-    }
-  })
-
-  test(
-    "ISSPreferredPackageVersionUnknownPackageName",
-    "Getting preferred package version for an unknown package-name should fail",
-    allocate(SingleParty),
-  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
-    for {
-      invalidPackageNameFailure <- ledger
-        .getPreferredPackageVersion(Seq(party), "What-Is-A-Package-Name?")
-        .mustFail("invalid package-name")
-      unknownPackageNameFailure <- ledger
-        .getPreferredPackageVersion(Seq(party), "NoSuchPackage")
-        .mustFail("unknown package-name")
-    } yield {
-      assertGrpcError(
-        invalidPackageNameFailure,
-        InvalidField,
-        Some("package_name/packageName"),
-      )
-      assertGrpcError(
-        unknownPackageNameFailure,
-        PackageNamesNotFound,
-        None,
-      )
-    }
-  })
-
-  test(
-    "ISSPreferredPackageVersionUnknownSynchronizerId",
-    "Getting preferred package version for an unknown synhcronizer-id should fail",
-    allocate(TwoParties),
-  )(implicit ec => { case Participants(Participant(ledger, Seq(party1, party2))) =>
-    for {
-      invalidSynchronizerIdFailure <- ledger
-        .getPreferredPackageVersion(
-          Seq(party1, party2),
-          Dummy.PACKAGE_NAME,
-          synchronizerIdO = Some("invalidSyncId"),
-        )
-        .mustFail("unknown synchronizer-id")
-      unknownSynchronizerIdFailure <- ledger
-        .getPreferredPackageVersion(
-          Seq(party1, party2),
-          Dummy.PACKAGE_NAME,
           synchronizerIdO = Some("unknownSynchronizerId::ns"),
         )
         .mustFail("unknown synchronizer-id")

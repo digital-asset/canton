@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.{Nonce, Signature}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcFUSExtended
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthentication.{

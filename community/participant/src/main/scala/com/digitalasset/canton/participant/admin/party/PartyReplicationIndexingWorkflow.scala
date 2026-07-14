@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.ledger.participant.state.{Reassignment, ReassignmentInfo, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationIndexingWorkflow.{
   ContractActivation,

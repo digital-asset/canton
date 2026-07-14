@@ -19,6 +19,7 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{

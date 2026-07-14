@@ -1741,6 +1741,30 @@ fileComments:
           fieldComments:
             completion: ''
             offset_checkpoint: ''
+      GetCompletionByHashRequest:
+        message:
+          comments: null
+          fieldComments:
+            transaction_hash: |-
+              The transaction hash of the prepared transaction whose completion is being looked up.
+
+              Required: must be non-empty
+      GetCompletionByHashResponse:
+        message:
+          comments: null
+          fieldComments:
+            accepted_completion: |-
+              The accepted completion for the given transaction hash (at most one can exist).
+              Only completions beyond the current pruning offset are visible.
+
+              Optional
+            last_rejected_completions: |-
+              Recent rejected completions for the given transaction hash, in descending offset order.
+              The server may truncate this list if there are too many entries.
+              Use ``submission_id`` to correlate with a specific command submission.
+              Only completions beyond the current pruning offset are visible.
+
+              Optional: can be empty
       GetCompletionsRequest:
         message:
           comments: null
@@ -1769,6 +1793,8 @@ fileComments:
             fieldComments:
               completion: ''
               offset_checkpoint: ''
+      GetCompletionByHashRequest: {}
+      GetCompletionByHashResponse: {}
       GetCompletionsRequest: {}
     services:
       CommandCompletionService:
@@ -1780,6 +1806,16 @@ fileComments:
         comments: |-
           Subscribe to command completion events.
           This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
+      - name: GetCompletionByHash
+        comments: |-
+          Look up a completion by its transaction hash.
+          This is only available for completions received after upgrading to Canton version 3.5.
+          A COMPLETION_NOT_FOUND error will be raised if either of the following is true:
+
+          - there is no completion with this transaction hash,
+          - the completion is not visible to the user,
+          - the completion was populated before upgrading to Canton version 3.5,
+          - respective completions are all pruned.
   command_service.proto:
     messages:
       SubmitAndWaitForReassignmentRequest:
@@ -3114,37 +3150,6 @@ fileComments:
         message:
           comments: null
           fieldComments: {}
-      GetPreferredPackageVersionRequest:
-        message:
-          comments: null
-          fieldComments:
-            parties: |-
-              The parties whose participants' vetting state should be considered when resolving the preferred package.
-
-              Required: must be non-empty
-            package_name: |-
-              The package-name for which the preferred package should be resolved.
-
-              Required
-            synchronizer_id: |-
-              The synchronizer whose vetting state should be used for resolving this query.
-              If not specified, the vetting states of all synchronizers to which the participant is connected are used.
-
-              Optional
-            vetting_valid_at: |-
-              The timestamp at which the package vetting validity should be computed
-              on the latest topology snapshot as seen by the participant.
-              If not provided, the participant's current clock time is used.
-
-              Optional
-      GetPreferredPackageVersionResponse:
-        message:
-          comments: null
-          fieldComments:
-            package_preference: |-
-              Not populated when no preferred package is found
-
-              Optional
       GetPreferredPackagesRequest:
         message:
           comments: null
@@ -3269,19 +3274,6 @@ fileComments:
           fieldComments:
             node_id: Required
             seed: 'Required: must be non-empty'
-      PackagePreference:
-        message:
-          comments: null
-          fieldComments:
-            package_reference: |-
-              The package reference of the preferred package.
-
-              Required
-            synchronizer_id: |-
-              The synchronizer for which the preferred package was computed.
-              If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
-
-              Required
       PackageVettingRequirement:
         message:
           comments: Defines a package-name for which the commonly vetted package with
@@ -3525,8 +3517,6 @@ fileComments:
                 Specifies the start of the deduplication period by a completion stream offset (exclusive).
                 Must be a valid absolute offset (positive integer).
       ExecuteSubmissionResponse: {}
-      GetPreferredPackageVersionRequest: {}
-      GetPreferredPackageVersionResponse: {}
       GetPreferredPackagesRequest: {}
       GetPreferredPackagesResponse: {}
       Metadata: {}
@@ -3550,7 +3540,6 @@ fileComments:
                 Same as min_ledger_time_abs, but specified as a duration, starting from the time this request is received by the server.
                 Must not be set at the same time as min_ledger_time_abs.
                 Optional
-      PackagePreference: {}
       PackageVettingRequirement: {}
       PartySignatures: {}
       PrepareSubmissionRequest: {}
@@ -3573,20 +3562,6 @@ fileComments:
       - name: ExecuteSubmissionAndWaitForTransaction
         comments: Similar to ExecuteSubmissionAndWait but additionally returns the
           transaction
-      - name: GetPreferredPackageVersion
-        comments: |-
-          A preferred package is the highest-versioned package for a provided package-name
-          that is vetted by all the participants hosting the provided parties.
-
-          Ledger API clients should use this endpoint for constructing command submissions
-          that are compatible with the provided preferred package, by making informed decisions on:
-          - which are the compatible packages that can be used to create contracts
-          - which contract or exercise choice argument version can be used in the command
-          - which choices can be executed on a template or interface of a contract
-
-          Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
-
-          Provided for backwards compatibility, it will be removed in the Canton version 3.4.0
       - name: GetPreferredPackages
         comments: |-
           Compute the preferred packages for the vetting requirements in the request.
@@ -3603,8 +3578,6 @@ fileComments:
           a `FAILED_PRECONDITION` error will be returned.
 
           Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
-
-          Experimental API: this endpoint is not guaranteed to provide backwards compatibility in future releases
   interactive/transaction/v1/interactive_submission_data.proto:
     messages:
       Create:
@@ -3779,6 +3752,36 @@ fileComments:
       QueryByKey: {}
       Rollback: {}
     services: {}
+  jose_service.proto:
+    messages:
+      GetJwksRequest:
+        message:
+          comments: null
+          fieldComments:
+            synchronizer_id: |-
+              The synchronizer containing the signing public keys for the party
+
+              Required
+            party_id: |-
+              The party to request the JWKS for
+
+              Required
+      GetJwksResponse:
+        message:
+          comments: null
+          fieldComments:
+            keys: |-
+              List of JWKs for the specified party and synchronizer.
+              Only keys of which the usage allows for Party JWT authentication will be returned.
+
+              Optional: can be empty
+    oneOfs:
+      GetJwksRequest: {}
+      GetJwksResponse: {}
+    services:
+      JoseService:
+      - name: GetJwks
+        comments: ''
   offset_checkpoint.proto:
     messages:
       OffsetCheckpoint:

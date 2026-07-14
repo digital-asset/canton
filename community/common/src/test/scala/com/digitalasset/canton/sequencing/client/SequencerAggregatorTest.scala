@@ -8,15 +8,12 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError.BogusEvent
-import com.digitalasset.canton.sequencing.{
-  SequencedSerializedEvent,
-  SequencerAggregator,
-  SequencerAggregatorTesting,
-}
+import com.digitalasset.canton.sequencing.{SequencedSerializedEvent, SequencerAggregator}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.util.{DelayUtil, MonadUtil, ResourceUtil}
@@ -46,7 +43,7 @@ class SequencerAggregatorTest
     with HasExecutionContext {
   import SequencerAggregatorTest.*
 
-  private val useNewAggregator = SequencerAggregatorTesting.useNewAggregatorForTests
+  private val useNewAggregator = true
 
   private lazy val rand: Random = {
     val seed = Random.nextLong()

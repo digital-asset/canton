@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.manual
 
 import better.files.File
+import com.digitalasset.canton.console.SplitBufferedProcessLogger
 import com.digitalasset.canton.integration.tests.manual.DataContinuityTest.baseDbDumpPath
 import com.digitalasset.canton.integration.tests.manual.S3Synchronization.{
   ContinuityDumpLocalRef,
@@ -12,9 +13,12 @@ import com.digitalasset.canton.integration.tests.manual.S3Synchronization.{
 }
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
-import com.digitalasset.canton.{FutureHelpers, TestEssentials}
+import com.digitalasset.canton.{BaseTest, FutureHelpers, TestEssentials}
+import com.typesafe.scalalogging.Logger
+import org.scalatest.Assertions.fail
 
 import java.nio.file.Files
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 import scala.math.Ordering.Implicits.*
 import scala.sys.process.*
@@ -38,7 +42,7 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
     def listVersionDirectories(): List[String] =
       listPvDirectories().map(_.takeWhile(_ != '/')).distinct
 
-    def mkContinuityDumpRef(path: String): ContinuityDumpRef
+    def mkContinuityDumpRef(path: String, logger: Logger): ContinuityDumpRef
 
     /** List the dumps on S3.
       *
@@ -89,7 +93,7 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
             .map(directory =>
               (
                 getReleaseVersion(directory),
-                mkContinuityDumpRef(directory),
+                mkContinuityDumpRef(directory, noTracingLogger),
               )
             )
             // Data continuity started with 3.4
@@ -169,8 +173,8 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
         .filter(_.contains("data-continuity-dumps"))
         .map(_.replace("data-continuity-dumps/", "").replace("/0", ""))
 
-    override def mkContinuityDumpRef(path: String): ContinuityDumpRef =
-      ContinuityDumpS3Ref(path)
+    override def mkContinuityDumpRef(path: String, logger: Logger): ContinuityDumpRef =
+      ContinuityDumpS3Ref(path, logger)
   }
 
   case object LocalDump extends DumpSource {
@@ -183,7 +187,7 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
       .filter(path => path.matches(".*/pv=\\d+$"))
       .toList
 
-    override def mkContinuityDumpRef(path: String): ContinuityDumpRef =
+    override def mkContinuityDumpRef(path: String, logger: Logger): ContinuityDumpRef =
       ContinuityDumpLocalRef(path)
   }
 }
@@ -194,24 +198,39 @@ object S3Synchronization {
     def localDownloadPath: File
   }
 
+  // aws S3 sync commands don't have any locks so concurrent runs will interfere with each other
+  private val lock = new Mutex()
+
   /** This class encapsulates the path to a data continuity dump in S3 bucket under
     * s3://canton-public-releases/data-continuity-dumps/ and provides a utility to download the dump
     * to a local path under `baseDbDumpPath`.
     * @param path
     *   The path to the dump under the shared prefix in the S3 bucket
     */
-  final case class ContinuityDumpS3Ref(override val path: String) extends ContinuityDumpRef {
+  final case class ContinuityDumpS3Ref(override val path: String, logger: Logger)
+      extends ContinuityDumpRef {
     lazy val localDownloadPath: File = {
       val syncCommand =
         s"aws s3 sync s3://canton-public-releases/data-continuity-dumps/$path ${baseDbDumpPath.path}/$path --no-sign-request"
 
-      val syncResult = runSynchronized(syncCommand)
-      if (syncResult != 0) {
-        throw new RuntimeException(
-          s"Failed to sync $path to $baseDbDumpPath: command '$syncCommand' exited with code $syncResult"
-        )
-      } else {
-        (baseDbDumpPath / path).directory
+      // Crude client side retry, because sync can fail with "connection reset by peer" errors,
+      // and the aws command would not automatically retry on that.
+      BaseTest.eventually(timeUntilSuccess = 2.minute, maxPollInterval = 30.seconds) {
+        logger.info(s"Syncing $path to $baseDbDumpPath: command '$syncCommand'")
+
+        val pb = Process(syncCommand)
+        val processLogger = new SplitBufferedProcessLogger(Some(logger))
+        val exitCode = lock.exclusive(pb.!(processLogger))
+
+        if (exitCode == 0) (baseDbDumpPath / path).directory
+        else {
+          val hint =
+            s"""Failed to sync $path to $baseDbDumpPath: command '$syncCommand' exited with code $exitCode
+               |${processLogger.error()}
+               |""".stripMargin
+          logger.info(hint)
+          fail(hint)
+        }
       }
     }
   }
@@ -223,11 +242,4 @@ object S3Synchronization {
     lazy val localDownloadPath: File =
       (baseDbDumpPath / path).directory
   }
-
-  private val lock = new Mutex()
-  // aws S3 sync commands don't have any locks so concurrent runs will interfere with each other
-  private def runSynchronized(command: String): Int =
-    lock.exclusive {
-      command.!
-    }
 }

@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochNumber,
+  WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
@@ -38,6 +39,7 @@ final class StateTransferMessageSender[E <: Env[E]](
     thisNode: BftNodeId,
     consensusDependencies: ConsensusModuleDependencies[E],
     epochStore: EpochStore[E],
+    workflowId: WorkflowId,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit synchronizerProtocolVersion: ProtocolVersion, metricsContext: MetricsContext)
     extends NamedLogging {
@@ -47,6 +49,8 @@ final class StateTransferMessageSender[E <: Env[E]](
   def sendBlockTransferRequest(
       blockTransferRequest: SignedMessage[StateTransferMessage.BlockTransferRequest],
       possibleRecipients: Seq[BftNodeId],
+      nodeThatTimedOut: Option[BftNodeId],
+      onRecipientDecision: Option[Option[BftNodeId] => Unit],
   )(implicit traceContext: TraceContext): Unit =
     // Ask a single node for an entire epoch of blocks to compromise between noise for different nodes
     //  and load balancing. Note that we're shuffling (instead of round-robin), so the same node might be chosen
@@ -58,6 +62,9 @@ final class StateTransferMessageSender[E <: Env[E]](
       P2PNetworkOut.SendToRandomAuthenticated(
         wrapSignedMessage(blockTransferRequest),
         possibleRecipients,
+        Some(workflowId),
+        nodeThatTimedOut,
+        onRecipientDecision,
       )
     )
 

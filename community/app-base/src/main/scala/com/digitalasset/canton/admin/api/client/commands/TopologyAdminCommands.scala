@@ -4,6 +4,7 @@
 package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
+import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
@@ -18,7 +19,7 @@ import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStoreId}
+import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30
 import com.digitalasset.canton.topology.admin.v30.*
 import com.digitalasset.canton.topology.admin.v30.AuthorizeRequest.Type.{Proposal, TransactionHash}
@@ -36,7 +37,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.Context.CancellableContext
@@ -854,6 +855,7 @@ object TopologyAdminCommands {
         filterKeyOwnerUid: String,
         asOf: Option[Instant],
         limit: PositiveInt,
+        clientVersion: ReleaseVersion,
     ) extends BaseCommand[v30.ListKeyOwnersRequest, v30.ListKeyOwnersResponse, Seq[
           ListKeyOwnersResult
         ]] {
@@ -866,6 +868,7 @@ object TopologyAdminCommands {
             filterKeyOwnerUid = filterKeyOwnerUid,
             asOf = asOf.map(ts => Timestamp(ts.getEpochSecond)),
             limit = limit.value,
+            baseAggregationRequest = v30.BaseAggregationRequest(clientVersion.toProtoPrimitive).some,
           )
         )
 
@@ -1033,7 +1036,9 @@ object TopologyAdminCommands {
     }
 
     final case class GenerateTransactions(
-        proposals: Seq[GenerateTransactions.Proposal]
+        baseRequest: BaseWriteRequest,
+        proposals: Seq[GenerateTransactions.Proposal],
+        serverVersion: Option[ReleaseVersion],
     ) extends BaseWriteCommand[
           GenerateTransactionsRequest,
           GenerateTransactionsResponse,
@@ -1041,7 +1046,12 @@ object TopologyAdminCommands {
         ] {
 
       override protected def createRequest(): Either[String, GenerateTransactionsRequest] =
-        Right(GenerateTransactionsRequest(proposals.map(_.toGenerateTransactionProposal)))
+        Right(
+          GenerateTransactionsRequest(
+            proposals.map(_.toGenerateTransactionProposal(serverVersion)),
+            Some(baseRequest.toProtoV30),
+          )
+        )
       override protected def submitRequest(
           service: TopologyManagerWriteServiceStub,
           request: GenerateTransactionsRequest,
@@ -1078,17 +1088,24 @@ object TopologyAdminCommands {
           change: TopologyChangeOp = TopologyChangeOp.Replace,
           serial: Option[PositiveInt] = None,
       ) {
-        def toGenerateTransactionProposal: GenerateTransactionsRequest.Proposal =
+        def toGenerateTransactionProposal(
+            serverVersion: Option[ReleaseVersion]
+        ): GenerateTransactionsRequest.Proposal =
           GenerateTransactionsRequest.Proposal(
             change.toProto,
             serial.map(_.value).getOrElse(0),
-            Some(mapping.toProtoV30),
+            if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+              // TODO(#32231) Switch to v31
+              GenerateTransactionsRequest.Proposal.Mapping.V30(mapping.toProtoV30)
+            else
+              GenerateTransactionsRequest.Proposal.Mapping.V30(mapping.toProtoV30),
             Some(store.toProtoV30),
           )
       }
     }
 
     final case class Propose[M <: TopologyMapping: ClassTag](
+        baseRequest: BaseWriteRequest,
         mapping: Either[String, M],
         signedBy: Seq[Fingerprint],
         change: TopologyChangeOp,
@@ -1097,6 +1114,7 @@ object TopologyAdminCommands {
         forceChanges: ForceFlags,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
+        serverVersion: Option[ReleaseVersion],
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -1109,7 +1127,11 @@ object TopologyAdminCommands {
             AuthorizeRequest.Proposal(
               change.toProto,
               serial.map(_.value).getOrElse(0),
-              Some(m.toProtoV30),
+              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                // TODO(#32231) Switch to v31
+                AuthorizeRequest.Proposal.Mapping.V30(m.toProtoV30)
+              else
+                AuthorizeRequest.Proposal.Mapping.V30(m.toProtoV30),
             )
           ),
           mustFullyAuthorize = mustFullyAuthorize,
@@ -1131,7 +1153,10 @@ object TopologyAdminCommands {
         .toRight("no transaction in response")
         .flatMap(
           SignedTopologyTransaction
-            .fromProtoV30(ProtocolVersionValidation.NoValidation, _)
+            .fromProtoV30(
+              ProtocolVersionValidation.NoValidation,
+              _,
+            )
             .leftMap(_.message)
             .flatMap(tx =>
               tx.selectMapping[M]
@@ -1143,6 +1168,7 @@ object TopologyAdminCommands {
     }
     object Propose {
       def apply[M <: TopologyMapping: ClassTag](
+          baseRequest: BaseWriteRequest,
           mapping: M,
           signedBy: Seq[Fingerprint],
           store: TopologyStoreId,
@@ -1151,8 +1177,10 @@ object TopologyAdminCommands {
           mustFullyAuthorize: Boolean = false,
           forceChanges: ForceFlags = ForceFlags.none,
           waitToBecomeEffective: Option[NonNegativeDuration],
+          serverVersion: Option[ReleaseVersion],
       ): Propose[M] =
         Propose(
+          baseRequest,
           Right(mapping),
           signedBy,
           change,
@@ -1161,6 +1189,7 @@ object TopologyAdminCommands {
           forceChanges,
           store,
           waitToBecomeEffective,
+          serverVersion,
         )
 
     }

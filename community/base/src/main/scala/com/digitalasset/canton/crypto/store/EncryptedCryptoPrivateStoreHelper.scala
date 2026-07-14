@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError.{
 }
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteString4096, ByteString6144, EitherTUtil}
 

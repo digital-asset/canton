@@ -19,6 +19,7 @@ import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.ContractIdAbsolutizer.{
   ContractIdAbsolutizationData,
   ContractIdAbsolutizationDataV1,

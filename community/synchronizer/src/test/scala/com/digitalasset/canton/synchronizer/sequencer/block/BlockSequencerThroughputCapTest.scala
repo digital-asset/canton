@@ -74,7 +74,8 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       clock,
       new IndividualBlockSequencerThroughputCap(
         observationPeriodSeconds,
-        strict,
+        strict = strict,
+        delayedActivation = false,
         thresholdsConfig = thresholds,
         updateEveryMs = NonNegativeInt.zero,
         config,

@@ -8,6 +8,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.*

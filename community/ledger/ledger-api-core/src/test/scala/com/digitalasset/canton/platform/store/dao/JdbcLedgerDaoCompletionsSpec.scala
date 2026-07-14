@@ -264,6 +264,87 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
     }
   }
 
+  it should "return completions from all users when userId is None" in {
+    for {
+      from <- ledgerDao.lookupLedgerEnd()
+      (_, tx) <- store(singleCreate)
+      to <- ledgerDao.lookupLedgerEnd()
+      // Query with userId = None should return completions regardless of user
+      (_, response) <- ledgerDao.completions
+        .getCommandCompletions(
+          from.fold(firstOffset)(_.lastOffset.increment),
+          to.value.lastOffset,
+          None,
+          tx.actAs.toSet,
+        )
+        .runWith(Sink.head)
+    } yield {
+      val completion = response.completionResponse.completion.toList.head
+      completion.commandId shouldBe tx.commandId.value
+    }
+  }
+
+  it should "not return completions when userId is None but parties do not match" in {
+    val rejection = new state.Update.CommandRejected.FinalReason(
+      RpcStatus.of(Status.Code.ABORTED.value(), "Nope.", Seq.empty)
+    )
+    for {
+      from <- ledgerDao.lookupLedgerEnd()
+      _ <- storeRejection(rejection)
+      to <- ledgerDao.lookupLedgerEnd()
+      response <- ledgerDao.completions
+        .getCommandCompletions(
+          from.fold(firstOffset)(_.lastOffset.increment),
+          to.value.lastOffset,
+          None,
+          Set("WRONG_PARTY"),
+        )
+        .runWith(Sink.seq)
+    } yield {
+      response shouldBe Seq.empty
+    }
+  }
+
+  it should "return completions with no party filtering when parties is empty" in {
+    for {
+      from <- ledgerDao.lookupLedgerEnd()
+      (_, tx) <- store(singleCreate)
+      to <- ledgerDao.lookupLedgerEnd()
+      // Query with empty parties should return completions regardless of submitter parties
+      (_, response) <- ledgerDao.completions
+        .getCommandCompletions(
+          from.fold(firstOffset)(_.lastOffset.increment),
+          to.value.lastOffset,
+          Some(tx.userId.value),
+          Set.empty,
+        )
+        .runWith(Sink.head)
+    } yield {
+      val completion = response.completionResponse.completion.toList.head
+      completion.commandId shouldBe tx.commandId.value
+    }
+  }
+
+  it should "return all completions when both userId is None and parties is empty" in {
+    for {
+      from <- ledgerDao.lookupLedgerEnd()
+      (_, tx) <- store(singleCreate)
+      to <- ledgerDao.lookupLedgerEnd()
+      // Query with both userId = None and empty parties should return everything
+      (_, response) <- ledgerDao.completions
+        .getCommandCompletions(
+          from.fold(firstOffset)(_.lastOffset.increment),
+          to.value.lastOffset,
+          None,
+          Set.empty,
+        )
+        .runWith(Sink.head)
+    } yield {
+      val completion = response.completionResponse.completion.toList.head
+      completion.commandId shouldBe tx.commandId.value
+    }
+  }
+
   private def storeRejection(
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
       commandId: Ref.CommandId = UUID.randomUUID().toString,

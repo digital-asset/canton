@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*

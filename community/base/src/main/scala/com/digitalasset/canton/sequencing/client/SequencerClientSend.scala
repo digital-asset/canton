@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator.NoTrafficCostValidation

@@ -25,6 +25,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.error.{CantonBaseError, FatalError}
 import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.protocol.messages.{

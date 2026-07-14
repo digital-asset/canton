@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.topology.*

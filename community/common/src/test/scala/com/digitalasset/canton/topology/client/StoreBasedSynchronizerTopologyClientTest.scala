@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TopologyConfig
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*

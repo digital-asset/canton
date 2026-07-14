@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.{
   QueryCostMonitoringConfig,
 }
 import com.digitalasset.canton.crypto.PseudoRandom
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

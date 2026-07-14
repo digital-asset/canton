@@ -17,7 +17,6 @@ import com.daml.tls.{TlsClientCertificate, TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config.PemFile
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.http.UserId
-import com.digitalasset.canton.http.util.NewBoolean
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.daml.lf.data.Ref
@@ -41,12 +40,6 @@ object HttpServiceTestFixture {
     val darFile = JarResourceUtils.resourceFile("Account-1.0.0.dar")
     Ref.PackageRef.Id(DarSchemaDecoder.assertReadArchiveFromFile(darFile).main._1)
   }
-
-  object UseTls extends NewBoolean.Named {
-    val Tls: UseTls = True
-    val NoTls: UseTls = False
-  }
-  type UseTls = UseTls.T
 
   private val List(serverCrt, serverPem, caCrt, clientCrt, clientPem) =
     List("server.crt", "server.pem", "ca.crt", "client.crt", "client.pem").map { src =>
