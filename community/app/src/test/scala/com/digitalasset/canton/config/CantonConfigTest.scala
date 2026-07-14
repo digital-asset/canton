@@ -583,36 +583,6 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
   }
 
-  "config validation on engine extensions" should {
-    "reject API versions that are not single path segments" in {
-      File.usingTemporaryFile("extension-service", ".conf") { overrideFile =>
-        overrideFile.writeText(
-          """
-             |canton.participants.participant1.parameters.engine.extensions.external-call-test {
-             |  address = "127.0.0.1"
-             |  port = 12345
-             |  version = "v1/internal"
-             |  tls.enabled = false
-             |}
-             |""".stripMargin
-        )
-
-        val result = loggerFactory.assertLogs(
-          CantonConfig.parseAndLoad(
-            Seq(simpleConf.toJava, overrideFile.toJava),
-            defaultPorts = None,
-          ),
-          _.errorMessage should (include("external-call-test") and include(
-            "version"
-          ) and include("URI path segment")),
-        )
-
-        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
-      }
-    }
-
-  }
-
   "config validation on duplicate storage" should {
     "return a ValidationError during loading" in {
       val result = loggerFactory.assertLogs(

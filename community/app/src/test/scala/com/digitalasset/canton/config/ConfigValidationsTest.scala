@@ -643,6 +643,36 @@ class ConfigValidationsTest extends BaseTestWordSpec {
     }
   }
 
+  "engine extension api version checks" when {
+    "the version is not a valid URI path segment" should {
+      "fail" in {
+        assertErrors(
+          participantWithExtension(
+            ExtensionServiceConfig(
+              address = "localhost",
+              port = Port.tryCreate(8080),
+              version = "v1/extra",
+            )
+          )
+        )(
+          "For participant p1, engine.extensions.ext1.version must be a non-empty URI path" +
+            " segment containing only unreserved characters [A-Za-z0-9._~-], excluding '.' and" +
+            " '..', but found 'v1/extra'"
+        )
+      }
+    }
+
+    "a valid version is configured" should {
+      "succeed" in {
+        assertValid(
+          participantWithExtension(
+            ExtensionServiceConfig(address = "localhost", port = Port.tryCreate(8080))
+          )
+        )
+      }
+    }
+  }
+
   "nodes with crypto scheme configurations" should {
     def configWithSchemes(
         signingSchemeConfig: Option[SigningSchemeConfig] = None,
