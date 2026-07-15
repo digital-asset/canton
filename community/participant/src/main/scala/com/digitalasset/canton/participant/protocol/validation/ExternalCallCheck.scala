@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
+import cats.syntax.functor.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{
   ExternalCallKey,
@@ -32,10 +33,12 @@ import scala.concurrent.ExecutionContext
   *   - re-validation: whether the (undisputed) recorded outputs agree with the extension service,
   *     re-executing each distinct call once ([[ExternalCallValidator]]).
   *
-  * Every disagreement found by either part is alarmed. The outcome is a single per-request
-  * `ExternalCallCheck.Result`: a disagreement from either part rejects the request on behalf of all
-  * hosted confirming parties, and a recorded result that cannot be re-validated leads to an
-  * abstention instead of an approval (see [[TransactionConfirmationResponsesFactory]]).
+  * Every disagreement found by either part is alarmed, once per request. The outcome is one
+  * `ExternalCallCheck.Result` per view that records external-call results: a disagreement or
+  * re-validation failure rejects exactly the views whose participant data records the affected
+  * call, and a recorded result that cannot be re-validated abstains those views instead of
+  * approving them (see [[TransactionConfirmationResponsesFactory]], which consults only the result
+  * of the view it responds for). Views without external-call results receive no result.
   * Disagreements among the recorded results within a single view's subtree are rejected earlier, as
   * a malformed view when the view is validated, independently of this check.
   *
@@ -53,10 +56,15 @@ class ExternalCallCheck(
   import ExternalCallCheck.*
 
   /** Checks consistency of the recorded external-call results and re-validates them against the
-    * extension service.
+    * extension service, producing one result per view that records external-call results. A view
+    * without a result in the returned map records no external calls and needs no verdict.
     *
     * If no view records an external-call result -- in particular, always, on protocol versions
-    * without external-call support -- the check short-circuits to `ExternalCallCheck.Passed`.
+    * without external-call support -- the check short-circuits to an empty map.
+    *
+    * Keys whose visible occurrences disagree have no unambiguous output and are not re-validated;
+    * all other keys still are, so a disagreement on one call does not mask a re-validation failure
+    * of another.
     *
     * @param requestId
     *   The request under validation, used to correlate logs and alarms.
@@ -73,7 +81,7 @@ class ExternalCallCheck(
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): FutureUnlessShutdown[Result] = {
+  ): FutureUnlessShutdown[Map[ViewPosition, Result]] = {
     val recordedResults = views.toSeq
       .sortBy { case (viewPosition, _) => viewPosition }(ViewPosition.orderViewPosition.toOrdering)
       .flatMap { case (viewPosition, view) =>
@@ -81,30 +89,73 @@ class ExternalCallCheck(
       }
 
     if (recordedResults.isEmpty)
-      FutureUnlessShutdown.pure(Passed)
+      FutureUnlessShutdown.pure(Map.empty)
     else {
       val inconsistencies = ExternalCallConsistencyChecker.check(views)
 
-      // Every visible inconsistency is alarmed: only the first one is propagated into the
-      // rejection, so the confirmation-responses factory reports just that one.
+      // Every visible inconsistency is alarmed here, once per request; the per-view results
+      // reject each affected view with the first (in the checker's deterministic order)
+      // inconsistency among the calls recorded in that view.
       inconsistencies.foreach(alarmDisagreement(requestId, _))
 
-      // The checker sorts the inconsistencies, so the reported disagreement is deterministic.
-      inconsistencies.headOption match {
-        case Some(inconsistency) =>
-          FutureUnlessShutdown.pure(Rejected(inconsistency.description))
-        case None if !runValidation =>
-          FutureUnlessShutdown.pure(Passed)
-        case None =>
-          validateRecordedResults(requestId, recordedResults)
+      val disagreeingKeys = inconsistencies.map(_.key).toSet
+      val validatableResults = recordedResults.filter { case (_, result) =>
+        !disagreeingKeys.contains(ExternalCallKey.fromResult(result.result))
       }
+
+      val revalidationF =
+        if (!runValidation || validatableResults.isEmpty)
+          FutureUnlessShutdown.pure(Seq.empty[(ExternalCallKey, KeyOutcome)])
+        else validateRecordedResults(requestId, validatableResults)
+
+      revalidationF.map(keyOutcomes =>
+        assemblePerViewResults(recordedResults, inconsistencies, keyOutcomes)
+      )
+    }
+  }
+
+  /** Combines the per-key outcomes into one result per view that records external-call results.
+    * Within a view, a disagreement takes precedence over a re-validation mismatch, which takes
+    * precedence over an unvalidatable result; each verdict describes a call recorded in that view.
+    * Outcomes are examined in key order, so every result is deterministic.
+    */
+  private def assemblePerViewResults(
+      recordedResults: Seq[(ViewPosition, ViewParticipantData.ViewExternalCallResult)],
+      inconsistencies: Seq[Inconsistency],
+      keyOutcomes: Seq[(ExternalCallKey, KeyOutcome)],
+  ): Map[ViewPosition, Result] = {
+    val keysByView: Map[ViewPosition, Set[ExternalCallKey]] =
+      recordedResults
+        .groupMap { case (viewPosition, _) => viewPosition } { case (_, result) =>
+          ExternalCallKey.fromResult(result.result)
+        }
+        .view
+        .mapValues(_.toSet)
+        .toMap
+
+    val mismatches = keyOutcomes.collect { case (_, KeyOutcome.Mismatch(inconsistency)) =>
+      inconsistency
+    }
+    val unvalidatable = keyOutcomes.collect { case (key, KeyOutcome.Unvalidatable(reason)) =>
+      key -> reason
+    }
+
+    keysByView.fmap { viewKeys =>
+      inconsistencies
+        .find(inconsistency => viewKeys.contains(inconsistency.key))
+        .orElse(mismatches.find(mismatch => viewKeys.contains(mismatch.key)))
+        .map(inconsistency => Rejected(inconsistency.description))
+        .orElse(unvalidatable.collectFirst {
+          case (key, reason) if viewKeys.contains(key) => CannotValidate(reason)
+        })
+        .getOrElse(Passed)
     }
   }
 
   /** Re-validates the recorded results, one validator call per distinct semantic call
-    * ([[com.digitalasset.canton.data.ExternalCallKey]]). At this point every key has a single
-    * recorded output: a key with disagreeing outputs is a visible inconsistency and was rejected
-    * before re-validation. Outcomes are examined in key order, so the result is deterministic.
+    * ([[com.digitalasset.canton.data.ExternalCallKey]]), returning the outcome per key in key
+    * order. At this point every key has a single recorded output: keys with disagreeing outputs are
+    * excluded from re-validation by the caller.
     */
   private def validateRecordedResults(
       requestId: RequestId,
@@ -112,7 +163,7 @@ class ExternalCallCheck(
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): FutureUnlessShutdown[Result] = {
+  ): FutureUnlessShutdown[Seq[(ExternalCallKey, KeyOutcome)]] = {
     val occurrencesByKey = recordedResults
       .groupMap { case (_, result) => ExternalCallKey.fromResult(result.result) } {
         case (viewPosition, result) =>
@@ -134,30 +185,25 @@ class ExternalCallCheck(
             .map(outcome => (key, occurrencesAndOutputs, recordedOutput, outcome))
       }
       .map { outcomes =>
-        val mismatches = outcomes.collect {
-          case (
+        outcomes.map { case (key, occurrencesAndOutputs, recordedOutput, validated) =>
+          val outcome = validated match {
+            case mismatched: ExternalCallValidator.Mismatched =>
+              val inconsistency = Inconsistency(
                 key,
-                occurrencesAndOutputs,
-                recordedOutput,
-                validated: ExternalCallValidator.Mismatched,
-              ) =>
-            Inconsistency(
-              key,
-              Set(validated.computedOutput, recordedOutput),
-              occurrencesAndOutputs.map { case (occurrence, _) => occurrence }.toSet,
-            )
+                Set(mismatched.computedOutput, recordedOutput),
+                occurrencesAndOutputs.map { case (occurrence, _) => occurrence }.toSet,
+              )
+              // Mirrors the visible-inconsistency alarms in check: every disagreement with the
+              // extension service is suspicious and alarmed once per request.
+              alarmDisagreement(requestId, inconsistency)
+              KeyOutcome.Mismatch(inconsistency)
+            case ExternalCallValidator.UnableToValidate(reason) =>
+              KeyOutcome.Unvalidatable(reason)
+            case ExternalCallValidator.Matched =>
+              KeyOutcome.Ok
+          }
+          key -> outcome
         }
-        // Mirrors the visible-inconsistency alarms in check: every disagreement with the
-        // extension service is suspicious, not only the first one.
-        mismatches.foreach(alarmDisagreement(requestId, _))
-
-        val rejectionO =
-          mismatches.headOption.map(inconsistency => Rejected(inconsistency.description))
-        val abstentionO = outcomes.collectFirst {
-          case (_, _, _, ExternalCallValidator.UnableToValidate(reason)) =>
-            CannotValidate(reason)
-        }
-        rejectionO.orElse(abstentionO).getOrElse(Passed)
       }
   }
 
@@ -171,22 +217,32 @@ class ExternalCallCheck(
 
 object ExternalCallCheck {
 
-  /** Per-request outcome of the external-call check, consumed by
-    * `TransactionConfirmationResponsesFactory` as pure data.
+  /** Per-view outcome of the external-call check, consumed by
+    * `TransactionConfirmationResponsesFactory` as pure data when responding for that view.
     */
   sealed trait Result extends Product with Serializable
 
-  /** All recorded results agree with each other and with the extension service (or there are none).
+  /** The results recorded in the view agree with all visible occurrences of the same calls and with
+    * the extension service.
     */
   case object Passed extends Result
 
-  /** Recorded results disagree with each other, or with the extension service. The request is
-    * rejected on behalf of all hosted confirming parties.
+  /** A result recorded in the view disagrees with another visible occurrence of the same call, or
+    * with the extension service. The view is rejected; the description names a call recorded in
+    * this view.
     */
   final case class Rejected(description: String) extends Result
 
-  /** A recorded result could not be re-validated (for example, no extension service is configured).
-    * Views that would otherwise be approved are abstained from instead.
+  /** A result recorded in the view could not be re-validated (for example, no extension service is
+    * configured). The view is abstained from instead of approved.
     */
   final case class CannotValidate(reason: String) extends Result
+
+  /** Re-validation outcome of a single distinct call. */
+  private sealed trait KeyOutcome extends Product with Serializable
+  private object KeyOutcome {
+    case object Ok extends KeyOutcome
+    final case class Mismatch(inconsistency: Inconsistency) extends KeyOutcome
+    final case class Unvalidatable(reason: String) extends KeyOutcome
+  }
 }

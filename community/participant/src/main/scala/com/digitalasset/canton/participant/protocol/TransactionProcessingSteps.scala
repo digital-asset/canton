@@ -1684,7 +1684,7 @@ object TransactionProcessingSteps {
         ErrorWithInternalConsistencyCheck,
         Unit,
       ],
-      externalCallCheckResultF: FutureUnlessShutdown[ExternalCallCheck.Result],
+      externalCallCheckResultF: FutureUnlessShutdown[Map[ViewPosition, ExternalCallCheck.Result]],
       timeValidationResultE: Either[TimeCheckFailure, Unit],
       replayCheckResult: Option[String],
   ) {
