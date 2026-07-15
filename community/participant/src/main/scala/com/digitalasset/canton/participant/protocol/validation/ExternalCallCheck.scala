@@ -74,9 +74,10 @@ class ExternalCallCheck(
     * If no view records an external-call result -- in particular, always, on protocol versions
     * without external-call support -- the check short-circuits to an empty map.
     *
-    * Keys whose visible occurrences disagree have no unambiguous output and are not re-validated;
-    * all other keys still are, so a disagreement on one call does not mask a re-validation failure
-    * of another.
+    * Keys whose visible occurrences disagree have no unambiguous output and are not re-validated.
+    * Other keys are re-validated if this participant is responsible for them (see the class
+    * documentation), so a disagreement on one call does not mask a re-validation failure of
+    * another.
     *
     * @param requestId
     *   The request under validation, used to correlate logs and alarms.
