@@ -98,8 +98,31 @@ final class ExternalCallProtocolIntegrationTest
     }
   }
 
+  private val identityTopologySnapshot: TopologySnapshot = {
+    val snapshot = mock[TopologySnapshot]
+    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
+      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
+        FutureUnlessShutdown.pure(parties)
+      }
+    snapshot
+  }
+
+  private def hostingOnly(hostedParties: Set[LfPartyId]): TopologySnapshot = {
+    val snapshot = mock[TopologySnapshot]
+    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
+      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
+        FutureUnlessShutdown.pure(parties.intersect(hostedParties))
+      }
+    snapshot
+  }
+
   private def externalCallCheck(validator: ExternalCallValidator): ExternalCallCheck =
-    new ExternalCallCheck(validator, PositiveInt.tryCreate(8), loggerFactory)
+    new ExternalCallCheck(
+      submittingParticipant,
+      validator,
+      PositiveInt.tryCreate(8),
+      loggerFactory,
+    )
 
   private def withConfirmers(
       view: TransactionView,
@@ -134,8 +157,11 @@ final class ExternalCallProtocolIntegrationTest
       validator: ExternalCallValidator,
       views: Map[ViewPosition, ParticipantTransactionView],
       runValidation: Boolean = true,
+      topologySnapshot: TopologySnapshot = identityTopologySnapshot,
   ): Map[ViewPosition, ExternalCallCheck.Result] =
-    externalCallCheck(validator).check(requestId, views, runValidation).futureValueUS
+    externalCallCheck(validator)
+      .check(requestId, views, topologySnapshot, runValidation)
+      .futureValueUS
 
   private def assertDisagreementAlarm[A](within: => A): A =
     loggerFactory.assertLogs(
@@ -382,6 +408,74 @@ final class ExternalCallProtocolIntegrationTest
         rightViewPosition -> ExternalCallCheck.Rejected(expectedDisagreement.description),
       )
     }
+
+    "skip re-validation when no checking party is hosted" in {
+      val validator = new RecordingExternalCallValidator(Map.empty)
+      val result = runCheck(
+        validator,
+        views(leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter)))),
+        topologySnapshot = hostingOnly(Set.empty),
+      )
+
+      // The participant hosts no checking party of the call, so re-validation is not its
+      // responsibility; the view passes from this check's perspective.
+      result shouldBe Map(leftViewPosition -> ExternalCallCheck.Passed)
+      validator.observed shouldBe empty
+    }
+
+    "skip re-validation when the checking parties are not confirmers of the recording view" in {
+      val validator = new RecordingExternalCallValidator(Map.empty)
+      val result = runCheck(
+        validator,
+        views(
+          leftResults = Seq(
+            externalCallViewResult(
+              0,
+              externalCallResult,
+              Set(ExampleTransactionFactory.observer),
+            )
+          )
+        ),
+      )
+
+      // The observer checks the call but does not confirm the view, so hosting it does not
+      // make this participant responsible for re-validation.
+      result shouldBe Map(leftViewPosition -> ExternalCallCheck.Passed)
+      validator.observed shouldBe empty
+    }
+
+    "attach a mismatch to every view recording the key when the gate passes on one" in {
+      val validator = new RecordingExternalCallValidator(
+        Map(
+          externalCallKey -> ExternalCallValidator.Mismatched(
+            computedOutput = otherExternalCallResult.output,
+            recordedOutput = externalCallResult.output,
+          )
+        )
+      )
+      val result = assertDisagreementAlarm {
+        runCheck(
+          validator,
+          views(
+            leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter))),
+            rightResults = Seq(
+              externalCallViewResult(
+                1,
+                externalCallResult,
+                Set(ExampleTransactionFactory.observer),
+              )
+            ),
+          ),
+          topologySnapshot = hostingOnly(Set(submitter)),
+        )
+      }
+
+      // The gate passes only for the left view's occurrence, so the call is re-validated
+      // (once); the mismatch nevertheless rejects every view recording the call.
+      validator.observed shouldBe Seq(externalCallKey)
+      result(leftViewPosition) shouldBe a[ExternalCallCheck.Rejected]
+      result(rightViewPosition) shouldBe result(leftViewPosition)
+    }
   }
 
   private lazy val responsesFactory: TransactionConfirmationResponsesFactory =
@@ -390,15 +484,6 @@ final class ExternalCallProtocolIntegrationTest
       factory.psid,
       loggerFactory,
     )
-
-  private val identityTopologySnapshot: TopologySnapshot = {
-    val snapshot = mock[TopologySnapshot]
-    when(snapshot.canConfirm(any[ParticipantId], any[Set[LfPartyId]])(anyTraceContext))
-      .thenAnswer { (_: ParticipantId, parties: Set[LfPartyId]) =>
-        FutureUnlessShutdown.pure(parties)
-      }
-    snapshot
-  }
 
   private def createResponses(
       checkResult: Map[ViewPosition, ExternalCallCheck.Result],

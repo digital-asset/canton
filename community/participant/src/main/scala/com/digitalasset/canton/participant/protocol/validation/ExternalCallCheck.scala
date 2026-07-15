@@ -19,6 +19,8 @@ import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsi
   Inconsistency,
 }
 import com.digitalasset.canton.protocol.RequestId
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 
@@ -42,12 +44,22 @@ import scala.concurrent.ExecutionContext
   * Disagreements among the recorded results within a single view's subtree are rejected earlier, as
   * a malformed view when the view is validated, independently of this check.
   *
+  * Re-validation is restricted to the calls this participant is responsible for: a call is
+  * re-validated only if the participant hosts one of its checking parties as a confirming party of
+  * a view recording the call. The checking parties of a call are confirming parties of the
+  * recording view whose confirmation is required, so every call is re-validated by the participants
+  * hosting its checking parties; re-validating it elsewhere would only invoke the extension service
+  * needlessly.
+  *
+  * @param participantId
+  *   This participant, for deciding which checking parties it hosts.
   * @param externalCallValidator
   *   The validator used to re-run external calls against the extension service.
   * @param externalCallValidationParallelism
   *   Bounds the number of concurrent validator calls.
   */
 class ExternalCallCheck(
+    participantId: ParticipantId,
     externalCallValidator: ExternalCallValidator,
     externalCallValidationParallelism: PositiveInt,
     protected val loggerFactory: NamedLoggerFactory,
@@ -70,6 +82,10 @@ class ExternalCallCheck(
     *   The request under validation, used to correlate logs and alarms.
     * @param views
     *   All views of the request received by this participant, by position.
+    * @param topologySnapshot
+    *   The topology snapshot used for the request, for deciding which confirming parties this
+    *   participant hosts. Must be the same snapshot the confirmation responses are computed with,
+    *   so that the re-validation restriction and the responses cannot diverge.
     * @param runValidation
     *   Whether to re-validate recorded results. False for requests with malformed payloads, which
     *   are rejected wholesale: only the alarms are of interest there.
@@ -77,6 +93,7 @@ class ExternalCallCheck(
   def check(
       requestId: RequestId,
       views: Map[ViewPosition, ParticipantTransactionView],
+      topologySnapshot: TopologySnapshot,
       runValidation: Boolean,
   )(implicit
       traceContext: TraceContext,
@@ -106,12 +123,52 @@ class ExternalCallCheck(
       val revalidationF =
         if (!runValidation || validatableResults.isEmpty)
           FutureUnlessShutdown.pure(Seq.empty[(ExternalCallKey, KeyOutcome)])
-        else validateRecordedResults(requestId, validatableResults)
+        else
+          keysToRevalidate(views, validatableResults, topologySnapshot).flatMap { gatedKeys =>
+            // The gate selects the keys to re-validate; a resulting mismatch still rejects
+            // every view recording the key, also where the gate did not pass.
+            val toValidate = validatableResults.filter { case (_, result) =>
+              gatedKeys.contains(ExternalCallKey.fromResult(result.result))
+            }
+            if (toValidate.isEmpty)
+              FutureUnlessShutdown.pure(Seq.empty[(ExternalCallKey, KeyOutcome)])
+            else validateRecordedResults(requestId, toValidate)
+          }
 
       revalidationF.map(keyOutcomes =>
         assemblePerViewResults(recordedResults, inconsistencies, keyOutcomes)
       )
     }
+  }
+
+  /** The keys this participant is responsible for re-validating: those with at least one occurrence
+    * whose checking parties include a party this participant hosts as a confirming party of the
+    * recording view. Hosting is decided with a single topology lookup over all candidate parties.
+    */
+  private def keysToRevalidate(
+      views: Map[ViewPosition, ParticipantTransactionView],
+      recordedResults: Seq[(ViewPosition, ViewParticipantData.ViewExternalCallResult)],
+      topologySnapshot: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[Set[ExternalCallKey]] = {
+    val resultsWithCandidateParties = recordedResults.map { case (viewPosition, result) =>
+      val confirmers = views(viewPosition).viewCommonData.viewConfirmationParameters.confirmers
+      (result, result.checkingParties.intersect(confirmers))
+    }
+    val allCandidateParties = resultsWithCandidateParties.flatMap { case (_, candidates) =>
+      candidates
+    }.toSet
+
+    if (allCandidateParties.isEmpty) FutureUnlessShutdown.pure(Set.empty)
+    else
+      topologySnapshot.canConfirm(participantId, allCandidateParties).map { hostedParties =>
+        resultsWithCandidateParties.collect {
+          case (result, candidates) if candidates.exists(hostedParties) =>
+            ExternalCallKey.fromResult(result.result)
+        }.toSet
+      }
   }
 
   /** Combines the per-key outcomes into one result per view that records external-call results.
