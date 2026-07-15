@@ -136,17 +136,17 @@ class HttpExtensionServiceClient(
   private def validateVersionEndpoint()(implicit
       tc: TraceContext
   ): FutureUnlessShutdown[ExtensionValidationResult] = {
-    val requestId = UUID.randomUUID().toString
+    val externalCallId = UUID.randomUUID().toString
     val request = HttpRequest
       .newBuilder()
       .uri(versionEndpoint)
       .timeout(config.requestTimeout.asJava)
       .header("Accept", "application/json")
-      .header("X-Request-Id", requestId)
+      .header("X-Request-Id", externalCallId)
       .GET()
       .build()
 
-    sendValidationRequest(request, requestId).map {
+    sendValidationRequest(request, externalCallId).map {
       case Right(response) =>
         response.statusCode() match {
           case 200 =>
@@ -163,7 +163,7 @@ class HttpExtensionServiceClient(
 
   private def sendValidationRequest(
       request: HttpRequest,
-      requestId: String,
+      externalCallId: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[String, HttpResponse[String]]] =
     performUnlessClosing
       .synchronizeWithClosingF("extension-service-startup-validation") {
@@ -171,7 +171,7 @@ class HttpExtensionServiceClient(
       }
       .map(response => Right(response))
       .recover { case NonFatal(e) =>
-        UnlessShutdown.Outcome(Left(validationExceptionMessage(e, requestId)))
+        UnlessShutdown.Outcome(Left(validationExceptionMessage(e, externalCallId)))
       }
 
   private def sendAsyncWithTimeout(
@@ -209,7 +209,7 @@ class HttpExtensionServiceClient(
     result.future
   }
 
-  private def validationExceptionMessage(e: Throwable, requestId: String): String =
+  private def validationExceptionMessage(e: Throwable, externalCallId: String): String =
     e match {
       case tooLarge: HttpExtensionServiceClient.ResponseBodyTooLarge =>
         s"Response body exceeded maximum size of ${tooLarge.maxResponseBodyBytes} bytes"
@@ -220,7 +220,7 @@ class HttpExtensionServiceClient(
       case io: java.io.IOException =>
         s"I/O error: ${exceptionMessage(io)}"
       case other =>
-        s"Unexpected error during startup validation: ${exceptionMessage(other)} (requestId=$requestId)"
+        s"Unexpected error during startup validation: ${exceptionMessage(other)} (externalCallId=$externalCallId)"
     }
 
   private def exceptionMessage(e: Throwable): String =
@@ -269,7 +269,7 @@ class HttpExtensionServiceClient(
       requestTimeout: Duration,
       idempotencyKey: String,
   )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ExtensionCallError, String]] = {
-    val requestId = UUID.randomUUID().toString
+    val externalCallId = UUID.randomUUID().toString
 
     HttpExtensionServiceClient.invalidExternalCallHeader(functionId, configHash) match {
       case Some(headerName) =>
@@ -278,7 +278,7 @@ class HttpExtensionServiceClient(
             ExtensionCallError(
               400,
               s"Invalid external-call HTTP header value for $headerName",
-              Some(requestId),
+              Some(externalCallId),
               retryable = false,
               clientActionable = true,
             )
@@ -296,7 +296,7 @@ class HttpExtensionServiceClient(
             .header("X-Daml-External-Function-Id", functionId)
             .header("X-Daml-External-Config-Hash", configHash)
             .header("X-Daml-External-Mode", mode.wireValue)
-            .header("X-Request-Id", requestId)
+            .header("X-Request-Id", externalCallId)
             .header("Idempotency-Key", idempotencyKey)
 
           authorizationHeader match {
@@ -306,7 +306,7 @@ class HttpExtensionServiceClient(
                   ExtensionCallError(
                     400,
                     s"Invalid extension service authentication configuration: $error",
-                    Some(requestId),
+                    Some(externalCallId),
                     retryable = false,
                     clientActionable = false,
                   )
@@ -321,130 +321,132 @@ class HttpExtensionServiceClient(
                 .build()
 
               logger.debug(
-                s"Making external call to extension '$extensionId': functionId=$functionId, mode=${mode.wireValue}, requestId=$requestId"
+                s"Making external call to extension '$extensionId': functionId=$functionId, mode=${mode.wireValue}, externalCallId=$externalCallId"
               )
 
               performUnlessClosing
                 .synchronizeWithClosingF("external-call-http-request") {
                   sendAsyncWithTimeout(req, requestTimeout)
                 }
-                .map(response => responseToResult(response, requestId))
+                .map(response => responseToResult(response, externalCallId))
                 .recover { case NonFatal(e) =>
-                  UnlessShutdown.Outcome(Left(exceptionToError(e, requestId)))
+                  UnlessShutdown.Outcome(Left(exceptionToError(e, externalCallId)))
                 }
           }
         } catch {
           case NonFatal(e) =>
-            FutureUnlessShutdown.pure(Left(exceptionToError(e, requestId)))
+            FutureUnlessShutdown.pure(Left(exceptionToError(e, externalCallId)))
         }
     }
   }
 
   private def responseToResult(
       resp: HttpResponse[String],
-      requestId: String,
+      externalCallId: String,
   )(implicit tc: TraceContext): Either[ExtensionCallError, String] =
     resp.statusCode() match {
       case 200 =>
         logger.debug(
-          s"External call to extension '$extensionId' succeeded: requestId=$requestId"
+          s"External call to extension '$extensionId' succeeded: externalCallId=$externalCallId"
         )
         Right(resp.body())
 
       case 400 =>
-        Left(errorFromStatus(resp, requestId, "Bad Request"))
+        Left(errorFromStatus(resp, externalCallId, "Bad Request"))
 
       case 401 =>
-        Left(errorFromStatus(resp, requestId, "Unauthorized - check bearer token"))
+        Left(errorFromStatus(resp, externalCallId, "Unauthorized - check bearer token"))
 
       case 403 =>
-        Left(errorFromStatus(resp, requestId, "Forbidden - insufficient permissions"))
+        Left(errorFromStatus(resp, externalCallId, "Forbidden - insufficient permissions"))
 
       case 404 =>
-        Left(errorFromStatus(resp, requestId, "Function not found"))
+        Left(errorFromStatus(resp, externalCallId, "Function not found"))
 
       case 408 =>
-        Left(errorFromStatus(resp, requestId, "Request timeout"))
+        Left(errorFromStatus(resp, externalCallId, "Request timeout"))
 
       case 429 =>
-        Left(errorFromStatus(resp, requestId, "Rate limit exceeded"))
+        Left(errorFromStatus(resp, externalCallId, "Rate limit exceeded"))
 
       case 500 =>
-        Left(errorFromStatus(resp, requestId, "Internal server error"))
+        Left(errorFromStatus(resp, externalCallId, "Internal server error"))
 
       case 502 =>
-        Left(errorFromStatus(resp, requestId, "Bad gateway"))
+        Left(errorFromStatus(resp, externalCallId, "Bad gateway"))
 
       case 503 =>
-        Left(errorFromStatus(resp, requestId, "Service unavailable"))
+        Left(errorFromStatus(resp, externalCallId, "Service unavailable"))
 
       case 504 =>
-        Left(errorFromStatus(resp, requestId, "Gateway timeout"))
+        Left(errorFromStatus(resp, externalCallId, "Gateway timeout"))
 
       case code =>
-        Left(errorFromStatus(resp, requestId, s"HTTP $code"))
+        Left(errorFromStatus(resp, externalCallId, s"HTTP $code"))
     }
 
   private def exceptionToError(
       e: Throwable,
-      requestId: String,
+      externalCallId: String,
   )(implicit tc: TraceContext): ExtensionCallError =
     e match {
       case tooLarge: HttpExtensionServiceClient.ResponseBodyTooLarge =>
         logger.warn(
-          s"External call to extension '$extensionId' response body exceeded maximum size of ${tooLarge.maxResponseBodyBytes} bytes: requestId=$requestId"
+          s"External call to extension '$extensionId' response body exceeded maximum size of ${tooLarge.maxResponseBodyBytes} bytes: externalCallId=$externalCallId"
         )
         ExtensionCallError(
           413,
           s"External call response body exceeded maximum size of ${tooLarge.maxResponseBodyBytes} bytes",
-          Some(requestId),
+          Some(externalCallId),
           retryable = false,
           clientActionable = true,
         )
 
       case timeout: java.net.http.HttpTimeoutException =>
-        logger.warn(s"External call to extension '$extensionId' timed out: requestId=$requestId")
+        logger.warn(
+          s"External call to extension '$extensionId' timed out: externalCallId=$externalCallId"
+        )
         ExtensionCallError(
           408,
           "Request timeout",
-          Some(requestId),
+          Some(externalCallId),
           retryable = true,
           clientActionable = false,
         )
 
       case connect: java.net.ConnectException =>
         logger.warn(
-          s"External call to extension '$extensionId' connection failed: requestId=$requestId"
+          s"External call to extension '$extensionId' connection failed: externalCallId=$externalCallId"
         )
         ExtensionCallError(
           503,
           "Connection failed",
-          Some(requestId),
+          Some(externalCallId),
           retryable = true,
           clientActionable = false,
         )
 
       case io: java.io.IOException =>
         logger.warn(
-          s"External call to extension '$extensionId' I/O error: requestId=$requestId"
+          s"External call to extension '$extensionId' I/O error: externalCallId=$externalCallId"
         )
         ExtensionCallError(
           503,
           "I/O error",
-          Some(requestId),
+          Some(externalCallId),
           retryable = true,
           clientActionable = false,
         )
 
       case other =>
         logger.error(
-          s"External call to extension '$extensionId' unexpected error: requestId=$requestId",
+          s"External call to extension '$extensionId' unexpected error: externalCallId=$externalCallId",
           other,
         )
         ExtensionCallError(
           500,
           "Unexpected error",
-          Some(requestId),
+          Some(externalCallId),
           retryable = false,
           clientActionable = false,
         )
@@ -452,27 +454,27 @@ class HttpExtensionServiceClient(
 
   private def errorFromStatus(
       resp: HttpResponse[String],
-      requestId: String,
+      externalCallId: String,
       defaultMessage: String,
   )(implicit tc: TraceContext): ExtensionCallError = {
-    logErrorBody(resp, requestId)
+    logErrorBody(resp, externalCallId)
     ExtensionCallError(
       resp.statusCode(),
       defaultMessage,
-      Some(requestId),
+      Some(externalCallId),
       retryable = HttpExtensionServiceClient.isRetryableHttpStatus(resp.statusCode()),
       clientActionable = false,
     )
   }
 
-  private def logErrorBody(resp: HttpResponse[String], requestId: String)(implicit
+  private def logErrorBody(resp: HttpResponse[String], externalCallId: String)(implicit
       tc: TraceContext
   ): Unit =
     if (logger.underlying.isInfoEnabled) {
       val statusCode = resp.statusCode()
       HttpExtensionServiceClient.diagnosticResponseBody(resp.body()).foreach { body =>
         logger.info(
-          s"External call to extension '$extensionId' returned HTTP $statusCode with response body '$body': requestId=$requestId"
+          s"External call to extension '$extensionId' returned HTTP $statusCode with response body '$body': externalCallId=$externalCallId"
         )
       }
     }

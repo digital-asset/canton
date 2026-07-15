@@ -844,7 +844,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
               .value
 
             error.statusCode shouldBe 404
-            error.requestId shouldBe None
+            error.externalCallId shouldBe None
             error.message should include("Extension 'missing-extension' not configured")
             error.message should not include "first-extension"
             error.message should not include "second-extension"

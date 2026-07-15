@@ -53,11 +53,13 @@ class ExtensionServiceExternalCallHandler(
 object ExtensionServiceExternalCallHandler {
 
   /** The client-facing rendering for errors that are not actionable for the client: only the retry
-    * status and the request id (for correlation with the participant's log) are exposed.
+    * status and the tracing identifiers (external call id and trace id, for correlation with the
+    * participant's log) are exposed.
     */
   private[extension] def genericClientMessage(error: ExtensionCallError): String = {
-    val requestId = error.requestId.fold("")(id => s", request id = '$id'")
-    s"External call failed (retryable = ${error.retryable}$requestId)"
+    val externalCallId = error.externalCallId.fold("")(id => s", external call id = '$id'")
+    val traceId = error.traceContext.traceId.fold("")(id => s", trace id = '$id'")
+    s"External call failed (retryable = ${error.retryable}$externalCallId$traceId)"
   }
 
   /** Create an ExternalCallHandler from an optional ExtensionServiceManager.

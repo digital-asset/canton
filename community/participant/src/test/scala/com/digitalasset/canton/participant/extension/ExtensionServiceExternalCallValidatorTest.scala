@@ -103,7 +103,7 @@ class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseT
             ExtensionCallError(
               statusCode = 503,
               message = "internal detail",
-              requestId = Some("request-1"),
+              externalCallId = Some("request-1"),
               retryable = true,
               clientActionable = false,
             )
@@ -118,7 +118,7 @@ class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseT
           result match {
             case ExternalCallValidator.UnableToValidate(reason) =>
               reason shouldBe
-                "external-call validation failed with status 503, requestId=request-1"
+                "external-call validation failed with status 503, externalCallId=request-1"
               reason should not include externalCallKey.extensionId
               reason should not include "internal detail"
 

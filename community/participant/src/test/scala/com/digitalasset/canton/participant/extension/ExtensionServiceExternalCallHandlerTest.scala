@@ -119,10 +119,10 @@ class ExtensionServiceExternalCallHandlerTest
                   ExtensionCallError(
                     statusCode = 503,
                     message = "Connection failed",
-                    requestId = Some("req-1"),
+                    externalCallId = Some("req-1"),
                     retryable = true,
                     clientActionable = false,
-                  )
+                  )(tc)
                 )
               )
           }
@@ -141,31 +141,35 @@ class ExtensionServiceExternalCallHandlerTest
             .futureValue
             .left
             .value
-          error.message shouldBe "External call failed (retryable = true, request id = 'req-1')"
+          error.message shouldBe
+            "External call failed (retryable = true, external call id = 'req-1')"
         } finally manager.close()
       }
     }
   }
 
   "ExtensionServiceExternalCallHandler.genericClientMessage" should {
-    "expose only the retry status and the request id" in {
-      ExtensionServiceExternalCallHandler.genericClientMessage(
-        ExtensionCallError(
-          statusCode = 503,
-          message = "Connection failed",
-          requestId = Some("req-1"),
-          retryable = true,
-          clientActionable = false,
-        )
-      ) shouldBe "External call failed (retryable = true, request id = 'req-1')"
+    "expose only the retry status and the tracing identifiers" in {
+      TraceContext.withNewTraceContext("test") { tc =>
+        ExtensionServiceExternalCallHandler.genericClientMessage(
+          ExtensionCallError(
+            statusCode = 503,
+            message = "Connection failed",
+            externalCallId = Some("req-1"),
+            retryable = true,
+            clientActionable = false,
+          )(tc)
+        ) shouldBe "External call failed (retryable = true, external call id = 'req-1'," +
+          s" trace id = '${tc.traceId.value}')"
+      }
     }
 
-    "omit the request id when absent" in {
+    "omit the identifiers when absent" in {
       ExtensionServiceExternalCallHandler.genericClientMessage(
         ExtensionCallError(
           statusCode = 500,
           message = "Unexpected error",
-          requestId = None,
+          externalCallId = None,
           retryable = false,
           clientActionable = false,
         )
@@ -175,18 +179,32 @@ class ExtensionServiceExternalCallHandlerTest
 
   "ExtensionCallError" should {
     // The full-error log interpolates `$error`, so its rendering (via PrettyPrinting) must cover
-    // every client-relevant field -- in particular the optional request id, which the 404 cases
+    // every client-relevant field -- in particular the optional identifiers, which the 404 cases
     // above omit. `clientActionable` is deliberately not rendered: it is control metadata, and
     // the rendering doubles as the client payload for actionable errors.
-    "render the client-relevant fields, including the request id, via pretty-printing" in {
+    "render the client-relevant fields, including the tracing identifiers, via pretty-printing" in {
+      TraceContext.withNewTraceContext("test") { tc =>
+        ExtensionCallError(
+          statusCode = 503,
+          message = "boom",
+          externalCallId = Some("req-1"),
+          retryable = true,
+          clientActionable = false,
+        )(tc).toString shouldBe
+          "ExtensionCallError(status code = 503, message = \"boom\", external call id = 'req-1'," +
+          s" retryable = true, trace id = '${tc.traceId.value}')"
+      }
+    }
+
+    "omit the tracing identifiers from the rendering when absent" in {
       ExtensionCallError(
         statusCode = 503,
         message = "boom",
-        requestId = Some("req-1"),
+        externalCallId = None,
         retryable = true,
         clientActionable = false,
-      ).toString shouldBe
-        "ExtensionCallError(status code = 503, message = \"boom\", request id = 'req-1', retryable = true)"
+      )(TraceContext.empty).toString shouldBe
+        "ExtensionCallError(status code = 503, message = \"boom\", retryable = true)"
     }
   }
 }
