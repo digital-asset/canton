@@ -15,6 +15,7 @@ import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndexFromRoot
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.sequencing.protocol.Recipients

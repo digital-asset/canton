@@ -9,6 +9,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerState, SynchronizerRank}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
 import com.digitalasset.canton.topology.PhysicalSynchronizerId

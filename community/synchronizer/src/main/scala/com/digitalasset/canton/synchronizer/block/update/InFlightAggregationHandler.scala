@@ -4,13 +4,13 @@
 package com.digitalasset.canton.synchronizer.block.update
 
 import cats.data.{Chain, EitherT}
-import cats.implicits.catsStdInstancesForFuture
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationId,
@@ -227,7 +227,7 @@ class InFlightAggregationHandler(
         )
 
       _ <- EitherTUtil
-        .condUnitET(
+        .condUnitET[FutureUnlessShutdown](
           unregisteredEligibleMembers.isEmpty,
           // TODO(#14322): review if still applicable and consider an error code (SequencerDeliverError)
           SubmissionOutcome.Reject.logAndCreate(
@@ -238,7 +238,6 @@ class InFlightAggregationHandler(
             ),
           ): SubmissionOutcome,
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
 
   private def wellFormedAggregationRule(
@@ -415,7 +414,7 @@ class InFlightAggregationHandler(
       )
       // If we're not delivering the request to all recipients right now, just send a receipt back to the sender
       _ <- EitherT
-        .cond(
+        .cond[FutureUnlessShutdown](
           updatedAggregation.tryIsDeliveredAt.nonEmpty,
           logger.debug(
             s"Aggregation ID $aggregationId has reached its threshold of the rule ${updatedAggregation.rule} and will be delivered at $sequencingTimestamp."
@@ -434,7 +433,6 @@ class InFlightAggregationHandler(
             ): SubmissionOutcome
           },
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
     } yield (updatedAggregation, fullInFlightAggregationUpdate)
   }
 

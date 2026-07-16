@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.protocol.v30;
+
+import "scalapb/scalapb.proto";
+
+// Proto definitions for locally storing data around ACS commitments and possibly exposing them over APIs.
+// These messages are not exchanged as part of the Canton protocols.
+
+// Holds trace data for a particular ACS digest.
+message AcsDigestTrace {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  repeated TraceElement traces = 2;
+}
+
+message TraceElement {
+  // A group of changes that are added or removed from a hash in one go.
+  message TraceGroup {
+    string description = 1;
+    repeated SingleTrace traces = 2;
+    bool added_to_hash = 3;
+  }
+
+  // A single trace reflects an individual contribution to a digest (cid, rc, party1, party2), and whether this
+  // change was an addition or a subtraction from the digest.
+  message SingleTrace {
+    bytes contract_id = 1;
+    int64 reassignment_counter = 2;
+    string party1 = 3;
+    string party2 = 4;
+    bool is_activation = 5;
+  }
+
+  oneof trace {
+    TraceGroup group = 1;
+    SingleTrace single = 2;
+  }
+}
+
+message ReceivedAcsCommitments {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  // contains versioned AcsCommitmentProtocolMessages
+  repeated bytes commitment = 1;
+}

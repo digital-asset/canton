@@ -65,24 +65,36 @@ import scala.quoted.Type
 object SynchronizedFuture extends WartTraverser {
 
   val messageSynchronized: String = "synchronized blocks must not return a Future"
+  val messageSynchronizedLike: String = "synchronization blocks must not return a Future"
+
+  val synchronizedName = "synchronized"
 
   def apply(u: WartUniverse): u.Traverser =
     new u.Traverser(this) {
       import q.reflect.*
 
       override def traverseTree(tree: Tree)(owner: Symbol): Unit =
-        if hasWartAnnotation(tree) then () // Ignore trees marked by SuppressWarnings
-        else if tree.isExpr then
-          tree.asExpr match
-            case '{ ($receiver: AnyRef).synchronized[tpe]($body) } =>
-              if isFutureLike[tpe] then error(tree.pos, messageSynchronized)
-              traverseTree(receiver.asTerm)(owner)
-              traverseTree(body.asTerm)(owner)
-            case _ => super.traverseTree(tree)(owner)
-        else super.traverseTree(tree)(owner)
+        tree match
+          case _ if hasWartAnnotation(tree) => () // Ignore trees marked by SuppressWarnings
+          case Apply(TypeApply(Select(receiver, `synchronizedName`), _tyarg2), List(body)) =>
+            val tpe = tree.asExpr.asTerm.tpe
+            if isFutureLike(tpe) then error(tree.pos, messageSynchronized)
+            traverseTree(receiver)(owner)
+            traverseTree(body)(owner)
+          case Apply(TypeApply(call @ Select(receiver, _), _tyarg2), List(body))
+            if isSynchronizedLike(call.symbol) =>
+            val tpe = body.asExpr.asTerm.tpe
+            if isFutureLike(tpe) then error(tree.pos, messageSynchronizedLike)
+            traverseTree(receiver)(owner)
+            traverseTree(body)(owner)
+          case _ => super.traverseTree(tree)(owner)
 
       private val futureLikeTester =
         FutureLikeTester.tester[DoNotReturnFromSynchronizedLikeFuture](u)
-      private def isFutureLike[T: Type] = futureLikeTester(TypeRepr.of[T])
+      private def isFutureLike(tpe: TypeRepr): Boolean = futureLikeTester(tpe)
+
+      private val synchronizedLikeType = TypeRepr.of[SynchronizedLikeMethod]
+      private def isSynchronizedLike(symbol: Symbol): Boolean =
+        symbol.annotations.exists(ann => ann.tpe <:< synchronizedLikeType)
     }
 }

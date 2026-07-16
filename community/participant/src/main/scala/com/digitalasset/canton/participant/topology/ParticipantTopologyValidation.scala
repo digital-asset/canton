@@ -10,6 +10,7 @@ import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView

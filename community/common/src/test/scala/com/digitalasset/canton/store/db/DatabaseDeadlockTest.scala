@@ -7,6 +7,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbConfig, DbParametersConfig}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.tracing.TraceContext

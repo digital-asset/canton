@@ -1549,6 +1549,29 @@ class ProtocolConverters(
         .map(Some(_))
         .map(lapi.contract_service.GetContractResponse(_))
   }
+
+  object GetJwksResponse
+      extends ProtocolConverter[
+        lapi.jose_service.GetJwksResponse,
+        JsJoseService.GetJwksResponse,
+      ] {
+    def toJson(response: lapi.jose_service.GetJwksResponse)(implicit
+        traceContext: TraceContext
+    ): Future[JsJoseService.GetJwksResponse] =
+      response.keys.traverse(io.circe.parser.parse(_)) match {
+        case Left(err) => jsFail(s"Invalid JWK: could not parse JSON: $err")
+        case Right(keys) => Future.successful(JsJoseService.GetJwksResponse(keys.toList))
+      }
+
+    def fromJson(response: JsJoseService.GetJwksResponse)(implicit
+        traceContext: TraceContext
+    ): Future[lapi.jose_service.GetJwksResponse] =
+      Future(
+        lapi.jose_service.GetJwksResponse(
+          response.keys.map(jwk => CirceToUJson.transform(jwk).toString).toSeq
+        )
+      )
+  }
 }
 
 object IdentifierConverter extends ConversionErrorSupport {

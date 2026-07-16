@@ -24,6 +24,7 @@ import com.digitalasset.canton.crypto.kms.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.driver.v1.{DriverFactoryLoader, DriverLoader}
 import com.digitalasset.canton.health.{CloseableAtomicHealthComponent, ComponentHealthState}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

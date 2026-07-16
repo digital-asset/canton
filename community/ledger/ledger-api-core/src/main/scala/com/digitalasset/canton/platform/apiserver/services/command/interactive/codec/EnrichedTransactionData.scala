@@ -12,6 +12,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, TracedLogger}
 import com.digitalasset.canton.platform.apiserver.execution.CommandInterpretationResult

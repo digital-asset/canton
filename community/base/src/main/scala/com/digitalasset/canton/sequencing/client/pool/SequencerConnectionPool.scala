@@ -14,6 +14,7 @@ import com.digitalasset.canton.health.{
   ComponentHealthState,
   HealthQuasiComponent,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,

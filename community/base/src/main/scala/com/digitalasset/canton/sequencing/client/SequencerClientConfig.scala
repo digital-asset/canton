@@ -108,7 +108,7 @@ final case class SequencerClientConfig(
     overrideMaxRequestSize: Option[NonNegativeInt] = None,
     maximumInFlightEventBatches: PositiveInt = PositiveInt.tryCreate(20),
     useNewConnectionPool: Boolean = true,
-    useNewAggregator: Boolean = false,
+    useNewAggregator: Boolean = true,
     pastEventsCacheSize: PositiveInt = PositiveInt.tryCreate(1000),
     timeReadingsRetention: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5),
     enableAmplificationImprovements: Boolean = true,

@@ -50,6 +50,7 @@ class V2Routes(
     requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
     jsHealthService: JsHealthService,
+    joseService: JsJoseService,
 )(implicit ec: ExecutionContext, apiLoggingConfig: ApiLoggingConfig)
     extends NamedLogging {
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
@@ -63,7 +64,8 @@ class V2Routes(
       _.endpoints()
     ) ++ trafficServiceIfEnabled.toList
       .flatMap(_.endpoints()) ++ jsHealthService
-      .endpoints() ++ contractService.endpoints()
+      .endpoints() ++ contractService.endpoints() ++
+      joseService.endpoints()
 
   private val docs =
     new JsApiDocsService(
@@ -172,6 +174,12 @@ object V2Routes {
       requestLogger = requestLogger,
       loggerFactory = loggerFactory,
     )
+    val jsJoseService = new JsJoseService(
+      ledgerClient,
+      protocolConverters,
+      requestLogger,
+      loggerFactory,
+    )
 
     new V2Routes(
       commandService,
@@ -191,6 +199,7 @@ object V2Routes {
       requestLogger,
       loggerFactory,
       jsHealthService,
+      jsJoseService,
     )(executionContext, apiLoggingConfig)
   }
 }

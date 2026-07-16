@@ -4,13 +4,13 @@
 package com.digitalasset.canton.synchronizer.sequencer.store
 
 import cats.data.EitherT
-import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.sequencing.protocol.{

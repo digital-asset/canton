@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BftNodeId,
   BlockNumber,
   EpochNumber,
+  WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch.BatchValidityDurationEpochs
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.PatienceAndCurrentTime
@@ -62,7 +63,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CancellableEvent,
   Env,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.BftNodeShuffler
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -118,8 +118,6 @@ final class AvailabilityModule[E <: Env[E]](
 
   private lazy val disseminationPatienceO: Option[Duration] =
     config.availabilityDisseminationPatience.map(_.toJava)
-
-  private val nodeShuffler = new BftNodeShuffler(random)
 
   private var lastKnownEpochNumber = initialEpochNumber
   private var activeMembership = initialMembership
@@ -933,7 +931,7 @@ final class AvailabilityModule[E <: Env[E]](
     proposeResponseCancellableEvent match {
       case None =>
         logger.debug(
-          s"$actingOnMessageType: proposal delay running, attempting to satisfy a proposal request immediately"
+          s"$actingOnMessageType: proposal delay not running, attempting to satisfy a proposal request immediately"
         )
         attemptSatisfyingProposalRequest(actingOnMessageType)
       case Some(cancellable) =>
@@ -1205,7 +1203,12 @@ final class AvailabilityModule[E <: Env[E]](
             logger.info(s"$messageType: $batchId was not missing")
         }
 
-      case Availability.LocalOutputFetch.FetchRemoteBatchDataTimeout(batchId, epochNumber) =>
+      case Availability.LocalOutputFetch.FetchRemoteBatchDataTimeout(
+            nodeThatTimedOutO,
+            batchId,
+            epochNumber,
+            timeout,
+          ) =>
         if (outputFetchProtocolState.pendingRemoteBatchIdsToStore.contains(batchId)) {
           logger.info(s"Won't retry fetching remote batch $batchId, because it is being stored")
           return
@@ -1218,47 +1221,31 @@ final class AvailabilityModule[E <: Env[E]](
             )
             return
         }
-        val (node, remainingNodes) =
-          status.remainingNodesToTry.headOption match {
-            case None =>
-              val logMessage =
-                s"$messageType: got fetch timeout for $batchId but no nodes to try left, " +
-                  "restarting fetch from the beginning"
-              if (
-                status.numberOfAttempts % config.availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning == 0
-              ) {
-                logger.warn(logMessage)
-              } else {
-                logger.info(logMessage)
-              }
-              // We tried all nodes and all timed out so we retry all again in the hope that we are just
-              //  experiencing temporarily network outage.
-              //  We have to keep retrying because the output module is blocked until we get these batches.
-              //  If these batches cannot be retrieved, e.g. because the topology has changed too much and/or
-              //  the nodes in the PoA are unreachable indefinitely, we'll need to resort (possibly manually)
-              //  to state transfer incl. the batch payloads (when it is implemented).
-              if (status.orderingMode.isStateTransfer)
-                extractNodes(None, useActiveTopology = true)
-              else
-                extractNodes(Some(status.originalProof.acks))
+        val possibleRecipients =
+          computePossibleRecipients(status.orderingMode, status.originalProof.acks)
+        val logMessage =
+          s"$messageType: got fetch timeout after $timeout while trying to fetch $batchId in epoch $epochNumber " +
+            s"from $nodeThatTimedOutO, possible candidate recipients for retry $possibleRecipients"
+        if (
+          status.numberOfAttempts % config.availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning == 0
+        ) {
+          logger.warn(logMessage)
+        } else {
+          logger.info(logMessage)
+        }
 
-            case Some(node) =>
-              logger.debug(
-                s"$messageType: got fetch timeout for $batchId, trying fetch from $node"
-              )
-              (node, status.remainingNodesToTry.drop(1))
-          }
-        val missingBatchStatus =
-          status.copy(
-            remainingNodesToTry = remainingNodes,
-            numberOfAttempts =
-              status.numberOfAttempts + (if (status.remainingNodesToTry.isEmpty) 1 else 0),
-          )
+        val missingBatchStatus = status.copy(numberOfAttempts = status.numberOfAttempts + 1)
         outputFetchProtocolState.localOutputMissingBatches.update(
           batchId,
           missingBatchStatus,
         )
-        startDownload(batchId, epochNumber, node, missingBatchStatus.calculateTimeout())
+        startDownload(
+          batchId,
+          possibleRecipients,
+          epochNumber,
+          missingBatchStatus.calculateTimeout(),
+          nodeThatTimedOutO,
+        )
 
       // This message is only used for tests
       case Availability.LocalOutputFetch.FetchBatchDataFromNodes(proofOfAvailability, mode) =>
@@ -1369,19 +1356,13 @@ final class AvailabilityModule[E <: Env[E]](
       logger.error(s"$actingOnMessageType: proof of availability is missing, ignoring")
       return
     }
-    val (node, remainingNodes) =
-      if (orderingMode.isStateTransfer)
-        extractNodes(acks = None, useActiveTopology = true)
-      else
-        extractNodes(Some(proofOfAvailability.acks))
+    val possibleRecipients = computePossibleRecipients(orderingMode, proofOfAvailability.acks)
     logger.debug(
-      s"$actingOnMessageType: fetch of ${proofOfAvailability.batchId} " +
-        s"requested from local store, trying to fetch from $node"
+      s"$actingOnMessageType: fetching ${proofOfAvailability.batchId} through remote nodes"
     )
     val missingBatchStatus = MissingBatchStatus(
       proofOfAvailability.batchId,
       proofOfAvailability,
-      remainingNodes,
       numberOfAttempts = 1,
       jitterStream = jitterConstructor(config, random),
       orderingMode,
@@ -1392,9 +1373,10 @@ final class AvailabilityModule[E <: Env[E]](
     )
     startDownload(
       proofOfAvailability.batchId,
+      possibleRecipients,
       proofOfAvailability.epochNumber,
-      node,
       missingBatchStatus.calculateTimeout(),
+      nodeThatTimedOut = None,
     )
   }
 
@@ -1434,45 +1416,59 @@ final class AvailabilityModule[E <: Env[E]](
     }
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.Return"))
   private def startDownload(
       batchId: BatchId,
+      possibleRecipients: Seq[BftNodeId],
       epochNumber: EpochNumber,
-      node: BftNodeId,
       timeout: FiniteDuration,
+      nodeThatTimedOut: Option[BftNodeId],
   )(implicit
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
   ): Unit = {
+    if (possibleRecipients.isEmpty) {
+      logger.warn(
+        s"Can't fetch batch $batchId, no possible recipients available to request it from"
+      )
+      return
+    }
+
     // We might consider doing parallel downloads in the future, as typically the network between nodes will have high
     //  bandwidth and should be able to support it. However, presently there is no evidence that this is a winning
     //  strategy in a majority of situations.
-    context
-      .delayedEvent(
-        timeout,
-        Availability.LocalOutputFetch.FetchRemoteBatchDataTimeout(batchId, epochNumber),
-      )
-      .discard
-    send(
+    sendToRandomAuthenticatedWithWorkflowBlacklisting(
       Availability.RemoteOutputFetch.FetchRemoteBatchData
         .create(batchId, epochNumber, from = thisNode),
-      node,
+      possibleRecipients,
+      nodeThatTimedOut,
+      onRecipientDecision = Some(chosenRecipientO =>
+        context
+          .delayedEvent(
+            timeout,
+            Availability.LocalOutputFetch
+              .FetchRemoteBatchDataTimeout(chosenRecipientO, batchId, epochNumber, timeout),
+          )
+          .discard
+      ),
     )
   }
 
-  private def extractNodes(
-      acks: Option[Seq[AvailabilityAck]],
-      useActiveTopology: Boolean = false,
-  )(implicit
-      context: E#ActorContextT[Availability.Message[E]],
-      traceContext: TraceContext,
-  ): (BftNodeId, Seq[BftNodeId]) = {
-    val nodes =
-      if (useActiveTopology) activeMembership.otherNodes.toSeq
-      else acks.getOrElse(abort("No availability acks provided for extracting nodes")).map(_.from)
-    val shuffled = nodeShuffler.shuffle(nodes)
-    val head = shuffled.headOption.getOrElse(abort("There should be at least one node to extract"))
-    head -> shuffled.tail
-  }
+  private def computePossibleRecipients(
+      orderingMode: OrderingMode,
+      acks: Seq[AvailabilityAck],
+  ): Seq[BftNodeId] =
+    if (orderingMode.isStateTransfer)
+      extractNodes(acksO = None)
+    else
+      extractNodes(Some(acks))
+
+  private def extractNodes(acksO: Option[Seq[AvailabilityAck]]): Seq[BftNodeId] =
+    acksO.fold {
+      activeMembership.otherNodes.toSeq
+    } { acks =>
+      acks.map(_.from)
+    }
 
   private def initiateMempoolPull(
       actingOnMessageType: => String
@@ -1528,6 +1524,35 @@ final class AvailabilityModule[E <: Env[E]](
           P2PNetworkOut.send(
             P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(signedMessage),
             to,
+          )
+        )
+        Availability.NoOp
+      }
+    )
+
+  private def sendToRandomAuthenticatedWithWorkflowBlacklisting(
+      message: RemoteProtocolMessage,
+      possibleNodes: Seq[BftNodeId],
+      nodeThatTimedOut: Option[BftNodeId],
+      onRecipientDecision: Option[Option[BftNodeId] => Unit],
+  )(implicit
+      context: E#ActorContextT[Availability.Message[E]],
+      traceContext: TraceContext,
+  ): Unit =
+    pipeToSelf(
+      activeCryptoProvider.signMessage(
+        message,
+        AuthenticatedMessageType.BftSignedAvailabilityMessage,
+      )
+    )(
+      handleFailure(s"Can't sign message $message") { signedMessage =>
+        dependencies.p2pNetworkOut.asyncSend(
+          P2PNetworkOut.SendToRandomAuthenticated(
+            P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(signedMessage),
+            possibleNodes,
+            Some(FetchBatchesSingleWorkflowId),
+            nodeThatTimedOut,
+            onRecipientDecision,
           )
         )
         Availability.NoOp
@@ -1739,4 +1764,8 @@ object AvailabilityModule {
 
   @VisibleForTesting
   private[availability] val DisseminateAheadMultiplier = 2
+
+  @VisibleForTesting
+  private[availability] val FetchBatchesSingleWorkflowId =
+    WorkflowId("FetchBatchesSingleWorkflowId")
 }

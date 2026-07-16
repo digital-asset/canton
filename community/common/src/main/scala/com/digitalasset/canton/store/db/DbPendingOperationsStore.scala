@@ -9,6 +9,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -73,6 +74,9 @@ class DbGenericPendingOperationStore(
       operationKey: String,
       operationName: NonEmptyString,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    logger.debug(
+      s"Deleting pending operation $operationName with key $operationKey for synchronizer $synchronizer from the store"
+    )
     val deleteAction =
       sqlu"""
         delete from common_pending_operations
@@ -111,6 +115,10 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Syn
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ConflictingPendingOperationError, Unit] = {
+
+    logger.debug(
+      s"Inserting pending operation ${operation.name} with key ${operation.key} for synchronizer ${operation.synchronizer} in the store"
+    )
 
     val readAction =
       sql"""
@@ -166,6 +174,9 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Syn
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
+    logger.debug(
+      s"Updating pending operation $name with key $key for synchronizer $synchronizer in the store"
+    )
     @unused
     implicit val setParameter: SetParameter[Op] = (v: Op, pp) => pp >> v.toByteString
     val updateAction =

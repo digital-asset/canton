@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOv
 import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithLongTermKeys
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParametersWithValidity,
@@ -294,6 +295,15 @@ class FixedSyncCryptoApiForSigning(
   override def verifySequencerSignatures(
       hash: Hash,
       signatures: NonEmpty[Seq[Signature]],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] = notImplementedE
+
+  override def verifyPartyJwtSignature(
+      hash: ByteString,
+      signer: PartyId,
+      signature: SignatureWithoutSigner,
       usage: NonEmpty[Set[SigningKeyUsage]],
   )(implicit
       traceContext: TraceContext

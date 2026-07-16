@@ -22,6 +22,7 @@ import com.digitalasset.canton.data.{
   UnassignmentData,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentData,
@@ -297,6 +298,28 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         } yield entry shouldBe Right(
           ReassignmentEntry(modifiedUnassignmentData, None, None)
         )
+      }
+
+      "addUnassignment updates the unassignment timestamp stored by addAssignmentData" in {
+        val store = mk(indexedTargetSynchronizer)
+        val unassignmentTs = CantonTimestamp.ofEpochSecond(3)
+        val dataWithTs = mkUnassignmentData(sourceSynchronizer1, unassignmentTs, mediator1)
+        val assignmentDataWithTs = AssignmentData(
+          dataWithTs.reassignmentId,
+          dataWithTs.sourcePsid,
+          dataWithTs.contractsBatch,
+        )
+        for {
+          _ <- store.addAssignmentDataIfAbsent(assignmentDataWithTs).value
+          entryBefore <- store.findReassignmentEntry(dataWithTs.reassignmentId).value
+          _ <- store.addUnassignmentData(dataWithTs).value
+          entryAfter <- store.findReassignmentEntry(dataWithTs.reassignmentId).value
+        } yield {
+          // addAssignmentDataIfAbsent stores a placeholder Epoch timestamp
+          entryBefore.map(_.unassignmentTs) shouldBe Right(CantonTimestamp.Epoch)
+          // the real unassignment timestamp must overwrite the placeholder
+          entryAfter shouldBe Right(ReassignmentEntry(dataWithTs, None, None))
+        }
       }
 
       "complete the assignment before the unassignment" in {

@@ -34,6 +34,16 @@ service CommandCompletionService {
   // Subscribe to command completion events.
   // This streaming endpoint provides more flexibility in filtering than the predecessor ``CompletionStream``.
   rpc GetCompletions(GetCompletionsRequest) returns (stream CompletionStreamResponse);
+
+  // Look up a completion by its transaction hash.
+  // This is only available for completions received after upgrading to Canton version 3.5.
+  // A COMPLETION_NOT_FOUND error will be raised if either of the following is true:
+  //
+  // - there is no completion with this transaction hash,
+  // - the completion is not visible to the user,
+  // - the completion was populated before upgrading to Canton version 3.5,
+  // - respective completions are all pruned.
+  rpc GetCompletionByHash(GetCompletionByHashRequest) returns (GetCompletionByHashResponse);
 }
 
 message CompletionStreamRequest {
@@ -87,4 +97,27 @@ message CompletionStreamResponse {
     Completion completion = 1;
     OffsetCheckpoint offset_checkpoint = 2;
   }
+}
+
+message GetCompletionByHashRequest {
+  // The transaction hash of the prepared transaction whose completion is being looked up.
+  //
+  // Required: must be non-empty
+  bytes transaction_hash = 1;
+}
+
+message GetCompletionByHashResponse {
+  // The accepted completion for the given transaction hash (at most one can exist).
+  // Only completions beyond the current pruning offset are visible.
+  //
+  // Optional
+  Completion accepted_completion = 1;
+
+  // Recent rejected completions for the given transaction hash, in descending offset order.
+  // The server may truncate this list if there are too many entries.
+  // Use ``submission_id`` to correlate with a specific command submission.
+  // Only completions beyond the current pruning offset are visible.
+  //
+  // Optional: can be empty
+  repeated Completion last_rejected_completions = 2;
 }

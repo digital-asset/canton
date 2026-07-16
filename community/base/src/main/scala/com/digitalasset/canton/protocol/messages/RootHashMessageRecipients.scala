@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.alternative.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.ParticipantId

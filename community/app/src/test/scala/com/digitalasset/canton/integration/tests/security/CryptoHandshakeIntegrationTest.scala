@@ -6,20 +6,29 @@ package com.digitalasset.canton.integration.tests.security
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.SecureConfiguration
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
-import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.admin.api.client.data.{
+  StaticSynchronizerParameters,
+  crypto as dataCrypto,
+}
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   CryptoConfig,
   CryptoProvider,
   CryptoSchemeConfig,
   SigningSchemeConfig,
 }
+import com.digitalasset.canton.console.{MediatorReference, SequencerReference}
 import com.digitalasset.canton.crypto.{
   EncryptionAlgorithmSpec,
   SigningAlgorithmSpec,
   SigningKeySpec,
 }
 import com.digitalasset.canton.integration.*
+import com.digitalasset.canton.integration.bootstrap.{
+  NetworkBootstrapper,
+  NetworkTopologyDescription,
+}
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
@@ -27,7 +36,7 @@ import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 trait CryptoHandshakeIntegrationTestBase {
-  self: CommunityIntegrationTest with SharedEnvironment with SecurityTestSuite =>
+  self: CommunityIntegrationTest & SharedEnvironment & SecurityTestSuite =>
 
   protected val securityAsset: SecurityTest =
     SecurityTest(property = SecureConfiguration, asset = "participant node")
@@ -241,7 +250,115 @@ trait CryptoHandshakeIntegrationTest
 
 }
 
-//class CryptoHandshakeIntegrationTestDefault extends CryptoHandshakeIntegrationTest
+trait CryptoHandshakeInBootstrapIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with SecurityTestSuite {
+
+  private val onlyEcP256Config = SigningSchemeConfig(
+    algorithms = CryptoSchemeConfig(
+      default = Some(SigningAlgorithmSpec.EcDsaSha256),
+      allowed = Some(NonEmpty.mk(Set, SigningAlgorithmSpec.EcDsaSha256)),
+    ),
+    keys = CryptoSchemeConfig(
+      default = Some(SigningKeySpec.EcP256),
+      allowed = Some(NonEmpty.mk(Set, SigningKeySpec.EcP256)),
+    ),
+  )
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P0S2M2_Manual
+      .addConfigTransforms(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.crypto.signing)
+            .replace(onlyEcP256Config)
+        ),
+        ConfigTransforms.updateAllMediatorConfigs_(
+          _.focus(_.crypto.signing)
+            .replace(onlyEcP256Config)
+        ),
+      )
+
+  private def bootstrapWithStaticParameters(
+      sequencer: SequencerReference,
+      mediator: MediatorReference,
+      staticSynchronizerParameters: StaticSynchronizerParameters,
+  )(implicit env: TestConsoleEnvironment): Unit =
+    NetworkBootstrapper(
+      Seq(
+        NetworkTopologyDescription(
+          env.daName,
+          synchronizerOwners = Seq(sequencer),
+          synchronizerThreshold = PositiveInt.one,
+          sequencers = Seq(sequencer),
+          mediators = Seq(mediator),
+          overrideStaticSynchronizerParameters = Some(staticSynchronizerParameters),
+        )(env)
+      )
+    )(env).bootstrap()
+
+  private def requiredSigningSpecs(
+      algorithm: dataCrypto.SigningAlgorithmSpec,
+      key: dataCrypto.SigningKeySpec,
+  ) =
+    dataCrypto.RequiredSigningSpecs(
+      algorithms = NonEmpty.mk(Set, algorithm),
+      keys = NonEmpty.mk(Set, key),
+    )
+
+  "Bootstrap fails if sequencer or mediator has incompatible crypto configuration" taggedAs SecurityTest(
+    property = SecureConfiguration,
+    asset = "synchronizer",
+  ) in { implicit env =>
+    import env.*
+
+    sequencer1.start()
+    mediator1.start()
+
+    assertThrowsAndLogsCommandFailures(
+      bootstrapWithStaticParameters(
+        sequencer1,
+        mediator1,
+        // Override the default static synchronizer parameters to require Ed25519 signing scheme,
+        // which is incompatible with the sequencer and mediator's configuration
+        EnvironmentDefinition.defaultStaticSynchronizerParameters.copy(
+          requiredSigningSpecs = requiredSigningSpecs(
+            dataCrypto.SigningAlgorithmSpec.Ed25519,
+            dataCrypto.SigningKeySpec.EcCurve25519,
+          )
+        ),
+      ),
+      out => {
+        out.commandFailureMessage should include("Required schemes")
+        out.commandFailureMessage should include("are not supported/allowed")
+      },
+    )
+  }
+
+  "Bootstrap succeeds if the crypto configuration is compatible with the sequencer and mediator" in {
+    implicit env =>
+      import env.*
+
+      sequencer2.start()
+      mediator2.start()
+
+      bootstrapWithStaticParameters(
+        sequencer2,
+        mediator2,
+        // Override the default static synchronizer parameters to require EcDsaSha256 signing scheme,
+        // which is compatible with the sequencer and mediator's configuration
+        EnvironmentDefinition.defaultStaticSynchronizerParameters.copy(
+          requiredSigningSpecs = requiredSigningSpecs(
+            dataCrypto.SigningAlgorithmSpec.EcDsaSha256,
+            dataCrypto.SigningKeySpec.EcP256,
+          )
+        ),
+      )
+  }
+}
+
+class CryptoHandshakeInBootstrapIntegrationTestDefault
+    extends CryptoHandshakeInBootstrapIntegrationTest
 
 class CryptoHandshakeIntegrationTestPostgres extends CryptoHandshakeIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

@@ -10,7 +10,7 @@ final case class RequiredEncryptionSpecs(
     algorithms: NonEmpty[Set[EncryptionAlgorithmSpec]],
     keys: NonEmpty[Set[EncryptionKeySpec]],
 ) extends PrettyPrinting {
-  override val pretty: Pretty[this.type] = prettyOfClass(
+  override protected val pretty: Pretty[this.type] = prettyOfClass(
     param("algorithms", _.algorithms),
     param("keys", _.keys),
   )
@@ -19,7 +19,7 @@ final case class RequiredEncryptionSpecs(
 /** Key schemes for asymmetric/hybrid encryption. */
 sealed trait EncryptionKeySpec extends Product with Serializable with PrettyPrinting {
   def name: String
-  override val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
 object EncryptionKeySpec {
@@ -35,7 +35,7 @@ object EncryptionKeySpec {
 /** Algorithm schemes for asymmetric/hybrid encryption. */
 sealed trait EncryptionAlgorithmSpec extends Product with Serializable with PrettyPrinting {
   def name: String
-  override val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
 object EncryptionAlgorithmSpec {
@@ -51,7 +51,7 @@ object EncryptionAlgorithmSpec {
 /** Key/algorithm schemes for symmetric encryption. */
 sealed trait SymmetricKeyScheme extends Product with Serializable with PrettyPrinting {
   def name: String
-  override val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
 
   def keySizeInBytes: Int
 }

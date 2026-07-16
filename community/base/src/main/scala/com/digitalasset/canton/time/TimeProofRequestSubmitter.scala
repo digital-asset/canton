@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.{ProcessingTimeout, TimeProofRequestConfig}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}

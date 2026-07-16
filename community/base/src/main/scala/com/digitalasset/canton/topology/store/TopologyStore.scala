@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology.store
 
 import cats.Monoid
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
@@ -14,6 +13,7 @@ import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -761,6 +761,71 @@ object TopologyStore {
       signedTx.mapping.namespace == participantId.namespace &&
       signedTx.mapping.restrictedToSynchronizer.forall(_ == synchronizerId)
     }
+
+  /** Best-effort ordering key for initial participant onboarding transactions: namespace
+    * delegations (root certificates first), then the owner-to-key mapping, then the synchronizer
+    * trust certificate.
+    */
+  def initialParticipantDispatchingOrder(signedTx: GenericSignedTopologyTransaction): Int =
+    signedTx.mapping.code match {
+      case TopologyMapping.Code.NamespaceDelegation =>
+        if (NamespaceDelegation.isRootCertificate(signedTx)) 0 else 1
+      case TopologyMapping.Code.OwnerToKeyMapping => 2
+      case TopologyMapping.Code.SynchronizerTrustCertificate => 3
+      case _ => 4
+    }
+
+  /** Checks that the given transactions form a valid initial participant onboarding set: only
+    * onboarding mappings, exactly one owner-to-key mapping (holding a signing and an encryption
+    * key) and exactly one synchronizer trust certificate.
+    */
+  def validateInitialParticipantDispatchingTransactions(
+      participantId: ParticipantId,
+      transactions: Seq[GenericSignedTopologyTransaction],
+  ): Either[String, Unit] = {
+    val mappings = transactions.map(_.mapping)
+
+    // a mapping is expected only if it is an onboarding mapping for this participant
+    val unexpected = mappings.filterNot { m =>
+      initialParticipantDispatchingSet.contains(m.code) &&
+      m.maybeUid.forall(_ == participantId.uid) &&
+      m.namespace == participantId.namespace
+    }
+    val ownerToKeyMappings = mappings.collect { case otk @ OwnerToKeyMapping(`participantId`, _) =>
+      otk
+    }
+    val providedKeys = ownerToKeyMappings.flatMap(_.keys)
+    val trustCertificates = mappings.collect { case cert: SynchronizerTrustCertificate => cert }
+
+    for {
+      _ <- Either.cond(
+        unexpected.isEmpty,
+        (),
+        s"Onboarding transactions contain unexpected mappings (only ${initialParticipantDispatchingSet
+            .mkString(", ")} are allowed): ${unexpected.mkString(", ")}",
+      )
+      _ <- Either.cond(
+        ownerToKeyMappings.sizeIs == 1,
+        (),
+        s"Onboarding transactions must contain exactly one owner-to-key mapping for the participant, found ${ownerToKeyMappings.size}",
+      )
+      _ <- Either.cond(
+        trustCertificates.sizeIs == 1,
+        (),
+        s"Onboarding transactions must contain exactly one synchronizer trust certificate, found ${trustCertificates.size}",
+      )
+      _ <- Either.cond(
+        providedKeys.exists(_.isEncryption),
+        (),
+        "Onboarding transactions do not contain a valid encryption key for the participant",
+      )
+      _ <- Either.cond(
+        providedKeys.exists(_.isSigning),
+        (),
+        "Onboarding transactions do not contain a valid signing key for the participant",
+      )
+    } yield ()
+  }
 
   /** convenience method waiting until the last eligible transaction inserted into the source store
     * has been dispatched successfully to the target synchronizer

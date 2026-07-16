@@ -25,6 +25,7 @@ import com.digitalasset.canton.ledger.api.{
   SinglePackageTargetVetting,
   UpdateVettedPackagesForceFlags,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{

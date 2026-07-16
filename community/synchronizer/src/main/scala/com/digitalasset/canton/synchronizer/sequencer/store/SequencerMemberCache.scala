@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.store
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.github.blemale.scaffeine.{Cache, Scaffeine}

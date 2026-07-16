@@ -28,11 +28,12 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   InvalidAcknowledgementSignature,
   InvalidSubmissionRequestSignature,
 }
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.admin.grpc.{BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{HostingParticipant, ParticipantPermission}
 import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier, transaction}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
@@ -61,6 +62,7 @@ trait StressTopologyDispatcherIntegrationTest
       to: Int,
   ): Future[Unit] = {
     import env.*
+
     val res = MonadUtil.parTraverseWithLimit(200)(from to to) { idx =>
       val partyId = PartyId(
         UniqueIdentifier.tryCreate(
@@ -72,6 +74,9 @@ trait StressTopologyDispatcherIntegrationTest
       val (_timeout, commandET) = env.grpcAdminCommandRunner.runCommandAsync(
         participant.name,
         TopologyAdminCommands.Write.Propose(
+          baseRequest = BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
           mapping = transaction.PartyToParticipant.tryCreate(
             partyId,
             1,
@@ -85,6 +90,7 @@ trait StressTopologyDispatcherIntegrationTest
           signedBy = Seq(participant.fingerprint),
           store = TopologyStoreId.Authorized,
           waitToBecomeEffective = None,
+          serverVersion = participant.health.status.releaseVersion,
         ),
         participant.config.clientAdminApi,
         None,
@@ -235,7 +241,7 @@ trait StressTopologyDispatcherIntegrationTest
   }
 }
 
-class StressTopologyDispatcherBftOrderingIntegrationTestPostgres
+final class StressTopologyDispatcherBftOrderingIntegrationTestPostgres
     extends StressTopologyDispatcherIntegrationTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

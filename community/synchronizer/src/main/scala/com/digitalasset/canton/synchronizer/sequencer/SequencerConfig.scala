@@ -15,6 +15,12 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.sequencer.admin.v30 as adminProto
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig.{
+  DefaultGlobalKbpsCap,
+  DefaultGlobalTpsCap,
+  DefaultPerClientKbpsCap,
+  DefaultPerClientTpsCap,
+}
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.{
   CircuitBreakerConfig,
   ThroughputCapConfig,
@@ -212,6 +218,9 @@ object BlockSequencerConfig {
     *
     * @param strict
     *   how should the per member rate cap be computed
+    * @param delayedActivation
+    *   If true (default) then the limits will be enforced after an initial grace period equal to
+    *   the observationPeriodSeconds.
     * @param updateEveryMs
     *   how often should the new caps be computed (only used in non-strict mode)
     */
@@ -221,6 +230,7 @@ object BlockSequencerConfig {
       clockTickInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100),
       messages: ThroughputCapByMessageTypeConfig = ThroughputCapByMessageTypeConfig(),
       strict: Boolean = true,
+      delayedActivation: Boolean = true,
       thresholds: NonEmpty[Seq[PositiveDouble]] = NonEmpty.mk(Seq, PositiveDouble.tryCreate(0.9)),
       updateEveryMs: NonNegativeInt = NonNegativeInt.tryCreate(100),
   )
@@ -231,14 +241,18 @@ object BlockSequencerConfig {
         globalTpsCap = PositiveDouble.tryCreate(2.0),
         perClientTpsCap = PositiveDouble.tryCreate(1.0),
       ),
+      confirmationResponse: IndividualThroughputCapConfig = IndividualThroughputCapConfig(
+        globalTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(20),
+        perClientTpsCap = DefaultGlobalTpsCap * PositiveDouble.tryCreate(1.3),
+      ),
   )
 
   /** configure an individual cap */
   final case class IndividualThroughputCapConfig(
-      globalTpsCap: PositiveDouble = PositiveDouble.tryCreate(10.0),
-      globalKbpsCap: PositiveDouble = PositiveDouble.tryCreate(2000.0),
-      perClientTpsCap: PositiveDouble = PositiveDouble.tryCreate(4.0),
-      perClientKbpsCap: PositiveDouble = PositiveDouble.tryCreate(1000.0),
+      globalTpsCap: PositiveDouble = DefaultGlobalTpsCap,
+      globalKbpsCap: PositiveDouble = DefaultGlobalKbpsCap,
+      perClientTpsCap: PositiveDouble = DefaultPerClientTpsCap,
+      perClientKbpsCap: PositiveDouble = DefaultPerClientKbpsCap,
   ) {
 
     def toAdminProto: adminProto.IndividualThroughputCapConfig =
@@ -252,6 +266,12 @@ object BlockSequencerConfig {
   }
 
   object IndividualThroughputCapConfig {
+
+    private[sequencer] val DefaultGlobalTpsCap: PositiveDouble = PositiveDouble.tryCreate(10.0)
+    private[sequencer] val DefaultGlobalKbpsCap: PositiveDouble = PositiveDouble.tryCreate(2000.0)
+    private[sequencer] val DefaultPerClientTpsCap: PositiveDouble = PositiveDouble.tryCreate(4.0)
+    private[sequencer] val DefaultPerClientKbpsCap: PositiveDouble =
+      PositiveDouble.tryCreate(1000.0)
 
     object ConfigImplicits {
       final implicit val individualCapConfigReader: ConfigReader[IndividualThroughputCapConfig] =

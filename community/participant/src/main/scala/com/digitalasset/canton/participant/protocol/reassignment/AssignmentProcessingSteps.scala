@@ -14,6 +14,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.AssignmentViewType
 import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.conflictdetection.{

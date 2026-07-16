@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.store.ParticipantPruningStore
 import com.digitalasset.canton.participant.store.ParticipantPruningStore.ParticipantPruningStatus
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}

@@ -31,6 +31,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.health.HealthQuasiComponent
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, TracedLogger}
@@ -49,7 +50,10 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
-import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.PreviousTimestampMismatch
+import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.{
+  BadSynchronizerId,
+  PreviousTimestampMismatch,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
   ClientShutdown,
   UnrecoverableError,
@@ -559,6 +563,39 @@ final class SequencerClientTest
             PreviousTimestampMismatch(
               receivedPreviousTimestamp = Some(CantonTimestamp.ofEpochSecond(666)),
               expectedPreviousTimestamp = Some(CantonTimestamp.Epoch),
+            )
+          )
+        val env = RichEnvFactory.create()
+        import env.*
+        val closeReasonF = for {
+          _ <- env.subscribeAfter(CantonTimestamp.MinValue, alwaysSuccessfulHandler)
+          subscription = subscriber
+            // we know the resilient sequencer subscription is using this type
+            .map(_.subscription.asInstanceOf[MockSubscription[SequencerClientSubscriptionError]])
+            .value
+          closeReason <- loggerFactory.assertLogs(
+            {
+              subscription.closeSubscription(error)
+              client.completion
+            },
+            _.warningMessage should include("sequencer"),
+          )
+        } yield closeReason
+
+        closeReasonF.futureValueUS should matchPattern {
+          case e: UnrecoverableError if e.cause == s"handler returned error: $error" =>
+        }
+        env.client.close()
+      }
+
+      "crashes the sequencer client on a BadSynchronizerId from a sequencer" in {
+        val error =
+          EventValidationError(
+            BadSynchronizerId(
+              expected = DefaultTestIdentities.physicalSynchronizerId,
+              received = SynchronizerId(
+                UniqueIdentifier.tryFromProtoPrimitive("wrong-synchronizer::id")
+              ).toPhysical,
             )
           )
         val env = RichEnvFactory.create()

@@ -15,9 +15,20 @@ import scala.concurrent.{Future, Promise}
 class SynchronizedFutureTest extends AnyWordSpec with Matchers {
   import SynchronizedFutureTest.*
 
-  def assertIsErrorSynchronized(result: WartTestTraverser.Result, count: Int = 1): Assertion = {
+  def assertIsErrorSynchronized(
+      result: WartTestTraverser.Result,
+      count: Int = 1,
+  ): Assertion = {
     result.errors.length shouldBe count
     result.errors.foreach(_ should include(SynchronizedFuture.messageSynchronized))
+    succeed
+  }
+  def assertIsErrorSynchronizedLike(
+      result: WartTestTraverser.Result,
+      count: Int = 1,
+  ): Assertion = {
+    result.errors.length shouldBe count
+    result.errors.foreach(_ should include(SynchronizedFuture.messageSynchronizedLike))
     succeed
   }
 
@@ -100,9 +111,50 @@ class SynchronizedFutureTest extends AnyWordSpec with Matchers {
       }
       assertIsErrorSynchronized(result)
     }
+
+    "detect synchronized-like methods with future body types" in {
+      val result = WartTestTraverser(SynchronizedFuture) {
+        val mutex = new Mutex
+        mutex.exclusive(Future.unit)
+      }
+      assertIsErrorSynchronizedLike(result)
+    }
+
+    "allow synchronized-like methods with non-future types" in {
+      val result = WartTestTraverser(SynchronizedFuture) {
+        val mutex = new Mutex
+        mutex.exclusive(10)
+      }
+      result.errors.length shouldBe 0
+    }
+
+    "detect with imported synchronized-like methods" in {
+      val result = WartTestTraverser(SynchronizedFuture) {
+        val mutex = new Mutex
+        import mutex.exclusive
+        exclusive(Future.unit)
+      }
+      assertIsErrorSynchronizedLike(result)
+    }
+
+    "detect nested synchronized-like methods" in {
+      val result = WartTestTraverser(SynchronizedFuture) {
+        val mutex = new Mutex
+        val _ = mutex.exclusive {
+          mutex.exclusive(Future.unit)
+          "not a future"
+        }
+      }
+      assertIsErrorSynchronizedLike(result)
+    }
   }
 }
 
 object SynchronizedFutureTest {
   @DoNotReturnFromSynchronizedLikeFuture class LooksLikeAFuture
+
+  class Mutex {
+    @SynchronizedLikeMethod
+    def exclusive[A](body: => A): A = body
+  }
 }

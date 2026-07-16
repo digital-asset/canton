@@ -41,7 +41,7 @@ import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamO
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
-import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStoreId}
+import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30.{
   ExportTopologySnapshotResponse,
   ExportTopologySnapshotV2Response,
@@ -62,7 +62,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.canton.{config, networking}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.nonempty.NonEmpty
@@ -469,13 +469,22 @@ class TopologyAdministrationGroup(
 
     def generate(
         proposals: Seq[GenerateTransactions.Proposal]
-    ): Seq[TopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    ): Seq[TopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
+      val nodeStatus = instance.health.status
+
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .GenerateTransactions(proposals)
+            .GenerateTransactions(
+              proposals = proposals,
+              baseRequest = BaseWriteRequest(
+                clientVersion = Some(ReleaseVersion.current)
+              ),
+              serverVersion = nodeStatus.releaseVersion,
+            )
         )
       }
+    }
 
     def sign(
         transactions: Seq[GenericSignedTopologyTransaction],
@@ -511,10 +520,15 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize: Boolean = true,
         forceChanges: ForceFlags = ForceFlags.none,
         waitToBecomeEffective: Option[NonNegativeDuration] = None,
-    ): SignedTopologyTransaction[TopologyChangeOp, M] =
+    ): SignedTopologyTransaction[TopologyChangeOp, M] = {
+      val nodeStatus = instance.health.status
+
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write.Propose(
+            BaseWriteRequest(
+              clientVersion = Some(ReleaseVersion.current)
+            ),
             mapping = mapping,
             signedBy = signedBy,
             store = store,
@@ -523,9 +537,11 @@ class TopologyAdministrationGroup(
             mustFullyAuthorize = mustFullyAuthorize,
             forceChanges = forceChanges,
             waitToBecomeEffective = waitToBecomeEffective,
+            serverVersion = nodeStatus.releaseVersion,
           )
         )
       }
+    }
 
     @Help.Summary("Authorize a transaction by its hash")
     def authorize[M <: TopologyMapping: ClassTag](
@@ -567,6 +583,7 @@ class TopologyAdministrationGroup(
         operation,
         filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
         protocolVersion = None,
+        clientVersion = Some(ReleaseVersion.current),
       )
 
       // Use V1 only if the target node is on 3.4 (ListAllV2 doesn't exist there).
@@ -1174,18 +1191,23 @@ class TopologyAdministrationGroup(
         ),
     ): SignedTopologyTransaction[TopologyChangeOp, DecentralizedNamespaceDefinition] = {
 
-      val command = TopologyAdminCommands.Write.Propose(
-        decentralizedNamespace,
-        signedBy = signedBy.toList,
-        serial = serial,
-        change = TopologyChangeOp.Replace,
-        mustFullyAuthorize = mustFullyAuthorize,
-        forceChanges = ForceFlags.none,
-        store = store,
-        waitToBecomeEffective = synchronize,
+      val nodeStatus = instance.health.status
+      runAdminCommand(
+        TopologyAdminCommands.Write.Propose(
+          baseRequest = BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
+          mapping = decentralizedNamespace,
+          signedBy = signedBy.toList,
+          serial = serial,
+          change = TopologyChangeOp.Replace,
+          mustFullyAuthorize = mustFullyAuthorize,
+          forceChanges = ForceFlags.none,
+          store = store,
+          waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
+        )
       )
-
-      runAdminCommand(command)
     }
   }
 
@@ -1245,9 +1267,13 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         forceFlags: ForceFlags = ForceFlags.none,
-    ): SignedTopologyTransaction[TopologyChangeOp, NamespaceDelegation] =
+    ): SignedTopologyTransaction[TopologyChangeOp, NamespaceDelegation] = {
+      val nodeStatus = instance.health.status
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
+          BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
           NamespaceDelegation.create(namespace, targetKey, delegationRestriction),
           signedBy = signedBy,
           store = store,
@@ -1256,8 +1282,10 @@ class TopologyAdministrationGroup(
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = forceFlags,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
+    }
 
     @Help.Summary("Revoke an existing namespace delegation")
     @Help.Description(
@@ -1299,7 +1327,8 @@ class TopologyAdministrationGroup(
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
-    ): SignedTopologyTransaction[TopologyChangeOp, NamespaceDelegation] =
+    ): SignedTopologyTransaction[TopologyChangeOp, NamespaceDelegation] = {
+      val nodeStatus = instance.health.status
       list(
         store,
         filterNamespace = namespace.toProtoPrimitive,
@@ -1308,6 +1337,9 @@ class TopologyAdministrationGroup(
         case Seq(nsd) =>
           runAdminCommand(
             TopologyAdminCommands.Write.Propose(
+              BaseWriteRequest(
+                clientVersion = Some(ReleaseVersion.current)
+              ),
               nsd.item,
               signedBy = signedBy,
               store = store,
@@ -1316,6 +1348,7 @@ class TopologyAdministrationGroup(
               mustFullyAuthorize = mustFullyAuthorize,
               forceChanges = forceChanges,
               waitToBecomeEffective = synchronize,
+              serverVersion = nodeStatus.releaseVersion,
             )
           )
 
@@ -1329,6 +1362,7 @@ class TopologyAdministrationGroup(
                 .map(_.item)}"
           )
       }
+    }
 
     def list(
         store: TopologyStoreId,
@@ -1381,6 +1415,7 @@ class TopologyAdministrationGroup(
               operation,
               filterSigningKey,
               protocolVersion = None,
+              clientVersion = Some(ReleaseVersion.current),
             ),
             filterKeyOwnerType,
             filterKeyOwnerUid,
@@ -1601,6 +1636,8 @@ class TopologyAdministrationGroup(
         force: ForceFlags = ForceFlags.none,
     ): Unit = {
 
+      val nodeStatus = instance.health.status
+
       val publicKeys = keys.map { case (fingerprint, purpose) =>
         // Ensure the specified key has a private key in the vault and get the public key
         ensurePrivateKeyExists(fingerprint, purpose)
@@ -1670,6 +1707,9 @@ class TopologyAdministrationGroup(
 
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
+          BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
           mapping = proposedMapping,
           signedBy = signedBy,
           store = TopologyStoreId.Authorized,
@@ -1678,6 +1718,7 @@ class TopologyAdministrationGroup(
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = force,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       ).discard
     }
@@ -1695,9 +1736,13 @@ class TopologyAdministrationGroup(
         // configurable in case of a key under a decentralized namespace
         mustFullyAuthorize: Boolean = true,
         force: ForceFlags = ForceFlags.none,
-    ): SignedTopologyTransaction[TopologyChangeOp, OwnerToKeyMapping] =
+    ): SignedTopologyTransaction[TopologyChangeOp, OwnerToKeyMapping] = {
+      val nodeStatus = instance.health.status
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
+          BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
           mapping = OwnerToKeyMapping.create(member, keys),
           signedBy = signedBy,
           store = store,
@@ -1706,8 +1751,10 @@ class TopologyAdministrationGroup(
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = force,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
+    }
   }
 
   @Help.Summary("Manage party to key mappings")
@@ -1758,9 +1805,13 @@ class TopologyAdministrationGroup(
         // configurable in case of a key under a decentralized namespace
         mustFullyAuthorize: Boolean = true,
         force: ForceFlags = ForceFlags.none,
-    ): SignedTopologyTransaction[TopologyChangeOp, PartyToKeyMapping] =
+    ): SignedTopologyTransaction[TopologyChangeOp, PartyToKeyMapping] = {
+      val nodeStatus = instance.health.status
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
+          BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
           mapping = PartyToKeyMapping.create(partyId, threshold, signingKeys),
           signedBy = signedBy.toList,
           store = store,
@@ -1769,8 +1820,10 @@ class TopologyAdministrationGroup(
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = force,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
+    }
   }
 
   @Help.Summary("Manage party to participant mappings")
@@ -2003,7 +2056,11 @@ class TopologyAdministrationGroup(
         forceFlags: ForceFlags = ForceFlags.none,
         participantsRequiringPartyToBeOnboarded: Seq[ParticipantId] = Nil,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
+      val nodeStatus = instance.health.status
       val command = TopologyAdminCommands.Write.Propose(
+        baseRequest = BaseWriteRequest(
+          clientVersion = Some(ReleaseVersion.current)
+        ),
         mapping = PartyToParticipant.create(
           partyId = party,
           threshold = threshold,
@@ -2023,6 +2080,7 @@ class TopologyAdministrationGroup(
         store = store,
         forceChanges = forceFlags,
         waitToBecomeEffective = synchronize,
+        serverVersion = nodeStatus.releaseVersion,
       )
 
       runAdminCommand(command)
@@ -2277,6 +2335,7 @@ class TopologyAdministrationGroup(
             operation,
             filterSigningKey,
             protocolVersion = None,
+            clientVersion = Some(ReleaseVersion.current),
           ),
           filterParty,
           filterParticipant,
@@ -2305,6 +2364,7 @@ class TopologyAdministrationGroup(
             operation,
             filterSigningKey,
             protocolVersion = None,
+            clientVersion = Some(ReleaseVersion.current),
           ),
           filterUid,
         )
@@ -2362,7 +2422,11 @@ class TopologyAdministrationGroup(
         change: TopologyChangeOp = TopologyChangeOp.Replace,
         featureFlags: Seq[SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag] = Seq.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerTrustCertificate] = {
+      val nodeStatus = instance.health.status
       val cmd = TopologyAdminCommands.Write.Propose(
+        baseRequest = BaseWriteRequest(
+          clientVersion = Some(ReleaseVersion.current)
+        ),
         mapping = SynchronizerTrustCertificate(
           participantId,
           synchronizerId,
@@ -2374,6 +2438,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         change = change,
         waitToBecomeEffective = synchronize,
+        serverVersion = nodeStatus.releaseVersion,
       )
       runAdminCommand(cmd)
     }
@@ -2427,7 +2492,11 @@ class TopologyAdministrationGroup(
         serial: Option[PositiveInt] = None,
         change: TopologyChangeOp = TopologyChangeOp.Replace,
     ): SignedTopologyTransaction[TopologyChangeOp, ParticipantSynchronizerPermission] = {
+      val nodeStatus = instance.health.status
       val cmd = TopologyAdminCommands.Write.Propose(
+        baseRequest = BaseWriteRequest(
+          clientVersion = Some(ReleaseVersion.current)
+        ),
         mapping = ParticipantSynchronizerPermission(
           synchronizerId = synchronizerId,
           participantId = participantId,
@@ -2441,6 +2510,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         change = change,
         waitToBecomeEffective = synchronize,
+        serverVersion = nodeStatus.releaseVersion,
       )
 
       runAdminCommand(cmd)
@@ -2586,6 +2656,7 @@ class TopologyAdministrationGroup(
             operation,
             filterSigningKey,
             protocolVersion = None,
+            clientVersion = Some(ReleaseVersion.current),
           ),
           filterUid,
         )
@@ -2605,18 +2676,24 @@ class TopologyAdministrationGroup(
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
-    ): SignedTopologyTransaction[TopologyChangeOp, PartyHostingLimits] =
+    ): SignedTopologyTransaction[TopologyChangeOp, PartyHostingLimits] = {
+      val nodeStatus = instance.health.status
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
-          PartyHostingLimits(synchronizerId, partyId),
+          baseRequest = BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
+          mapping = PartyHostingLimits(synchronizerId, partyId),
           signedBy = signedBy,
           store = store.getOrElse(synchronizerId),
           serial = serial,
           change = TopologyChangeOp.Replace,
           mustFullyAuthorize = mustFullyAuthorize,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
+    }
   }
 
   @Help.Summary("Manage package vettings")
@@ -2773,8 +2850,12 @@ class TopologyAdministrationGroup(
         force: ForceFlags = ForceFlags.none,
         operation: TopologyChangeOp = TopologyChangeOp.Replace,
     ): Unit = {
+      val nodeStatus = instance.health.status
 
       val command = TopologyAdminCommands.Write.Propose(
+        baseRequest = BaseWriteRequest(
+          clientVersion = Some(ReleaseVersion.current)
+        ),
         mapping = VettedPackages.create(
           participantId = participant,
           packages = packages,
@@ -2786,6 +2867,7 @@ class TopologyAdministrationGroup(
         store = store,
         forceChanges = force,
         waitToBecomeEffective = synchronize,
+        serverVersion = nodeStatus.releaseVersion,
       )
 
       runAdminCommand(command).discard
@@ -2815,6 +2897,7 @@ class TopologyAdministrationGroup(
             operation,
             filterSigningKey,
             protocolVersion = None,
+            clientVersion = Some(ReleaseVersion.current),
           ),
           filterParticipant,
         )
@@ -2856,6 +2939,7 @@ class TopologyAdministrationGroup(
                 operation,
                 filterSigningKey,
                 protocolVersion = None,
+                clientVersion = Some(ReleaseVersion.current),
               ),
               filterSynchronizer,
             )
@@ -2999,7 +3083,11 @@ class TopologyAdministrationGroup(
         signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
     ): SignedTopologyTransaction[TopologyChangeOp, MediatorSynchronizerState] = {
+      val nodeStatus = instance.health.status
       val command = TopologyAdminCommands.Write.Propose(
+        baseRequest = BaseWriteRequest(
+          clientVersion = Some(ReleaseVersion.current)
+        ),
         mapping = MediatorSynchronizerState
           .create(synchronizerId, group, threshold, active, observers),
         signedBy = signedBy.toList,
@@ -3009,6 +3097,7 @@ class TopologyAdministrationGroup(
         forceChanges = ForceFlags.none,
         store = store.getOrElse(synchronizerId),
         waitToBecomeEffective = synchronize,
+        serverVersion = nodeStatus.releaseVersion,
       )
 
       runAdminCommand(command)
@@ -3042,11 +3131,16 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize: Boolean = false,
     ): SignedTopologyTransaction[TopologyChangeOp, MediatorSynchronizerState] = {
 
+      val nodeStatus = instance.health.status
+
       val mediatorStateResult = list(synchronizerId = synchronizerId, group = Some(group))
         .maxByOption(_.context.serial)
         .getOrElse(throw new IllegalArgumentException(s"Unknown mediator group $group"))
 
       val command = TopologyAdminCommands.Write.Propose(
+        baseRequest = BaseWriteRequest(
+          clientVersion = Some(ReleaseVersion.current)
+        ),
         mapping = mediatorStateResult.item,
         signedBy = Seq.empty,
         serial = Some(mediatorStateResult.context.serial.increment),
@@ -3055,6 +3149,7 @@ class TopologyAdministrationGroup(
         forceChanges = ForceFlags.none,
         store = store.getOrElse(synchronizerId),
         waitToBecomeEffective = synchronize,
+        serverVersion = nodeStatus.releaseVersion,
       )
 
       runAdminCommand(command)
@@ -3081,6 +3176,7 @@ class TopologyAdministrationGroup(
             operation,
             filterSigningKey,
             protocolVersion = None,
+            clientVersion = Some(ReleaseVersion.current),
           ),
           filterSynchronizer,
         )
@@ -3128,21 +3224,31 @@ class TopologyAdministrationGroup(
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.unbounded
         ),
-    ): SignedTopologyTransaction[TopologyChangeOp, SequencerSynchronizerState] =
+    ): SignedTopologyTransaction[TopologyChangeOp, SequencerSynchronizerState] = {
+      val nodeStatus = instance.health.status
+
       consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommands.Write.Propose(
-            mapping = SequencerSynchronizerState.create(synchronizerId, threshold, active, passive),
-            signedBy = signedBy.toList,
-            serial = serial,
-            change = TopologyChangeOp.Replace,
-            mustFullyAuthorize = mustFullyAuthorize,
-            forceChanges = ForceFlags.none,
-            store = store.getOrElse(synchronizerId),
-            waitToBecomeEffective = synchronize,
+        for {
+          result <- adminCommand(
+            TopologyAdminCommands.Write.Propose(
+              baseRequest = BaseWriteRequest(
+                clientVersion = Some(ReleaseVersion.current)
+              ),
+              mapping =
+                SequencerSynchronizerState.create(synchronizerId, threshold, active, passive),
+              signedBy = signedBy.toList,
+              serial = serial,
+              change = TopologyChangeOp.Replace,
+              mustFullyAuthorize = mustFullyAuthorize,
+              forceChanges = ForceFlags.none,
+              store = store.getOrElse(synchronizerId),
+              waitToBecomeEffective = synchronize,
+              serverVersion = nodeStatus.releaseVersion,
+            )
           )
-        )
+        } yield result
       }
+    }
   }
 
   @Help.Summary("Manage synchronizer parameters state")
@@ -3260,6 +3366,8 @@ class TopologyAdministrationGroup(
         force: ForceFlags = ForceFlags.none,
     ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerParametersState] = { // TODO(#15815): Don't expose internal TopologyMapping and TopologyChangeOp classes
 
+      val nodeStatus = instance.health.status
+
       val parametersInternal =
         parameters.toInternal.valueOr(err =>
           consoleEnvironment.raiseError(s"Cannot convert parameters to internal format: $err")
@@ -3267,16 +3375,20 @@ class TopologyAdministrationGroup(
 
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
-          SynchronizerParametersState(
+          baseRequest = BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
+          mapping = SynchronizerParametersState(
             synchronizerId,
             parametersInternal,
           ),
-          signedBy.toList,
+          signedBy = signedBy.toList,
           serial = serial,
           mustFullyAuthorize = mustFullyAuthorize,
           store = store.getOrElse(synchronizerId),
           forceChanges = force,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
@@ -3643,6 +3755,7 @@ class TopologyAdministrationGroup(
         ),
         force: ForceFlags = ForceFlags.none,
     ): SignedTopologyTransaction[TopologyChangeOp, SequencingParametersState] = { // TODO(#15815): Don't expose internal TopologyMapping and TopologyChangeOp classes
+      val nodeStatus = instance.health.status
       val parametersInternal =
         parameters.toInternal
           .valueOr(err =>
@@ -3650,16 +3763,20 @@ class TopologyAdministrationGroup(
           )
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
-          SequencingParametersState(
+          baseRequest = BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
+          mapping = SequencingParametersState(
             synchronizerId,
             parametersInternal,
           ),
-          signedBy.toList,
+          signedBy = signedBy.toList,
           serial = serial,
           mustFullyAuthorize = mustFullyAuthorize,
           store = store.getOrElse(synchronizerId),
           forceChanges = force,
           waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
@@ -3739,6 +3856,7 @@ class TopologyAdministrationGroup(
               operation,
               filterSigningKey,
               protocolVersion = None,
+              clientVersion = Some(ReleaseVersion.current),
             ),
             filterSynchronizer,
           )
@@ -3791,19 +3909,27 @@ class TopologyAdministrationGroup(
           upgradeTime,
         )
 
+        val nodeStatus = instance.health.status
+
         consoleEnvironment.run {
-          adminCommand(
-            TopologyAdminCommands.Write.Propose(
-              mapping = mapping,
-              signedBy = signedBy.toList,
-              serial = serial,
-              change = TopologyChangeOp.Replace,
-              mustFullyAuthorize = mustFullyAuthorize,
-              forceChanges = ForceFlags.none,
-              store = store.getOrElse(successorPhysicalSynchronizerId.logical),
-              waitToBecomeEffective = synchronize,
+          for {
+            result <- adminCommand(
+              TopologyAdminCommands.Write.Propose(
+                baseRequest = BaseWriteRequest(
+                  clientVersion = Some(ReleaseVersion.current)
+                ),
+                mapping = mapping,
+                signedBy = signedBy.toList,
+                serial = serial,
+                change = TopologyChangeOp.Replace,
+                mustFullyAuthorize = mustFullyAuthorize,
+                forceChanges = ForceFlags.none,
+                store = store.getOrElse(successorPhysicalSynchronizerId.logical),
+                waitToBecomeEffective = synchronize,
+                serverVersion = nodeStatus.releaseVersion,
+              )
             )
-          )
+          } yield result
         }
       }
 
@@ -3853,9 +3979,14 @@ class TopologyAdministrationGroup(
           upgradeTime,
         )
 
+        val nodeStatus = instance.health.status
+
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
+              baseRequest = BaseWriteRequest(
+                clientVersion = Some(ReleaseVersion.current)
+              ),
               mapping = mapping,
               signedBy = signedBy.toList,
               serial = serial,
@@ -3864,6 +3995,7 @@ class TopologyAdministrationGroup(
               forceChanges = ForceFlags.none,
               store = store.getOrElse(successorPhysicalSynchronizerId.logical),
               waitToBecomeEffective = synchronize,
+              serverVersion = nodeStatus.releaseVersion,
             )
           )
         }
@@ -3918,10 +4050,15 @@ class TopologyAdministrationGroup(
           synchronize: Option[config.NonNegativeDuration] = Some(
             consoleEnvironment.commandTimeouts.unbounded
           ),
-      ): SignedTopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor] =
+      ): SignedTopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor] = {
+        val nodeStatus = instance.health.status
+
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
+              baseRequest = BaseWriteRequest(
+                clientVersion = Some(ReleaseVersion.current)
+              ),
               mapping = networking.Endpoint
                 .fromUris(endpoints.toSeq)
                 .map { case (validatedEndpoints, useTls) =>
@@ -3942,9 +4079,11 @@ class TopologyAdministrationGroup(
               forceChanges = ForceFlags.none,
               store = store.getOrElse(successorSynchronizerId.logical),
               waitToBecomeEffective = synchronize,
+              serverVersion = nodeStatus.releaseVersion,
             )
           )
         }
+      }
 
       def list(
           store: Option[TopologyStoreId] = None,
@@ -3964,6 +4103,7 @@ class TopologyAdministrationGroup(
               operation,
               filterSigningKey,
               protocolVersion = None,
+              clientVersion = Some(ReleaseVersion.current),
             ),
             filterSequencerId = filterSequencerId,
             filterSuccessorPhysicalSynchronizerId = filterSuccessorPhysicalSynchronizerId,

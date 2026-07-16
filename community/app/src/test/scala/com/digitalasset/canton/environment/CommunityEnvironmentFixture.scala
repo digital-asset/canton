@@ -10,6 +10,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{CantonConfig, TestingConfigInternal}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.metrics.{ParticipantHistograms, ParticipantMetrics}

@@ -8,6 +8,7 @@ import cats.syntax.option.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec

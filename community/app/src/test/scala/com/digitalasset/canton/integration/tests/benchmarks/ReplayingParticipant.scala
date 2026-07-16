@@ -25,6 +25,7 @@ import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto, SynchronizerC
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelParams

@@ -5,6 +5,7 @@ package com.digitalasset.canton.util
 
 import cats.data.EitherT
 import cats.{Applicative, MonadThrow}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.nonempty.NonEmpty

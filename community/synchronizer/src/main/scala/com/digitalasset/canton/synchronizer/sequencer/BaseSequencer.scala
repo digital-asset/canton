@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonBaseError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused

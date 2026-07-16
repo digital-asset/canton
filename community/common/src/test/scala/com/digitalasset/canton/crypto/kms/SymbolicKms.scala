@@ -30,6 +30,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError

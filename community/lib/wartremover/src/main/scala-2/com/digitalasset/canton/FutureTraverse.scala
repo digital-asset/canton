@@ -91,6 +91,9 @@ object FutureTraverse extends WartTraverser {
     val traverseFilterInstanceOptionSymbol =
       functorFilterCompanion.decl(TermName("catsTraverseFilterForOption"))
     require(traverseFilterInstanceOptionSymbol != NoSymbol)
+    val traverseInstanceTupleSymbol =
+      unorderedFoldableCompanion.member(TermName("catsUnorderedFoldableInstancesForTuple2"))
+    require(traverseInstanceTupleSymbol != NoSymbol)
 
     val forbidden: Seq[ForbiddenMethod] = Seq(
       ForbiddenMethod(
@@ -152,6 +155,7 @@ object FutureTraverse extends WartTraverser {
       traverseInstanceEitherSymbol,
       traverseFilterInstanceOptionSymbol,
       stdInstancesForOptionSymbol,
+      traverseInstanceTupleSymbol,
     )
     val futureLikeType = typeOf[DoNotTraverseLikeFuture]
     val futureLikeTester = FutureLikeTester.tester(u)(futureLikeType)
@@ -163,9 +167,9 @@ object FutureTraverse extends WartTraverser {
     }
 
     def isSingletonContainer(receiver: Tree): Boolean = receiver match {
-      case Apply(_, List(implicitArg)) if allowedImplicits.contains(implicitArg.symbol) => true
       case Apply(_, List(implicitArg))
-          if hasAllowTraverseSingleContainerAnnotation(implicitArg.symbol) =>
+          if allowedImplicits.contains(implicitArg.symbol) ||
+            hasAllowTraverseSingleContainerAnnotation(implicitArg.symbol) =>
         true
       case _ => false
     }

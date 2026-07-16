@@ -11,8 +11,8 @@ import com.digitalasset.canton.sequencer.admin.v30.SequencerBftAdministrationSer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
-  Consensus,
   Mempool,
+  Output,
   P2PNetworkOut,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -30,13 +30,13 @@ import SequencerBftAdminData.{
 final class BftOrderingSequencerAdminService(
     mempoolAdminRef: ModuleRef[Mempool.Admin],
     p2pNetworkOutAdminRef: ModuleRef[P2PNetworkOut.Admin],
-    issConsensusAdminRef: ModuleRef[Consensus.Admin],
+    outputAdminRef: ModuleRef[Output.Admin],
     override val loggerFactory: NamedLoggerFactory,
     createWriteReadinessPromise: () => Promise[WriteReadiness] = () => Promise(),
     createBoolPromise: () => Promise[Boolean] = () => Promise(),
     createNetworkStatusPromise: () => Promise[PeerNetworkStatus] = () => Promise(),
-    createOrderingTopologyPromise: () => Promise[Consensus.Admin.GetOrderingTopologyResponse] =
-      () => Promise(),
+    createOrderingTopologyPromise: () => Promise[Output.Admin.GetOrderingTopologyResponse] = () =>
+      Promise(),
     createPeerEndpointSeqPromise: () => Promise[Seq[P2PEndpoint]] = () => Promise(),
 )(implicit executionContext: ExecutionContext, metricsContext: MetricsContext)
     extends SequencerBftAdministrationService
@@ -135,8 +135,8 @@ final class BftOrderingSequencerAdminService(
       request: GetOrderingTopologyRequest
   ): Future[GetOrderingTopologyResponse] = {
     val resultPromise = createOrderingTopologyPromise()
-    issConsensusAdminRef.asyncSend(
-      Consensus.Admin.GetOrderingTopology { orderingResponse =>
+    outputAdminRef.asyncSend(
+      Output.Admin.GetOrderingTopology { orderingResponse =>
         resultPromise.success(orderingResponse).discard
       }
     )
@@ -155,8 +155,8 @@ final class BftOrderingSequencerAdminService(
   override def setPerformanceMetricsEnabled(
       request: SetPerformanceMetricsEnabledRequest
   ): Future[SetPerformanceMetricsEnabledResponse] = {
-    issConsensusAdminRef.asyncSend(
-      Consensus.Admin.SetPerformanceMetricsEnabled(request.enabled)
+    outputAdminRef.asyncSend(
+      Output.Admin.SetPerformanceMetricsEnabled(request.enabled)
     )
     Future.successful(SetPerformanceMetricsEnabledResponse())
   }

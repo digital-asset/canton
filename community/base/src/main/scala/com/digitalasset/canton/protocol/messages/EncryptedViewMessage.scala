@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError.FailedToRead
 import com.digitalasset.canton.crypto.v30 as V30Crypto
 import com.digitalasset.canton.data.{ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast

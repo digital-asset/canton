@@ -12,3 +12,10 @@ message PendingLsuOperation {
 
   string successor_physical_synchronizer_id = 1;
 }
+
+message PendingOnboardingTransactions {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  // Serialized SignedTopologyTransaction messages to be used for onboarding to the synchronizer
+  repeated bytes transactions = 1;
+}

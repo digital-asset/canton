@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SequencerApiCl
 import com.digitalasset.canton.console.{LocalInstanceReference, LocalSequencerReference}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.OnShutdownRunner.PureOnShutdownRunner
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}

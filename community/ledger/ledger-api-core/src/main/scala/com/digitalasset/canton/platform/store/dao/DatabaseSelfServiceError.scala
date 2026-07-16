@@ -39,16 +39,18 @@ object DatabaseSelfServiceError {
     case ex => ex
   }
 
+  def isNetworkTimeoutException(exception: PSQLException): Boolean =
+    exception.getSQLState == "08006" && (exception.getCause match {
+      case _: java.net.SocketTimeoutException => true
+      case _ => false
+    })
+
   def checkPSQLException(exception: PSQLException)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): StatusRuntimeException =
-    if (exception.getSQLState == "08006") {
-      exception.getCause match {
-        case _: java.net.SocketTimeoutException =>
-          IndexErrors.DatabaseErrors.SqlNetworkTimeoutError.Reject(exception).asGrpcError
-        case _ => retryable(exception)
-      }
-    } else if (isRetryablePsqlException(exception)) retryable(exception)
+    if (isNetworkTimeoutException(exception))
+      IndexErrors.DatabaseErrors.SqlNetworkTimeoutError.Reject(exception).asGrpcError
+    else if (isRetryablePsqlException(exception)) retryable(exception)
     else nonRetryable(exception)
 
   private def retryable(ex: SQLException)(implicit

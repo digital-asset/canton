@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.extension
 
 import com.daml.tls.{ServerAuthRequirementConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PemFile, PositiveFiniteDuration}
 import com.digitalasset.canton.http.HttpService
@@ -18,7 +17,7 @@ import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import com.sun.net.httpserver.{HttpServer, HttpsConfigurator, HttpsServer}
+import com.sun.net.httpserver.{HttpHandler, HttpServer, HttpsConfigurator, HttpsServer}
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
@@ -30,7 +29,6 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{CopyOnWriteArrayList, CountDownLatch, TimeUnit}
 import scala.concurrent.ExecutionContext
 
-@UnstableTest // TODO(i33886): remove this once the test is no longer flaky
 class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   "HttpExtensionServiceClient" should {
@@ -77,7 +75,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           val headers = exchange.getRequestHeaders
           observedMethod.set(exchange.getRequestMethod)
           observedPath.set(exchange.getRequestURI.getPath)
@@ -92,7 +90,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
             new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
           )
           writeResponse(exchange, 200, "beef")
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -141,14 +139,14 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           val headers = exchange.getRequestHeaders
           observedConfigHash.set(headers.getFirst("X-Daml-External-Config-Hash"))
           observedBody.set(
             new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
           )
           writeResponse(exchange, 200, "beef")
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -172,10 +170,10 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           val _ = requests.incrementAndGet()
           writeResponse(exchange, 200, "beef")
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -218,13 +216,13 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           observedAuthorization.set(
             Option(exchange.getRequestHeaders.getFirst("Authorization"))
           )
           exchange.sendResponseHeaders(200, 0)
           exchange.getResponseBody.close()
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -258,10 +256,10 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           observedRequests.add(s"${exchange.getRequestMethod} ${exchange.getRequestURI.getPath}")
           writeResponse(exchange, 200, """{"application":"external-call-server","version":"v0"}""")
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -284,12 +282,14 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange =>
-          if (attempts.incrementAndGet() == 1) {
-            writeResponse(exchange, 412, "try again")
-          } else {
-            writeResponse(exchange, 200, "cafe")
-          },
+        (
+            exchange =>
+              if (attempts.incrementAndGet() == 1) {
+                writeResponse(exchange, 412, "try again")
+              } else {
+                writeResponse(exchange, 200, "cafe")
+              }
+        ): HttpHandler,
       )
       server.start()
 
@@ -320,7 +320,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           observedIdempotencyKeys.add(
             Option(exchange.getRequestHeaders.getFirst("Idempotency-Key")).getOrElse("")
           )
@@ -329,7 +329,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           } else {
             writeResponse(exchange, 200, "cafe")
           }
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -367,21 +367,23 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange =>
-          if (attempts.incrementAndGet() == 1) {
-            exchange.getResponseHeaders.add("Retry-After", "5")
-            writeResponse(exchange, 429, "retry later")
-          } else {
-            writeResponse(exchange, 200, "cafe")
-          },
+        (
+            exchange =>
+              if (attempts.incrementAndGet() == 1) {
+                exchange.getResponseHeaders.add("Retry-After", "5")
+                writeResponse(exchange, 429, "retry later")
+              } else {
+                writeResponse(exchange, 200, "cafe")
+              }
+        ): HttpHandler,
       )
       server.start()
 
       try {
         val client = newClient(
           configFor(server).copy(
-            connectTimeout = PositiveFiniteDuration.ofMillis(10),
-            requestTimeout = PositiveFiniteDuration.ofMillis(50),
+            connectTimeout = PositiveFiniteDuration.ofSeconds(5),
+            requestTimeout = PositiveFiniteDuration.ofSeconds(5),
             maxRetries = NonNegativeInt.tryCreate(1),
             retryInitialDelay = NonNegativeFiniteDuration.ofMillis(1),
             retryMaxDelay = NonNegativeFiniteDuration.ofMillis(1),
@@ -406,10 +408,10 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           attempts.incrementAndGet()
           writeResponse(exchange, 503, "still unavailable")
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -445,10 +447,10 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           attempts.incrementAndGet()
           writeResponse(exchange, 401, "missing token")
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -486,10 +488,10 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
           server.createContext(
             "/",
-            exchange => {
+            (exchange => {
               attempts.incrementAndGet()
               writeResponse(exchange, statusCode, "beef00")
-            },
+            }): HttpHandler,
           )
           server.start()
 
@@ -528,7 +530,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           val body = "too late".getBytes(StandardCharsets.UTF_8)
           exchange.sendResponseHeaders(200, body.length.toLong)
           val responseBody = exchange.getResponseBody
@@ -544,7 +546,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
               case _: IOException => ()
             }
           }
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -595,11 +597,11 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
       server.createContext(
         "/",
-        exchange => {
+        (exchange => {
           attempts.incrementAndGet()
           writeResponse(exchange, 503, "try again")
           firstResponseReturned.countDown()
-        },
+        }): HttpHandler,
       )
       server.start()
 
@@ -849,7 +851,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           },
           _.warningMessage shouldBe
             "External call to extension 'missing-extension' (function 'function') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'missing-extension' not configured\", retryable = false)",
+            "status=404, retryable=false, message=Extension 'missing-extension' not configured",
         )
       } finally {
         manager.close()
@@ -938,7 +940,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
     new HttpExtensionServiceClient(
       extensionId = "test-extension",
       config = config,
-      httpClient = ExtensionServiceManager.createHttpClient(config),
+      httpClient = ExtensionServiceManager.createHttpClient(config)(ec),
       timeoutScheduler = scheduledExecutor(),
       performUnlessClosing = FlagCloseable(logger, timeouts),
       loggerFactory = loggerFactory,

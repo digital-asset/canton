@@ -112,7 +112,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   fakeModuleExpectingSilence,
 }
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
-import com.digitalasset.canton.util.MaxBytesToDecompress
+import com.digitalasset.canton.util.{MaxBytesToDecompress, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, LfTimestamp}
 import com.google.protobuf.ByteString
@@ -783,7 +783,6 @@ class OutputModuleTest
         sequencerFirstBlockOfEpoch,
         Map.empty,
       )(testedProtocolVersion)
-      val orderingTopology = OrderingTopology.forTesting(nodes = Set(BftNodeId("node1")))
       val oldCryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
       val outputEpochPolicy = mock[LeaderSelectionPolicy[ProgrammableUnitTestEnv]]
       val sequencerEpochPolicy = mock[LeaderSelectionPolicy[ProgrammableUnitTestEnv]]
@@ -862,30 +861,40 @@ class OutputModuleTest
           Some(TopologyActivationTime(sequencerTimestampOfEpoch)),
           checkPendingChanges = true,
         )
-      ).thenReturn(() => Some(orderingTopology -> oldCryptoProvider))
+      ).thenReturn(() => Some(defaultTestMembership.orderingTopology -> oldCryptoProvider))
       when(store.getLeaderSelectionPolicyState(sequencerEpochIsAt)).thenReturn(() =>
         Some(sequencerEpochBlacklistState)
       )
       when(
         leaderSelectionInitializer.leaderSelectionPolicy(
           sequencerEpochBlacklistState,
-          orderingTopology,
+          defaultTestMembership.orderingTopology,
         )
       )
         .thenReturn(sequencerEpochPolicy)
       when(
         leaderSelectionInitializer.leaderSelectionPolicy(
           outputEpochBlacklistState,
-          orderingTopology,
+          defaultTestMembership.orderingTopology,
         )
       )
         .thenReturn(outputEpochPolicy)
       when(outputEpochPolicy.firstBlockWeNeedToAdd).thenReturn(Some(outputBlockIsAt))
+      // Leaders and blacklisted nodes are used to emit metrics, so we need to mock them.
+      when(
+        sequencerEpochPolicy.getLeaders(defaultTestMembership.orderingTopology, sequencerEpochIsAt)
+      ).thenReturn(Seq(BftNodeId("node1")))
+      when(
+        sequencerEpochPolicy.getBlacklistedNodes(
+          defaultTestMembership.orderingTopology,
+          sequencerEpochIsAt,
+        )
+      ).thenReturn(Seq.empty)
 
       val output = createOutputModule(
         initialHeight = sequencerBlockIsAt,
         initialEpochWeHaveLeaderSelectionStateFor = outputEpochIsAt,
-        initialOrderingTopology = orderingTopology,
+        initialMembership = defaultTestMembership,
         blacklistLeaderSelectionPolicyState = Some(outputEpochBlacklistState),
         orderingTopologyProvider = orderingTopologyProvider,
         store = store,
@@ -1099,12 +1108,17 @@ class OutputModuleTest
             val store = spy(createOutputMetadataStore[ProgrammableUnitTestEnv])
             val topologyProviderMock = mock[OrderingTopologyProvider[ProgrammableUnitTestEnv]]
             val consensusRef = mock[ModuleRef[Consensus.Message[ProgrammableUnitTestEnv]]]
-            val newOrderingTopology =
-              OrderingTopology.forTesting(
-                nodes = Set(BftNodeId("node1")),
-                Option(SequencingParameters.Default),
-                topologyActivationTime,
-                areTherePendingCantonTopologyChanges = Some(pendingChanges),
+            val newMembership =
+              Membership(
+                BftNodeId("node1"),
+                OrderingTopology.forTesting(
+                  nodes = Set(BftNodeId("node1")),
+                  Option(SequencingParameters.Default),
+                  topologyActivationTime,
+                  areTherePendingCantonTopologyChanges = Some(pendingChanges),
+                ),
+                leaders = Seq(BftNodeId("node1")),
+                blacklistedNodes = Seq.empty,
               )
             val newCryptoProvider = failingCryptoProvider[ProgrammableUnitTestEnv]
             when(
@@ -1113,7 +1127,7 @@ class OutputModuleTest
                 checkPendingChanges = true,
               )
             )
-              .thenReturn(() => Some((newOrderingTopology, newCryptoProvider)))
+              .thenReturn(() => Some((newMembership.orderingTopology, newCryptoProvider)))
             val subscriptionBlocks = mutable.Queue.empty[Traced[BlockFormat.Block]]
             implicit val context
                 : ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
@@ -1173,8 +1187,8 @@ class OutputModuleTest
             context.runPipedMessagesThenVerifyAndReceiveOnModule(output) {
               _ shouldBe Output.UpdateLeaderSelection(
                 Output.TopologyFetched(
-                  EpochNumber(1L), // Epoch number
-                  newOrderingTopology,
+                  EpochNumber(1L),
+                  newMembership.orderingTopology,
                   newCryptoProvider,
                 )
               )
@@ -1182,8 +1196,8 @@ class OutputModuleTest
             val piped3 = context.runPipedMessages()
             piped3 should contain only
               Output.TopologyFetched(
-                EpochNumber(1L), // Epoch number
-                newOrderingTopology,
+                EpochNumber(1L),
+                newMembership.orderingTopology,
                 newCryptoProvider,
               )
 
@@ -1208,7 +1222,7 @@ class OutputModuleTest
                 case Seq(
                       Output.MetadataStoredForNewEpoch(
                         1L, // Epoch number
-                        `newOrderingTopology`,
+                        `newMembership`,
                         _, // A fake crypto provider instance
                       )
                     ) =>
@@ -1226,9 +1240,9 @@ class OutputModuleTest
             }
 
             verify(consensusRef, times(1)).asyncSend(
-              Consensus.NewEpochTopology(
+              Consensus.NewEpochMembership(
                 secondEpochNumber,
-                Membership.forTesting(BftNodeId("node1"), newOrderingTopology),
+                Membership.forTesting(BftNodeId("node1"), newMembership.orderingTopology),
                 any[CryptoProvider[ProgrammableUnitTestEnv]],
               )
             )(any[TraceContext], any[MetricsContext])
@@ -1453,7 +1467,6 @@ class OutputModuleTest
           spy(new FakeOrderingTopologyProvider[ProgrammableUnitTestEnv])
         val consensusRef = mock[ModuleRef[Consensus.Message[ProgrammableUnitTestEnv]]]
         val output = createOutputModule[ProgrammableUnitTestEnv](
-          initialOrderingTopology = OrderingTopology.forTesting(Set(BftNodeId("node1"))),
           orderingTopologyProvider = topologyProviderSpy,
           consensusRef = consensusRef,
           requestInspector = new FixedResultRequestInspector(false),
@@ -1484,7 +1497,7 @@ class OutputModuleTest
           any[TraceContext]
         )
         verify(consensusRef, times(1)).asyncSend(
-          Consensus.NewEpochTopology(
+          Consensus.NewEpochMembership(
             secondEpochNumber,
             Membership.forTesting(BftNodeId("node1")),
             any[CryptoProvider[ProgrammableUnitTestEnv]],
@@ -1503,7 +1516,6 @@ class OutputModuleTest
         val consensusRef = mock[ModuleRef[Consensus.Message[ProgrammableUnitTestEnv]]]
         val blockSubscription = new EmptyBlockSubscription()
         val output = createOutputModule[ProgrammableUnitTestEnv](
-          initialOrderingTopology = OrderingTopology.forTesting(Set(BftNodeId("node1"))),
           orderingTopologyProvider = topologyProviderSpy,
           consensusRef = consensusRef,
           requestInspector = new FixedResultRequestInspector(false),
@@ -1524,7 +1536,7 @@ class OutputModuleTest
         output.receive(Output.ProcessNewEpochTopologyMessagesIfPossible)
 
         verify(consensusRef, times(1)).asyncSend(
-          Consensus.NewEpochTopology(
+          Consensus.NewEpochMembership(
             secondEpochNumber,
             Membership.forTesting(BftNodeId("node1")),
             any[CryptoProvider[ProgrammableUnitTestEnv]],
@@ -1549,17 +1561,22 @@ class OutputModuleTest
         TopologyActivationTime(aTimestamp.plusMillis(2))
       val previousTopologyActivationTime =
         TopologyActivationTime(topologyActivationTime.value.minusSeconds(1L))
-      val topology = OrderingTopology(
-        nodesTopologyInfo = Map(
-          node1 -> nodeTopologyInfo(),
-          node2 -> nodeTopologyInfo(),
-          BftNodeId("node from the future") -> nodeTopologyInfo(),
+      val membership = Membership(
+        node1,
+        OrderingTopology(
+          nodesTopologyInfo = Map(
+            node1 -> nodeTopologyInfo(),
+            node2 -> nodeTopologyInfo(),
+            BftNodeId("node from the future") -> nodeTopologyInfo(),
+          ),
+          DefaultEpochLength,
+          SequencingParameters.Default,
+          defaultMaxBytesToDecompress, // irrelevant for this test
+          topologyActivationTime,
+          areTherePendingCantonTopologyChanges = Some(false),
         ),
-        DefaultEpochLength,
-        SequencingParameters.Default,
-        defaultMaxBytesToDecompress, // irrelevant for this test
-        topologyActivationTime,
-        areTherePendingCantonTopologyChanges = Some(false),
+        leaders = Seq(node1, node2),
+        blacklistedNodes = Seq.empty,
       )
       val firstKnownAt = Map(
         node1 -> node1ActivationTime,
@@ -1601,7 +1618,7 @@ class OutputModuleTest
 
       val output =
         createOutputModule[ProgrammableUnitTestEnv](
-          initialOrderingTopology = topology,
+          initialMembership = membership,
           store = store,
           epochStoreReader = epochStore,
           orderingTopologyProvider = new FakeOrderingTopologyProvider(Some(firstKnownAt)),
@@ -1631,7 +1648,11 @@ class OutputModuleTest
       )
       output.receive(
         UpdateLeaderSelection(
-          Output.TopologyFetched(EpochNumber(1L), topology, failingCryptoProvider)
+          Output.TopologyFetched(
+            EpochNumber(1L),
+            membership.orderingTopology,
+            failingCryptoProvider,
+          )
         )
       )
       context.runPipedMessagesUntilNoMorePiped(output)
@@ -1757,6 +1778,33 @@ class OutputModuleTest
     output.currentEpochCouldAlterOrderingTopology shouldBe true
   }
 
+  "receiving a 'GetOrderingTopology' message" should {
+    "return the ordering topology" in {
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+
+      val output = createOutputModule[ProgrammableUnitTestEnv]()()
+      output.receive(Output.Start)
+
+      val callbackCell = new SingleUseCell[Output.Admin.GetOrderingTopologyResponse]
+      def callback(response: Output.Admin.GetOrderingTopologyResponse): Unit =
+        callbackCell.putIfAbsent(response)
+
+      output.receive(Output.Admin.GetOrderingTopology(callback))
+
+      callbackCell.get shouldBe
+        Some(
+          Output.Admin.GetOrderingTopologyResponse(
+            Bootstrap.BootstrapEpochNumber,
+            defaultTestMembership.orderingTopology.nodes,
+            defaultTestMembership.leaders,
+            defaultTestMembership.blacklistedNodes,
+            defaultTestMembership.orderingTopology.sequencingParameters,
+          )
+        )
+    }
+  }
+
   private def completeBlockData(
       blockNumber: BlockNumber,
       commitTimestamp: CantonTimestamp,
@@ -1792,8 +1840,7 @@ class OutputModuleTest
   private def createOutputModule[E <: BaseIgnoringUnitTestEnv[E]](
       initialHeight: Long = BlockNumber.First,
       initialEpochWeHaveLeaderSelectionStateFor: Long = Bootstrap.BootstrapEpochNumber,
-      initialOrderingTopology: OrderingTopology =
-        OrderingTopology.forTesting(nodes = Set(BftNodeId("node1"))),
+      initialMembership: Membership = defaultTestMembership,
       availabilityRef: ModuleRef[Availability.Message[E]] = fakeModuleExpectingSilence,
       consensusRef: ModuleRef[Consensus.Message[E]] = fakeModuleExpectingSilence,
       store: OutputMetadataStore[E] = createOutputMetadataStore[E],
@@ -1828,7 +1875,7 @@ class OutputModuleTest
           testedProtocolVersion
         )
       ),
-      initialOrderingTopology,
+      initialMembership.orderingTopology,
     )
     val startupState =
       StartupState[E](
@@ -1838,7 +1885,7 @@ class OutputModuleTest
         previousBftTimeForOnboarding,
         areTherePendingTopologyChangesInOnboardingEpoch,
         failingCryptoProvider,
-        initialOrderingTopology,
+        initialMembership,
         initialLowerBound = None,
         leaderSelectionPolicy,
       )
@@ -1877,6 +1924,9 @@ class OutputModuleTest
 }
 
 object OutputModuleTest {
+
+  private def defaultTestMembership(implicit synchronizerProtocolVersion: ProtocolVersion) =
+    Membership.forTesting(BftNodeId("node1"))
 
   private class AccumulatingRequestInspector extends RequestInspector {
     // Ensure that `currentEpochCouldAlterOrderingTopology` accumulates correctly by processing

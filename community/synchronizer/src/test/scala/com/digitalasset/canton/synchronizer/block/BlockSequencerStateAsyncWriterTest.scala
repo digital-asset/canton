@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdown,

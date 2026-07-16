@@ -242,6 +242,70 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
                   .mkString(", ")}]."
           )
     }
+
+    @Explanation(
+      "This rejection is given when a request refers to an unknown synchronizer."
+    )
+    @Resolution("Use a connected synchronizer.")
+    object Synchronizer
+        extends ErrorCode(
+          id = "SYNCHRONIZER_NOT_FOUND",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+      final case class Reject(synchronizerId: String)(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(
+            cause = "Could not find synchronizer."
+          ) {
+
+        override def resources: Seq[(ErrorResource, String)] =
+          super.resources :+ ((ErrorResource.SynchronizerId, synchronizerId))
+      }
+
+    }
+
+    @Explanation(
+      "This rejection is given when signing keys for a party do not exist, or that party does not exist."
+    )
+    @Resolution("The party must exist in the synchronizer topology.")
+    object PartySigningKeys
+        extends ErrorCode(
+          id = "PARTY_SIGNING_KEYS_NOT_FOUND",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+      final case class Reject(partyId: String)(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(
+            cause = "Could not find signing keys for the requested party."
+          ) {
+
+        override def resources: Seq[(ErrorResource, String)] =
+          super.resources :+ ((ErrorResource.Party, partyId))
+      }
+    }
+
+    @Explanation(
+      "The completion does not exist or is not visible to the requesting user."
+    )
+    @Resolution(
+      "Check the transaction hash and verify that the requesting user has visibility over the completion."
+    )
+    object Completion
+        extends ErrorCode(
+          id = "COMPLETION_NOT_FOUND",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+
+      final case class RejectWithHash(hash: String)(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(
+            cause = "Completion not found, or not visible."
+          ) {
+        override def resources: Seq[(ErrorResource, String)] = Seq(
+          (ErrorResource.TransactionHash, hash)
+        )
+      }
+    }
   }
 
   @Explanation("This rejection is given when a read request tries to access pruned data.")

@@ -47,6 +47,7 @@ import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.Ach
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.backend.*
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{
@@ -93,6 +94,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
     maxOutputBatchedBufferSize: Int,
     maxTailerBatchSize: Int,
     postProcessingParallelism: Int,
+    parContractReadRowLock: DbLockMeta,
     achsConfig: Option[AchsConfig],
     metrics: LedgerApiServerMetrics,
     inMemoryStateUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
@@ -242,7 +244,13 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
           ),
           ingester = ingester(
             ingestFunction = ingestionStorageBackend.insertBatch,
-            lockUsedContracts = eventStorageBackend.readLockInternalContractIds,
+            lockUsedContracts = internalContractIds =>
+              implicit connection =>
+                implicit errorLoggingContext =>
+                  eventStorageBackend.readLockInternalContractIds(
+                    internalContractIds = internalContractIds,
+                    dbLockMeta = parContractReadRowLock,
+                  ),
             evictContractsFromCache = contractStore.contractsPruned,
             reassignmentOffsetPersistence = reassignmentOffsetPersistence,
             zeroDbBatch = ingestionStorageBackend.batch(
@@ -1055,7 +1063,7 @@ object ParallelIndexerSubscription {
 
   def ingester[DbBatch](
       ingestFunction: (Connection, DbBatch) => Unit,
-      lockUsedContracts: Set[Long] => Connection => Set[Long],
+      lockUsedContracts: Set[Long] => Connection => ErrorLoggingContext => Set[Long],
       evictContractsFromCache: Iterable[Long] => Unit,
       reassignmentOffsetPersistence: ReassignmentOffsetPersistence,
       zeroDbBatch: DbBatch,
@@ -1075,10 +1083,10 @@ object ParallelIndexerSubscription {
         .flatMap(_ =>
           dbDispatcher.executeSql(metrics.indexer.ingestion) { connection =>
             metrics.indexer.updates.inc(batch.batchSize.toLong)(MetricsContext.Empty)
-            val missingContracts = Timed.value(
-              metrics.indexer.ingestionBlockedByPruningDuration,
-              lockUsedContracts(batch.usedInternalContractIds)(connection),
-            )
+            val missingContracts =
+              lockUsedContracts(batch.usedInternalContractIds)(connection)(
+                ErrorLoggingContext(logger, implicitly)
+              )
             if (missingContracts.nonEmpty) {
               logger.info(
                 s"Found ${missingContracts.size} missing contracts during indexing. Likely because pruning. Restarting indexer to recover the missing contracts."

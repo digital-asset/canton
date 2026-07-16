@@ -11,6 +11,7 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{Epoch, ofEpochMilli}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.*

@@ -5,6 +5,7 @@ package com.digitalasset.canton.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedStringType}
 import com.digitalasset.canton.topology.SynchronizerId

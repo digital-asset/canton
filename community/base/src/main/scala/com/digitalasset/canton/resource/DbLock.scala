@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, PseudoRandom}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -422,7 +423,7 @@ trait DbLock extends NamedLogging with FlagCloseable with HasCloseContext {
     */
   def acquire()(implicit traceContext: TraceContext): EitherT[Future, DbLockError, Unit] =
     for {
-      _ <- transition(LockState.Free, LockState.Acquiring, acquireError).toEitherT
+      _ <- transition(LockState.Free, LockState.Acquiring, acquireError).toEitherT[Future]
       _ = logger.trace(s"Acquiring lock $lockId")
       _ <- acquireInternal().leftFlatMap(err => acquireInternalError[Unit](err).toEitherT)
       _ = transitionOrFail(LockState.Acquiring, LockState.Acquired)
@@ -437,7 +438,7 @@ trait DbLock extends NamedLogging with FlagCloseable with HasCloseContext {
     */
   def tryAcquire()(implicit traceContext: TraceContext): EitherT[Future, DbLockError, Boolean] =
     for {
-      _ <- transition(LockState.Free, LockState.Acquiring, acquireError).toEitherT
+      _ <- transition(LockState.Free, LockState.Acquiring, acquireError).toEitherT[Future]
       _ = logger.trace(s"Try acquiring lock $lockId")
       acquired <- tryAcquireInternal().leftFlatMap(err =>
         acquireInternalError[Boolean](err).toEitherT
@@ -456,7 +457,7 @@ trait DbLock extends NamedLogging with FlagCloseable with HasCloseContext {
   /** Explicitly release the lock. */
   def release()(implicit traceContext: TraceContext): EitherT[Future, DbLockError, Unit] =
     for {
-      _ <- transition(LockState.Acquired, LockState.Releasing, releaseError).toEitherT
+      _ <- transition(LockState.Acquired, LockState.Releasing, releaseError).toEitherT[Future]
       _ = logger.trace(s"Releasing lock $lockId")
       _ <- releaseInternal().leftFlatMap(err => releaseInternalError(err).toEitherT)
       _ = transitionOrFail(LockState.Releasing, LockState.Free)

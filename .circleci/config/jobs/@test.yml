@@ -55,7 +55,7 @@ variations_test:
         steps:
           - run:
               name: Skip test (except for selected users)
-              command: .circleci/skip-variations-test.sh
+              command: scripts/ci/skip-variations-test.sh
     - set_canton_protocol_version:
         protocol_version: << parameters.protocol_version >>
     - run_variations_tests:
@@ -276,7 +276,6 @@ temp_acs_commitment_tests_pv_dev:
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   steps:
-    - use_new_sequencer_aggregator
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |

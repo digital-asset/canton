@@ -331,6 +331,46 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/commands/completion-by-hash:
+    post:
+      description: |-
+        Look up a completion by its transaction hash.
+        This is only available for completions received after upgrading to Canton version 3.5.
+        A COMPLETION_NOT_FOUND error will be raised if either of the following is true:
+
+        - there is no completion with this transaction hash,
+        - the completion is not visible to the user,
+        - the completion was populated before upgrading to Canton version 3.5,
+        - respective completions are all pruned.
+      operationId: postV2CommandsCompletion-by-hash
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetCompletionByHashRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetCompletionByHashResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
   /v2/events/events-by-contract-id:
     post:
       description: |-
@@ -1072,12 +1112,47 @@ paths:
   /v2/state/active-contracts-page:
     get:
       description: |-
+        Deprecated
+
+        Use POST version of this endpoint
+      operationId: getV2StateActive-contracts-page
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetActiveContractsPageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsGetActiveContractsPageResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+    post:
+      description: |-
         Returns a page of the snapshot of the active contracts and incomplete (un)assignments at a ledger offset.
         Once all pages are fetched by repeated calls to ``GetActiveContractsPage``,
         the client SHOULD begin retrieving updates from the update service,
         starting at the ``GetActiveContractsPageResponse``.``active_at_offset`` specified in this request.
         Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
-      operationId: getV2StateActive-contracts-page
+      operationId: postV2StateActive-contracts-page
       requestBody:
         content:
           application/json:
@@ -2064,70 +2139,6 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
-  /v2/interactive-submission/preferred-package-version:
-    get:
-      description: |-
-        A preferred package is the highest-versioned package for a provided package-name
-        that is vetted by all the participants hosting the provided parties.
-
-        Ledger API clients should use this endpoint for constructing command submissions
-        that are compatible with the provided preferred package, by making informed decisions on:
-        - which are the compatible packages that can be used to create contracts
-        - which contract or exercise choice argument version can be used in the command
-        - which choices can be executed on a template or interface of a contract
-
-        Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.4.0
-      operationId: getV2Interactive-submissionPreferred-package-version
-      parameters:
-      - name: parties
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-      - name: package-name
-        in: query
-        required: true
-        schema:
-          type: string
-      - name: vetting_valid_at
-        in: query
-        required: false
-        schema:
-          type: string
-          format: date-time
-      - name: synchronizer-id
-        in: query
-        required: false
-        schema:
-          type: string
-      responses:
-        '200':
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetPreferredPackageVersionResponse'
-        '400':
-          description: 'Invalid value, Invalid value for: query parameter parties,
-            Invalid value for: query parameter package-name, Invalid value for: query
-            parameter vetting_valid_at, Invalid value for: query parameter synchronizer-id'
-          content:
-            text/plain:
-              schema:
-                type: string
-        default:
-          description: ''
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/JsCantonError'
-      security:
-      - httpAuth: []
-      - apiKeyAuth: []
   /v2/interactive-submission/preferred-packages:
     post:
       description: |-
@@ -2145,8 +2156,6 @@ paths:
         a `FAILED_PRECONDITION` error will be returned.
 
         Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
-
-        Experimental API: this endpoint is not guaranteed to provide backwards compatibility in future releases
       operationId: postV2Interactive-submissionPreferred-packages
       requestBody:
         content:
@@ -2247,6 +2256,61 @@ paths:
                 $ref: '#/components/schemas/GetContractResponse'
         '400':
           description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/jose/jwks/synchronizer/{synchronizer}/party/{party}:
+    get:
+      description: |-
+        Retrieve public keys as JWKS for a specific party and synchronizer.
+        This endpoint is experimental / alpha, therefore no backwards compatibility is guaranteed.
+      operationId: getV2JoseJwks
+      parameters:
+      - name: synchronizer
+        in: path
+        description: synchronizer from which to read the public keys
+        required: true
+        schema:
+          type: string
+      - name: party
+        in: path
+        description: party for which to retrieve the public keys
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                description: A JWKS as specified by RFC 7517
+                type: object
+                required:
+                - keys
+                properties:
+                  keys:
+                    description: |-
+                      List of JWKs for the specified party and synchronizer.
+                      Only keys of which the usage allows for Party JWT authentication will be returned.
+
+                      Optional: can be empty
+                    type: array
+                    items:
+                      description: A JSON object representing a JWK
+                      type: object
+        '400':
+          description: Invalid value
           content:
             text/plain:
               schema:
@@ -4191,6 +4255,40 @@ components:
 
             Optional: can be empty
           type: string
+    GetCompletionByHashRequest:
+      title: GetCompletionByHashRequest
+      type: object
+      required:
+      - transactionHash
+      properties:
+        transactionHash:
+          description: |-
+            The transaction hash of the prepared transaction whose completion is being looked up.
+
+            Required: must be non-empty
+          type: string
+    GetCompletionByHashResponse:
+      title: GetCompletionByHashResponse
+      type: object
+      properties:
+        acceptedCompletion:
+          $ref: '#/components/schemas/Completion1'
+          description: |-
+            The accepted completion for the given transaction hash (at most one can exist).
+            Only completions beyond the current pruning offset are visible.
+
+            Optional
+        lastRejectedCompletions:
+          description: |-
+            Recent rejected completions for the given transaction hash, in descending offset order.
+            The server may truncate this list if there are too many entries.
+            Use ``submission_id`` to correlate with a specific command submission.
+            Only completions beyond the current pruning offset are visible.
+
+            Optional: can be empty
+          type: array
+          items:
+            $ref: '#/components/schemas/Completion1'
     GetCompletionsRequest:
       title: GetCompletionsRequest
       type: object
@@ -4417,16 +4515,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PartyDetails'
-    GetPreferredPackageVersionResponse:
-      title: GetPreferredPackageVersionResponse
-      type: object
-      properties:
-        packagePreference:
-          $ref: '#/components/schemas/PackagePreference'
-          description: |-
-            Not populated when no preferred package is found
-
-            Optional
     GetPreferredPackagesRequest:
       title: GetPreferredPackagesRequest
       type: object
@@ -6728,26 +6816,6 @@ components:
           type: array
           items:
             type: string
-    PackagePreference:
-      title: PackagePreference
-      type: object
-      required:
-      - synchronizerId
-      - packageReference
-      properties:
-        packageReference:
-          $ref: '#/components/schemas/PackageReference'
-          description: |-
-            The package reference of the preferred package.
-
-            Required
-        synchronizerId:
-          description: |-
-            The synchronizer for which the preferred package was computed.
-            If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
-
-            Required
-          type: string
     PackageReference:
       title: PackageReference
       type: object

@@ -21,8 +21,9 @@ import com.digitalasset.canton.console.{
   InstanceReference,
 }
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
+import com.digitalasset.canton.crypto.admin.grpc.{BaseVaultRequest, PrivateKeyMetadata}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -35,7 +36,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.topology.{ExternalParty, Member, MemberCode, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 
@@ -80,12 +81,24 @@ class SecretKeyAdministration(
       filterName: String = "",
       filterPurpose: Set[KeyPurpose] = Set.empty,
       filterUsage: Set[SigningKeyUsage] = Set.empty,
-  ): Seq[PrivateKeyMetadata] =
+  ): Seq[PrivateKeyMetadata] = {
+    val nodeStatus = instance.health.status
+
     consoleEnvironment.run {
       adminCommand(
-        VaultAdminCommands.ListMyKeys(filterFingerprint, filterName, filterPurpose, filterUsage)
+        VaultAdminCommands.ListMyKeys(
+          baseRequest = BaseVaultRequest(
+            clientVersion = ReleaseVersion.current
+          ),
+          filterFingerprint = filterFingerprint,
+          filterName = filterName,
+          filterPurpose = filterPurpose,
+          filterUsage = filterUsage,
+          serverVersion = nodeStatus.releaseVersion,
+        )
       )
     }
+  }
 
   @Help.Summary("Generate new public/private key pair for signing and store it in the vault")
   @Help.Description(
@@ -110,8 +123,20 @@ class SecretKeyAdministration(
   ): SigningPublicKey =
     NonEmpty.from(usage) match {
       case Some(usageNE) =>
+        val nodeStatus = instance.health.status
+
         consoleEnvironment.run {
-          adminCommand(VaultAdminCommands.GenerateSigningKey(name, usageNE, keySpec))
+          adminCommand(
+            VaultAdminCommands.GenerateSigningKey(
+              baseRequest = BaseVaultRequest(
+                clientVersion = ReleaseVersion.current
+              ),
+              name = name,
+              usage = usageNE,
+              keySpec = keySpec,
+              serverVersion = nodeStatus.releaseVersion,
+            )
+          )
         }
       case None => throw new IllegalArgumentException("no signing key usage specified")
     }
@@ -157,8 +182,20 @@ class SecretKeyAdministration(
   ): SigningPublicKey =
     NonEmpty.from(usage) match {
       case Some(usageNE) =>
+        val nodeStatus = instance.health.status
+
         consoleEnvironment.run {
-          adminCommand(VaultAdminCommands.RegisterKmsSigningKey(kmsKeyId, usageNE, name))
+          adminCommand(
+            VaultAdminCommands.RegisterKmsSigningKey(
+              baseRequest = BaseVaultRequest(
+                clientVersion = ReleaseVersion.current
+              ),
+              kmsKeyId = kmsKeyId,
+              usage = usageNE,
+              name = name,
+              serverVersion = nodeStatus.releaseVersion,
+            )
+          )
         }
       case None => throw new IllegalArgumentException("no signing key usage specified")
     }
@@ -666,6 +703,7 @@ class GlobalSecretKeyAdministration(
 }
 
 class PublicKeyAdministration(
+    instance: InstanceReference,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
 ) extends Helpful {
@@ -739,17 +777,24 @@ class PublicKeyAdministration(
       filterContext: String = "",
       filterPurpose: Set[KeyPurpose] = Set.empty,
       filterUsage: Set[SigningKeyUsage] = Set.empty,
-  ): Seq[PublicKeyWithName] =
+  ): Seq[PublicKeyWithName] = {
+    val nodeStatus = instance.health.status
+
     consoleEnvironment.run {
       adminCommand(
         VaultAdminCommands.ListPublicKeys(
-          filterFingerprint,
-          filterContext,
-          filterPurpose,
-          filterUsage,
+          baseRequest = BaseVaultRequest(
+            clientVersion = ReleaseVersion.current
+          ),
+          filterFingerprint = filterFingerprint,
+          filterName = filterContext,
+          filterPurpose = filterPurpose,
+          filterUsage = filterUsage,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
+  }
 
   @Help.Summary("List active owners with keys for given search arguments")
   @Help.Description(
@@ -769,7 +814,14 @@ class PublicKeyAdministration(
   ): Seq[ListKeyOwnersResult] = consoleEnvironment.run {
     adminCommand(
       TopologyAdminCommands.Aggregation
-        .ListKeyOwners(synchronizerIds, filterKeyOwnerType, filterKeyOwnerUid, asOf, limit)
+        .ListKeyOwners(
+          synchronizerIds,
+          filterKeyOwnerType,
+          filterKeyOwnerUid,
+          asOf,
+          limit,
+          clientVersion = ReleaseVersion.current,
+        )
     )
   }
 
@@ -793,6 +845,7 @@ class PublicKeyAdministration(
           filterKeyOwnerUid = keyOwner.uid.toProtoPrimitive,
           asOf,
           limit,
+          clientVersion = ReleaseVersion.current,
         )
       )
     }
@@ -806,7 +859,7 @@ class KeyAdministrationGroup(
 ) extends Helpful {
 
   private lazy val publicAdmin =
-    new PublicKeyAdministration(runner, consoleEnvironment)
+    new PublicKeyAdministration(instance, runner, consoleEnvironment)
   private lazy val secretAdmin =
     new SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory)
 

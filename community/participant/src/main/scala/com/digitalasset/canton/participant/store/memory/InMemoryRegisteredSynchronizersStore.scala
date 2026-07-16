@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.RegisteredSynchronizersStore
 import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore.{

@@ -3,16 +3,24 @@
 
 package com.digitalasset.canton.console
 
+import com.typesafe.scalalogging.Logger
+
 import scala.collection.mutable
 import scala.sys.process.ProcessLogger
 
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
-class SplitBufferedProcessLogger extends ProcessLogger {
+class SplitBufferedProcessLogger(logger: Option[Logger]) extends ProcessLogger {
   private val stdoutBuffer = mutable.Buffer[String]()
   private val stderrBuffer = mutable.Buffer[String]()
 
-  override def out(s: => String): Unit = synchronized(stdoutBuffer.append(s))
-  override def err(s: => String): Unit = synchronized(stderrBuffer.append(s))
+  override def out(s: => String): Unit = {
+    logger.foreach(_.info(s))
+    synchronized(stdoutBuffer.append(s))
+  }
+  override def err(s: => String): Unit = {
+    logger.foreach(_.error(s))
+    synchronized(stderrBuffer.append(s))
+  }
   override def buffer[T](f: => T): T = f
 
   /** Output the buffered stdout content to a String applying an optional line prefix.

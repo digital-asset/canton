@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.manual
 
 import cats.data.NonEmptyList
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.tests.manual.S3Synchronization.ContinuityDumpRef
 import com.digitalasset.canton.util.ReleaseUtils
@@ -47,7 +46,6 @@ final class BasicDataContinuityTestPostgresShard4
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).fourth
 }
 
-@UnstableTest // TODO(i33868): remove this once the test is no longer flaky
 final class SynchronizerChangeDataContinuityTestPostgresShard1
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
@@ -56,7 +54,6 @@ final class SynchronizerChangeDataContinuityTestPostgresShard1
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).first
 }
 
-@UnstableTest // TODO(i33868): remove this once the test is no longer flaky
 final class SynchronizerChangeDataContinuityTestPostgresShard2
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
@@ -65,7 +62,6 @@ final class SynchronizerChangeDataContinuityTestPostgresShard2
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).second
 }
 
-@UnstableTest // TODO(i33868): remove this once the test is no longer flaky
 final class SynchronizerChangeDataContinuityTestPostgresShard3
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
@@ -75,7 +71,6 @@ final class SynchronizerChangeDataContinuityTestPostgresShard3
     SplitReleaseVersion.split(S3Dump.getDumpDirectories()).third
 }
 
-@UnstableTest // TODO(i33868): remove this once the test is no longer flaky
 final class SynchronizerChangeDataContinuityTestPostgresShard4
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {

@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.store.EncryptedCryptoPrivateStore
 import com.digitalasset.canton.error.FatalError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
   CloseContext,

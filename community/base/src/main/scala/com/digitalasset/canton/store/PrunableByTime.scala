@@ -5,6 +5,7 @@ package com.digitalasset.canton.store
 
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}

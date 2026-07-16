@@ -51,7 +51,7 @@ object SecureRandomness extends PrettyPrintingCompanion[SecureRandomness] {
   /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
     * implement this method.
     */
-  override val pretty: Pretty[SecureRandomness] = prettyOfClass(
+  override protected val pretty: Pretty[SecureRandomness] = prettyOfClass(
     unnamedParam(_.unwrap)
   )
 

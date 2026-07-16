@@ -38,6 +38,7 @@ class V2_2(override val testDars: TestDars) extends AvailableTests {
       new InterfaceIT(testDars),
       new InterfaceSubscriptionsIT(testDars),
       new InterfaceSubscriptionsWithEventBlobsIT(testDars),
+      new JoseServiceIT,
       new LimitsIT,
       new MultiPartySubmissionIT,
       new PackageManagementServiceIT(testDars),

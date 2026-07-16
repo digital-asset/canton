@@ -288,7 +288,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
         currentOffset.increment -> (acc :+ currentOffset)
       case ((currentOffset, acc), _) => (currentOffset.increment, acc)
     }
-    restartIndexer(incompleteOffsets = incompleteOffsetAcc._2)
+    restartServices(serviceParams.copy(incompleteOffsets = incompleteOffsetAcc._2))
     ingestUpdates(updates*)
   }
 

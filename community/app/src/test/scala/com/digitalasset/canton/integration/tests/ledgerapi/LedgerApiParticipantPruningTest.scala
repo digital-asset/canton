@@ -17,13 +17,16 @@ import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.ParticipantSynchronizerLimits
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.damltests.java.test
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByOwner
+import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipantConfigs_
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -98,6 +101,12 @@ trait LedgerApiParticipantPruningTest
         ConfigTransforms.updateMaxDeduplicationDurations(transactionTolerance.asJava),
         lowerLedgerApiServerBatchSize,
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        updateAllParticipantConfigs_(
+          _.focus(_.ledgerApi.indexService.pruningDbLockTimeout)
+            .replace(config.PositiveFiniteDuration.ofMillis(2500))
+            .focus(_.ledgerApi.indexService.contractPruningDbLockTimeout)
+            .replace(config.PositiveFiniteDuration.ofMillis(2400))
+        ),
       )
       .withSetup { implicit env =>
         import env.*
@@ -131,8 +140,29 @@ trait LedgerApiParticipantPruningTest
         participants.all.dars.upload(CantonTestsPath, synchronizerId = Some(acmeId))
       }
 
+  // this will capture the release function of the ACCESS SHARE table locks for several tables to simulate pg_dump style locks on the participant database for the whole integration tests
+  private val releasePgDumpLockOnParticipant1: AtomicReference[() => Unit] =
+    new AtomicReference(() => ())
+
   "ledger pruning prevents access to pruned transactions and completions" in { implicit env =>
     import env.*
+
+    // for the whole test-run of this integration test we start with allocating ACCESS SHARE lock on all tables which are involved in pruning related locks
+    // - par_contracts for read/write row locking
+    // - lapi_pruning_candidate_deactivated for ACCESS ROW EXCLUSIVE table locks, lightweight vacuuming and reindexing
+    // - lapi_pruning_contract_candidate for ACCESS ROW EXCLUSIVE table locks, lightweight vacuuming and reindexing
+    // this simulates the situation in production by pg_dump, what holds ACCESS SHARE locks on all tables for extended period of time
+    val pgDumpLocks = withConnectionForTest(participant1) { c =>
+      SQL"LOCK TABLE lapi_pruning_candidate_deactivated IN ACCESS SHARE MODE"
+        .executeUpdate()(c)
+        .discard
+      SQL"LOCK TABLE lapi_pruning_contract_candidate IN ACCESS SHARE MODE"
+        .executeUpdate()(c)
+        .discard
+      SQL"LOCK TABLE par_contracts IN ACCESS SHARE MODE".executeUpdate()(c).discard
+    }
+    releasePgDumpLockOnParticipant1.set(() => pgDumpLocks.commitAndClose())
+
     val beforeLedgerTime = {
       val simClock = environment.simClock.value
       val ts = simClock.now
@@ -180,10 +210,9 @@ trait LedgerApiParticipantPruningTest
     val lockedPruning = withConnectionForTest(participant1)(lockPruning(participant1))
 
     // Prune and remember offsets.
-    val pruneF = Future(participant1.pruning.prune(offsetAtTheBeginning))
-    val (participant, offsetToPruneUpTo) = (participant1, pruningOffset)
+    val pruneTimeoutF = Future(participant1.pruning.prune(offsetAtTheBeginning))
     Threading.sleep(1000)
-    pruneF.value shouldBe None
+    pruneTimeoutF.value shouldBe None
 
     // If pruning did not finish, we expect ParticipantPruningInProgress error on subsequent API calls
     loggerFactory.assertThrowsAndLogs[CommandFailure](
@@ -191,10 +220,43 @@ trait LedgerApiParticipantPruningTest
       logEntry => logEntry.errorMessage should include(ParticipantPruningInProgress.id),
     )
 
-    // As unlocking, pruning finishes
-    pruneF.value shouldBe None
+    // Waiting more will kick in the lock timeout
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      throw pruneTimeoutF.failed.futureValue,
+      logEntry => {
+        logEntry.errorMessage should include("INDEX_DB_LOCK_TIMEOUT_ERROR")
+        logEntry.errorMessage should include(
+          "Acquisition of DB Lock timed out (timeout config: \"index-service-config.pruning-db-lock-timeout\": 2500 ms). Lock description: exclusive table lock on pruning table"
+        )
+      },
+      _.warningMessage should include("Pruning failed"),
+      _.errorMessage should include("Unhandled internal error"),
+      _.errorMessage should include("failed with INTERNAL/An error occurred"),
+      _.errorMessage should include("Request failed for participant1."),
+    )
+
+    // As unlocking pruning lock and locking contract-pruning lock, pruning gets blocked again
     lockedPruning.commitAndClose()
-    pruneF.futureValue
+    val lockedContractPruning =
+      withConnectionForTest(participant1)(lockContractPruning(participant1))
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      participant1.pruning.prune(offsetAtTheBeginning),
+      logEntry => {
+        logEntry.errorMessage should include("INDEX_DB_LOCK_TIMEOUT_ERROR")
+        logEntry.errorMessage should include(
+          "Acquisition of DB Lock timed out (timeout config: \"index-service-config.contract-pruning-db-lock-timeout\": 2400 ms). Lock description: exclusive table lock on contract pruning table"
+        )
+      },
+      _.warningMessage should include("Pruning failed"),
+      _.errorMessage should include("Unhandled internal error"),
+      _.errorMessage should include("failed with INTERNAL/An error occurred"),
+      _.errorMessage should include("Request failed for participant1."),
+    )
+
+    // As unlocking, and starting pruning again, pruning finishes
+    lockedContractPruning.commitAndClose()
+    participant1.pruning.prune(offsetAtTheBeginning)
+
     participant1.testing.state_inspection.internalContractIdOf(cidBeginningContractId) shouldBe None
     val cidMiddleInternalContractIdOpt =
       participant1.testing.state_inspection.internalContractIdOf(cidMiddleContractId)
@@ -207,7 +269,7 @@ trait LedgerApiParticipantPruningTest
 
     // Pruning fails if contract pruning cannot resolve the optimistic lock after retries
     loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.pruning.prune(offsetToPruneUpTo),
+      participant1.pruning.prune(pruningOffset),
       logEntry => logEntry.errorMessage should include(ParticipantContractPruningBlocked.id),
     )
 
@@ -221,14 +283,14 @@ trait LedgerApiParticipantPruningTest
     // As unlocking contract, repeated pruning finishes successfully: this time the event pruning is a noop,
     // but the contract candidates will be pruned after.
     contractLock.commitAndClose()
-    participant1.pruning.prune(offsetToPruneUpTo)
+    participant1.pruning.prune(pruningOffset)
 
     // And contract is indeed pruned from the contract store
     participant1.testing.state_inspection.internalContractIdOf(cidMiddleContractId) shouldBe None
 
     // user-manual-entry-begin: ManualPruneParticipantNodePrune
     // The prune() method prunes more comprehensively and should be used in most cases.
-    participant1.pruning.prune(offsetToPruneUpTo)
+    participant1.pruning.prune(pruningOffset)
 
     // user-manual-entry-end: ManualPruneParticipantNodePrune
     logger.info(s"pruned at $pruningOffset")
@@ -530,6 +592,11 @@ trait LedgerApiParticipantPruningTest
       // pruning before assign so that referential integrity is restored
       waitUntilSafeToPrune(participant1, Some(pruningOffset))
       participant1.pruning.prune(pruningOffset)
+
+      releasePgDumpLockOnParticipant1.get()()
+      logger.info(
+        "Releasing pg_dump style lock from the critical tables. If the test is successful at this point is proving pg_dump is not interfering with all table and row locks used for pruning."
+      )
   }
 
   private def waitUntilSafeToPrune(

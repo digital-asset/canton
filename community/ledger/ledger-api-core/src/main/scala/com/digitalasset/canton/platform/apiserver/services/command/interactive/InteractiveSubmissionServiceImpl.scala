@@ -37,6 +37,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SubmissionResult
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.*
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,

@@ -7,7 +7,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   CostEstimation,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionRequest,
   InteractiveSubmissionServiceGrpc,
   MinLedgerTime,
 }
@@ -28,7 +27,6 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf
 import io.circe.*
@@ -39,7 +37,6 @@ import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
 import sttp.tapir.{AnyEndpoint, Endpoint, Schema, stringToPath}
 
-import java.time.Instant
 import scala.concurrent.{ExecutionContext, Future}
 
 @SuppressWarnings(Array("com.digitalasset.canton.DirectGrpcServiceInvocation"))
@@ -78,10 +75,6 @@ class JsInteractiveSubmissionService(
     withServerLogic(
       JsInteractiveSubmissionService.executeAndWaitForTransactionEndpoint,
       executeAndWaitForTransaction,
-    ),
-    withServerLogic(
-      JsInteractiveSubmissionService.preferredPackageVersionEndpoint,
-      preferredPackageVersion,
     ),
     withServerLogic(
       JsInteractiveSubmissionService.preferredPackagesEndpoint,
@@ -143,26 +136,6 @@ class JsInteractiveSubmissionService(
         .toJson(grpcResp)
         .resultToRight
     } yield jsonResp
-  }
-
-  private def preferredPackageVersion(
-      callerContext: CallerContext
-  ): TracedInput[(List[String], String, Option[Instant], Option[String])] => Future[
-    Either[JsCantonError, interactive_submission_service.GetPreferredPackageVersionResponse]
-  ] = { (tracedInput: TracedInput[(List[String], String, Option[Instant], Option[String])]) =>
-    implicit val token: Option[String] = callerContext.token()
-    implicit val tc: TraceContext = callerContext.traceContext()
-    val (parties, packageName, vettingValidAt, synchronizerId) = tracedInput.in
-    interactiveSubmissionServiceClient(token)
-      .getPreferredPackageVersion(
-        GetPreferredPackageVersionRequest(
-          parties = parties,
-          packageName = packageName,
-          vettingValidAt = vettingValidAt.map(ProtoConverter.InstantConverter.toProtoPrimitive),
-          synchronizerId = synchronizerId.getOrElse(""),
-        )
-      )
-      .resultToRight
   }
 
   private def preferredPackages(
@@ -247,13 +220,6 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
 
   private lazy val interactiveSubmission =
     v2Endpoint.in(sttp.tapir.stringToPath("interactive-submission"))
-  private lazy val preferredPackageVersion =
-    interactiveSubmission.in(sttp.tapir.stringToPath("preferred-package-version"))
-
-  private val partiesQueryParam = "parties"
-  private val packageNameQueryParam = "package-name"
-  private val timestampVettingValidityQueryParam = "vetting_valid_at"
-  private val synchronizerIdQueryParam = "synchronizer-id"
 
   private lazy val preferredPackages =
     interactiveSubmission.in(sttp.tapir.stringToPath("preferred-packages"))
@@ -314,17 +280,6 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
       interactive_submission_service.InteractiveSubmissionServiceGrpc.METHOD_EXECUTE_SUBMISSION_AND_WAIT_FOR_TRANSACTION
     )
 
-  val preferredPackageVersionEndpoint =
-    preferredPackageVersion.get
-      .in(sttp.tapir.query[List[String]](partiesQueryParam))
-      .in(sttp.tapir.query[String](packageNameQueryParam))
-      .in(sttp.tapir.query[Option[Instant]](timestampVettingValidityQueryParam))
-      .in(sttp.tapir.query[Option[String]](synchronizerIdQueryParam))
-      .out(jsonBody[interactive_submission_service.GetPreferredPackageVersionResponse])
-      .protoRef(
-        interactive_submission_service.InteractiveSubmissionServiceGrpc.METHOD_GET_PREFERRED_PACKAGE_VERSION
-      )
-
   val preferredPackagesEndpoint =
     preferredPackages.post
       .in(jsonBody[interactive_submission_service.GetPreferredPackagesRequest])
@@ -339,7 +294,6 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
       executeEndpoint,
       executeAndWaitEndpoint,
       executeAndWaitForTransactionEndpoint,
-      preferredPackageVersionEndpoint,
       preferredPackagesEndpoint,
     )
 }
@@ -438,11 +392,6 @@ object JsInteractiveSubmissionServiceCodecs {
 
   implicit val packageReference: Codec[package_reference.PackageReference] =
     deriveCodec
-  implicit val packagePreference: Codec[interactive_submission_service.PackagePreference] =
-    deriveRelaxedCodec
-  implicit val getPreferredPackageVersionResponse
-      : Codec[interactive_submission_service.GetPreferredPackageVersionResponse] =
-    deriveRelaxedCodec
 
   implicit val packageVettingRequirement
       : Codec[interactive_submission_service.PackageVettingRequirement] =

@@ -19,6 +19,7 @@ import com.digitalasset.canton.crypto.kms.{
   KmsSigningPublicKey,
 }
 import com.digitalasset.canton.health.ComponentHealthState
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext

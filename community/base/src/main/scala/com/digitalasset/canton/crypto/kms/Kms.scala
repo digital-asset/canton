@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{ExponentialBackoffConfig, KmsConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.health.CloseableAtomicHealthComponent
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
@@ -46,7 +47,7 @@ object KmsKeyId extends PrettyPrintingCompanion[KmsKeyId] {
   implicit val kmsKeyIdReader: ConfigReader[KmsKeyId] =
     String300.lengthLimitedStringReader.map(KmsKeyId.apply)
 
-  override val pretty: Pretty[KmsKeyId] = prettyOfClass(
+  override protected val pretty: Pretty[KmsKeyId] = prettyOfClass(
     unnamedParam(_.str.unwrap.unquoted)
   )
 
@@ -554,7 +555,7 @@ object KmsError {
       KmsCreateClientError
   }
   object KmsCreateClientError extends PrettyPrintingCompanion[KmsCreateClientError] {
-    override val pretty: Pretty[KmsCreateClientError] =
+    override protected val pretty: Pretty[KmsCreateClientError] =
       prettyOfClass(param("reason", _.reason.unquoted))
   }
 
@@ -564,7 +565,7 @@ object KmsError {
   }
   object KmsMissingSupportedSpecsError
       extends PrettyPrintingCompanion[KmsMissingSupportedSpecsError] {
-    override val pretty: Pretty[KmsMissingSupportedSpecsError] =
+    override protected val pretty: Pretty[KmsMissingSupportedSpecsError] =
       prettyOfClass(param("reason", _.reason.unquoted))
   }
 
@@ -573,7 +574,7 @@ object KmsError {
       KmsCreateKeyRequestError
   }
   object KmsCreateKeyRequestError extends PrettyPrintingCompanion[KmsCreateKeyRequestError] {
-    override val pretty: Pretty[KmsCreateKeyRequestError] =
+    override protected val pretty: Pretty[KmsCreateKeyRequestError] =
       prettyOfClass(param("reason", _.reason.unquoted))
   }
 
@@ -582,7 +583,7 @@ object KmsError {
     override def prettyCompanion: PrettyPrintingCompanion[KmsCreateKeyError] = KmsCreateKeyError
   }
   object KmsCreateKeyError extends PrettyPrintingCompanion[KmsCreateKeyError] {
-    override val pretty: Pretty[KmsCreateKeyError] =
+    override protected val pretty: Pretty[KmsCreateKeyError] =
       prettyOfClass(param("reason", _.reason.unquoted))
   }
 
@@ -591,7 +592,7 @@ object KmsError {
       KmsCannotFindKeyError
   }
   object KmsCannotFindKeyError extends PrettyPrintingCompanion[KmsCannotFindKeyError] {
-    override val pretty: Pretty[KmsCannotFindKeyError] =
+    override protected val pretty: Pretty[KmsCannotFindKeyError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -603,7 +604,7 @@ object KmsError {
     override def prettyCompanion: PrettyPrintingCompanion[KmsKeyDisabledError] = KmsKeyDisabledError
   }
   object KmsKeyDisabledError extends PrettyPrintingCompanion[KmsKeyDisabledError] {
-    override val pretty: Pretty[KmsKeyDisabledError] =
+    override protected val pretty: Pretty[KmsKeyDisabledError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -612,7 +613,7 @@ object KmsError {
       KmsGetPublicKeyRequestError
   }
   object KmsGetPublicKeyRequestError extends PrettyPrintingCompanion[KmsGetPublicKeyRequestError] {
-    override val pretty: Pretty[KmsGetPublicKeyRequestError] =
+    override protected val pretty: Pretty[KmsGetPublicKeyRequestError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -625,7 +626,7 @@ object KmsError {
       KmsGetPublicKeyError
   }
   object KmsGetPublicKeyError extends PrettyPrintingCompanion[KmsGetPublicKeyError] {
-    override val pretty: Pretty[KmsGetPublicKeyError] =
+    override protected val pretty: Pretty[KmsGetPublicKeyError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -634,7 +635,7 @@ object KmsError {
       KmsEncryptRequestError
   }
   object KmsEncryptRequestError extends PrettyPrintingCompanion[KmsEncryptRequestError] {
-    override val pretty: Pretty[KmsEncryptRequestError] =
+    override protected val pretty: Pretty[KmsEncryptRequestError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
 
   }
@@ -647,7 +648,7 @@ object KmsError {
     override def prettyCompanion: PrettyPrintingCompanion[KmsEncryptError] = KmsEncryptError
   }
   object KmsEncryptError extends PrettyPrintingCompanion[KmsEncryptError] {
-    override val pretty: Pretty[KmsEncryptError] =
+    override protected val pretty: Pretty[KmsEncryptError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -656,7 +657,7 @@ object KmsError {
       KmsDecryptRequestError
   }
   object KmsDecryptRequestError extends PrettyPrintingCompanion[KmsDecryptRequestError] {
-    override val pretty: Pretty[KmsDecryptRequestError] =
+    override protected val pretty: Pretty[KmsDecryptRequestError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -668,7 +669,7 @@ object KmsError {
     override def prettyCompanion: PrettyPrintingCompanion[KmsDecryptError] = KmsDecryptError
   }
   object KmsDecryptError extends PrettyPrintingCompanion[KmsDecryptError] {
-    override val pretty: Pretty[KmsDecryptError] =
+    override protected val pretty: Pretty[KmsDecryptError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -676,7 +677,7 @@ object KmsError {
     override def prettyCompanion: PrettyPrintingCompanion[KmsSignRequestError] = KmsSignRequestError
   }
   object KmsSignRequestError extends PrettyPrintingCompanion[KmsSignRequestError] {
-    override val pretty: Pretty[KmsSignRequestError] =
+    override protected val pretty: Pretty[KmsSignRequestError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -688,7 +689,7 @@ object KmsError {
     override def prettyCompanion: PrettyPrintingCompanion[KmsSignError] = KmsSignError
   }
   object KmsSignError extends PrettyPrintingCompanion[KmsSignError] {
-    override val pretty: Pretty[KmsSignError] =
+    override protected val pretty: Pretty[KmsSignError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -697,7 +698,7 @@ object KmsError {
       KmsDeleteKeyRequestError
   }
   object KmsDeleteKeyRequestError extends PrettyPrintingCompanion[KmsDeleteKeyRequestError] {
-    override val pretty: Pretty[KmsDeleteKeyRequestError] =
+    override protected val pretty: Pretty[KmsDeleteKeyRequestError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -710,7 +711,7 @@ object KmsError {
   }
 
   object KmsDeleteKeyError extends PrettyPrintingCompanion[KmsDeleteKeyError] {
-    override val pretty: Pretty[KmsDeleteKeyError] =
+    override protected val pretty: Pretty[KmsDeleteKeyError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -721,7 +722,7 @@ object KmsError {
   }
   object KmsRetrieveKeyMetadataRequestError
       extends PrettyPrintingCompanion[KmsRetrieveKeyMetadataRequestError] {
-    override val pretty: Pretty[KmsRetrieveKeyMetadataRequestError] =
+    override protected val pretty: Pretty[KmsRetrieveKeyMetadataRequestError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -734,7 +735,7 @@ object KmsError {
       KmsRetrieveKeyMetadataError
   }
   object KmsRetrieveKeyMetadataError extends PrettyPrintingCompanion[KmsRetrieveKeyMetadataError] {
-    override val pretty: Pretty[KmsRetrieveKeyMetadataError] =
+    override protected val pretty: Pretty[KmsRetrieveKeyMetadataError] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 
@@ -743,7 +744,7 @@ object KmsError {
       KmsFailedConversionError
   }
   object KmsFailedConversionError extends PrettyPrintingCompanion[KmsFailedConversionError] {
-    override val pretty: Pretty[KmsFailedConversionError] =
+    override protected val pretty: Pretty[KmsFailedConversionError] =
       prettyOfClass(param("purpose", _.purpose), param("reason", _.reason.unquoted))
   }
 

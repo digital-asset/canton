@@ -16,6 +16,7 @@ import com.daml.ledger.api.testtool.infrastructure.time.{
 import com.daml.ledger.api.testtool.infrastructure.{
   ChannelEndpoint,
   ExternalParty,
+  ExternalPartyKeySpec,
   FutureAssertions,
   Identification,
   LedgerServices,
@@ -37,6 +38,8 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionByHashRequest,
+  GetCompletionByHashResponse,
   GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
@@ -63,8 +66,6 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionRequest,
-  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
@@ -74,6 +75,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionResponse,
   SinglePartySignatures,
 }
+import com.daml.ledger.api.v2.jose_service.{GetJwksRequest, GetJwksResponse}
 import com.daml.ledger.api.v2.package_service.*
 import com.daml.ledger.api.v2.state_service.*
 import com.daml.ledger.api.v2.testing.time_service.{GetTimeRequest, SetTimeRequest}
@@ -101,7 +103,7 @@ import io.grpc.protobuf.StatusProto
 import io.grpc.stub.StreamObserver
 import io.scalaland.chimney.dsl.*
 
-import java.security.{KeyPair, KeyPairGenerator, Signature}
+import java.security.KeyPair
 import java.time.{Clock, Instant}
 import java.util.List as JList
 import scala.concurrent.duration.DurationInt
@@ -265,21 +267,6 @@ final class SingleParticipantTestContext private[participant] (
       executeSubmissionAndWaitForTransactionRequest
     )
 
-  override def getPreferredPackageVersion(
-      parties: Seq[Party],
-      packageName: String,
-      vettingValidAt: Option[Instant] = None,
-      synchronizerIdO: Option[String] = None,
-  ): Future[GetPreferredPackageVersionResponse] =
-    services.interactiveSubmission.getPreferredPackageVersion(
-      new GetPreferredPackageVersionRequest(
-        parties = parties.map(_.getValue),
-        packageName = packageName,
-        synchronizerId = synchronizerIdO.getOrElse(""),
-        vettingValidAt = vettingValidAt.map(_.asProtobuf),
-      )
-    )
-
   override def getPreferredPackages(
       vettingRequirements: Map[String, Seq[Party]],
       vettingValidAt: Option[Instant] = None,
@@ -301,6 +288,7 @@ final class SingleParticipantTestContext private[participant] (
   override def generateExternalPartyTopologyRequest(
       namespacePublicKey: Array[Byte],
       partyIdHint: Option[String] = None,
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[GenerateExternalPartyTopologyResponse] =
     for {
       syncIds <- getConnectedSynchronizers(None, None)
@@ -311,10 +299,9 @@ final class SingleParticipantTestContext private[participant] (
           partyHint = partyIdHint.getOrElse(nextPartyHintId()),
           publicKey = Some(
             lapicrypto.SigningPublicKey(
-              format =
-                lapicrypto.CryptoKeyFormat.CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO,
+              format = keySpec.keyFormat,
               keyData = ByteString.copyFrom(namespacePublicKey),
-              keySpec = lapicrypto.SigningKeySpec.SIGNING_KEY_SPEC_EC_CURVE25519,
+              keySpec = keySpec.keySpec,
             )
           ),
           localParticipantObservationOnly = false,
@@ -329,13 +316,15 @@ final class SingleParticipantTestContext private[participant] (
       keyPair: KeyPair,
       partyIdHint: Option[String] = None,
       synchronizer: String = "",
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[AllocateExternalPartyRequest] = {
-    val signing = Signature.getInstance("Ed25519")
+    val signing = keySpec.signatureInstance()
     signing.initSign(keyPair.getPrivate)
     for {
       onboardingTransactions <- generateExternalPartyTopologyRequest(
         keyPair.getPublic.getEncoded,
         partyIdHint,
+        keySpec,
       )
     } yield {
       signing.update(onboardingTransactions.multiHash.toByteArray)
@@ -349,10 +338,10 @@ final class SingleParticipantTestContext private[participant] (
         },
         multiHashSignatures = Seq(
           lapicrypto.Signature(
-            format = lapicrypto.SignatureFormat.SIGNATURE_FORMAT_RAW,
+            format = keySpec.signatureFormat,
             signature = ByteString.copyFrom(signing.sign()),
             signedBy = onboardingTransactions.publicKeyFingerprint,
-            signingAlgorithmSpec = lapicrypto.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ED25519,
+            signingAlgorithmSpec = keySpec.signatureAlgorithmSpec,
           )
         ),
         identityProviderId = "",
@@ -378,9 +367,9 @@ final class SingleParticipantTestContext private[participant] (
   override def allocateExternalPartyFromHint(
       partyIdHint: Option[String],
       minSynchronizers: Int,
+      keySpec: ExternalPartyKeySpec,
   ): Future[ExternalParty] = {
-    val keyGen = KeyPairGenerator.getInstance("Ed25519")
-    val keyPair = keyGen.generateKeyPair()
+    val keyPair = keySpec.keyInstance()
     for {
       connectedSynchronizerIds <- connectedSynchronizers()
       result <- MonadUtil.foldLeftM[Future, Option[AllocateExternalPartyResponse], String](
@@ -399,6 +388,7 @@ final class SingleParticipantTestContext private[participant] (
             // the same party across all synchronizers
             .orElse(previouslyAllocatedPartyIdHint),
           synchronizer = synchronizerId,
+          keySpec = keySpec,
         ).flatMap(services.partyManagement.allocateExternalParty)
           .map(Some(_))
       }
@@ -409,7 +399,8 @@ final class SingleParticipantTestContext private[participant] (
         UniqueIdentifier.tryFromProtoPrimitive(partyId).fingerprint,
         keyPair,
         signingThreshold = PositiveInt.one,
-        connectedSynchronizerIds.toList,
+        initialSynchronizers = connectedSynchronizerIds.toList,
+        signingKeySpec = keySpec,
       )
     }
   }
@@ -1756,6 +1747,11 @@ final class SingleParticipantTestContext private[participant] (
     ).filterTake(_.completionResponse.isCompletion)(n)
       .map(_.map(_.getCompletion.offset))
 
+  override def completionByHash(hash: ByteString): Future[GetCompletionByHashResponse] =
+    services.commandCompletion.getCompletionByHash(
+      GetCompletionByHashRequest(transactionHash = hash)
+    )
+
   override def checkHealth(): Future[HealthCheckResponse] =
     services.health.check(HealthCheckRequest())
 
@@ -1872,6 +1868,9 @@ final class SingleParticipantTestContext private[participant] (
         )
       }
     }
+
+  def getJwks(request: GetJwksRequest): Future[GetJwksResponse] =
+    services.jose.getJwks(request)
 }
 
 object SingleParticipantTestContext {

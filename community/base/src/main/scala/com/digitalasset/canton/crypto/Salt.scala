@@ -49,7 +49,7 @@ object SaltAlgorithm {
     override def prettyCompanion: PrettyPrintingCompanion[Hmac] = Hmac
   }
   object Hmac extends PrettyPrintingCompanion[Hmac] {
-    override val pretty: Pretty[Hmac] = prettyOfClass(
+    override protected val pretty: Pretty[Hmac] = prettyOfClass(
       param("hmacAlgorithm", _.hmacAlgorithm.name.unquoted)
     )
   }
@@ -94,7 +94,7 @@ final case class Salt private (private val salt: ByteString, private val algorit
 }
 
 object Salt extends PrettyPrintingCompanion[Salt] {
-  override val pretty: Pretty[Salt] = prettyOfParam(_.salt)
+  override protected val pretty: Pretty[Salt] = prettyOfParam(_.salt)
 
   private[crypto] def create(bytes: ByteString, algorithm: SaltAlgorithm): Either[SaltError, Salt] =
     Either.cond(
@@ -149,7 +149,7 @@ object SaltError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidSaltCreation] = InvalidSaltCreation
   }
   object InvalidSaltCreation extends PrettyPrintingCompanion[InvalidSaltCreation] {
-    override val pretty: Pretty[InvalidSaltCreation] =
+    override protected val pretty: Pretty[InvalidSaltCreation] =
       prettyOfClass(
         param("bytes", _.bytes),
         param("algorithm", _.algorithm),
@@ -160,7 +160,7 @@ object SaltError {
     override def prettyCompanion: PrettyPrintingCompanion[HmacGenerationError] = HmacGenerationError
   }
   object HmacGenerationError extends PrettyPrintingCompanion[HmacGenerationError] {
-    override val pretty: Pretty[HmacGenerationError] = prettyOfClass(
+    override protected val pretty: Pretty[HmacGenerationError] = prettyOfClass(
       param("error", _.error)
     )
   }

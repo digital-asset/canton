@@ -54,7 +54,7 @@ sealed abstract class HashAlgorithm(val name: String, val index: Long, val lengt
 }
 
 object HashAlgorithm extends PrettyPrintingCompanion[HashAlgorithm] {
-  override val pretty: Pretty[HashAlgorithm] = prettyOfString(_.name)
+  override protected val pretty: Pretty[HashAlgorithm] = prettyOfString(_.name)
 
   implicit val hashAlgorithmOrder: Order[HashAlgorithm] = Order.by[HashAlgorithm, Long](_.index)
 
@@ -130,7 +130,7 @@ final case class Hash private (
 }
 
 object Hash extends PrettyPrintingCompanion[Hash] {
-  override val pretty: Pretty[Hash] = prettyOfString(hash =>
+  override protected val pretty: Pretty[Hash] = prettyOfString(hash =>
     s"${hash.algorithm.name}:${HexString.toHexString(hash.hash).readableHash}"
   )
 

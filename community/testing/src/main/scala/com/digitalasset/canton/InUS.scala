@@ -4,6 +4,7 @@
 package com.digitalasset.canton
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import org.scalactic.source.Position
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpecLike

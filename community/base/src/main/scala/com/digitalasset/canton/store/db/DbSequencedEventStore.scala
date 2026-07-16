@@ -5,12 +5,12 @@ package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.CantonRequireTypes.String3
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -39,12 +39,13 @@ class DbSequencedEventStore(
 
   override protected[this] implicit def setParameterIndexedSynchronizer
       : SetParameter[IndexedPhysicalSynchronizer] = IndexedString.setParameterIndexedString
-  override protected[this] def partitionColumn: String = "physical_synchronizer_idx"
+  override protected[this] def partitionColumn: String & Singleton = "physical_synchronizer_idx"
 
   private val protocolVersion = physicalSynchronizerIdx.psid.protocolVersion
   override protected[this] val partitionKey: IndexedPhysicalSynchronizer = physicalSynchronizerIdx
 
-  override protected[this] def pruning_status_table: String = "common_sequenced_event_store_pruning"
+  override protected[this] def pruning_status_table: String & Singleton =
+    "common_sequenced_event_store_pruning"
 
   import com.digitalasset.canton.store.SequencedEventStore.*
   import storage.api.*

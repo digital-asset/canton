@@ -49,7 +49,14 @@ class TeaDbTrafficStore(
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, AccountState] = OptionT(
     storage.queryAndUpdate(
-      persistDeltaDBIO(accountId, eventId, eventSource, eventType, delta, timestamp),
+      persistDeltaDBIO(
+        accountId,
+        eventId,
+        eventSource,
+        eventType,
+        delta,
+        timestamp,
+      ).transactionally,
       "persist traffic delta",
     )
   )

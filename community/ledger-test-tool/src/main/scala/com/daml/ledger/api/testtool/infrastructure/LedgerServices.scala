@@ -83,6 +83,8 @@ import com.daml.ledger.api.v2.command_completion_service.{
   CommandCompletionServiceGrpc,
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionByHashRequest,
+  GetCompletionByHashResponse,
   GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.CommandServiceGrpc.CommandService
@@ -122,14 +124,14 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionRequest,
-  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   InteractiveSubmissionServiceGrpc,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
 }
+import com.daml.ledger.api.v2.jose_service.JoseServiceGrpc.JoseService
+import com.daml.ledger.api.v2.jose_service.{GetJwksRequest, GetJwksResponse, JoseServiceGrpc}
 import com.daml.ledger.api.v2.package_service.PackageServiceGrpc.PackageService
 import com.daml.ledger.api.v2.package_service.{
   GetPackageRequest,
@@ -196,6 +198,7 @@ import com.digitalasset.canton.http.json.v2.{
   JsGetActiveContractsResponse,
   JsIdentityProviderService,
   JsInteractiveSubmissionService,
+  JsJoseService,
   JsPackageService,
   JsPartyManagementService,
   JsPrepareSubmissionRequest,
@@ -214,7 +217,6 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.logging.audit.TransportType.Http
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NoLogging}
 import com.digitalasset.canton.networking.grpc.CallMetadata
-import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.Implicits.packageMetadataSemigroup
 import com.digitalasset.canton.tracing.TraceContext
@@ -552,6 +554,21 @@ private final class LedgerServicesJson(
         responseObserver,
         Future.successful(_: CompletionStreamResponse),
       )
+
+    /** Look up a completion by its transaction hash. This is only available for completions
+      * received after upgrading to Canton version 3.5. If:
+      *
+      *   - there is no completion with this transaction hash,
+      *   - or the completion is not visible to the user,
+      *   - or the completion was populated before upgrading to Canton version 3.5,
+      *   - or respective completions are all pruned,
+      *
+      * a COMPLETION_NOT_FOUND error will be raised.
+      */
+    override def getCompletionByHash(
+        request: GetCompletionByHashRequest
+    ): Future[GetCompletionByHashResponse] =
+      clientCall(JsCommandService.completionByHashEndpoint, request)
   }
 
   def commandSubmission: CommandSubmissionService = new CommandSubmissionService {
@@ -993,27 +1010,6 @@ private final class LedgerServicesJson(
           request,
         )
 
-      override def getPreferredPackageVersion(
-          request: GetPreferredPackageVersionRequest
-      ): Future[GetPreferredPackageVersionResponse] =
-        clientCall(
-          JsInteractiveSubmissionService.preferredPackageVersionEndpoint,
-          (
-            request.parties.toList,
-            request.packageName,
-            request.vettingValidAt.map(
-              InstantConverter
-                .fromProtoPrimitive(_)
-                .getOrElse(
-                  throw new IllegalArgumentException(
-                    s"could not transform ${request.vettingValidAt} to an Instant"
-                  )
-                )
-            ),
-            Option(request.synchronizerId).filter(_.nonEmpty),
-          ),
-        )
-
       override def executeSubmissionAndWait(
           request: ExecuteSubmissionAndWaitRequest
       ): Future[ExecuteSubmissionAndWaitResponse] =
@@ -1054,6 +1050,12 @@ private final class LedgerServicesJson(
       clientCall(JsContractService.getContractEndpoint, request)
         .flatMap(protocolConverters.GetContractResponse.fromJson)
   }
+
+  def jose: JoseService = new JoseService {
+    override def getJwks(request: GetJwksRequest): Future[GetJwksResponse] =
+      clientCall(JsJoseService.getJwksEndpoint, request)
+        .flatMap(protocolConverters.GetJwksResponse.fromJson)
+  }
 }
 
 sealed trait LedgerServices {
@@ -1074,6 +1076,7 @@ sealed trait LedgerServices {
   def userManagement: UserManagementService
   def identityProviderConfig: IdentityProviderConfigService
   def contract: ContractService
+  def jose: JoseService
 }
 
 private final class LedgerServicesGrpc(
@@ -1131,6 +1134,9 @@ private final class LedgerServicesGrpc(
 
   val contract: ContractService =
     ContractServiceGrpc.stub(channel)
+
+  val jose: JoseService =
+    JoseServiceGrpc.stub(channel)
 }
 
 object JsonErrors {

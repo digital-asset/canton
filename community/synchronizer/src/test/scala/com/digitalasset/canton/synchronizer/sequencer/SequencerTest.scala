@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.{HashPurpose, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
 import com.digitalasset.canton.protocol.{v30, v31, v32}

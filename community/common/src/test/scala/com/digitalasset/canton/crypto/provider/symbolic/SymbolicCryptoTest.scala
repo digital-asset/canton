@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.{
   SigningTest,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import org.scalatest.wordspec.AsyncWordSpec
 
 class SymbolicCryptoTest

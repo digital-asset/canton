@@ -8,6 +8,7 @@ import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,

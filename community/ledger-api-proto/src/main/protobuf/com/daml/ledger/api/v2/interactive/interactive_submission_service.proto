@@ -40,20 +40,6 @@ service InteractiveSubmissionService {
   // Similar to ExecuteSubmissionAndWait but additionally returns the transaction
   rpc ExecuteSubmissionAndWaitForTransaction(ExecuteSubmissionAndWaitForTransactionRequest) returns (ExecuteSubmissionAndWaitForTransactionResponse);
 
-  // A preferred package is the highest-versioned package for a provided package-name
-  // that is vetted by all the participants hosting the provided parties.
-  //
-  // Ledger API clients should use this endpoint for constructing command submissions
-  // that are compatible with the provided preferred package, by making informed decisions on:
-  // - which are the compatible packages that can be used to create contracts
-  // - which contract or exercise choice argument version can be used in the command
-  // - which choices can be executed on a template or interface of a contract
-  //
-  // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
-  //
-  // Provided for backwards compatibility, it will be removed in the Canton version 3.4.0
-  rpc GetPreferredPackageVersion(GetPreferredPackageVersionRequest) returns (GetPreferredPackageVersionResponse);
-
   // Compute the preferred packages for the vetting requirements in the request.
   // A preferred package is the highest-versioned package for a provided package-name
   // that is vetted by all the participants hosting the provided parties.
@@ -68,8 +54,6 @@ service InteractiveSubmissionService {
   // a `FAILED_PRECONDITION` error will be returned.
   //
   // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
-  //
-  // Experimental API: this endpoint is not guaranteed to provide backwards compatibility in future releases
   rpc GetPreferredPackages(GetPreferredPackagesRequest) returns (GetPreferredPackagesResponse);
 }
 
@@ -676,50 +660,6 @@ message DamlTransaction {
   //
   // Required: must be non-empty
   repeated NodeSeed node_seeds = 4;
-}
-
-message GetPreferredPackageVersionRequest {
-  // The parties whose participants' vetting state should be considered when resolving the preferred package.
-  //
-  // Required: must be non-empty
-  repeated string parties = 1;
-  // The package-name for which the preferred package should be resolved.
-  //
-  // Required
-  string package_name = 2;
-
-  // The synchronizer whose vetting state should be used for resolving this query.
-  // If not specified, the vetting states of all synchronizers to which the participant is connected are used.
-  //
-  // Optional
-  string synchronizer_id = 3;
-
-  // The timestamp at which the package vetting validity should be computed
-  // on the latest topology snapshot as seen by the participant.
-  // If not provided, the participant's current clock time is used.
-  //
-  // Optional
-  google.protobuf.Timestamp vetting_valid_at = 4;
-}
-
-message GetPreferredPackageVersionResponse {
-  // Not populated when no preferred package is found
-  //
-  // Optional
-  PackagePreference package_preference = 1;
-}
-
-message PackagePreference {
-  // The package reference of the preferred package.
-  //
-  // Required
-  PackageReference package_reference = 1;
-
-  // The synchronizer for which the preferred package was computed.
-  // If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
-  //
-  // Required
-  string synchronizer_id = 2;
 }
 
 // Defines a package-name for which the commonly vetted package with the highest version must be found.

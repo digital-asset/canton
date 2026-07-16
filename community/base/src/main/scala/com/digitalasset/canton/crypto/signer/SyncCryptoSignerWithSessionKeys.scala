@@ -23,6 +23,7 @@ import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys.{
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,

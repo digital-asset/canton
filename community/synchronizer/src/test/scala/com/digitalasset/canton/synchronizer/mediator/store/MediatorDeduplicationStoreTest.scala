@@ -7,6 +7,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}

@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.topology.PhysicalSynchronizerId

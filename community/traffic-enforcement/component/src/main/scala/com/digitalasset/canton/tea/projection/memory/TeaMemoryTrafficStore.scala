@@ -8,6 +8,7 @@ import cats.implicits.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.tea.projection.memory.TeaMemoryTrafficStore.EventKey
 import com.digitalasset.canton.tea.projection.{
   AccountId,

@@ -705,7 +705,7 @@ object Update {
       recordTime: CantonTimestamp,
       payload: ByteString,
   )(implicit override val traceContext: TraceContext)
-      extends SequencedUpdate {
+      extends SequencedEventUpdate {
 
     lazy val updateId: UpdateId = {
       val builder = Hash.build(HashPurpose.AcsCommitmentUpdateId, HashAlgorithm.Sha256)

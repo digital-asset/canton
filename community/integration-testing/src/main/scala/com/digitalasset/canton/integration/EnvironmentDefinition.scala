@@ -451,6 +451,13 @@ object EnvironmentDefinition extends LazyLogging {
       new NetworkBootstrapper(S2M1())
     }
 
+  /**   - 0 participants
+    *   - 2 sequencers
+    *   - 2 mediators
+    */
+  lazy val P0S2M2_Manual: EnvironmentDefinition =
+    P0S2M2_Config.withManualStart
+
   lazy val P0S2M2_Config: EnvironmentDefinition =
     buildBaseEnvironmentDefinition(
       numParticipants = 0,

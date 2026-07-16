@@ -19,9 +19,11 @@ import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, EncryptedC
 import com.digitalasset.canton.crypto.{v30 as cryptoproto, *}
 import com.digitalasset.canton.error.{CantonBaseError, CantonError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
   DeserializationError,
@@ -30,12 +32,26 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
+
+final case class BaseVaultRequest(
+    clientVersion: ReleaseVersion
+) {
+  def toProtoV30: v30.BaseVaultRequest =
+    v30.BaseVaultRequest(clientVersion.toProtoPrimitive)
+}
+
+object BaseVaultRequest {
+  def fromProtoV30(proto: v30.BaseVaultRequest): ParsingResult[BaseVaultRequest] =
+    ReleaseVersion
+      .fromProtoPrimitive(proto.clientVersion, "client_version")
+      .map(BaseVaultRequest(_))
+}
 
 class GrpcVaultService(
     crypto: Crypto,
@@ -98,9 +114,10 @@ class GrpcVaultService(
           purposeO <- filters.purpose
             .traverse(purpose => KeyPurpose.fromProtoEnum("purpose", purpose))
             .map(keyPurposeList => NonEmpty.from(keyPurposeList))
-          usageO <- filters.usage
-            .traverse(usage => SigningKeyUsage.fromProtoEnum("usage", usage))
-            .map(keyUsageList => NonEmpty.from(keyUsageList.flatten.toSet))
+          usageO <-
+            filters.usageV30
+              .traverse(usage => SigningKeyUsage.fromProtoEnum("usageV30", usage))
+              .map(keyUsageList => NonEmpty.from(keyUsageList.flatten.toSet))
           _ = if (purposeO.exists(_.contains(KeyPurpose.Encryption)) && usageO.exists(_.nonEmpty))
             throw ProtoDeserializationFailure
               .WrapNoLoggingStr("Cannot specify a usage when listing encryption keys")
@@ -125,6 +142,11 @@ class GrpcVaultService(
                 .WrapStr(s"Failed to check key ${pk.publicKey.id}'s existence: $err")
             }
         )
+      baseRequest <- EitherT.fromEither[FutureUnlessShutdown](
+        request.baseRequest
+          .traverse(BaseVaultRequest.fromProtoV30)
+          .leftMap(ProtoDeserializationFailure.WrapNoLogging(_))
+      )
       listKeysFilters = parseFilters(request.filters)
       filteredPublicKeys = listPublicKeys(listKeysFilters, publicKeys)
       keysMetadata <-
@@ -191,12 +213,30 @@ class GrpcVaultService(
       request: v30.ListPublicKeysRequest
   ): Future[v30.ListPublicKeysResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val listKeysFilters = parseFilters(request.filters)
-    crypto.cryptoPublicStore.publicKeysWithName
-      .map { keys =>
-        v30.ListPublicKeysResponse(listPublicKeys(listKeysFilters, keys).map(_.toProtoV30))
-      }
-      .failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
+
+    val res = for {
+      baseRequestO <- toFutureUnlessShutdown(
+        request.baseRequest.traverse(BaseVaultRequest.fromProtoV30)
+      )
+      listKeysFilters = parseFilters(request.filters)
+      keys <- crypto.cryptoPublicStore.publicKeysWithName
+    } yield {
+      val publicKeys = listPublicKeys(listKeysFilters, keys)
+
+      if (
+        ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(baseRequestO.map(_.clientVersion))
+      )
+        v30.ListPublicKeysResponse(
+          publicKeysV30 = Seq()
+          // TODO(#32231) Set public keys
+        )
+      else
+        v30.ListPublicKeysResponse(
+          publicKeysV30 = publicKeys.map(_.toProtoV30)
+        )
+    }
+
+    res.failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
   }
 
   /** Generates a new signing key. If there is an empty usage in the request (i.e. and old key
@@ -206,7 +246,11 @@ class GrpcVaultService(
       request: v30.GenerateSigningKeyRequest
   ): Future[v30.GenerateSigningKeyResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
     for {
+      baseRequestO <- toFuture(
+        request.baseRequest.traverse(BaseVaultRequest.fromProtoV30)
+      )
       scheme <-
         if (request.keySpec.isSigningKeySpecUnspecified)
           Future.successful(crypto.privateCrypto.signingSchemes.keySpecs.default)
@@ -219,7 +263,7 @@ class GrpcVaultService(
       usage <- Future(
         // for commands, we should not default to All; instead, the request should fail because usage is now a mandatory parameter.
         SigningKeyUsage
-          .fromProtoListWithoutDefault(request.usage)
+          .fromProtoListWithoutDefault(request.usageV30)
           .valueOr(err => throw ProtoDeserializationFailure.WrapNoLogging(err).asGrpcError)
       )
       name <- Future(
@@ -232,7 +276,17 @@ class GrpcVaultService(
           .generateSigningKey(scheme, usage, name.emptyStringAsNone)
           .leftMap(err => SigningKeyGenerationError.ErrorCode.Wrap(err).toCantonRpcError)
       )
-    } yield v30.GenerateSigningKeyResponse(publicKey = Some(key.toProtoV30))
+    } yield v30.GenerateSigningKeyResponse(
+      publicKey =
+        if (
+          ReleaseVersion.Feature.signingKeyUsageProtoV31
+            .supported(baseRequestO.map(_.clientVersion))
+        )
+          // TODO(#32231) Switch to v30.GenerateSigningKeyResponse.PublicKey.Key
+          v30.GenerateSigningKeyResponse.PublicKey.V30(key.toProtoV30)
+        else
+          v30.GenerateSigningKeyResponse.PublicKey.V30(key.toProtoV30)
+    )
   }
 
   override def generateEncryptionKey(
@@ -309,7 +363,18 @@ class GrpcVaultService(
       request: v30.RegisterKmsSigningKeyRequest
   ): Future[v30.RegisterKmsSigningKeyResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val usage = SigningKeyUsage
+      .fromProtoListWithoutDefault(request.usageV30)
+      .leftMap(ProtoDeserializationFailure.WrapNoLogging.apply)
+
     val res = for {
+      baseRequestO <-
+        EitherT
+          .fromEither[FutureUnlessShutdown](
+            request.baseRequest.traverse(BaseVaultRequest.fromProtoV30)
+          )
+          .leftMap(err => ProtoDeserializationFailure.WrapNoLogging(err).toCantonRpcError)
+
       kmsCrypto <- getKmsPrivateApi.toEitherT[FutureUnlessShutdown]
       pubKey <- registerKmsKey[SigningPublicKey](
         request.kmsKeyId,
@@ -319,11 +384,7 @@ class GrpcVaultService(
            * have any usage.
            */
           EitherT
-            .fromEither[FutureUnlessShutdown](
-              SigningKeyUsage
-                .fromProtoListWithoutDefault(request.usage)
-                .leftMap(ProtoDeserializationFailure.WrapNoLogging.apply)
-            )
+            .fromEither[FutureUnlessShutdown](usage)
             .flatMap(usage =>
               kmsCrypto.registerSigningKey(key, usage, name).leftMap { err =>
                 GrpcVaultServiceError.RegisterKmsKeyInternalError
@@ -331,8 +392,19 @@ class GrpcVaultService(
               }
             )
         },
-      ).map(key => v30.RegisterKmsSigningKeyResponse(publicKey = Some(key.toProtoV30)))
-        .leftMap(_.toCantonRpcError)
+      ).map(key =>
+        v30.RegisterKmsSigningKeyResponse(
+          publicKey =
+            // TODO(#32231) Switch to v31
+            if (
+              ReleaseVersion.Feature.signingKeyUsageProtoV31
+                .supported(baseRequestO.map(_.clientVersion))
+            )
+              v30.RegisterKmsSigningKeyResponse.PublicKey.V30(key.toProtoV30)
+            else
+              v30.RegisterKmsSigningKeyResponse.PublicKey.V30(key.toProtoV30)
+        )
+      ).leftMap(_.toCantonRpcError)
     } yield pubKey
 
     CantonGrpcUtil.mapErrNewEUS(res)
@@ -652,6 +724,30 @@ class GrpcVaultService(
       _ <- crypto.cryptoPublicStore.deleteKey(fingerprint)
     } yield v30.DeleteKeyPairResponse()
   }.failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
+
+  // Transform a left to a failed future
+  private def toFuture[T](
+      res: ParsingResult[T]
+  )(implicit errorLoggingContext: ErrorLoggingContext): Future[T] =
+    res.fold(
+      err =>
+        Future.failed(
+          ProtoDeserializationFailure.WrapNoLogging(err).toCantonRpcError.asGrpcError
+        ),
+      res => Future(res),
+    )
+
+  // Transform a left to a failed future unless shutdown
+  private def toFutureUnlessShutdown[T](
+      res: ParsingResult[T]
+  )(implicit errorLoggingContext: ErrorLoggingContext): FutureUnlessShutdown[T] =
+    res.fold(
+      err =>
+        FutureUnlessShutdown.failed(
+          ProtoDeserializationFailure.WrapNoLogging(err).toCantonRpcError.asGrpcError
+        ),
+      res => FutureUnlessShutdown.pure(res),
+    )
 }
 
 sealed trait GrpcVaultServiceError extends RpcError with Product with Serializable

@@ -130,8 +130,8 @@ object TestBackend {
       parameter = storageBackendFactory.createParameterStorageBackend(stringInterning),
       pruningOffsetService = mock[PruningOffsetService],
       party = storageBackendFactory.createPartyStorageBackend(ledgerEndCache),
-      completion =
-        storageBackendFactory.createCompletionStorageBackend(stringInterning, loggerFactory),
+      completion = storageBackendFactory
+        .createCompletionStorageBackend(stringInterning, ledgerEndCache, loggerFactory),
       contract =
         storageBackendFactory.createContractStorageBackend(stringInterning, ledgerEndCache),
       event = storageBackendFactory

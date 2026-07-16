@@ -12,6 +12,7 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.{AuthServiceConfig, PositiveFiniteDuration}
 import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.crypto.admin.grpc.BaseVaultRequest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
@@ -21,6 +22,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.version.ReleaseVersion
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
@@ -69,6 +71,7 @@ trait AdminApiKeyRotationIntegrationTest
       })
 
   private val grpcAdminCommand = VaultAdminCommands.ListPublicKeys(
+    BaseVaultRequest(clientVersion = ReleaseVersion.current),
     "",
     "",
     Set.empty,

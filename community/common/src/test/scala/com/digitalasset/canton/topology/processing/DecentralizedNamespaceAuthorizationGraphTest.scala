@@ -23,7 +23,14 @@ class DecentralizedNamespaceAuthorizationGraphTest
     DecentralizedNamespaceAuthorizationGraph(
       decentralizedNamespaceDefinition,
       owners
-        .map(new AuthorizationGraph(_, extraDebugInfo = false, loggerFactory = loggerFactory))
+        .map(
+          new AuthorizationGraph(
+            _,
+            extraDebugInfo = false,
+            warnAboutDanglingKeys = true,
+            loggerFactory = loggerFactory,
+          )
+        )
         .forgetNE
         .toSeq,
     )

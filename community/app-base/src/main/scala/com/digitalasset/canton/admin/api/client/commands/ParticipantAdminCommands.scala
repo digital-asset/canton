@@ -1552,6 +1552,7 @@ object ParticipantAdminCommands {
         config: InternalSynchronizerConnectionConfig,
         performHandshake: Boolean,
         sequencerConnectionValidation: SequencerConnectionValidation,
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]],
     ) extends Base[v30.RegisterSynchronizerRequest, v30.RegisterSynchronizerResponse, Unit] {
 
       override protected def createRequest(): Either[String, v30.RegisterSynchronizerRequest] = {
@@ -1565,6 +1566,7 @@ object ParticipantAdminCommands {
             config = Some(config.toProtoV30),
             synchronizerConnection = synchronizerConnection,
             sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,
+            onboardingTransactions = onboardingTransactions.map(_.toByteString),
           )
         )
       }

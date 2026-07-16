@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyTransaction}
 import com.digitalasset.canton.tracing.TraceContext

@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot

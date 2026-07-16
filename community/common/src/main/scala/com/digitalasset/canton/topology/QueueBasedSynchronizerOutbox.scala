@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast

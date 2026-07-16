@@ -17,6 +17,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetail
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
+import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsReader.CompletionsByHash
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
@@ -68,6 +69,16 @@ private[platform] trait LedgerDaoCommandCompletionsReader {
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, CompletionStreamResponse), NotUsed]
+
+  def getCompletionByHash(
+      hash: Array[Byte],
+      maxRejectedCompletions: Int,
+      parties: Set[Party],
+      rejectedBeforeOffset: Option[Offset],
+      includeAccepted: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[CompletionsByHash]
 }
 
 private[platform] trait LedgerDaoEventsReader {

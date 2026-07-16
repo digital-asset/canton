@@ -5,6 +5,7 @@ package com.digitalasset.canton
 
 import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.topology.PartyKind
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalactic.source

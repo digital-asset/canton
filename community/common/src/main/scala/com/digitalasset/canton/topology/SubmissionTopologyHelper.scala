@@ -9,6 +9,7 @@ import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSna
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
 import scala.concurrent.ExecutionContext

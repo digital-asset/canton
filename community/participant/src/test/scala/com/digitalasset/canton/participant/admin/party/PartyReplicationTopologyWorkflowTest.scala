@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TopologyConfig
 import com.digitalasset.canton.crypto.{Fingerprint, Hash, HashAlgorithm, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.client.{

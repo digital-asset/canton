@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTime
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.{InitialPageToken, ListVettedPackagesOpts, PageToken}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarMainPackageId}
 import com.digitalasset.canton.participant.store.{

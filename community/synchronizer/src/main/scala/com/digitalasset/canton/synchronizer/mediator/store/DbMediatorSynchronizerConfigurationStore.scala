@@ -8,6 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.CantonRequireTypes.{String1, String300}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.{DbStorage, DbStore}

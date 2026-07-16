@@ -16,6 +16,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   ValueDeserializationError,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, v30}

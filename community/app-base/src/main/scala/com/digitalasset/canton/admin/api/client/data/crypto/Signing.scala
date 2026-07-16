@@ -10,7 +10,7 @@ final case class RequiredSigningSpecs(
     algorithms: NonEmpty[Set[SigningAlgorithmSpec]],
     keys: NonEmpty[Set[SigningKeySpec]],
 ) extends PrettyPrinting {
-  override val pretty: Pretty[this.type] = prettyOfClass(
+  override protected val pretty: Pretty[this.type] = prettyOfClass(
     param("algorithms", _.algorithms),
     param("keys", _.keys),
   )
@@ -19,7 +19,7 @@ final case class RequiredSigningSpecs(
 /** Schemes for signature keys. */
 sealed trait SigningKeySpec extends Product with Serializable with PrettyPrinting {
   def name: String
-  override val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
 object SigningKeySpec {
@@ -47,7 +47,7 @@ object SigningKeySpec {
 /** Algorithm schemes for signing. */
 sealed trait SigningAlgorithmSpec extends Product with Serializable with PrettyPrinting {
   def name: String
-  override val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
 object SigningAlgorithmSpec {

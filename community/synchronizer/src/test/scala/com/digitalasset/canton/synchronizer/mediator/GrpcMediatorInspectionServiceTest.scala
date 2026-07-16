@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.CantonTimestamp.Epoch
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

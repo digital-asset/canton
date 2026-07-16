@@ -134,6 +134,7 @@ final case class TestingTopology(
     ] = defaultSynchronizerParams,
     staticSynchronizerParameters: StaticSynchronizerParameters =
       defaultStaticSynchronizerParameters,
+    externalParties: Map[PartyId, (ParticipantId, SigningKeysWithThreshold)] = Map.empty,
     cryptoConfig: CryptoConfig = CryptoConfig(),
     freshKeys: AtomicBoolean = new AtomicBoolean(false),
 ) {
@@ -265,6 +266,13 @@ final case class TestingTopology(
 
   def withPackages(packages: Map[ParticipantId, Seq[LfPackageId]]): TestingTopology =
     this.copy(packages = packages.view.mapValues(VettedPackage.unbounded).toMap)
+
+  def withExternalParty(
+      partyId: PartyId,
+      participantId: ParticipantId,
+      signingKeys: SigningKeysWithThreshold,
+  ) =
+    this.copy(externalParties = externalParties + (partyId -> ((participantId, signingKeys))))
 
   def build(
       loggerFactory: NamedLoggerFactory = NamedLoggerFactory("test-area", "crypto")
@@ -599,6 +607,19 @@ class TestingIdentityFactory(
 
     val partyDataTx = partyToParticipantTxs()
 
+    val externalPartyOnboarding = topology.externalParties.toList.map {
+      case (partyId, (participantId, signingKeys)) =>
+        mkAdd(
+          PartyToParticipant.tryCreate(
+            partyId = partyId,
+            threshold = PositiveInt.tryCreate(1),
+            participants =
+              Seq(HostingParticipant(participantId, ParticipantPermission.Confirmation)),
+            partySigningKeysWithThreshold = Some(signingKeys),
+          )
+        )
+    }
+
     val synchronizerGovernanceTxs = List(
       mkAdd(
         SynchronizerParametersState(
@@ -613,6 +634,7 @@ class TestingIdentityFactory(
       mediatorOnboarding ++
       Seq(sequencerOnboarding) ++
       partyDataTx ++
+      externalPartyOnboarding ++
       synchronizerGovernanceTxs)
       .map(ValidatedTopologyTransaction(_, rejectionReason = None))
 

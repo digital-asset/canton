@@ -6,6 +6,7 @@ package com.digitalasset.canton.store.db
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.PrunableByTime
@@ -29,9 +30,9 @@ trait DbPrunableByTime[Idx] extends PrunableByTime {
     *   - `phase` stores the [[com.digitalasset.canton.pruning.PruningPhase]]
     *   - `ts` stores the [[com.digitalasset.canton.data.CantonTimestamp]]
     */
-  protected[this] def pruning_status_table: String
+  protected[this] def pruning_status_table: String & Singleton
 
-  protected[this] def partitionColumn: String
+  protected[this] def partitionColumn: String & Singleton
   protected[this] def partitionKey: Idx
 
   protected[this] implicit val ec: ExecutionContext

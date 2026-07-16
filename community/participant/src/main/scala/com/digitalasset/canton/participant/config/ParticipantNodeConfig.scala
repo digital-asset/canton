@@ -373,8 +373,8 @@ object TestingTimeServiceConfig {
   * @param connectToSynchronizersOnStartup
   *   If true, connects to synchronizers that have manualConnect=false on startup. Default: true.
   *   Has impact only if manual-start is false.
-  * @param commitmentTracing
-  *   Whether commitment tracing should be disabled, incremental, or full. Default: disabled
+  * @param acsCommitments
+  *   Configuration options for ACS commitments
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -424,9 +424,12 @@ final case class ParticipantNodeParameterConfig(
 /** Config for the ACS commitment processing pipeline.
   * @param tracing
   *   the tracing mode. Default is disabled.
+  * @param receivedCommitmentValidationParallelism
+  *   the number of parallel threads to use for verifying incoming commitments. Default is 1.
   */
 final case class AcsCommitmentConfig(
-    tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled
+    tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
+    receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
 )
 
 /** Config for LSU.

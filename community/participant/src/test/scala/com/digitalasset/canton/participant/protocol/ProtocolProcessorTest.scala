@@ -24,6 +24,7 @@ import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
 import com.digitalasset.canton.data.{CantonTimestamp, SubmissionTrackerData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   DefaultPromiseUnlessShutdownFactory,
   FlagCloseable,

@@ -367,5 +367,12 @@
             <testing>true</testing>
         </rewrite>
 
-    </appender>
+    <!-- TODO(#33883) remove when shutdown order of TEA has been cleaned up -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>io.grpc.netty.shaded.io.netty.channel.ChannelInitializer</logger>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
+   </appender>
 </included>

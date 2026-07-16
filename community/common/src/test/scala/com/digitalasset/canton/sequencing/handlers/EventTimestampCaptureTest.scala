@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{SequencedEventHandler, SequencerTestUtils}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence

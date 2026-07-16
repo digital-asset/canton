@@ -38,6 +38,7 @@ import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.Externally
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory

@@ -197,7 +197,7 @@ object PrettyUtil extends PrettyUtil {
   */
 trait PrettyNameOnlyCase extends Product with PrettyPrinting {
   @SuppressWarnings(Array("org.wartremover.warts.Product"))
-  override protected[pretty] def pretty: Pretty[this.type] = prettyOfObject
+  override protected def pretty: Pretty[this.type] = prettyOfObject
 }
 object PrettyNameOnlyCase {
   import scala.language.implicitConversions

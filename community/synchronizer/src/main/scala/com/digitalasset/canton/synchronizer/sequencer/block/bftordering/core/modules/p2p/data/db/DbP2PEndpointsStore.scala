@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.CantonRequireTypes.String256M
+import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage.DbAction
@@ -125,7 +125,7 @@ final class DbP2PEndpointsStore(
 
   private def insertEndpoint(endpoint: P2PEndpoint): DbAction.WriteOnly[Int] = {
     val address =
-      String256M.tryCreate(endpoint.address) // URL host names are limited to 253 characters anyway
+      String255.tryCreate(endpoint.address) // URL host names are limited to 253 characters anyway
     val port = endpoint.port.unwrap
     val (customServerTrustCertificates, clientCertificateChain, clientPrivateKeyFile) =
       endpoint match {
@@ -171,9 +171,9 @@ final class DbP2PEndpointsStore(
   }
 
   private def deleteEndpoint(endpointId: P2PEndpoint.Id): DbAction.WriteOnly[Int] = {
-    val address256M = String256M.tryCreate(endpointId.address)
+    val address = String255.tryCreate(endpointId.address)
     sqlu"""delete from ord_p2p_endpoints
-           where address = $address256M and port = ${endpointId.port.unwrap} and transport_security = ${endpointId.transportSecurity}"""
+           where address = $address and port = ${endpointId.port.unwrap} and transport_security = ${endpointId.transportSecurity}"""
   }
 
   private def clearEndpoints: DbAction.WriteOnly[Int] = sqlu"truncate table ord_p2p_endpoints"

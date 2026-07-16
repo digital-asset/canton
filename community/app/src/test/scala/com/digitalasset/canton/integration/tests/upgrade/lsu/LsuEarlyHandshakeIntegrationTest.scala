@@ -82,6 +82,14 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
           synchronizerConnectionConfig(Seq(sequencer1, sequencer2), threshold = 2)
         )
 
+        // Under some circumstances, participant1 may not yet have observed packages vetted by participant2
+        eventually() {
+          logger.info("Checking vetted packages")
+          participant1.topology.vetted_packages
+            .list(filterParticipant = participant2.id.filterString) should not be empty
+        }
+
+        logger.info("Checking that participants can ping each other")
         participant1.health.ping(participant2)
 
         fixture = fixtureWithDefaults()

@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -204,54 +205,56 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       items: Seq[StateKeyFetch]
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = lock.exclusive {
-    val itemsMap =
-      items
-        .groupMap1(key => (key.code, key.namespace, key.identifier))(_.validUntilCutoff)
-        .view
-        .mapValues(_.min1)
-        .toMap
-    val found = lock.exclusive {
-      topologyTransactionStore
-        .filter { entry =>
-          itemsMap.get(entry.indexKey).exists { validUntil =>
-            entry.rejected.isEmpty
-            && entry.until.forall(ts => ts >= validUntil)
+  ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
+    val itemsMap = items
+      .groupMap1(key => (key.code, key.namespace, key.identifier))(_.validUntilCutoff)
+      .view
+      .mapValues(_.min1)
+      .toMap
+    val found = lock
+      .exclusive {
+        topologyTransactionStore
+          .filter { entry =>
+            itemsMap.get(entry.indexKey).exists { validUntil =>
+              entry.rejected.isEmpty
+              && entry.until.forall(ts => ts >= validUntil)
+            }
           }
-        }
-        .sortBy(c => (c.until.map(_.value).getOrElse(CantonTimestamp.MaxValue), c.batchIdx))
-        .reverse
-        .map(_.toStoredTransaction)
-        .toSeq
-    }
+      }
+      .sortBy(c => (c.until.map(_.value).getOrElse(CantonTimestamp.MaxValue), c.batchIdx))
+      .reverse
+      .map(_.toStoredTransaction)
+      .toSeq
     FutureUnlessShutdown.pure(StoredTopologyTransactions(found))
   }
 
   override def bulkInsert(
       initialSnapshot: GenericStoredTopologyTransactions
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = lock.exclusive {
-    initialSnapshot.result
-      .foldLeft((CantonTimestamp.MinValue, -1)) { case ((prevTs, prevBatch), tx) =>
-        val batchIdx = if (prevTs < tx.validFrom.value || prevBatch == -1) 0 else prevBatch + 1
-        val uniqueKey = (
-          tx.validFrom,
-          batchIdx,
-        )
-        if (topologyTransactionsStoreUniqueIndex.add(uniqueKey)) {
-          topologyTransactionStore.append(
-            TopologyStoreEntry(
-              tx.transaction,
-              tx.sequenced,
-              from = tx.validFrom,
-              batchIdx = batchIdx,
-              until = tx.validUntil,
-              rejected = tx.rejectionReason,
-            )
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    lock.exclusive {
+      initialSnapshot.result
+        .foldLeft((CantonTimestamp.MinValue, -1)) { case ((prevTs, prevBatch), tx) =>
+          val batchIdx = if (prevTs < tx.validFrom.value || prevBatch == -1) 0 else prevBatch + 1
+          val uniqueKey = (
+            tx.validFrom,
+            batchIdx,
           )
+          if (topologyTransactionsStoreUniqueIndex.add(uniqueKey)) {
+            topologyTransactionStore.append(
+              TopologyStoreEntry(
+                tx.transaction,
+                tx.sequenced,
+                from = tx.validFrom,
+                batchIdx = batchIdx,
+                until = tx.validUntil,
+                rejected = tx.rejectionReason,
+              )
+            )
+          }
+          (tx.validFrom.value, batchIdx)
         }
-        (tx.validFrom.value, batchIdx)
-      }
-      .discard
+        .discard
+    }
     FutureUnlessShutdown.unit
   }
 

@@ -22,10 +22,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CommitCertificate,
   OrderedBlock,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
-  Membership,
-  SequencingParameters,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   MessageFrom,
   SignedMessage,
@@ -58,21 +55,6 @@ object Consensus {
   }
 
   final case object Start extends Message[Nothing]
-
-  sealed trait Admin extends Message[Nothing]
-  object Admin {
-    final case class GetOrderingTopologyResponse(
-        epochNumber: EpochNumber,
-        nodes: Set[BftNodeId],
-        leaders: Seq[BftNodeId],
-        blacklisted: Seq[BftNodeId],
-        sequencingParameters: SequencingParameters,
-    )
-
-    final case class GetOrderingTopology(callback: GetOrderingTopologyResponse => Unit)
-        extends Admin
-    final case class SetPerformanceMetricsEnabled(enabled: Boolean) extends Admin
-  }
 
   sealed trait ProtocolMessage extends Message[Nothing]
 
@@ -344,8 +326,10 @@ object Consensus {
     final case class VerifiedStateTransferMessage(message: StateTransferNetworkMessage)
         extends StateTransferMessage
 
-    final case class RetryBlockTransferRequest(request: SignedMessage[BlockTransferRequest])
-        extends StateTransferMessage
+    final case class RetryBlockTransferRequest(
+        request: SignedMessage[BlockTransferRequest],
+        nodeThatTimedOut: Option[BftNodeId],
+    ) extends StateTransferMessage
 
     final case class BlockVerified[E <: Env[E]](
         commitCertificate: CommitCertificate,
@@ -361,10 +345,10 @@ object Consensus {
   }
 
   final case class StateTransferCompleted[E <: Env[E]](
-      newEpochTopologyMessage: Consensus.NewEpochTopology[E]
+      newEpochTopologyMessage: Consensus.NewEpochMembership[E]
   ) extends Message[E]
 
-  final case class NewEpochTopology[E <: Env[E]](
+  final case class NewEpochMembership[E <: Env[E]](
       epochNumber: EpochNumber,
       membership: Membership,
       cryptoProvider: CryptoProvider[E],
@@ -380,7 +364,7 @@ object Consensus {
 
   sealed trait Internal extends Message[Nothing]
   object Internal {
-    case object WarnWaitingForNewEpochTopology extends Internal
+    case object WarnWaitingForNewEpochMembership extends Internal
   }
 }
 

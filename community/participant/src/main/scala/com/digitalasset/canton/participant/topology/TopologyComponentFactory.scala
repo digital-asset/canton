@@ -18,6 +18,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig

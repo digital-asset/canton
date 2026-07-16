@@ -19,6 +19,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver

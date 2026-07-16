@@ -3,102 +3,18 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation
 
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.PlainTextP2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.P2PConnectionEventListener
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.network.{
+  NetworkPartitionFault,
+  SlowFaultState,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.jdk.DurationConverters.ScalaDurationOps
+import scala.concurrent.duration.DurationInt
 import scala.util.Random
-
-private sealed trait NetworkSimulatorState {
-
-  def tick(
-      nodes: Set[BftNodeId],
-      settings: NetworkSettings,
-      clock: Clock,
-      random: Random,
-  ): NetworkSimulatorState
-
-  def partitionExists(node1: BftNodeId, node2: BftNodeId): Boolean
-}
-
-private object NetworkSimulatorState {
-
-  final case object NoMorePartitions extends NetworkSimulatorState {
-
-    override def tick(
-        nodes: Set[BftNodeId],
-        settings: NetworkSettings,
-        clock: Clock,
-        random: Random,
-    ): NetworkSimulatorState = this
-
-    override def partitionExists(node1: BftNodeId, node2: BftNodeId): Boolean = false
-  }
-
-  final case class NoCurrentPartition(started: CantonTimestamp) extends NetworkSimulatorState {
-
-    private def shouldCreatePartition(
-        settings: NetworkSettings,
-        clock: Clock,
-        random: Random,
-    ): Boolean =
-      clock.now.isAfter(
-        started.plus(settings.unPartitionStability.toJava)
-      ) && settings.partitionProbability.flipCoin(random)
-
-    private def makePartition(
-        nodes: Set[BftNodeId],
-        settings: NetworkSettings,
-        random: Random,
-    ): Set[BrokenLink] =
-      settings.partitionMode.makePartition(nodes, settings.partitionSymmetry, random)
-
-    override def tick(
-        nodes: Set[BftNodeId],
-        settings: NetworkSettings,
-        clock: Clock,
-        random: Random,
-    ): NetworkSimulatorState =
-      if (shouldCreatePartition(settings, clock, random)) {
-        NetworkSimulatorState.ActivePartition(
-          makePartition(nodes, settings, random),
-          clock.now,
-        )
-      } else { this }
-
-    override def partitionExists(node1: BftNodeId, node2: BftNodeId): Boolean = false
-  }
-
-  private final case class ActivePartition(partition: Set[BrokenLink], started: CantonTimestamp)
-      extends NetworkSimulatorState {
-
-    private def shouldRemovePartition(
-        settings: NetworkSettings,
-        clock: Clock,
-        random: Random,
-    ): Boolean =
-      clock.now.isAfter(
-        started.plus(settings.partitionStability.toJava)
-      ) && settings.unPartitionProbability.flipCoin(random)
-
-    override def tick(
-        nodes: Set[BftNodeId],
-        settings: NetworkSettings,
-        clock: Clock,
-        random: Random,
-    ): NetworkSimulatorState =
-      if (shouldRemovePartition(settings, clock, random)) {
-        NetworkSimulatorState.NoCurrentPartition(clock.now)
-      } else { this }
-
-    override def partitionExists(node1: BftNodeId, node2: BftNodeId): Boolean =
-      partition.contains(BrokenLink(node1, node2))
-  }
-}
 
 class NetworkSimulator(
     settings: NetworkSettings,
@@ -110,14 +26,24 @@ class NetworkSimulator(
   private val random = new Random(settings.randomSeed)
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  private var partitionState: NetworkSimulatorState =
-    NetworkSimulatorState.NoCurrentPartition(clock.now)
+  private var partitionState: NetworkPartitionFault =
+    NetworkPartitionFault.NoCurrentPartition(clock.now)
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var slowState: SlowFaultState =
+    SlowFaultState.NoCurrentSlowness(settings.slowFaultSettings, clock, random)
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var canUseFaults = true
 
   def tick(): Unit = if (canUseFaults) {
-    partitionState = partitionState.tick(topology.activeNodes, settings, clock, random)
+    partitionState = partitionState.tick(
+      topology.activeNodes,
+      settings.networkPartitionFaultSettings,
+      clock,
+      random,
+    )
+    slowState = slowState.tick(topology.activeNodes, settings.slowFaultSettings, clock, random)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Return"))
@@ -139,9 +65,16 @@ class NetworkSimulator(
 
     val sendCount = 1 + (if (canUseFaults && settings.packetReplay.flipCoin(random)) 1 else 0)
 
+    val delayFromSlowness = if (canUseFaults && slowState.haveSlowConnection(from, to)) {
+      settings.slowFaultSettings.messageDelay.generateRandomDuration(random)
+    } else {
+      0.seconds
+    }
+
     1 to sendCount foreach { _ =>
       val delay = settings.oneWayDelay
         .generateRandomDuration(random)
+        .plus(delayFromSlowness)
       agenda.addOne(
         ReceiveNetworkMessage(to, msg),
         delay,
@@ -171,6 +104,7 @@ class NetworkSimulator(
 
   def makeHealthy(): Unit = {
     canUseFaults = false
-    partitionState = NetworkSimulatorState.NoMorePartitions
+    partitionState = partitionState.makeHealthy
+    slowState = slowState.makeHealthy
   }
 }

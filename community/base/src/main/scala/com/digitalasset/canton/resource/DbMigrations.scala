@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
 }
 import com.digitalasset.canton.environment.CantonNodeParameters
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond, Offset}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -278,6 +279,7 @@ class PruningProcessor(
           )
         )
 
+      // TODO(#33650) – replace with unboundedTraverseFilter; safe because bound to synchronizerIds for which there are maybe 1 to 10
       synchronizerOffsets <- syncPersistentStateManager.getAllLogical.keySet.toList
         .parTraverseFilter[FutureUnlessShutdown, PruningCutoffs.SynchronizerOffset] { lsid =>
           participantNodePersistentState.value.ledgerApiStore
@@ -333,6 +335,7 @@ class PruningProcessor(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       cutoffs <- getPruningCutoffs(fromExclusive, upToInclusive)
+      // TODO(#33650) – replace with unboundedTraverse; safe because there are maybe 1 to 10 synchronizers
       _ <- cutoffs.synchronizerOffsets.parTraverse(pruneSynchronizer)
       _ <- cutoffs.globalOffsetO.fold(FutureUnlessShutdown.unit) {
         case (globalOffset, publicationTime) =>

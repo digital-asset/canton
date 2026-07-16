@@ -24,7 +24,7 @@ sealed abstract class HmacAlgorithm(val name: String, val hashAlgorithm: HashAlg
 }
 
 object HmacAlgorithm extends PrettyPrintingCompanion[HmacAlgorithm] {
-  override val pretty: Pretty[HmacAlgorithm] = prettyOfString(_.name)
+  override protected val pretty: Pretty[HmacAlgorithm] = prettyOfString(_.name)
 
   val algorithms: Seq[HmacAlgorithm] = Seq(HmacSha256)
 
@@ -63,7 +63,7 @@ final case class Hmac private (private val hmac: ByteString, private val algorit
 
 object Hmac extends PrettyPrintingCompanion[Hmac] {
 
-  override val pretty: Pretty[Hmac] = {
+  override protected val pretty: Pretty[Hmac] = {
     implicit val ps: Pretty[String] = PrettyInstances.prettyString
     PrettyUtil.prettyInfix[Hmac](_.algorithm.name, ":", _.hmac)
   }
@@ -135,7 +135,7 @@ object HmacError {
       UnknownHmacAlgorithm
   }
   object UnknownHmacAlgorithm extends PrettyPrintingCompanion[UnknownHmacAlgorithm] {
-    override val pretty: Pretty[UnknownHmacAlgorithm] = prettyOfClass(
+    override protected val pretty: Pretty[UnknownHmacAlgorithm] = prettyOfClass(
       param("algorithm", _.algorithm.name.unquoted),
       param("cause", _.cause),
     )
@@ -147,7 +147,7 @@ object HmacError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidHmacLength] = InvalidHmacLength
   }
   object InvalidHmacLength extends PrettyPrintingCompanion[InvalidHmacLength] {
-    override val pretty: Pretty[InvalidHmacLength] = prettyOfClass(
+    override protected val pretty: Pretty[InvalidHmacLength] = prettyOfClass(
       param("length", _.length),
       param("expectedLength", _.expectedLength),
     )
@@ -161,7 +161,7 @@ object HmacError {
       InvalidHmacKeyLength
   }
   object InvalidHmacKeyLength extends PrettyPrintingCompanion[InvalidHmacKeyLength] {
-    override val pretty: Pretty[InvalidHmacKeyLength] = prettyOfClass(
+    override protected val pretty: Pretty[InvalidHmacKeyLength] = prettyOfClass(
       param("length", _.length),
       param("minimumLength", _.minimumLength),
       param("maximumLength", _.maximumLength),
@@ -171,13 +171,13 @@ object HmacError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidHmacSecret] = InvalidHmacSecret
   }
   object InvalidHmacSecret extends PrettyPrintingCompanion[InvalidHmacSecret] {
-    override val pretty: Pretty[InvalidHmacSecret] = prettyOfClass(unnamedParam(_.cause))
+    override protected val pretty: Pretty[InvalidHmacSecret] = prettyOfClass(unnamedParam(_.cause))
   }
   final case class FailedToComputeHmac(cause: Exception) extends HmacError {
     override def prettyCompanion: PrettyPrintingCompanion[FailedToComputeHmac] = FailedToComputeHmac
   }
   object FailedToComputeHmac extends PrettyPrintingCompanion[FailedToComputeHmac] {
-    override val pretty: Pretty[FailedToComputeHmac] = prettyOfClass(
+    override protected val pretty: Pretty[FailedToComputeHmac] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }

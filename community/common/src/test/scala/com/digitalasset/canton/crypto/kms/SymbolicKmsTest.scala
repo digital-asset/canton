@@ -16,6 +16,7 @@ import com.digitalasset.canton.crypto.{
   SigningPublicKey,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.util.ByteString190
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString

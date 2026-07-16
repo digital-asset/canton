@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.ExternalCallKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
 class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseTest {
 
   private val externalCallKey =
-    ExternalCallKey(
+    DAMLe.ExternalCallKey(
       extensionId = "extension-id",
       functionId = "function-id",
       config = "00010203",
@@ -88,7 +88,7 @@ class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseT
             },
           _.warningMessage shouldBe
             "External call to extension 'extension-id' (function 'function-id') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'extension-id' not configured\", retryable = false)",
+            "status=404, retryable=false, message=Extension 'extension-id' not configured",
         )
         .thereafter(_ => manager.close())
     }

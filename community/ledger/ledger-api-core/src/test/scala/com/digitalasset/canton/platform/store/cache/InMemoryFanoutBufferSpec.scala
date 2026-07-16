@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.cache
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.ReassignmentInfo
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -22,6 +23,7 @@ import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.daml.lf.data.Time
+import com.google.protobuf.ByteString
 import org.scalatest.Succeeded
 import org.scalatest.compatible.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -561,6 +563,163 @@ class InMemoryFanoutBufferSpec
         }
       }
 
+      "hash-based lookup" should {
+        "find a transaction by its hash" in {
+          val hash = mkHash("hash-1")
+          val txWithHash = txAccepted(10L, offset(20L), Some(hash))
+          withBuffer(10, Vector(offset(20L) -> txWithHash)) { buffer =>
+            buffer.lookup(LookupKey.ByHash(hash.unwrap)) shouldBe Some(txWithHash)
+          }
+        }
+
+        "return None for a hash that is not in the buffer" in {
+          val txWithHash = txAccepted(10L, offset(20L), Some(mkHash("hash-2")))
+          withBuffer(10, Vector(offset(20L) -> txWithHash)) { buffer =>
+            buffer.lookup(
+              LookupKey.ByHash(mkHash("nonexistent").unwrap)
+            ) shouldBe None
+          }
+        }
+
+        "evict hash from hash map when entry is dropped" in {
+          val hash = mkHash("hash-3")
+          val txWithHash = txAccepted(10L, offset(20L), Some(hash))
+          withBuffer(
+            2,
+            Vector(
+              offset(20L) -> txWithHash,
+              offset(21L) -> txAccepted(11L, offset(21L)),
+              offset(22L) -> txAccepted(12L, offset(22L)),
+            ),
+          ) { buffer =>
+            buffer.lookup(LookupKey.ByHash(hash.unwrap)) shouldBe None
+          }
+        }
+
+        "clear hash map on flush" in {
+          val hash = mkHash("hash-4")
+          val txWithHash = txAccepted(10L, offset(20L), Some(hash))
+          withBuffer(10, Vector(offset(20L) -> txWithHash)) { buffer =>
+            buffer.flush()
+            buffer.lookup(LookupKey.ByHash(hash.unwrap)) shouldBe None
+            buffer._acceptedByHash shouldBe empty
+          }
+        }
+
+        "not add entries without hash to hash map" in {
+          withBuffer(10, Vector(offset(20L) -> txAccepted(10L, offset(20L)))) { buffer =>
+            buffer._acceptedByHash shouldBe empty
+          }
+        }
+      }
+
+      "rejection indexing" should {
+        "index a rejection with hash in _rejectionsByHash" in {
+          val hash = mkHash("rej-hash-1")
+          val rejected = txRejected(5L, offset(20L), Some(hash))
+          withBuffer(10, Vector(offset(20L) -> rejected)) { buffer =>
+            buffer._rejectionsByHash(hash.unwrap) shouldBe Vector(rejected)
+          }
+        }
+
+        "not index a rejection without hash" in {
+          val rejected = txRejected(5L, offset(20L))
+          withBuffer(10, Vector(offset(20L) -> rejected)) { buffer =>
+            buffer._rejectionsByHash shouldBe empty
+          }
+        }
+
+        "store multiple rejections for the same hash newest-first" in {
+          val hash = mkHash("rej-hash-2")
+          val rejected1 = txRejected(5L, offset(20L), Some(hash))
+          val rejected2 = txRejected(6L, offset(21L), Some(hash))
+          val rejected3 = txRejected(7L, offset(22L), Some(hash))
+          withBuffer(
+            10,
+            Vector(
+              offset(20L) -> rejected1,
+              offset(21L) -> rejected2,
+              offset(22L) -> rejected3,
+            ),
+          ) { buffer =>
+            buffer._rejectionsByHash(hash.unwrap) shouldBe Vector(
+              rejected3,
+              rejected2,
+              rejected1,
+            )
+          }
+        }
+
+        "evict oldest rejection from vector on drop" in {
+          val hash = mkHash("rej-hash-3")
+          val rejected1 = txRejected(5L, offset(20L), Some(hash))
+          val rejected2 = txRejected(6L, offset(21L), Some(hash))
+          withBuffer(
+            2,
+            Vector(
+              offset(20L) -> rejected1,
+              offset(21L) -> rejected2,
+              offset(22L) -> txAccepted(7L, offset(22L)),
+            ),
+          ) { buffer =>
+            // rejected1 should have been evicted (buffer size 2; 3 entries pushed)
+            buffer._rejectionsByHash(hash.unwrap) shouldBe Vector(rejected2)
+          }
+        }
+
+        "remove hash key when last rejection is evicted" in {
+          val hash = mkHash("rej-hash-4")
+          val rejected1 = txRejected(5L, offset(20L), Some(hash))
+          withBuffer(
+            2,
+            Vector(
+              offset(20L) -> rejected1,
+              offset(21L) -> txAccepted(6L, offset(21L)),
+              offset(22L) -> txAccepted(7L, offset(22L)),
+            ),
+          ) { buffer =>
+            buffer._rejectionsByHash should not contain key(hash.unwrap)
+          }
+        }
+
+        "lookupCompletionsByHash returns both accepted and rejections" in {
+          val hash = mkHash("rej-hash-5")
+          val accepted = txAccepted(5L, offset(20L), Some(hash))
+          val rejected = txRejected(6L, offset(21L), Some(hash))
+          withBuffer(
+            10,
+            Vector(
+              offset(20L) -> accepted,
+              offset(21L) -> rejected,
+            ),
+          ) { buffer =>
+            val (acc, rejs) = buffer.lookupCompletionsByHash(hash.unwrap)
+            acc shouldBe Some(accepted)
+            rejs shouldBe Vector(rejected)
+          }
+        }
+
+        "lookupCompletionsByHash returns empty for unknown hash" in {
+          withBuffer(
+            10,
+            Vector(offset(20L) -> txAccepted(5L, offset(20L), Some(mkHash("known")))),
+          ) { buffer =>
+            val (acc, rejs) = buffer.lookupCompletionsByHash(mkHash("unknown").unwrap)
+            acc shouldBe None
+            rejs shouldBe empty
+          }
+        }
+
+        "flush clears _rejectionsByHash" in {
+          val hash = mkHash("rej-hash-6")
+          val rejected = txRejected(5L, offset(20L), Some(hash))
+          withBuffer(10, Vector(offset(20L) -> rejected)) { buffer =>
+            buffer.flush()
+            buffer._rejectionsByHash shouldBe empty
+          }
+        }
+      }
+
       "indexAfter" should {
         "yield the index gt the searched entry" in {
           InMemoryFanoutBuffer.indexAfter(InsertionPoint(3)) shouldBe 3
@@ -643,7 +802,14 @@ class InMemoryFanoutBufferSpec
 
   private def succ(offset: Offset): Offset = offset.increment
 
-  private def txAccepted(idx: Long, offset: Offset) =
+  private def mkHash(input: String): Hash =
+    Hash.digest(
+      HashPurpose.PreparedSubmission,
+      ByteString.copyFromUtf8(input),
+      HashAlgorithm.Sha256,
+    )
+
+  private def txAccepted(idx: Long, offset: Offset, hash: Option[Hash] = None) =
     TransactionLogUpdate.TransactionAccepted(
       updateId = TestUpdateId(s"tx-$idx").toHexString,
       workflowId = s"workflow-$idx",
@@ -654,15 +820,16 @@ class InMemoryFanoutBufferSpec
       commandId = "",
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Time.Timestamp.Epoch,
-      transactionHash = None,
+      transactionHash = hash,
     )
 
-  private def txRejected(idx: Long, offset: Offset) =
+  private def txRejected(idx: Long, offset: Offset, hash: Option[Hash] = None) =
     TransactionLogUpdate.TransactionRejected(
       offset = offset,
       completionStreamResponse = CompletionStreamResponse.defaultInstance.withCompletion(
         Completion.defaultInstance.copy(
-          actAs = Seq(s"submitter-$idx")
+          actAs = Seq(s"submitter-$idx"),
+          transactionHash = hash.map(_.unwrap),
         )
       ),
     )

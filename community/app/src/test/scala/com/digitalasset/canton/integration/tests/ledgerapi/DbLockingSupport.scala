@@ -3,12 +3,15 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
+import com.daml.metrics.api.noop.NoOpTimer
+import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.damltests.java.test
-import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend.DataSourceConfig
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.topology.SynchronizerId
@@ -46,6 +49,18 @@ trait DbLockingSupport extends NamedLogging {
   def withConnectionForTest(
       participant: LocalParticipantReference
   )(testFunction: Connection => Unit, onCommit: Connection => Unit = _ => ()) = {
+    val conn = connectionFor(participant)
+    QueryStrategy.withoutNetworkTimeout(testFunction(conn))(conn, noTracingLogger)
+    new Object {
+      def commitAndClose(): Unit = {
+        onCommit(conn)
+        conn.commit()
+        conn.close()
+      }
+    }
+  }
+
+  def connectionFor(participant: LocalParticipantReference): Connection = {
     val ledgerApiStore =
       participant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore
     val conn =
@@ -56,14 +71,7 @@ trait DbLockingSupport extends NamedLogging {
         )
         .getConnection
     conn.setAutoCommit(false)
-    QueryStrategy.withoutNetworkTimeout(testFunction(_))(conn, noTracingLogger)
-    new Object {
-      def commitAndClose(): Unit = {
-        onCommit(conn)
-        conn.commit()
-        conn.close()
-      }
-    }
+    conn
   }
 
   private def eventStorageBackend(participant: LocalParticipantReference) =
@@ -74,13 +82,34 @@ trait DbLockingSupport extends NamedLogging {
         loggerFactory = loggerFactory,
       )
 
+  private val testDbLockMeta = DbLockMeta(
+    lockDescription = "test lock",
+    timeoutConfig = "test-config",
+    timeoutMillis = 5000,
+    timer = NoOpTimer(
+      MetricInfo(MetricName("test"), "test", MetricQualification.Debug)
+    ),
+  )
+
   def lockPruning(participant: LocalParticipantReference)(conn: Connection): Unit =
-    eventStorageBackend(participant).lockExclusivelyPruningProcessingTable(conn)
+    eventStorageBackend(participant).lockExclusivelyPruningProcessingTable(testDbLockMeta)(
+      conn,
+      ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty),
+    )
+
+  def lockContractPruning(participant: LocalParticipantReference)(conn: Connection): Unit =
+    eventStorageBackend(participant).lockExclusivelyContractPruningProcessingTable(testDbLockMeta)(
+      conn,
+      ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty),
+    )
 
   def readLockContract(participant: LocalParticipantReference, internalContractId: Long)(
       conn: Connection
   ): Set[Long] =
-    eventStorageBackend(participant).readLockInternalContractIds(Set(internalContractId))(conn)
+    eventStorageBackend(participant).readLockInternalContractIds(
+      Set(internalContractId),
+      testDbLockMeta,
+    )(conn, ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty))
 
   def writeLockContract(participant: LocalParticipantReference, internalContractId: Long)(
       conn: Connection

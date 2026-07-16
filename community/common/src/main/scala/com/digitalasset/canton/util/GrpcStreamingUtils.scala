@@ -10,7 +10,10 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserverWithContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.thereafterFutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.{
+  thereafterFutureUnlessShutdown,
+  *,
+}
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors

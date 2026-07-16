@@ -9,6 +9,7 @@ import cats.syntax.foldable.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidationError.{

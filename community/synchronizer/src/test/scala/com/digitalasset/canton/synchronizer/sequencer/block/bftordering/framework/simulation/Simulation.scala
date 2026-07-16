@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.endpointToTestBftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.ModuleControl
@@ -80,7 +80,10 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     agenda.addOne(command, at, ScheduledCommand.DefaultPriority)
   }
 
-  agenda.addOne(MakeSystemHealthy, simSettings.phaseDurations.faulty)
+  agenda.addOne(
+    MakeSystemHealthy(traceContextGenerator.newTraceContext),
+    simSettings.phaseDurations.faulty,
+  )
   // Schedule liveness checks starting from "phase 2" up to the end of the simulation
   LazyList
     .iterate(simSettings.phaseDurations.faulty + simSettings.phaseDurations.recovery)(
@@ -97,6 +100,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
       // TODO(#22807): Currently, only initial nodes are subjects to crashes.
       nodes = topology.activeSequencersToMachines.view.keySet.toSet,
       agenda,
+      traceContextGenerator,
     )
   private val futureSimulator =
     new FutureSimulator(
@@ -256,14 +260,14 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     node
   }
 
-  private def crashNode(node: BftNodeId): Unit = {
+  private def crashNode(node: BftNodeId)(implicit traceContext: TraceContext): Unit = {
     val machine = tryGetMachine(node)
     machine.crash(node)
     runNodeCollector(node, EventOriginator.FromInit, machine.nodeCollector)
     agenda.removeCommandsOnCrash(node)
   }
 
-  private def restartNode(node: BftNodeId): Unit = {
+  private def restartNode(node: BftNodeId)(implicit traceContext: TraceContext): Unit = {
     val machine = tryGetMachine(node)
     if (machine.isCrashed) {
       machine.restart(node)
@@ -400,20 +404,28 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           p2pConnectionEventListener.onSequencerId(to, maybeP2PEndpoint)
           val machine = tryGetMachine(from)
           runNodeCollector(from, EventOriginator.FromNetwork, machine.nodeCollector)
-        case CrashNode(node) =>
-          logger.info(s"Crashing '$node' at ${whatToDo.at}")(TraceContext.empty)
+        case CrashNode(node, permanent, traceContext) =>
+          implicit val tc: TraceContext = traceContext
+          logger.info(
+            s"Crashing '$node'${if (permanent) " (permanently)" else ""} at ${whatToDo.at}"
+          )
           crashNode(node)
-        case RestartNode(node) =>
-          logger.info(s"Restarting '$node' at ${whatToDo.at}")(TraceContext.empty)
+          if (permanent) {
+            verifier.dontCheckLiveness(node)
+          }
+        case RestartNode(node, traceContext) =>
+          implicit val tc: TraceContext = traceContext
+          logger.info(s"Restarting '$node' at ${whatToDo.at}")
           restartNode(node)
-        case MakeSystemHealthy =>
-          logger.info("Healing system")(TraceContext.empty)
+        case MakeSystemHealthy(traceContext) =>
+          implicit val tc: TraceContext = traceContext
+          logger.info("Healing system")
           local.makeHealthy()
           network.makeHealthy()
           topology.activeNodes.foreach { node =>
             restartNode(node)
           }
-          logger.info("Healing system done")(TraceContext.empty)
+          logger.info("Healing system done")
         case ResumeLivenessChecks =>
           logger.info(s"Check liveness ${whatToDo.at}")(TraceContext.empty)
           verifier.resumeCheckingLiveness(clock.now)
@@ -486,26 +498,23 @@ final case class Machine[OnboardingDataT, SystemNetworkMessageT](
     onboardingManager: OnboardingManager[OnboardingDataT],
     loggerFactory: NamedLoggerFactory,
     simulationP2PNetworkManager: SimulationP2PNetworkManager[SystemNetworkMessageT],
-) {
-  private val logger = loggerFactory.getLogger(getClass)
+) extends NamedLogging {
   private var crashed = false
 
-  def crash(node: BftNodeId): Unit = {
+  def crash(node: BftNodeId)(implicit traceContext: TraceContext): Unit = {
     logger.info(s"Stopping modules to simulate crash on $node")
     allReactors.clear()
     crashed = true
   }
 
-  def restart(node: BftNodeId): Unit = {
+  def restart(node: BftNodeId)(implicit traceContext: TraceContext): Unit = {
     require(isCrashed)
     val system = new SimulationModuleSystem(nodeCollector, loggerFactory)
     logger.info("Clearing connection state and initializing modules again to simulate restart")
     init.p2pGrpcConnectionState.clear()
     val _ = init
       .systemInitializerFactory(onboardingManager.provide(ProvideForRestart, node))
-      .initialize(system, (_, _) => simulationP2PNetworkManager)(
-        TraceContext.createNew("dabft_pekko_module_system_simulation_restart")
-      )
+      .initialize(system, (_, _) => simulationP2PNetworkManager)
     crashed = false
   }
 
@@ -519,7 +528,7 @@ final case class Machine[OnboardingDataT, SystemNetworkMessageT](
 
   def isCrashed: Boolean = crashed
 
-  def makeHealthy(node: BftNodeId): Unit =
+  def makeHealthy(node: BftNodeId)(implicit traceContext: TraceContext): Unit =
     if (isCrashed) {
       restart(node)
     }

@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidator
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.MessageDispatcher.{
@@ -38,7 +39,8 @@ class ParallelMessageDispatcherTest
       requestProcessors: RequestProcessors,
       topologyProcessor: ParticipantTopologyProcessor,
       trafficProcessor: TrafficControlProcessor,
-      acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+      legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+      acsCommitmentValidator: ReceivedAcsCommitmentValidator,
       requestCounterAllocator: RequestCounterAllocator,
       recordOrderPublisher: RecordOrderPublisher,
       badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
@@ -53,7 +55,8 @@ class ParallelMessageDispatcherTest
       requestProcessors,
       topologyProcessor,
       trafficProcessor,
-      acsCommitmentProcessor,
+      legacyAcsCommitmentProcessor,
+      acsCommitmentValidator,
       requestCounterAllocator,
       recordOrderPublisher,
       badRootHashMessagesRequestProcessor,

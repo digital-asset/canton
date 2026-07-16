@@ -9,7 +9,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{ViewHash, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseNonNegativeInt}
 import com.digitalasset.canton.util.RoseTree

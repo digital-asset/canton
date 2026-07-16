@@ -14,6 +14,7 @@ import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPrivateStoreExtended}
 import com.digitalasset.canton.error.{CantonBaseError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -369,7 +370,7 @@ object EncryptionKeySpec extends PrettyPrintingCompanion[EncryptionKeySpec] {
       case v30.EncryptionKeyScheme.ENCRYPTION_KEY_SCHEME_RSA2048_OAEP_SHA256 =>
         Right(EncryptionKeySpec.Rsa2048)
     }
-  override val pretty: Pretty[EncryptionKeySpec] = prettyOfString(_.name)
+  override protected val pretty: Pretty[EncryptionKeySpec] = prettyOfString(_.name)
 }
 
 /** Algorithm schemes for asymmetric/hybrid encryption. */
@@ -436,7 +437,7 @@ object EncryptionAlgorithmSpec extends PrettyPrintingCompanion[EncryptionAlgorit
       case v30.EncryptionAlgorithmSpec.ENCRYPTION_ALGORITHM_SPEC_RSA_OAEP_SHA256 =>
         Right(EncryptionAlgorithmSpec.RsaOaepSha256)
     }
-  override val pretty: Pretty[EncryptionAlgorithmSpec] = prettyOfString(_.name)
+  override protected val pretty: Pretty[EncryptionAlgorithmSpec] = prettyOfString(_.name)
 }
 
 /** Required encryption algorithms and keys for asymmetric/hybrid encryption to be listed in the
@@ -493,7 +494,7 @@ object RequiredEncryptionSpecs extends PrettyPrintingCompanion[RequiredEncryptio
         )
     } yield RequiredEncryptionSpecs(algorithmSpecsNE, keySpecsNE)
 
-  override val pretty: Pretty[RequiredEncryptionSpecs] = prettyOfClass(
+  override protected val pretty: Pretty[RequiredEncryptionSpecs] = prettyOfClass(
     param("algorithms", _.algorithms),
     param("keys", _.keys),
   )
@@ -539,7 +540,7 @@ object SymmetricKeyScheme extends PrettyPrintingCompanion[SymmetricKeyScheme] {
         Right(SymmetricKeyScheme.Aes128Gcm)
     }
 
-  override val pretty: Pretty[SymmetricKeyScheme] = prettyOfString(_.name)
+  override protected val pretty: Pretty[SymmetricKeyScheme] = prettyOfString(_.name)
 }
 
 final case class SymmetricKey private (
@@ -754,7 +755,7 @@ object EncryptionPublicKey
     )
   )
 
-  override val pretty: Pretty[EncryptionPublicKey] =
+  override protected val pretty: Pretty[EncryptionPublicKey] =
     prettyOfClass(param("id", _.id), param("format", _.format), param("keySpec", _.keySpec))
 
   /** Creates a [[EncryptionPublicKey]] from the given parameters. Performs validations on usage and
@@ -811,7 +812,7 @@ final case class EncryptionPublicKeyWithName(
 }
 
 object EncryptionPublicKeyWithName extends PrettyPrintingCompanion[EncryptionPublicKeyWithName] {
-  override val pretty: Pretty[EncryptionPublicKeyWithName] =
+  override protected val pretty: Pretty[EncryptionPublicKeyWithName] =
     prettyOfClass(param("publicKey", _.publicKey), param("name", _.name))
 
   implicit def getResultEncryptionPublicKeyWithName(implicit
@@ -941,7 +942,7 @@ object EncryptionError {
       UnsupportedAlgorithmSpec
   }
   object UnsupportedAlgorithmSpec extends PrettyPrintingCompanion[UnsupportedAlgorithmSpec] {
-    override val pretty: Pretty[UnsupportedAlgorithmSpec] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedAlgorithmSpec] = prettyOfClass(
       param("algorithmSpec", _.algorithmSpec),
       param("supportedAlgorithmSpec", _.supportedAlgorithmSpec),
     )
@@ -954,7 +955,7 @@ object EncryptionError {
       UnsupportedKeyFormat
   }
   object UnsupportedKeyFormat extends PrettyPrintingCompanion[UnsupportedKeyFormat] {
-    override val pretty: Pretty[UnsupportedKeyFormat] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedKeyFormat] = prettyOfClass(
       param("format", _.keyFormat),
       param("supportedKeyFormats", _.supportedKeyFormats),
     )
@@ -967,7 +968,7 @@ object EncryptionError {
   }
   object UnsupportedSchemeForDeterministicEncryption
       extends PrettyPrintingCompanion[UnsupportedSchemeForDeterministicEncryption] {
-    override val pretty: Pretty[UnsupportedSchemeForDeterministicEncryption] =
+    override protected val pretty: Pretty[UnsupportedSchemeForDeterministicEncryption] =
       prettyOfClass(
         unnamedParam(_.error.unquoted)
       )
@@ -978,7 +979,7 @@ object EncryptionError {
       NoMatchingAlgorithmSpec
   }
   object NoMatchingAlgorithmSpec extends PrettyPrintingCompanion[NoMatchingAlgorithmSpec] {
-    override val pretty: Pretty[NoMatchingAlgorithmSpec] = prettyOfClass(
+    override protected val pretty: Pretty[NoMatchingAlgorithmSpec] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -986,7 +987,7 @@ object EncryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[FailedToEncrypt] = FailedToEncrypt
   }
   object FailedToEncrypt extends PrettyPrintingCompanion[FailedToEncrypt] {
-    override val pretty: Pretty[FailedToEncrypt] = prettyOfClass(
+    override protected val pretty: Pretty[FailedToEncrypt] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -994,7 +995,7 @@ object EncryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidSymmetricKey] = InvalidSymmetricKey
   }
   object InvalidSymmetricKey extends PrettyPrintingCompanion[InvalidSymmetricKey] {
-    override val pretty: Pretty[InvalidSymmetricKey] = prettyOfClass(
+    override protected val pretty: Pretty[InvalidSymmetricKey] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1003,7 +1004,7 @@ object EncryptionError {
       InvalidEncryptionKey
   }
   object InvalidEncryptionKey extends PrettyPrintingCompanion[InvalidEncryptionKey] {
-    override val pretty: Pretty[InvalidEncryptionKey] = prettyOfClass(
+    override protected val pretty: Pretty[InvalidEncryptionKey] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1020,7 +1021,7 @@ object EncryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[MaxViewSizeExceeded] = MaxViewSizeExceeded
   }
   object MaxViewSizeExceeded extends PrettyPrintingCompanion[MaxViewSizeExceeded] {
-    override val pretty: Pretty[MaxViewSizeExceeded] = prettyOfClass(
+    override protected val pretty: Pretty[MaxViewSizeExceeded] = prettyOfClass(
       param("view size (bytes)", _.viewSizeBytes),
       param("max request size configured (bytes)", _.maxRequestSizeBytes),
     )
@@ -1037,7 +1038,7 @@ object DecryptionError {
       UnsupportedAlgorithmSpec
   }
   object UnsupportedAlgorithmSpec extends PrettyPrintingCompanion[UnsupportedAlgorithmSpec] {
-    override val pretty: Pretty[UnsupportedAlgorithmSpec] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedAlgorithmSpec] = prettyOfClass(
       param("algorithmSpec", _.algorithmSpec),
       param("supportedAlgorithmSpecs", _.supportedAlgorithmSpecs),
     )
@@ -1051,7 +1052,7 @@ object DecryptionError {
       KeyAlgoSpecsMismatch
   }
   object KeyAlgoSpecsMismatch extends PrettyPrintingCompanion[KeyAlgoSpecsMismatch] {
-    override val pretty: Pretty[KeyAlgoSpecsMismatch] = prettyOfClass(
+    override protected val pretty: Pretty[KeyAlgoSpecsMismatch] = prettyOfClass(
       param("encryptionKeySpec", _.encryptionKeySpec),
       param("algorithmSpec", _.algorithmSpec),
       param("supportedKeySpecsByAlgo", _.supportedKeySpecsByAlgo),
@@ -1064,7 +1065,7 @@ object DecryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[UnsupportedKeySpec] = UnsupportedKeySpec
   }
   object UnsupportedKeySpec extends PrettyPrintingCompanion[UnsupportedKeySpec] {
-    override val pretty: Pretty[UnsupportedKeySpec] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedKeySpec] = prettyOfClass(
       param("encryptionKeySpec", _.encryptionKeySpec),
       param("supportedKeySpecs", _.supportedKeySpecs),
     )
@@ -1077,7 +1078,7 @@ object DecryptionError {
       UnsupportedKeyFormat
   }
   object UnsupportedKeyFormat extends PrettyPrintingCompanion[UnsupportedKeyFormat] {
-    override val pretty: Pretty[UnsupportedKeyFormat] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedKeyFormat] = prettyOfClass(
       param("format", _.keyFormat),
       param("supportedKeyFormats", _.supportedKeyFormats),
     )
@@ -1090,7 +1091,7 @@ object DecryptionError {
       UnsupportedSymmetricKeySpec
   }
   object UnsupportedSymmetricKeySpec extends PrettyPrintingCompanion[UnsupportedSymmetricKeySpec] {
-    override val pretty: Pretty[UnsupportedSymmetricKeySpec] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedSymmetricKeySpec] = prettyOfClass(
       param("symmetricKeySpec", _.symmetricKeySpec),
       param("supportedKeySpecs", _.supportedKeySpecs),
     )
@@ -1099,7 +1100,7 @@ object DecryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[FailedToDecrypt] = FailedToDecrypt
   }
   object FailedToDecrypt extends PrettyPrintingCompanion[FailedToDecrypt] {
-    override val pretty: Pretty[FailedToDecrypt] = prettyOfClass(
+    override protected val pretty: Pretty[FailedToDecrypt] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1107,7 +1108,7 @@ object DecryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidSymmetricKey] = InvalidSymmetricKey
   }
   object InvalidSymmetricKey extends PrettyPrintingCompanion[InvalidSymmetricKey] {
-    override val pretty: Pretty[InvalidSymmetricKey] = prettyOfClass(
+    override protected val pretty: Pretty[InvalidSymmetricKey] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1115,7 +1116,7 @@ object DecryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[InvariantViolation] = InvariantViolation
   }
   object InvariantViolation extends PrettyPrintingCompanion[InvariantViolation] {
-    override val pretty: Pretty[InvariantViolation] = prettyOfClass(
+    override protected val pretty: Pretty[InvariantViolation] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1124,7 +1125,7 @@ object DecryptionError {
       InvalidEncryptionKey
   }
   object InvalidEncryptionKey extends PrettyPrintingCompanion[InvalidEncryptionKey] {
-    override val pretty: Pretty[InvalidEncryptionKey] = prettyOfClass(
+    override protected val pretty: Pretty[InvalidEncryptionKey] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1133,7 +1134,7 @@ object DecryptionError {
       UnknownEncryptionKey
   }
   object UnknownEncryptionKey extends PrettyPrintingCompanion[UnknownEncryptionKey] {
-    override val pretty: Pretty[UnknownEncryptionKey] = prettyOfClass(
+    override protected val pretty: Pretty[UnknownEncryptionKey] = prettyOfClass(
       param("keyId", _.keyId)
     )
   }
@@ -1142,7 +1143,7 @@ object DecryptionError {
       DecryptionWithWrongKey
   }
   object DecryptionWithWrongKey extends PrettyPrintingCompanion[DecryptionWithWrongKey] {
-    override val pretty: Pretty[DecryptionWithWrongKey] = prettyOfClass(
+    override protected val pretty: Pretty[DecryptionWithWrongKey] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1150,7 +1151,7 @@ object DecryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[FailedToDeserialize] = FailedToDeserialize
   }
   object FailedToDeserialize extends PrettyPrintingCompanion[FailedToDeserialize] {
-    override val pretty: Pretty[FailedToDeserialize] = prettyOfClass(
+    override protected val pretty: Pretty[FailedToDeserialize] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
@@ -1158,7 +1159,7 @@ object DecryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[KeyStoreError] = KeyStoreError
   }
   object KeyStoreError extends PrettyPrintingCompanion[KeyStoreError] {
-    override val pretty: Pretty[KeyStoreError] = prettyOfClass(
+    override protected val pretty: Pretty[KeyStoreError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1190,14 +1191,14 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
     override def prettyCompanion: PrettyPrintingCompanion[GeneralError] = GeneralError
   }
   object GeneralError extends PrettyPrintingCompanion[GeneralError] {
-    override val pretty: Pretty[GeneralError] = prettyOfClass(unnamedParam(_.error))
+    override protected val pretty: Pretty[GeneralError] = prettyOfClass(unnamedParam(_.error))
   }
 
   final case class GeneralKmsError(error: String) extends EncryptionKeyGenerationError {
     override def prettyCompanion: PrettyPrintingCompanion[GeneralKmsError] = GeneralKmsError
   }
   object GeneralKmsError extends PrettyPrintingCompanion[GeneralKmsError] {
-    override val pretty: Pretty[GeneralKmsError] = prettyOfClass(
+    override protected val pretty: Pretty[GeneralKmsError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1207,7 +1208,7 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
     override def prettyCompanion: PrettyPrintingCompanion[KeyCreationError] = KeyCreationError
   }
   object KeyCreationError extends PrettyPrintingCompanion[KeyCreationError] {
-    override val pretty: Pretty[KeyCreationError] = prettyOfParam(
+    override protected val pretty: Pretty[KeyCreationError] = prettyOfParam(
       _.error
     )
   }
@@ -1216,7 +1217,7 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
     override def prettyCompanion: PrettyPrintingCompanion[FingerprintError] = FingerprintError
   }
   object FingerprintError extends PrettyPrintingCompanion[FingerprintError] {
-    override val pretty: Pretty[FingerprintError] = prettyOfClass(
+    override protected val pretty: Pretty[FingerprintError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1228,7 +1229,7 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
     override def prettyCompanion: PrettyPrintingCompanion[UnsupportedKeySpec] = UnsupportedKeySpec
   }
   object UnsupportedKeySpec extends PrettyPrintingCompanion[UnsupportedKeySpec] {
-    override val pretty: Pretty[UnsupportedKeySpec] = prettyOfClass(
+    override protected val pretty: Pretty[UnsupportedKeySpec] = prettyOfClass(
       param("keySpec", _.keySpec),
       param("supportedKeySpecs", _.supportedKeySpecs),
     )
@@ -1241,7 +1242,7 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
       EncryptionPrivateStoreError
   }
   object EncryptionPrivateStoreError extends PrettyPrintingCompanion[EncryptionPrivateStoreError] {
-    override val pretty: Pretty[EncryptionPrivateStoreError] = prettyOfClass(
+    override protected val pretty: Pretty[EncryptionPrivateStoreError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
@@ -1278,7 +1279,7 @@ object EncryptionKeyCreationError extends CantonErrorGroups.CommandErrorGroup {
       KeyParseAndValidateError
   }
   object KeyParseAndValidateError extends PrettyPrintingCompanion[KeyParseAndValidateError] {
-    override val pretty: Pretty[KeyParseAndValidateError] = prettyOfClass(
+    override protected val pretty: Pretty[KeyParseAndValidateError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
@@ -1287,7 +1288,7 @@ object EncryptionKeyCreationError extends CantonErrorGroups.CommandErrorGroup {
       DerivePublicKeyError
   }
   object DerivePublicKeyError extends PrettyPrintingCompanion[DerivePublicKeyError] {
-    override val pretty: Pretty[DerivePublicKeyError] = prettyOfClass(
+    override protected val pretty: Pretty[DerivePublicKeyError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }

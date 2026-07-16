@@ -86,7 +86,7 @@ object ListKeyOwnersResult {
     for {
       synchronizerId <- SynchronizerId.fromProtoPrimitive(value.synchronizerId, "synchronizer_id")
       owner <- Member.fromProtoPrimitive(value.keyOwner, "keyOwner")
-      signingKeys <- value.signingKeys.traverse(SigningPublicKey.fromProtoV30)
+      signingKeys <- value.signingKeysV30.traverse(SigningPublicKey.fromProtoV30)
       encryptionKeys <- value.encryptionKeys.traverse(EncryptionPublicKey.fromProtoV30)
     } yield ListKeyOwnersResult(synchronizerId, owner, signingKeys, encryptionKeys)
 }

@@ -5,9 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.flatMap.*
 import cats.syntax.foldable.*
-import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -19,6 +17,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,

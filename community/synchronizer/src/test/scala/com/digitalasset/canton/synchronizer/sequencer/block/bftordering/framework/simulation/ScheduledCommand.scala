@@ -90,9 +90,10 @@ final case class EstablishConnection(
     p2pConnectionEventListener: P2PConnectionEventListener,
     traceContext: TraceContext,
 ) extends Command
-final case class CrashNode(node: BftNodeId) extends Command
-final case class RestartNode(node: BftNodeId) extends Command
-case object MakeSystemHealthy extends Command
+final case class CrashNode(node: BftNodeId, permanent: Boolean, traceContext: TraceContext)
+    extends Command
+final case class RestartNode(node: BftNodeId, traceContext: TraceContext) extends Command
+final case class MakeSystemHealthy(traceContext: TraceContext) extends Command
 case object ResumeLivenessChecks extends Command
 
 final case class ScheduledCommand(

@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto.kms.gcp.audit
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.kms.KmsError
 import com.digitalasset.canton.crypto.kms.audit.KmsRequestResponseLogger
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

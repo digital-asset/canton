@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.UnassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData.InternalIncompleteReassignmentData
@@ -177,14 +178,14 @@ class DbReassignmentStore(
           $unassignmentData,
           ${unassignmentData.contractsBatch.stakeholders.all}
         )
-        on conflict (target_synchronizer_idx, reassignment_id) do update set unassignment_data = $unassignmentData
+        on conflict (target_synchronizer_idx, reassignment_id) do update set unassignment_data = $unassignmentData, unassignment_timestamp = ${unassignmentData.unassignmentTs}
         where r.target_synchronizer_idx=$indexedTargetSynchronizer and r.reassignment_id=${unassignmentData.reassignmentId} and r.unassignment_data IS NULL;
       """
         case _: Profile.H2 =>
           sqlu"""MERGE INTO par_reassignments using dual
                  on (target_synchronizer_idx=$indexedTargetSynchronizer and reassignment_id=${unassignmentData.reassignmentId})
                  when matched and unassignment_data IS NULL then
-                   update set unassignment_data = $unassignmentData
+                   update set unassignment_data = $unassignmentData, unassignment_timestamp = ${unassignmentData.unassignmentTs}
                  when not matched then
                    insert (target_synchronizer_idx, source_synchronizer_idx, reassignment_id, unassignment_timestamp, unassignment_data, stakeholders)
                    values ($indexedTargetSynchronizer, $indexedSourceSynchronizer, ${unassignmentData.reassignmentId}, ${unassignmentData.unassignmentTs}, $unassignmentData, ${unassignmentData.contractsBatch.stakeholders.all});

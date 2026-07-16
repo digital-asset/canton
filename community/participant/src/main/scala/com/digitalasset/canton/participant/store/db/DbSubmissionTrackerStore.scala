@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.SubmissionTrackerStore
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
@@ -40,7 +41,7 @@ class DbSubmissionTrackerStore(
 
   override protected[this] implicit def setParameterIndexedSynchronizer
       : SetParameter[IndexedPhysicalSynchronizer] = IndexedString.setParameterIndexedString
-  override protected[this] def partitionColumn: String = "physical_synchronizer_idx"
+  override protected[this] def partitionColumn: String & Singleton = "physical_synchronizer_idx"
 
   override protected def batchingParameters: Option[PrunableByTimeParameters] = Some(
     batchingParametersConfig
@@ -81,7 +82,7 @@ class DbSubmissionTrackerStore(
     f
   }
 
-  override protected[this] def pruning_status_table: String =
+  override protected[this] def pruning_status_table: String & Singleton =
     "par_fresh_submitted_transaction_pruning"
 
   override protected[canton] def doPrune(

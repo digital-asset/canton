@@ -85,6 +85,10 @@ class CantonOrderingTopologyProviderTest
                 case HowLongToBlacklist.Linear(_) =>
                   HowLongToBlacklist.NoBlacklisting
                 case HowLongToBlacklist.NoBlacklisting => HowLongToBlacklist.Linear(Some(1L))
+                case _: HowLongToBlacklist.LinearWithParameters =>
+                  HowLongToBlacklist.NoBlacklisting
+                case _: HowLongToBlacklist.Exponential =>
+                  HowLongToBlacklist.NoBlacklisting
               }
             )
           Table[Option[Long], Option[Long], SegmentLength, Option[

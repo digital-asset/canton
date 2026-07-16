@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters

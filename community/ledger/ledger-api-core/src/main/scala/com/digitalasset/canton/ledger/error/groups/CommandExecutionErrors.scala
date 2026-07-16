@@ -950,10 +950,10 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
               (ErrorResource.PackageName, err.dstPackageName),
             )
               ++ encodeParties(err.originalSignatories)
-              ++ encodeParties(err.originalObservers)
+              ++ encodeParties(err.originalSignatoryStakeholders)
               ++ optKeyResources(err.originalKeyOpt)
               ++ encodeParties(err.recomputedSignatories)
-              ++ encodeParties(err.recomputedObservers)
+              ++ encodeParties(err.recomputedSignatoryStakeholders)
               ++ optKeyResources(err.recomputedKeyOpt)
           }
         }

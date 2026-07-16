@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.{
   Offset,
 }
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.CanPrettyPrint
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

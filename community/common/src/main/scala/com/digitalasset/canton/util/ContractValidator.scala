@@ -8,6 +8,7 @@ import cats.implicits.toBifunctorOps
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.crypto.{HashOps, HmacOps}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver

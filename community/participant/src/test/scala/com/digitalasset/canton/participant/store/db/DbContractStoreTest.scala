@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.ContractStoreTest
 import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDbContractStoreForTesting

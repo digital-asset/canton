@@ -16,12 +16,14 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogger, SuppressionRule}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
 }
+import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{PartyKind, PhysicalSynchronizerId, SynchronizerId}
@@ -55,6 +57,7 @@ import org.scalatestplus.scalacheck.CheckerAsserting
 import org.slf4j.bridge.SLF4JBridgeHandler
 import org.typelevel.discipline.Laws
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -332,6 +335,11 @@ trait FutureHelpers extends Assertions with ScalaFuturesWithPatience { self =>
       us.onShutdown(fail(s"Unexpected shutdown"))
   }
 
+  implicit class UnthrottledHandlerResultSyntax(handlerResult: HandlerResult) {
+    @nowarn("msg=side-effecting nullary methods are discouraged")
+    def handlerResultValue: Unit =
+      handlerResult.futureValueUS.unwrap.futureValueUS.future.futureValueUS
+  }
 }
 
 /** Base traits for tests. Makes syntactic sugar and logging available.

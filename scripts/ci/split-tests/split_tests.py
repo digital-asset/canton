@@ -19,8 +19,8 @@ DEFAULT_EXCLUDE_PATTERNS = [
     r'com\.digitalasset\.canton\.integration\.tests\.variations',
     r'com\.digitalasset\.canton\.integration\.tests\.modelbased',
     r'com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.*Writer.*',
-    r'com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration'
-    ]
+    r'com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration',
+]
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -29,7 +29,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("shard", type=int, help="Current shard index")
     parser.add_argument("test_file", help="File with test class names")
     parser.add_argument("timings_file", help="JSON file with historical timings (or empty string)")
-    parser.add_argument("fallback_test_time", type=float, help="Default duration for unknown tests (seconds)")
+    parser.add_argument(
+        "fallback_test_time", type=float, help="Default duration for unknown tests (seconds)"
+    )
     parser.add_argument("output_file", help="Output file for GitHub Actions GITHUB_OUTPUT")
     parser.add_argument(
         "--exclude-patterns",
@@ -49,7 +51,9 @@ def validate_inputs(total: int, shard: int, test_file: str) -> None:
     if total <= 0:
         raise ValueError("total must be > 0")
     if shard < 0 or shard >= total:
-        raise ValueError(f"shard must satisfy 0 <= shard < total (got shard={shard}, total={total})")
+        raise ValueError(
+            f"shard must satisfy 0 <= shard < total (got shard={shard}, total={total})"
+        )
     if not os.path.isfile(test_file):
         raise ValueError(f"Test file not found: {test_file}")
 
@@ -80,13 +84,17 @@ def load_timings(timings_file: str) -> Dict[str, float]:
     return {name: float(duration) for name, duration in payload.items()}
 
 
-def build_weighted_items(filtered_tests: Iterable[str], timings: Dict[str, float], fallback: float) -> List[Tuple[str, float]]:
+def build_weighted_items(
+    filtered_tests: Iterable[str], timings: Dict[str, float], fallback: float
+) -> List[Tuple[str, float]]:
     items = [(test_name, float(timings.get(test_name, fallback))) for test_name in filtered_tests]
     items.sort(key=lambda pair: pair[1], reverse=True)
     return items
 
 
-def assign_to_shards(items: Iterable[Tuple[str, float]], total_shards: int) -> Tuple[List[List[str]], List[float]]:
+def assign_to_shards(
+    items: Iterable[Tuple[str, float]], total_shards: int
+) -> Tuple[List[List[str]], List[float]]:
     buckets: List[List[str]] = [[] for _ in range(total_shards)]
     bucket_times = [0.0] * total_shards
     for test_name, duration in items:
@@ -96,7 +104,9 @@ def assign_to_shards(items: Iterable[Tuple[str, float]], total_shards: int) -> T
     return buckets, bucket_times
 
 
-def print_debug_distribution(total: int, shard: int, buckets: Sequence[Sequence[str]], bucket_times: Sequence[float]) -> None:
+def print_debug_distribution(
+    total: int, shard: int, buckets: Sequence[Sequence[str]], bucket_times: Sequence[float]
+) -> None:
     print("\n" + "=" * 80)
     print("TEST SHARD DISTRIBUTION DEBUG")
     print("=" * 80)
@@ -214,6 +224,7 @@ def self_test() -> None:
     test_full_flow_helpers()
     print("All self-checks passed")
 
+
 def main():
     args = parse_args()
 
@@ -236,6 +247,7 @@ def main():
         print_debug_distribution(args.total, args.shard, buckets, bucket_times)
 
     write_output(args.output_file, selected, len(filtered))
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":

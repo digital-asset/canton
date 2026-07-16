@@ -149,7 +149,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.AcsCommitmentProtocolMessage(messageP) =>
-          AcsCommitmentProtocolMessage.fromProtoV32(expectedProtocolVersion, messageP)
+          AcsCommitmentProtocolMessage.fromProtoV32(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            messageP,
+          )
         case Content.LegacyAcsCommitmentProtocolMessage(messageP) =>
           LegacyAcsCommitmentProtocolMessage.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.AcsCommitmentSummaryProtocolMessage(messageP) =>

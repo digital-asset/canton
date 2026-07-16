@@ -40,7 +40,8 @@ final case class PrivateKeyMetadata(
 
   def toProtoV30: v30.PrivateKeyMetadata =
     v30.PrivateKeyMetadata(
-      publicKeyWithName = Some(publicKeyWithName.toProtoV30),
+      publicKeyWithName =
+        v30.PrivateKeyMetadata.PublicKeyWithName.V30(publicKeyWithName.toProtoV30),
       wrapperKeyId = wrapperKeyId.map(_.toProtoPrimitive),
       kmsKeyId = kmsKeyId.map(_.toProtoPrimitive),
     )
@@ -50,11 +51,12 @@ object PrivateKeyMetadata {
 
   def fromProtoV30(key: v30.PrivateKeyMetadata): ParsingResult[PrivateKeyMetadata] =
     for {
-      publicKeyWithName <- ProtoConverter.parseRequired(
-        PublicKeyWithName.fromProto30,
-        "public_key_with_name",
-        key.publicKeyWithName,
-      )
+      publicKeyWithName <- key.publicKeyWithName match {
+        case v30.PrivateKeyMetadata.PublicKeyWithName.V30(pk) =>
+          PublicKeyWithName.fromProto30(pk)
+        case v30.PrivateKeyMetadata.PublicKeyWithName.Empty =>
+          ProtoConverter.required("public_key_with_name", None)
+      }
       wrapperKeyId <- key.wrapperKeyId
         .traverse { keyId =>
           if (keyId.isBlank)

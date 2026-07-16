@@ -6,6 +6,7 @@ package com.digitalasset.canton.caching
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.tracing.TraceContext

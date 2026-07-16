@@ -75,7 +75,7 @@ private[auth] final class UserRightsChangeAsyncChecker(
               userClaimsMismatchCallback()
             case Success(Right((user, userRights, idpConfig))) =>
               val updatedClaims =
-                UserBasedClaimResolver.convertUserRightsToClaims(userRights)
+                UserBasedClaimResolver.convertUserRightsToClaims(userRights, idpId)
               if (
                 idpConfig.exists(_.isDeactivated) ||
                 user.isDeactivated ||

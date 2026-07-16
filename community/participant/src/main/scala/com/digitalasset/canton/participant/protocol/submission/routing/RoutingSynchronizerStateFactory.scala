@@ -12,6 +12,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.{
 import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.submission.routing.RoutingSynchronizerStateFactory.SyncCryptoPureApiLookup
 import com.digitalasset.canton.participant.sync.{
   ConnectedSynchronizer,

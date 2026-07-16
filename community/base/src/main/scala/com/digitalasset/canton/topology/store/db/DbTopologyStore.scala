@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile, SQLActionBuilderChain}

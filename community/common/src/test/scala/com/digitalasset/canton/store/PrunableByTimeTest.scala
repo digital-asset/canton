@@ -9,6 +9,7 @@ import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}

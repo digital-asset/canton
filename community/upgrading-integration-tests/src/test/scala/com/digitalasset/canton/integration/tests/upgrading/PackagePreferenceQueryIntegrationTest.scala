@@ -123,7 +123,7 @@ final class PackagePreferenceQueryIntegrationTest
         )
       }
 
-  "get_preferred_package_version" should {
+  "get_preferred_packages" should {
     "return the correct response for a package-name, set of parties and the given topology state without synchronizer-id restriction" in {
       implicit env =>
         import env.*

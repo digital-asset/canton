@@ -11,6 +11,7 @@ import com.daml.metrics.api.noop.NoOpCounter
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedEventCapturingLogger, NamedLoggerFactory}
 import com.digitalasset.canton.time.SimClock

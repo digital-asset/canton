@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{mapErrNewEUS, wrapErrUS}
@@ -38,7 +39,11 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil, OptionUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  ReleaseVersion,
+  RepresentativeProtocolVersion,
+}
 import com.digitalasset.canton.{ProtoDeserializationError, topology}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -59,6 +64,7 @@ final case class BaseQuery(
     ops: Option[TopologyChangeOp],
     filterSigningKey: String,
     protocolVersion: Option[ProtocolVersion],
+    clientVersion: Option[ReleaseVersion],
 ) {
   def toProtoV1: adminProto.BaseQuery =
     adminProto.BaseQuery(
@@ -68,6 +74,7 @@ final case class BaseQuery(
       timeQuery.toProtoV30,
       filterSigningKey,
       protocolVersion.map(_.toProtoPrimitive),
+      clientVersion.map(_.toProtoPrimitive),
     )
 }
 
@@ -79,6 +86,7 @@ object BaseQuery {
       ops: Option[TopologyChangeOp],
       filterSigningKey: String,
       protocolVersion: Option[ProtocolVersion],
+      clientVersion: Option[ReleaseVersion] = Some(ReleaseVersion.current),
   ): BaseQuery =
     BaseQuery(
       Some(store),
@@ -87,6 +95,7 @@ object BaseQuery {
       ops,
       filterSigningKey,
       protocolVersion,
+      clientVersion,
     )
 
   def fromProto(value: Option[adminProto.BaseQuery]): ParsingResult[BaseQuery] =
@@ -100,6 +109,9 @@ object BaseQuery {
       store <- baseQuery.store.traverse(
         grpc.TopologyStoreId.fromProtoV30(_, "store")
       )
+      clientVersion <- baseQuery.clientVersion.traverse(
+        ReleaseVersion.fromProtoPrimitive(_, "client_version")
+      )
     } yield BaseQuery(
       store,
       proposals,
@@ -107,6 +119,7 @@ object BaseQuery {
       operationOp,
       filterSignedKey,
       protocolVersion,
+      clientVersion,
     )
 }
 
@@ -133,6 +146,7 @@ class GrpcTopologyManagerReadService(
       transactionHash: ByteString,
       serial: PositiveInt,
       signedBy: NonEmpty[Set[Fingerprint]],
+      representativeProtocolVersion: RepresentativeProtocolVersion[TopologyTransaction.type],
   )
 
   private def collectStores(
@@ -270,6 +284,7 @@ class GrpcTopologyManagerReadService(
                 tx.hash.hash.getCryptographicEvidence,
                 tx.serial,
                 tx.transaction.signatures.map(_.authorizingLongTermKey),
+                tx.transaction.transaction.representativeProtocolVersion,
               )
               (result, tx.mapping)
             }
@@ -295,28 +310,39 @@ class GrpcTopologyManagerReadService(
   ): Future[adminProto.ListNamespaceDelegationResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      res <- collectFromStores(
+      transactions <- collectFromStores(
         request.baseQuery,
         NamespaceDelegation.code,
         idFilter = None,
         namespaceFilter = Some(request.filterNamespace),
       )
-    } yield {
-      val results = res
+      resultsE = transactions
         .collect {
           case (result, x: NamespaceDelegation)
               if request.filterTargetKeyFingerprint.isEmpty || x.target.fingerprint.unwrap == request.filterTargetKeyFingerprint =>
             (result, x)
         }
-        .map { case (context, elem) =>
-          new adminProto.ListNamespaceDelegationResponse.Result(
-            context = Some(createBaseResult(context)),
-            item = Some(elem.toProto),
+        .traverse { case (context, elem) =>
+          val protoVersion =
+            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+
+          (if (protoVersion == 30)
+             ListNamespaceDelegationResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
+           else
+             TopologyManagerError.InternalError
+               .Unexpected(
+                 s"Cannot serialize namespace delegations using proto version $protoVersion"
+               )
+               .asLeft).map(item =>
+            adminProto.ListNamespaceDelegationResponse.Result(
+              context = Some(createBaseResult(context)),
+              item = item,
+            )
           )
         }
 
-      adminProto.ListNamespaceDelegationResponse(results = results)
-    }
+      results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
+    } yield adminProto.ListNamespaceDelegationResponse(results = results)
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -351,13 +377,12 @@ class GrpcTopologyManagerReadService(
   ): Future[adminProto.ListOwnerToKeyMappingResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      res <- collectFromStoresByFilterString(
+      transactions <- collectFromStoresByFilterString(
         request.baseQuery,
         OwnerToKeyMapping.code,
         request.filterKeyOwnerUid,
       )
-    } yield {
-      val results = res
+      resultsE = transactions
         .collect {
           // topology store indexes by uid, so need to filter out the members of the wrong type
           case (result, x: OwnerToKeyMapping)
@@ -365,14 +390,27 @@ class GrpcTopologyManagerReadService(
                 (request.filterKeyOwnerType.isEmpty || request.filterKeyOwnerType == x.member.code.threeLetterId.unwrap) =>
             (result, x)
         }
-        .map { case (context, elem) =>
-          new adminProto.ListOwnerToKeyMappingResponse.Result(
-            context = Some(createBaseResult(context)),
-            item = Some(elem.toProto),
+        .traverse { case (context, elem) =>
+          val protoVersion =
+            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+
+          (if (protoVersion == 30)
+             ListOwnerToKeyMappingResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
+           else
+             TopologyManagerError.InternalError
+               .Unexpected(
+                 s"Cannot serialize owner to key mapping using proto version $protoVersion"
+               )
+               .asLeft).map(item =>
+            adminProto.ListOwnerToKeyMappingResponse.Result(
+              context = Some(createBaseResult(context)),
+              item = item,
+            )
           )
         }
-      adminProto.ListOwnerToKeyMappingResponse(results = results)
-    }
+
+      results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
+    } yield adminProto.ListOwnerToKeyMappingResponse(results = results)
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -381,22 +419,34 @@ class GrpcTopologyManagerReadService(
   ): Future[ListPartyToKeyMappingResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      res <- collectFromStoresByFilterString(
+      transactions <- collectFromStoresByFilterString(
         request.baseQuery,
         PartyToKeyMapping.code,
         request.filterParty,
       )
-    } yield {
-      val results = res
+      resultsE = transactions
         .collect { case (result, x: PartyToKeyMapping) => (result, x) }
-        .map { case (context, elem) =>
-          new adminProto.ListPartyToKeyMappingResponse.Result(
-            context = Some(createBaseResult(context)),
-            item = Some(elem.toProto),
+        .traverse { case (context, elem) =>
+          val protoVersion =
+            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+
+          (if (protoVersion == 30)
+             ListPartyToKeyMappingResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
+           else
+             TopologyManagerError.InternalError
+               .Unexpected(
+                 s"Cannot serialize party to key mappings using proto version $protoVersion"
+               )
+               .asLeft).map(item =>
+            adminProto.ListPartyToKeyMappingResponse.Result(
+              context = Some(createBaseResult(context)),
+              item = item,
+            )
           )
         }
-      adminProto.ListPartyToKeyMappingResponse(results = results)
-    }
+
+      results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
+    } yield adminProto.ListPartyToKeyMappingResponse(results = results)
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -504,35 +554,45 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListPartyToParticipantRequest
   ): Future[adminProto.ListPartyToParticipantResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    def partyPredicate(x: PartyToParticipant) =
+      x.partyId.toProtoPrimitive.startsWith(request.filterParty)
+    def participantPredicate(x: PartyToParticipant) =
+      request.filterParticipant.isEmpty || x.participantIds.exists(
+        _.toProtoPrimitive.contains(request.filterParticipant)
+      )
+
     val ret = for {
-      res <- collectFromStoresByFilterString(
+      transactions <- collectFromStoresByFilterString(
         request.baseQuery,
         PartyToParticipant.code,
         request.filterParty,
       )
-    } yield {
-      def partyPredicate(x: PartyToParticipant) =
-        x.partyId.toProtoPrimitive.startsWith(request.filterParty)
-
-      def participantPredicate(x: PartyToParticipant) =
-        request.filterParticipant.isEmpty || x.participantIds.exists(
-          _.toProtoPrimitive.contains(request.filterParticipant)
-        )
-
-      val results = res
+      resultsE = transactions
         .collect {
           case (result, x: PartyToParticipant) if partyPredicate(x) && participantPredicate(x) =>
             (result, x)
         }
-        .map { case (context, elem) =>
-          new adminProto.ListPartyToParticipantResponse.Result(
-            context = Some(createBaseResult(context)),
-            item = Some(elem.toProto),
+        .traverse { case (context, elem) =>
+          val protoVersion =
+            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+
+          (if (protoVersion == 30)
+             ListPartyToParticipantResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
+           else
+             TopologyManagerError.InternalError
+               .Unexpected(
+                 s"Cannot serialize party to participant mappings using proto version $protoVersion"
+               )
+               .asLeft).map(item =>
+            adminProto.ListPartyToParticipantResponse.Result(
+              context = Some(createBaseResult(context)),
+              item = item,
+            )
           )
         }
 
-      adminProto.ListPartyToParticipantResponse(results = results)
-    }
+      results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
+    } yield adminProto.ListPartyToParticipantResponse(results = results)
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 

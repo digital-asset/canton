@@ -10,6 +10,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.AsyncResult
@@ -67,6 +68,7 @@ class TopologyStateProcessorImpl private[processing] (
     outboxQueue: Option[SynchronizerOutboxQueue],
     topologyMappingChecksFactory: TopologyStateLookup => TopologyMappingChecks,
     pureCrypto: CryptoPureApi,
+    warnAboutDanglingKeys: Boolean,
     loggerFactoryParent: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyStateProcessor
@@ -88,6 +90,7 @@ class TopologyStateProcessorImpl private[processing] (
       // if transactions are put directly into a store (ie there is no outbox queue)
       // then the authorization validation is final.
       validationIsFinal = outboxQueue.isEmpty,
+      warnAboutDanglingKeys,
       loggerFactory.append("role", if (outboxQueue.isEmpty) "incoming" else "outgoing"),
     )
 
@@ -449,6 +452,7 @@ object TopologyStateProcessor {
       outboxQueue,
       topologyMappingChecksFactory,
       pureCrypto,
+      warnAboutDanglingKeys = true,
       loggerFactoryParent,
     )
 
@@ -480,6 +484,7 @@ object TopologyStateProcessor {
       outboxQueue = None,
       topologyMappingChecksFactory,
       pureCrypto,
+      warnAboutDanglingKeys = false,
       loggerFactoryParent,
     )
 
@@ -499,6 +504,7 @@ object TopologyStateProcessor {
       outboxQueue = None,
       topologyMappingChecksFactory,
       pureCrypto,
+      warnAboutDanglingKeys = false,
       loggerFactoryParent,
     )
 }

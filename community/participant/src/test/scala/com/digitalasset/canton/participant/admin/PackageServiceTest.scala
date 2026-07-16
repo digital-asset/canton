@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.{CachingConfigs, PackageMetadataViewConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.PackageService.DarMainPackageId

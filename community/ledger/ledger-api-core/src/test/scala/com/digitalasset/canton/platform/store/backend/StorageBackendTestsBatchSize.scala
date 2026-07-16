@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.store.dao.DatabaseSelfServiceError
 import com.digitalasset.daml.lf.data.Ref.Party
 import org.scalatest.Inside
@@ -50,7 +49,7 @@ private[backend] trait StorageBackendTestsBatchSize
         connection.setAutoCommit(false)
         connection.setNetworkTimeout(
           directEc,
-          IndexerConfig.DefaultPostgresDataSourceConfig.networkTimeout.value.duration.toMillis.toInt,
+          20 * 1000, // 20 seconds, the original limit causing the Sev1
         )
         try {
           ingest(dtos, connection)

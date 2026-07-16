@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.protocol.{RequestId, RootHash}

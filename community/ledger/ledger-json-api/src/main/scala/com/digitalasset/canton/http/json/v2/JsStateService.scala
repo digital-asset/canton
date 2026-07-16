@@ -69,6 +69,7 @@ class JsStateService(
       getActiveContractsStream,
     ),
     withServerLogic(JsStateService.activeContractsPageEndpoint, getActiveContractsPage),
+    withServerLogic(JsStateService.queryActiveContractsPageEndpoint, getActiveContractsPage),
     withServerLogic(JsStateService.getConnectedSynchronizersEndpoint, getConnectedSynchronizers),
     withServerLogic(
       JsStateService.getLedgerEndEndpoint,
@@ -244,6 +245,17 @@ object JsStateService extends DocumentationEndpoints {
     .in(sttp.tapir.stringToPath("active-contracts-page"))
     .in(jsonBody[state_service.GetActiveContractsPageRequest])
     .out(jsonBody[JsGetActiveContractsPageResponse])
+    .deprecated()
+    .description(s"""|
+           |Deprecated
+           |
+           |Use POST version of this endpoint
+       """.stripMargin.trim)
+
+  val queryActiveContractsPageEndpoint = state.post
+    .in(sttp.tapir.stringToPath("active-contracts-page"))
+    .in(jsonBody[state_service.GetActiveContractsPageRequest])
+    .out(jsonBody[JsGetActiveContractsPageResponse])
     .protoRef(state_service.StateServiceGrpc.METHOD_GET_ACTIVE_CONTRACTS_PAGE)
 
   val getConnectedSynchronizersEndpoint = state.get
@@ -268,6 +280,7 @@ object JsStateService extends DocumentationEndpoints {
     activeContractsEndpoint,
     activeContractsListEndpoint,
     activeContractsPageEndpoint,
+    queryActiveContractsPageEndpoint,
     getConnectedSynchronizersEndpoint,
     getLedgerEndEndpoint,
     getLastPrunedOffsetsEndpoint,

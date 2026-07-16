@@ -6,6 +6,7 @@ package com.digitalasset.canton.lifecycle
 import cats.Id
 import com.digitalasset.canton.concurrent.{FutureSupervisor, SupervisedPromise}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting

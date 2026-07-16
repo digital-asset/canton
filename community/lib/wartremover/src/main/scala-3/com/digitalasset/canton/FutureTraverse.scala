@@ -128,6 +128,7 @@ object FutureTraverse extends WartTraverser {
         val tpe = TypeRepr.of[T]
         tpe <:< TypeRepr.of[Option[Any]] ||
         tpe <:< TypeRepr.of[Either[Any, Any]] ||
+        tpe <:< TypeRepr.of[Tuple2[Any, Any]] ||
         tpe.baseClasses
           .flatMap(_.annotations)
           .exists(term => term.tpe <:< TypeRepr.of[AllowTraverseSingleContainer])

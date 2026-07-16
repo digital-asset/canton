@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.pruning
 
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.parallel.*

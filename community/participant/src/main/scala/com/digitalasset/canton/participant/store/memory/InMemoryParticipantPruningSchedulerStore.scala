@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.scheduler.ParticipantPruningSchedule
 import com.digitalasset.canton.participant.store.ParticipantPruningSchedulerStore

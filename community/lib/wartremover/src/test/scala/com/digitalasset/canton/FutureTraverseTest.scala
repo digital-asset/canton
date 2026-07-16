@@ -161,6 +161,7 @@ class FutureTraverseTest extends AnyWordSpec with Matchers {
 
     "allow singleton containers" in {
       val result = WartTestTraverser(FutureTraverse) {
+        // Option
         (1.some).traverse(_ => Future.successful(()))
         Foldable[Option].traverse_(Option.empty[Int])(_ => Future.successful(()))
         Traverse[Option].traverse(Option.empty[Int])(_ => Future.successful(()))
@@ -174,11 +175,17 @@ class FutureTraverseTest extends AnyWordSpec with Matchers {
         TraverseFilter[Option].traverseFilter(Option.empty[Int])(_ =>
           Future.successful(Option.empty)
         )
+
+        // Either
         // Since we've imported cats.syntax.either.*, this call does not go through Cats' Traverse typeclass anyway.
         (Either.left[String, Int]("")).traverse(_ => Future.successful(()))
         Foldable[Either[String, *]].traverse_(Left(""))(_ => Future.successful(()))
         Traverse[Either[String, *]].traverse(Left(""))(_ => Future.successful(()))
 
+        // Tuple2
+        (1, 2).traverse(_ => Future.successful(()))
+        Foldable[(String, *)].traverse_(("foo", 1))(_ => Future.successful(()))
+        Traverse[(String, *)].traverse_(("foo", 1))(_ => Future.successful(()))
       }
       result.errors shouldBe empty
     }

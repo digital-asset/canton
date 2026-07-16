@@ -21,7 +21,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Output,
   SequencerNode,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.{
+  SimulationEnv,
+  TraceContextGenerator,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.onboarding.OnboardingManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.onboarding.OnboardingManager.ReasonForProvide
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
@@ -61,6 +64,8 @@ class SequencerSnapshotOnboardingManager(
     random: Random,
 ) extends OnboardingManager[BftOnboardingData]
     with TestEssentials {
+
+  private val traceContextGenerator = TraceContextGenerator(random)
 
   private var onboardedNodes = initialNodes
 
@@ -122,9 +127,10 @@ class SequencerSnapshotOnboardingManager(
       Seq[(Command, FiniteDuration)](StartMachine(myEndpoint) -> DefaultEpsilonForSchedulingCommand)
       ++
       topologySettings.crashAfterOnboardDistribution.map(dist =>
-        CrashNode(sequencerId) -> DefaultEpsilonForSchedulingCommand.plus(
-          dist.generateRandomDuration(random)
-        )
+        CrashNode(sequencerId, permanent = false, traceContextGenerator.newTraceContext) ->
+          DefaultEpsilonForSchedulingCommand.plus(
+            dist.generateRandomDuration(random)
+          )
       )
     }
 

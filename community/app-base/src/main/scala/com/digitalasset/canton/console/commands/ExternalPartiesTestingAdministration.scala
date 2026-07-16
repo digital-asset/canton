@@ -21,6 +21,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeyUsage, SigningKeysWithThreshold}
 import com.digitalasset.canton.data.OnboardingTransactions
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.{

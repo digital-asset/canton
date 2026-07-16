@@ -8,6 +8,7 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
@@ -101,6 +102,7 @@ class CantonDynamicSynchronizerParameterGetter(
             NonEmpty.from(aliases),
             "No synchronizer defined",
           )
+          // TODO(#33650) – replace with unboundedTraverseFilter; safe because the number of connected synchronizer aliases is an administratively bounded, strictly small configuration list (1 to 10)
           allTolerances <- EitherT.right(aliases.parTraverseFilter(getTolerance))
           allTolerancesNE <- EitherT.fromOption[FutureUnlessShutdown](
             NonEmpty.from(allTolerances),

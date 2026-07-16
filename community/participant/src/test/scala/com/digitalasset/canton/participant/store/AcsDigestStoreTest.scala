@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.store.IndexedSynchronizer

@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout, Topolo
 import com.digitalasset.canton.crypto.SigningKeysWithThreshold
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{

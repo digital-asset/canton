@@ -64,10 +64,13 @@ object AuthorizedTopologyTransaction {
   *
   * @param extraDebugInfo
   *   whether to log the authorization graph at debug level on every recomputation
+  * @param warnAboutDanglingKeys
+  *   flag whether to log dangling keys in the authorization graph at WARN or at INFO level
   */
 class AuthorizationGraph(
     val namespace: Namespace,
     extraDebugInfo: Boolean,
+    warnAboutDanglingKeys: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends AuthorizationCheck
     with NamedLogging {
@@ -251,9 +254,10 @@ class AuthorizationGraph(
      */
     val dangling = graph.nodes().asScala.diff(cache.keySet).filter(!graph.predecessors(_).isEmpty)
     if (dangling.nonEmpty) {
-      logger.warn(
+      val danglingKeysMessage =
         s"The following target keys of namespace $namespace are dangling: ${dangling.toList.sorted}"
-      )
+      if (warnAboutDanglingKeys) logger.warn(danglingKeysMessage)
+      else logger.info(danglingKeysMessage)
     }
     if (cache.nonEmpty) {
       if (extraDebugInfo && logger.underlying.isDebugEnabled) {

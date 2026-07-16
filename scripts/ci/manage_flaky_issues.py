@@ -61,7 +61,16 @@ def report_issue(issue: str):
     has_assignee = False
 
     # search issues by title. also returns partial matches
-    result = run_gh_with_retries(["api", "graphql", "-F", "query=@scripts/ci/findIssueByTitle.graphql", "-f", f"searchstr=repo:DACH-NY/canton in:title {title}"])
+    result = run_gh_with_retries(
+        [
+            "api",
+            "graphql",
+            "-F",
+            "query=@scripts/ci/findIssueByTitle.graphql",
+            "-f",
+            f"searchstr=repo:DACH-NY/canton in:title {title}",
+        ]
+    )
     check_result(result)
     search_result_json = json.loads(result.stdout)
 
@@ -73,7 +82,6 @@ def report_issue(issue: str):
             has_assignee = result["assignees"]["totalCount"] > 0
             # look at the projects the issue is linked to
             for project_relation in result["projectItems"]["nodes"]:
-
                 # only extract data for the ticket if the linked project matches the flaky test project
                 if project_relation["project"]["id"] == flaky_test_project:
                     project_item_id = project_relation["id"]
@@ -115,24 +123,50 @@ def report_issue(issue: str):
     else:
         create_issue(title)
 
+
 def gh_assign_release_line(idx: str, project_item_id: str):
     release_line_value = branches_to_report.get(branch, None)
     if release_line_value:
-        result = run_gh_with_retries(["api", "graphql",
-                                  "-F", "query=@scripts/ci/assignReleaseLine.graphql",
-                                  "-F", f"issue={project_item_id}",
-                                  "-F", f"project={flaky_test_project}",
-                                  "-F", f"field={release_line_field}",
-                                  "-F", f"value={release_line_value}"])
+        result = run_gh_with_retries(
+            [
+                "api",
+                "graphql",
+                "-F",
+                "query=@scripts/ci/assignReleaseLine.graphql",
+                "-F",
+                f"issue={project_item_id}",
+                "-F",
+                f"project={flaky_test_project}",
+                "-F",
+                f"field={release_line_field}",
+                "-F",
+                f"value={release_line_value}",
+            ]
+        )
         check_result(result)
-        print(f"Assigned release line \"{release_line_value}\" to issue: https://github.com/DACH-NY/canton/issues/{idx}")
+        print(
+            f"Assigned release line \"{release_line_value}\" to issue: https://github.com/DACH-NY/canton/issues/{idx}"
+        )
 
 
 def gh_issue_create_cmd(title: str, body: str):
-    result = run_gh_with_retries(["issue", "create", "--repo", "DACH-NY/canton",
-                               "--title", title, "--body", body, "--milestone", milestone])
+    result = run_gh_with_retries(
+        [
+            "issue",
+            "create",
+            "--repo",
+            "DACH-NY/canton",
+            "--title",
+            title,
+            "--body",
+            body,
+            "--milestone",
+            milestone,
+        ]
+    )
     check_result(result)
     return result
+
 
 def gh_issue_edit_cmd(idx: str, title: str, body: str):
     # gh issue edit has no --state flag; reopen separately first
@@ -140,10 +174,12 @@ def gh_issue_edit_cmd(idx: str, title: str, body: str):
     reopen_result = run_gh_with_retries(["issue", "reopen", idx, "--repo", "DACH-NY/canton"])
     if reopen_result.returncode != 0 and "already open" not in reopen_result.stderr.lower():
         check_result(reopen_result)
-    result = run_gh_with_retries(["issue", "edit", idx, "--repo", "DACH-NY/canton",
-                  "--title", title, "--body", body])
+    result = run_gh_with_retries(
+        ["issue", "edit", idx, "--repo", "DACH-NY/canton", "--title", title, "--body", body]
+    )
     check_result(result)
     return result
+
 
 def create_issue(title: str):
     body = f"""This issue was created automatically by the CI system. Please fix the test before closing the issue.
@@ -156,6 +192,7 @@ def create_issue(title: str):
 
 def extract_commit_hashes_from_body(body: str) -> list[str]:
     return re.findall(r'commit/([0-9a-f]{40})', body)
+
 
 # --- nightly streak detection ---------------------------------------------
 #
@@ -180,7 +217,8 @@ def _git_commit_before(when: datetime.datetime) -> Optional[str]:
     iso = when.strftime("%Y-%m-%dT%H:%M:%SZ")
     result = subprocess.run(
         ["git", "rev-list", "-1", f"--before={iso}", "origin/main"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     sha = result.stdout.strip()
     return sha if result.returncode == 0 and len(sha) == 40 else None
@@ -213,10 +251,14 @@ def recent_nightly_commits() -> tuple:
         _nightly_commits_cache = tuple()
         return _nightly_commits_cache
 
-    fetch = subprocess.run(["git", "fetch", "--quiet", "origin", "main"], capture_output=True, text=True)
+    fetch = subprocess.run(
+        ["git", "fetch", "--quiet", "origin", "main"], capture_output=True, text=True
+    )
     if fetch.returncode != 0:
         # Stale origin/main would mis-enumerate the nightly commits; log and carry on.
-        print(f"recent_nightly_commits: 'git fetch origin main' failed, using local origin/main: {fetch.stderr.strip()}")
+        print(
+            f"recent_nightly_commits: 'git fetch origin main' failed, using local origin/main: {fetch.stderr.strip()}"
+        )
     now = datetime.datetime.utcnow()
     # `now` is after the current run's own nightly cron slot, so the most recent
     # cron time enumerated below resolves to `current` again. We therefore request
@@ -274,13 +316,20 @@ def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
         ["api", f"repos/DACH-NY/canton/commits/{newer_hash}", "--jq", ".parents[].sha"]
     )
     if result.returncode != 0:
-        print(f"are_consecutive_commits: gh api failed for {newer_hash[:8]}: {result.stderr.strip()}")
+        print(
+            f"are_consecutive_commits: gh api failed for {newer_hash[:8]}: {result.stderr.strip()}"
+        )
         return False
     return older_hash in result.stdout.splitlines()
 
+
 def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, str]]:
     job = get_ci_job_name()
-    threshold = CONSECUTIVE_FAILURES_THRESHOLD if job != 'unstable_test' else CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+    threshold = (
+        CONSECUTIVE_FAILURES_THRESHOLD
+        if job != 'unstable_test'
+        else CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+    )
 
     header = "| Date | Job | Node | Build | Commit |"
     if header not in body:
@@ -298,7 +347,9 @@ def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, st
         else:
             # Collapse consecutive same-commit entries (multi-shard / retries) so they
             # don't shadow the check: are_consecutive_commits(X, X) is always False.
-            distinct = [c for c, _ in groupby(extract_commit_hashes_from_body(body) + [commit_hash])]
+            distinct = [
+                c for c, _ in groupby(extract_commit_hashes_from_body(body) + [commit_hash])
+            ]
             recent = distinct[-threshold:]
             if len(recent) >= threshold and all(
                 are_consecutive_commits(a, b) for a, b in zip(recent, recent[1:])
@@ -314,8 +365,20 @@ def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, st
         return (idx, title, commit_hash)
     return None
 
+
 def gh_unarchive_issue(idx: str, project_item_id: str):
-    result = run_gh_with_retries(["api", "graphql", "-F", "query=@scripts/ci/unarchiveIssue.graphql", "-F", f"issue={project_item_id}", "-F", f"project={flaky_test_project}"])
+    result = run_gh_with_retries(
+        [
+            "api",
+            "graphql",
+            "-F",
+            "query=@scripts/ci/unarchiveIssue.graphql",
+            "-F",
+            f"issue={project_item_id}",
+            "-F",
+            f"project={flaky_test_project}",
+        ]
+    )
     check_result(result)
     print(f"Unarchived issue: https://github.com/DACH-NY/canton/issues/{idx}")
 
@@ -324,7 +387,9 @@ def self_test():
     test_update_issue_old_format()
     test_update_issue_new_format()
     test_update_issue_returns_consecutive_streak_info('test_job', CONSECUTIVE_FAILURES_THRESHOLD)
-    test_update_issue_returns_consecutive_streak_info('unstable_test', CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE)
+    test_update_issue_returns_consecutive_streak_info(
+        'unstable_test', CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+    )
     test_update_issue_dedupes_shard_duplicates()
     test_report_issue_skips_slack_if_assignee()
     test_nightly_streak_detection()
@@ -350,30 +415,41 @@ def test_nightly_streak_detection():
     prior = commits[:-1]  # the n-1 previous nightly commits
 
     env = {
-        'CIRCLECI': 'true', 'GITHUB_ACTIONS': 'false', 'CIRCLE_SHA1': current,
-        'CIRCLE_JOB': 'nightly_integration_test', 'CIRCLE_NODE_INDEX': '0',
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test',
+        'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
 
     # failed on each of the last 3 nightly runs (priors in body + current) -> streak
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
+    ):
         assert nightly_streak(_nightly_body(prior)) is True
 
     # one of the last-3 nightly commits is missing from the body -> no streak
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
+    ):
         assert nightly_streak(_nightly_body(prior[:-1])) is False
 
     # the prior failures are non-nightly rows -> ignored -> no streak
     nonnightly = _nightly_body(prior).replace("nightly_integration_test", "test_with_java17")
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
+    ):
         assert nightly_streak(nonnightly) is False
 
     # fewer than N nightly runs known -> never flag
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits[:1])):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits[:1])),
+    ):
         assert nightly_streak(_nightly_body(prior)) is False
 
 
@@ -384,30 +460,38 @@ def test_recent_nightly_commits_counts_current_run_once():
     so it fails if the slot count regresses to N-1."""
     global _nightly_commits_cache
     n = NIGHTLY_CONSECUTIVE_FAILURES
-    current = format(0xc, '040x')
+    current = format(0xC, '040x')
     priors = [format(i, '040x') for i in range(1, n)]
     env = {
-        'CIRCLECI': 'true', 'GITHUB_ACTIONS': 'false', 'CIRCLE_SHA1': current,
-        'CIRCLE_JOB': 'nightly_integration_test', 'CIRCLE_NODE_INDEX': '0',
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test',
+        'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
     # _previous_nightly_datetimes returns slots newest-first; the newest resolves
     # to the current run's commit, each earlier one to a distinct prior commit.
     counter = {'i': 0}
+
     def fake_before(_dt):
         i = counter['i']
         counter['i'] += 1
         if i == 0:
             return current
-        return priors[i - 1] if i - 1 < len(priors) else format(0xdead + i, '040x')
+        return priors[i - 1] if i - 1 < len(priors) else format(0xDEAD + i, '040x')
 
     saved_cache = _nightly_commits_cache
     _nightly_commits_cache = None
     try:
-        with patch.dict(os.environ, env, clear=False), \
-             patch(f'{__name__}.subprocess.run',
-                   return_value=subprocess.CompletedProcess([], 0, '', '')), \
-             patch(f'{__name__}._git_commit_before', side_effect=fake_before):
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(
+                f'{__name__}.subprocess.run',
+                return_value=subprocess.CompletedProcess([], 0, '', ''),
+            ),
+            patch(f'{__name__}._git_commit_before', side_effect=fake_before),
+        ):
             result = recent_nightly_commits()
     finally:
         _nightly_commits_cache = saved_cache
@@ -424,17 +508,22 @@ def test_update_issue_nightly_streak_labels_and_returns():
     current = commits[-1]
     prior = commits[:-1]
     env = {
-        'CIRCLECI': 'true', 'GITHUB_ACTIONS': 'false', 'CIRCLE_SHA1': current,
-        'CIRCLE_JOB': 'nightly_integration_test', 'CIRCLE_NODE_INDEX': '0',
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'nightly_integration_test',
+        'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
 
     labelled: list = []
     # streak -> returns issue tuple and applies the broken-nightly label
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)), \
-         patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
+        patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)),
+    ):
         result = update_issue("77", "Flaky NightlyIntegrationTest", _nightly_body(prior))
         assert result is not None, "Expected a nightly streak to fire"
         assert result[0] == "77"
@@ -442,10 +531,12 @@ def test_update_issue_nightly_streak_labels_and_returns():
 
     # no streak -> no label, returns None
     labelled.clear()
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)), \
-         patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
+        patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)),
+    ):
         result = update_issue("77", "Flaky NightlyIntegrationTest", _nightly_body(prior[:-1]))
         assert result is None
         assert labelled == [], "Expected no label when there is no streak"
@@ -466,8 +557,10 @@ def test_update_issue_old_format():
         'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
+    ):
         update_issue("42", "Flaky test", old_body)
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
@@ -486,14 +579,17 @@ def test_update_issue_old_format():
         'GITHUB_REPOSITORY': 'DACH-NY/canton',
         'GITHUB_SERVER_URL': 'https://github.com',
     }
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
+    ):
         update_issue("42", "Flaky test", old_body)
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
         assert header in msg, f"Table header was not injected into old-format body (GHA): {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once (GHA)"
+
 
 def test_update_issue_new_format():
     # New issues already have the table header — the new row is simply appended, no duplicate header
@@ -511,13 +607,17 @@ def test_update_issue_new_format():
         'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
+    ):
         update_issue("42", "Flaky test", new_body)
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
-        assert msg.count(header) == 1, f"Table header must appear exactly once in updated body: {msg}"
+        assert msg.count(header) == 1, (
+            f"Table header must appear exactly once in updated body: {msg}"
+        )
 
     # Test GitHub Actions
     env_gha = {
@@ -530,13 +630,18 @@ def test_update_issue_new_format():
         'GITHUB_REPOSITORY': 'DACH-NY/canton',
         'GITHUB_SERVER_URL': 'https://github.com',
     }
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh:
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
+    ):
         update_issue("42", "Flaky test", new_body)
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
         header = "| Date | Job | Node | Build | Commit |"
-        assert msg.count(header) == 1, f"Table header must appear exactly once in updated body (GHA): {msg}"
+        assert msg.count(header) == 1, (
+            f"Table header must appear exactly once in updated body (GHA): {msg}"
+        )
+
 
 def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
     # Build exactly CONSECUTIVE_FAILURES_THRESHOLD commits: prior ones go in the body, last is current
@@ -550,7 +655,11 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
             for i, c in enumerate(commit_list)
         )
         header = "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
-        return "This issue was created automatically by the CI system.\n\n" + header + ("\n" + rows if rows else "")
+        return (
+            "This issue was created automatically by the CI system.\n\n"
+            + header
+            + ("\n" + rows if rows else "")
+        )
 
     consecutive_pairs = set(zip(commits, commits[1:]))
 
@@ -571,9 +680,11 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
     }
 
     # exactly threshold-1 prior commits, all consecutive → streak fires (CCI)
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive),
+    ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is not None, f"Expected streak with {threshold} consecutive commits (CCI)"
         idx, title, commit = result
@@ -581,16 +692,20 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
         assert commit == current, f"Expected current commit in result, got: {commit}"
 
     # one commit short → not enough history, no streak (CCI)
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive),
+    ):
         result = update_issue("42", "Flaky test", make_body(prior[:-1]))
         assert result is None, f"Expected None with only {len(prior) - 1} prior commits (CCI)"
 
     # full history but not consecutive → no streak (CCI)
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive),
+    ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None for non-consecutive commits (CCI)"
 
@@ -607,9 +722,11 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
     }
 
     # exactly threshold-1 prior commits, all consecutive → streak fires (GHA)
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive),
+    ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is not None, f"Expected streak with {threshold} consecutive commits (GHA)"
         idx, title, commit = result
@@ -617,16 +734,20 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
         assert commit == current, f"Expected current commit in result, got: {commit}"
 
     # one commit short → not enough history, no streak (GHA)
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive):
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.are_consecutive_commits', side_effect=all_consecutive),
+    ):
         result = update_issue("42", "Flaky test", make_body(prior[:-1]))
         assert result is None, f"Expected None with only {len(prior) - 1} prior commits (GHA)"
 
     # full history but not consecutive → no streak (GHA)
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive):
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.are_consecutive_commits', side_effect=not_consecutive),
+    ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None for non-consecutive commits (GHA)"
 
@@ -656,9 +777,14 @@ def test_update_issue_dedupes_shard_duplicates():
         'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
-    with patch.dict(os.environ, env, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs):
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(
+            f'{__name__}.are_consecutive_commits',
+            side_effect=lambda a, b: (a, b) in consecutive_pairs,
+        ),
+    ):
         result = update_issue("42", "Flaky test", body)
         assert result is not None, "Expected streak to fire after deduping shard-duplicate rows"
         assert result[2] == current
@@ -680,13 +806,23 @@ def test_report_issue_skips_slack_if_assignee():
     consecutive_pairs = set(zip(commits, commits[1:]))
 
     def make_search_response(total_count):
-        return json.dumps({"data": {"search": {"nodes": [{
-            "title": title,
-            "number": 99,
-            "body": body_with_history,
-            "assignees": {"totalCount": total_count},
-            "projectItems": {"nodes": []},
-        }]}}})
+        return json.dumps(
+            {
+                "data": {
+                    "search": {
+                        "nodes": [
+                            {
+                                "title": title,
+                                "number": 99,
+                                "body": body_with_history,
+                                "assignees": {"totalCount": total_count},
+                                "projectItems": {"nodes": []},
+                            }
+                        ]
+                    }
+                }
+            }
+        )
 
     # Test CircleCI
     env_cci = {
@@ -699,21 +835,33 @@ def test_report_issue_skips_slack_if_assignee():
     }
 
     # assigned issue: body is updated but Slack is suppressed (CCI)
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit, \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
-         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit,
+        patch(
+            f'{__name__}.are_consecutive_commits',
+            side_effect=lambda a, b: (a, b) in consecutive_pairs,
+        ),
+        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+    ):
         mock_gh.return_value.returncode = 0
         mock_gh.return_value.stdout = make_search_response(total_count=1)
         result = report_issue("SomeFlakyTest")
-        assert result is None, "Expected None when issue has an assignee (no Slack notification) (CCI)"
+        assert result is None, (
+            "Expected None when issue has an assignee (no Slack notification) (CCI)"
+        )
         mock_edit.assert_called_once()
 
     # unassigned issue with same streak: Slack is not suppressed (CCI)
-    with patch.dict(os.environ, env_cci, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
-         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+    with (
+        patch.dict(os.environ, env_cci, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(
+            f'{__name__}.are_consecutive_commits',
+            side_effect=lambda a, b: (a, b) in consecutive_pairs,
+        ),
+        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+    ):
         mock_gh.return_value.returncode = 0
         mock_gh.return_value.stdout = make_search_response(total_count=0)
         result = report_issue("SomeFlakyTest")
@@ -732,21 +880,33 @@ def test_report_issue_skips_slack_if_assignee():
     }
 
     # assigned issue: body is updated but Slack is suppressed (GHA)
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit, \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
-         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit,
+        patch(
+            f'{__name__}.are_consecutive_commits',
+            side_effect=lambda a, b: (a, b) in consecutive_pairs,
+        ),
+        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+    ):
         mock_gh.return_value.returncode = 0
         mock_gh.return_value.stdout = make_search_response(total_count=1)
         result = report_issue("SomeFlakyTest")
-        assert result is None, "Expected None when issue has an assignee (no Slack notification) (GHA)"
+        assert result is None, (
+            "Expected None when issue has an assignee (no Slack notification) (GHA)"
+        )
         mock_edit.assert_called_once()
 
     # unassigned issue with same streak: Slack is not suppressed (GHA)
-    with patch.dict(os.environ, env_gha, clear=False), \
-         patch(f'{__name__}.gh_issue_edit_cmd'), \
-         patch(f'{__name__}.are_consecutive_commits', side_effect=lambda a, b: (a, b) in consecutive_pairs), \
-         patch(f'{__name__}.run_gh_with_retries') as mock_gh:
+    with (
+        patch.dict(os.environ, env_gha, clear=False),
+        patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(
+            f'{__name__}.are_consecutive_commits',
+            side_effect=lambda a, b: (a, b) in consecutive_pairs,
+        ),
+        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+    ):
         mock_gh.return_value.returncode = 0
         mock_gh.return_value.stdout = make_search_response(total_count=0)
         result = report_issue("SomeFlakyTest")
@@ -799,10 +959,16 @@ def run(failing_tests_json=None, streaks_json=None):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Create/update GitHub flaky-test issues.")
-    parser.add_argument("--failing-tests-json", default=None,
-                        help="Input path for the failing-tests JSON (default: shared CI temp dir).")
-    parser.add_argument("--streaks-json", default=None,
-                        help="Output path for the streaks JSON (default: shared CI temp dir).")
+    parser.add_argument(
+        "--failing-tests-json",
+        default=None,
+        help="Input path for the failing-tests JSON (default: shared CI temp dir).",
+    )
+    parser.add_argument(
+        "--streaks-json",
+        default=None,
+        help="Output path for the streaks JSON (default: shared CI temp dir).",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run self-tests and exit.")
     return parser.parse_args(argv)
 

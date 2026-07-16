@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.mediator
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.*

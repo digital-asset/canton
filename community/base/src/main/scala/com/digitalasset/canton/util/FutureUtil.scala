@@ -4,6 +4,7 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException

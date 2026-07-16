@@ -404,7 +404,7 @@ class ScenarioRunner(console: HeadlessConsole, scenario: SnippetScenario)(
       case None => shellTemporaryDir
     }
 
-    val processLogger = new SplitBufferedProcessLogger {
+    val processLogger = new SplitBufferedProcessLogger(None) {
       override def out(s: => String): Unit = {
         logger.info(s)
         super.out(s)

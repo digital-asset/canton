@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.google.protobuf.ByteString
 
-import java.security.{KeyPair, Signature}
+import java.security.KeyPair
 import scala.language.implicitConversions
 
 sealed trait Party {
@@ -24,9 +24,10 @@ final case class ExternalParty(
     signingFingerprint: Fingerprint,
     signingKeyPair: KeyPair,
     signingThreshold: PositiveInt,
+    signingKeySpec: ExternalPartyKeySpec,
 ) extends Party {
   def sign(data: ByteString): ByteString = {
-    val signatureInstance = Signature.getInstance("Ed25519")
+    val signatureInstance = signingKeySpec.signatureInstance()
     signatureInstance.initSign(signingKeyPair.getPrivate)
     signatureInstance.update(data.toByteArray)
     ByteString.copyFrom(signatureInstance.sign())
@@ -49,6 +50,7 @@ object Party {
       signingKeyPair: KeyPair,
       signingThreshold: PositiveInt,
       initialSynchronizers: List[String] = List.empty,
+      signingKeySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): ExternalParty =
     ExternalParty(
       new ApiParty(value),
@@ -56,6 +58,7 @@ object Party {
       signingFingerprint,
       signingKeyPair,
       signingThreshold,
+      signingKeySpec,
     )
 
   def apply(value: String, initialSynchronizers: List[String] = List.empty): Party =

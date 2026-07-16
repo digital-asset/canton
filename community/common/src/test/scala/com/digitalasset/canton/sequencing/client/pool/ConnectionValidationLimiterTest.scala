@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.pool
 
-import cats.syntax.parallel.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   HasUnlessClosing,
@@ -47,8 +47,7 @@ class ConnectionValidationLimiterTest extends AnyWordSpec with BaseTest with Has
       promises.foreach(_.outcome_(()))
 
       // Wait for all validation requests to complete
-      // TODO(#33650) – Statically bounded to 42 elements
-      fut.parSequence.futureValueUS
+      fut.foreach(_.futureValueUS)
 
       // We should have 2 validations
       eventually()(counter.get shouldBe 2)

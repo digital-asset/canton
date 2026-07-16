@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Recipients

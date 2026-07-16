@@ -14,6 +14,7 @@ import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{ComponentHealthState, HealthStatus, ReportsHealth}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
   withEnrichedLoggingContext,

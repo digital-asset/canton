@@ -32,6 +32,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   SynchronizerIndex,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.event.{AcsChangeSupport, RecordTime}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics

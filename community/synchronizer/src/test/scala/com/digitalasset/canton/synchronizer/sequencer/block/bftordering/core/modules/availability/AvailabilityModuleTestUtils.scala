@@ -345,28 +345,14 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       Seq(ProofOfAvailability4NodesQuorumVotesNodes0To3InTopology)
     ),
   )
-  protected val AMissingBatchStatusNode1And2AcksWithNode1ToTry =
+  protected val AMissingBatchStatusNode1And2Acks =
     MissingBatchStatus(
       ABatchId,
       ProofOfAvailabilityNode1And2AcksNode1And2InTopology,
-      remainingNodesToTry = Seq(Node1),
       numberOfAttempts = 1,
       jitterStream = jitterStream,
       orderingMode = OrderingMode.Consensus,
     )
-  protected val AMissingBatchStatusNode1And2AcksWithNode2ToTry =
-    AMissingBatchStatusNode1And2AcksWithNode1ToTry
-      .copy(remainingNodesToTry =
-        ProofOfAvailabilityNode1And2AcksNode1And2InTopology.acks.map(_.from).tail
-      )
-  protected val AMissingBatchStatusNode1And2AcksWithNoAttemptsLeft =
-    AMissingBatchStatusNode1And2AcksWithNode1ToTry
-      .copy(remainingNodesToTry = Seq.empty)
-  protected val ABatchMissingBatchStatusNode1And2AcksWithNoAttemptsLeft =
-    ABatchId -> AMissingBatchStatusNode1And2AcksWithNode1ToTry
-  protected val AMissingBatchStatusFromStateTransferWithNoAttemptsLeft =
-    AMissingBatchStatusNode1And2AcksWithNoAttemptsLeft
-      .copy(orderingMode = OrderingMode.StateTransfer)
   protected val ANextToBeProvidedToConsensus =
     NextToBeProvidedToConsensus(
       BlockNumber.First,

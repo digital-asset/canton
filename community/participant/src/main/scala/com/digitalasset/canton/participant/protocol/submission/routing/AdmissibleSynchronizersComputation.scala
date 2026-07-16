@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
@@ -80,6 +81,7 @@ class AdmissibleSynchronizersComputation(
       PhysicalSynchronizerId,
       Map[LfPartyId, PartyInfo],
     ]] =
+      // TODO(#33650) - replace with unboundedTraverseFilter, safe because the number of topology snapshots is bounded by the participant's connected synchronizers
       synchronizerState.topologySnapshots.toVector
         .parTraverseFilter(queryPartyTopologySnapshotClient)
         .map(_.toMap)

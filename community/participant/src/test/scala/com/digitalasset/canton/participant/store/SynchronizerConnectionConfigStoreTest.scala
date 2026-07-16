@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, Positi
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
   Active,

@@ -5,6 +5,7 @@ package com.digitalasset.canton.util
 
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FutureUnlessShutdown,

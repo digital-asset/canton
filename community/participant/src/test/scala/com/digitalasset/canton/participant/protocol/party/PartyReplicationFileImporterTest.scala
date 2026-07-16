@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId

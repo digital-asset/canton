@@ -1647,7 +1647,7 @@ class ParallelIndexerSubscriptionSpec
     val outBatchF =
       ParallelIndexerSubscription.ingester(
         ingestFunction = ingestFunction,
-        lockUsedContracts = _ => _ => Set.empty,
+        lockUsedContracts = _ => _ => _ => Set.empty,
         evictContractsFromCache = _ => (),
         reassignmentOffsetPersistence = new ReassignmentOffsetPersistence {
           override def persist(updates: Seq[(Offset, Update)], tracedLogger: TracedLogger)(implicit

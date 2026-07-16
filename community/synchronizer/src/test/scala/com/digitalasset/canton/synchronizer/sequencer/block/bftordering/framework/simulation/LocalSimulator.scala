@@ -14,17 +14,21 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.Random
 
-import SimulationModuleSystem.SimulationEnv
+import SimulationModuleSystem.{SimulationEnv, TraceContextGenerator}
 
 class LocalSimulator(
     settings: LocalSettings,
     nodes: Set[BftNodeId],
     agenda: Agenda,
+    traceContextGenerator: TraceContextGenerator,
 ) {
   private val random = new Random(settings.randomSeed)
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var canUseFaults = true
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var havePermanentlyCrashedNodes = false
 
   private val crashNodeStatus: mutable.Map[BftNodeId, LocalSimulator.CrashNodeStatus] =
     mutable.Map.from(
@@ -36,14 +40,30 @@ class LocalSimulator(
     if (!canUseFaults) {
       return
     }
+    if (!havePermanentlyCrashedNodes) {
+      settings.permanentlyCrashNodes.foreach { numberOfNodesToPermanentlyCrash =>
+        val nodesToCrashPermanently = random.shuffle(nodes).take(numberOfNodesToPermanentlyCrash)
+        nodesToCrashPermanently.foreach { node =>
+          crashNodeStatus(node) = LocalSimulator.Permanent
+          agenda.addOne(
+            CrashNode(node, permanent = true, traceContextGenerator.newTraceContext),
+            duration = 1.microsecond,
+          )
+        }
+      }
+      havePermanentlyCrashedNodes = true
+    }
     crashNodeStatus.mapValuesInPlace { case (node, status) =>
       if (status.shouldUpdate(at)) {
         val gracePeriod =
           at.add(settings.crashRestartGracePeriod.generateRandomDuration(random).toJava)
         if (settings.crashRestartChance.flipCoin(random)) {
-          agenda.addOne(CrashNode(node), duration = 1.microsecond)
           agenda.addOne(
-            RestartNode(node),
+            CrashNode(node, permanent = false, traceContextGenerator.newTraceContext),
+            duration = 1.microsecond,
+          )
+          agenda.addOne(
+            RestartNode(node, traceContextGenerator.newTraceContext),
             duration = settings.crashTimeDistribution.generateRandomDuration(random),
           )
         }
@@ -129,5 +149,9 @@ object LocalSimulator {
 
   private final case class Initialized(dontUpdateUntil: CantonTimestamp) extends CrashNodeStatus {
     override def shouldUpdate(at: CantonTimestamp): Boolean = dontUpdateUntil.isBefore(at)
+  }
+
+  private object Permanent extends CrashNodeStatus {
+    override def shouldUpdate(at: CantonTimestamp): Boolean = false
   }
 }

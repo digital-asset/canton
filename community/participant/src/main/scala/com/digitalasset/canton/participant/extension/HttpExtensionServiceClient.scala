@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PerformUnlessClosing,

@@ -7,6 +7,7 @@ import cats.data.NonEmptyChain
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.LockedStates

@@ -19,7 +19,8 @@ import scala.language.implicitConversions
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
     extends Equals
-    with Serializable {
+    with Serializable
+    with HasTraceContext {
 
   lazy val asW3CTraceContext: Option[W3CTraceContext] =
     W3CTraceContext.fromOpenTelemetryContext(context)
@@ -78,6 +79,8 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   }
 
   def showTraceId: Shown = Shown(s"tid:${traceId.getOrElse("")}")
+
+  override def traceContext: TraceContext = this
 }
 
 object TraceContext {

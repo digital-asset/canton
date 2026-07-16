@@ -47,12 +47,15 @@ def process_test_report(path: Path, failing_tests: Set[str]):
     # To understand this XML parsing I recommend to just go through this code with a debugger on
     # an example test report; alternatively see e.g. https://stackoverflow.com/a/26661423
     for child in root:
-        if 'name' not in child.attrib: continue
+        if 'name' not in child.attrib:
+            continue
         contains_fail = any(childchild.tag == 'failure' for childchild in child)
         contains_error = any(childchild.tag == 'error' for childchild in child)
         if contains_fail or contains_error:
             # Example value: LedgerAPIParticipantPruningTestPostgres
-            test_name = child.attrib.get('classname', child.attrib.get('name', 'unknown')).split('.')[-1]
+            test_name = child.attrib.get('classname', child.attrib.get('name', 'unknown')).split(
+                '.'
+            )[-1]
             print(f"Found failing test '{test_name}'")
             failing_tests.add(test_name)
     return failing_tests
@@ -62,7 +65,9 @@ def check_for_log_failures(failing_tests_result: Set[str]):
     failure = None
     if os.path.exists("found_problems.txt"):
         with open("found_problems.txt", "r") as f:
-            lines = f.read().splitlines() # splitlines() strips trailing newlines unlike readlines()
+            lines = (
+                f.read().splitlines()
+            )  # splitlines() strips trailing newlines unlike readlines()
             failure = compute_single_log_failure(lines)
 
     if failure:
@@ -70,6 +75,7 @@ def check_for_log_failures(failing_tests_result: Set[str]):
         failing_tests_result.add(failure)
 
     return failing_tests_result
+
 
 def compute_single_log_failure(lines: list[str]):
     if not lines:
@@ -91,7 +97,7 @@ def compute_single_log_failure(lines: list[str]):
 
         if failure:
             failures.append(failure)
-        else: # Give up and append the untouched line
+        else:  # Give up and append the untouched line
             failures.append(line)
 
     # Prefer the longest line as it's likely the most informative
@@ -127,7 +133,7 @@ def test_compute_single_log_failure():
         "ERROR i.g.i.ManagedChannelOrphanWrapper - *~*~*~ Channel ManagedChannelImpl{logId=6714, target=localhost:15272} was not shutdown properly!!! ~*~*~*",
         "2021-05-05 12:43:03,509 [...] WARN  c.d.l.p.s.v.SeedService$ - Trying to gather entropy from the underlying operating system to initialized the contract ID seeding, but the entropy pool seems empty.",
         "WARN  c.d.c.p.p.v.ConfirmationResponseFactory:BroadcastPackageUsageIntegrationTest/participant=participant3/synchronizer=da tid:8c53516be1ff7a431b87322eebf2d4ae - Malformed request RequestId(2021-05-05T11:00:30.588840Z). DAMLeError(Error(Contract could not be found with id ContractId(00c0d9eb114b6eec91c8837bad7975c19e0739e7d25cde0c8b9c4446b0cff1a81fca001220a20c40f20f8a329e3874819a5af2e9107e808e8c091d3dd2a4f7aceff24cfcee)))",
-        "ERROR c.d.c.p.a.BroadcastPackageUsageService:BroadcastPackageUsageIntegrationTest/participant=participant3 tid:ef410c4f0c6bbc7664a1cd07f94644d7 - An unexpected exception occurred while updating UsePackage contracts."
+        "ERROR c.d.c.p.a.BroadcastPackageUsageService:BroadcastPackageUsageIntegrationTest/participant=participant3 tid:ef410c4f0c6bbc7664a1cd07f94644d7 - An unexpected exception occurred while updating UsePackage contracts.",
     ]
     expected = "ERROR c.d.c.p.a.BroadcastPackageUsageService"
     actual = compute_single_log_failure(lines)
@@ -140,17 +146,14 @@ def test_compute_single_log_failure():
         "[warn] 		io.spray:sbt-revolver:0.9.1 (sbtVersion=1.0, scalaVersion=2.12)",
         "[warn] ",
         "[warn] 	Note: Unresolved dependencies path:",
-        "[error] sbt.librarymanagement.ResolveException: Error downloading io.spray:sbt-revolver;sbtVersion=1.0;scalaVersion=2.12:0.9.1"
+        "[error] sbt.librarymanagement.ResolveException: Error downloading io.spray:sbt-revolver;sbtVersion=1.0;scalaVersion=2.12:0.9.1",
     ]
     expected = "error sbt.librarymanagement.ResolveException: Error downloading io.spray:sbt-revolver;sbtVersion=1.0;scalaVersion=2.12:0.9.1"
     actual = compute_single_log_failure(lines)
     assert actual == expected, f"Expected '{expected}', got '{actual}'"
 
     # General
-    lines = [
-        "unmatched",
-        "longer unmatched"
-    ]
+    lines = ["unmatched", "longer unmatched"]
     expected = "longer unmatched"
     actual = compute_single_log_failure(lines)
     assert actual == expected, f"Expected '{expected}', got '{actual}'"
@@ -164,10 +167,17 @@ def run(failure_message=None, failing_tests_json=None):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Collect failing tests into a JSON artifact.")
-    parser.add_argument("failure_message", nargs="?", default=None,
-                        help="Optional CI failure message recorded as the single failing test (sbt crash path).")
-    parser.add_argument("--failing-tests-json", default=None,
-                        help="Output path for the failing-tests JSON (default: shared CI temp dir).")
+    parser.add_argument(
+        "failure_message",
+        nargs="?",
+        default=None,
+        help="Optional CI failure message recorded as the single failing test (sbt crash path).",
+    )
+    parser.add_argument(
+        "--failing-tests-json",
+        default=None,
+        help="Output path for the failing-tests JSON (default: shared CI temp dir).",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run self-tests and exit.")
     return parser.parse_args(argv)
 

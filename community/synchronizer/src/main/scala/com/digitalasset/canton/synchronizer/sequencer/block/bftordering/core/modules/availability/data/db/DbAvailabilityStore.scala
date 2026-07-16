@@ -8,6 +8,7 @@ import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.caching.{CaffeineCache, ConcurrentCache}
 import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}

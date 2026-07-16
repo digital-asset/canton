@@ -44,6 +44,7 @@ final case class ParticipantNodeParameters(
     enableAllLedgerApiReassignments: Boolean,
     commitAfterFailedActivenessCheck: Boolean,
     validateLegacyContractsV11: Boolean,
+    acsCommitments: AcsCommitmentConfig,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -117,5 +118,6 @@ object ParticipantNodeParameters {
     enableAllLedgerApiReassignments = false,
     commitAfterFailedActivenessCheck = false,
     validateLegacyContractsV11 = true,
+    acsCommitments = AcsCommitmentConfig(),
   )
 }

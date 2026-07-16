@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt
 import com.digitalasset.canton.crypto.{SyncCryptoClient, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.SynchronizerParameters
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.*
@@ -43,8 +44,6 @@ import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
 import java.util.UUID
-import scala.concurrent.Future
-import scala.language.implicitConversions
 
 final class SequencerRateLimitManagerImplTest
     extends FixtureAsyncWordSpec
@@ -293,14 +292,16 @@ final class SequencerRateLimitManagerImplTest
   }
 
   private def purchaseTraffic(implicit f: Env) =
-    f.balanceManager.addTrafficPurchased(
-      TrafficPurchased(
-        sender,
-        PositiveInt.one,
-        trafficPurchased,
-        sequencerTs.immediatePredecessor,
+    f.balanceManager
+      .addTrafficPurchased(
+        TrafficPurchased(
+          sender,
+          PositiveInt.one,
+          trafficPurchased,
+          sequencerTs.immediatePredecessor,
+        )
       )
-    )
+      .failOnShutdown
 
   private def returnIncorrectCostFromSender(
       cost: NonNegativeLong = incorrectSubmissionCostNN
@@ -345,9 +346,6 @@ final class SequencerRateLimitManagerImplTest
   }
 
   "traffic control when processing submission request" should {
-
-    implicit def fusToF[T](fus: FutureUnlessShutdown[T]): Future[T] =
-      fus.onShutdown(fail(s"fusToF"))
 
     "let requests through if enough traffic" in { implicit f =>
       for {
@@ -549,9 +547,6 @@ final class SequencerRateLimitManagerImplTest
   }
 
   "traffic control after sequencing" should {
-
-    implicit def fusToF[T](fus: FutureUnlessShutdown[T]): Future[T] =
-      fus.onShutdown(fail(s"fusToF"))
 
     "consume traffic" in { implicit f =>
       returnCorrectCost

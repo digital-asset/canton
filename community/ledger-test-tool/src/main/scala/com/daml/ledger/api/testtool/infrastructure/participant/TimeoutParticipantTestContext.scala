@@ -6,7 +6,12 @@ package com.daml.ledger.api.testtool.infrastructure.participant
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext.IncludeInterfaceView
 import com.daml.ledger.api.testtool.infrastructure.time.{DelayMechanism, Durations}
-import com.daml.ledger.api.testtool.infrastructure.{ChannelEndpoint, ExternalParty, Party}
+import com.daml.ledger.api.testtool.infrastructure.{
+  ChannelEndpoint,
+  ExternalParty,
+  ExternalPartyKeySpec,
+  Party,
+}
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.package_management_service.{
   PackageDetails,
@@ -20,6 +25,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
   CompletionStreamResponse,
+  GetCompletionByHashResponse,
   GetCompletionsRequest,
 }
 import com.daml.ledger.api.v2.command_service.{
@@ -43,11 +49,11 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionResponse,
   GetPreferredPackagesResponse,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
 }
+import com.daml.ledger.api.v2.jose_service
 import com.daml.ledger.api.v2.package_service.{
   GetPackageResponse,
   ListVettedPackagesRequest,
@@ -176,16 +182,6 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     s"Execute submission and wait",
     delegate.executeSubmissionAndWaitForTransaction(executeSubmissionAndWaitForTransactionRequest),
   )
-  override def getPreferredPackageVersion(
-      parties: Seq[Party],
-      packageName: String,
-      vettingValidAt: Option[Instant] = None,
-      synchronizerIdO: Option[String] = None,
-  ): Future[GetPreferredPackageVersionResponse] = withTimeout(
-    s"Get preferred package version for parties $parties, $packageName, $synchronizerIdO at $vettingValidAt",
-    delegate.getPreferredPackageVersion(parties, packageName, vettingValidAt, synchronizerIdO),
-  )
-
   override def getPreferredPackages(
       vettingRequirements: Map[String, Seq[Party]],
       vettingValidAt: Option[Instant] = None,
@@ -204,10 +200,11 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   override def allocateExternalPartyFromHint(
       partyIdHint: Option[String] = None,
       minSynchronizers: Int,
+      keySpec: ExternalPartyKeySpec,
   ): Future[ExternalParty] =
     withTimeout(
       "Allocate external party",
-      delegate.allocateExternalPartyFromHint(partyIdHint, minSynchronizers),
+      delegate.allocateExternalPartyFromHint(partyIdHint, minSynchronizers, keySpec),
     )
 
   def allocateParty(
@@ -241,15 +238,17 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       keyPair: KeyPair,
       partyIdHint: Option[String] = None,
       synchronizer: String = "",
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[AllocateExternalPartyRequest] =
-    delegate.allocateExternalPartyRequest(keyPair, partyIdHint, synchronizer)
+    delegate.allocateExternalPartyRequest(keyPair, partyIdHint, synchronizer, keySpec)
 
   override def generateExternalPartyTopologyRequest(
       namespacePublicKey: Array[Byte],
       partyIdHint: Option[String] = None,
+      keySpec: ExternalPartyKeySpec = ExternalPartyKeySpec.default,
   ): Future[GenerateExternalPartyTopologyResponse] = withTimeout(
     s"Generate topology transactions to allocate external party $partyIdHint",
-    delegate.generateExternalPartyTopologyRequest(namespacePublicKey, partyIdHint),
+    delegate.generateExternalPartyTopologyRequest(namespacePublicKey, partyIdHint, keySpec),
   )
 
   override def allocateParty(
@@ -865,6 +864,8 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
 
   override def offsets(n: Int, request: CompletionStreamRequest): Future[Vector[Long]] =
     withTimeout(s"$n checkpoints for request $request", delegate.offsets(n, request))
+  override def completionByHash(hash: ByteString): Future[GetCompletionByHashResponse] =
+    withTimeout(s"Completion by hash", delegate.completionByHash(hash))
   override def checkHealth(): Future[HealthCheckResponse] =
     withTimeout("Check health", delegate.checkHealth())
   override def watchHealth(): Future[Seq[HealthCheckResponse]] =
@@ -957,4 +958,8 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     "Get ledger end request",
     delegate.getLedgerEnd(),
   )
+
+  override def getJwks(
+      request: jose_service.GetJwksRequest
+  ): Future[jose_service.GetJwksResponse] = delegate.getJwks(request)
 }

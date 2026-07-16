@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.version.HasToByteString
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}

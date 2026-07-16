@@ -11,6 +11,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}

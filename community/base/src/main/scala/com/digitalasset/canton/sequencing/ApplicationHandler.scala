@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing
 import cats.syntax.apply.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.tracing.TraceContext

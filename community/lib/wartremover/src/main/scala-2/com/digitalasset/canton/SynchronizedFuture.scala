@@ -57,12 +57,13 @@ import org.wartremover.{WartTraverser, WartUniverse}
   * }}}
   *
   * There are cases where the `synchronized` block is supposed to return a
-  * [[scala.concurrent.Future]], for example when dealing with the promise of a future. In such a
-  * case, the warning should simply be suppressed locally.
+  * [[scala.concurrent.Future]], for example when dealing with the future of a
+  * [[scala.concurrent.Promise]]. In such a case, the warning should simply be suppressed locally.
   */
 object SynchronizedFuture extends WartTraverser {
 
   val messageSynchronized: String = "synchronized blocks must not return a Future"
+  val messageSynchronizedLike: String = "synchronization blocks must not return a Future"
 
   def apply(u: WartUniverse): u.Traverser = {
     import u.universe.*
@@ -71,6 +72,11 @@ object SynchronizedFuture extends WartTraverser {
 
     val futureLikeType = typeOf[DoNotReturnFromSynchronizedLikeFuture]
     val futureLikeTester = FutureLikeTester.tester(u)(futureLikeType)
+    val synchronizedLikeType = typeOf[SynchronizedLikeMethod]
+    def isSynchronizedLike(symbol: Symbol): Boolean =
+      symbol.annotations.exists { ann =>
+        ann.tree.tpe =:= synchronizedLikeType
+      }
 
     new Traverser {
 
@@ -82,6 +88,16 @@ object SynchronizedFuture extends WartTraverser {
             val tpe = tree.tpe
             if (tpe != null && futureLikeTester(tpe.dealias)) {
               error(u)(tree.pos, messageSynchronized)
+            } else {
+              // Keep looking for other instances in the receiver and the body
+              traverse(receiver)
+              traverse(body)
+            }
+          case Apply(TypeApply(call @ Select(receiver, _), _tyarg2), List(body))
+              if call.symbol != null && call.symbol.isMethod && isSynchronizedLike(call.symbol) =>
+            val tpe = body.tpe
+            if (tpe != null && futureLikeTester(tpe.dealias)) {
+              error(u)(tree.pos, messageSynchronizedLike)
             } else {
               // Keep looking for other instances in the receiver and the body
               traverse(receiver)

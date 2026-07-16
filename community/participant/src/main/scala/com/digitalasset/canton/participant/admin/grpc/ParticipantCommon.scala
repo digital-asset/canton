@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.party.LapiAcsHelper
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}

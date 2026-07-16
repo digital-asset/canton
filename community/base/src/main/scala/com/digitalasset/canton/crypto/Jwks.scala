@@ -89,7 +89,7 @@ object JwksError {
     override def prettyCompanion: PrettyPrintingCompanion[GeneralError] = GeneralError
   }
   object GeneralError extends PrettyPrintingCompanion[GeneralError] {
-    override val pretty: Pretty[GeneralError] =
+    override protected val pretty: Pretty[GeneralError] =
       prettyOfClass(unnamedParam(_.error))
   }
 
@@ -99,7 +99,7 @@ object JwksError {
       JceJavaKeyConversionError
   }
   object JceJavaKeyConversionError extends PrettyPrintingCompanion[JceJavaKeyConversionError] {
-    override val pretty: Pretty[JceJavaKeyConversionError] =
+    override protected val pretty: Pretty[JceJavaKeyConversionError] =
       prettyOfClass(unnamedParam(_.error))
   }
 
@@ -109,7 +109,7 @@ object JwksError {
     override def prettyCompanion: PrettyPrintingCompanion[UnsupportedKeySpec] = UnsupportedKeySpec
   }
   object UnsupportedKeySpec extends PrettyPrintingCompanion[UnsupportedKeySpec] {
-    override val pretty: Pretty[UnsupportedKeySpec] =
+    override protected val pretty: Pretty[UnsupportedKeySpec] =
       prettyOfClass(param("keySpec", _.keySpec))
   }
 
@@ -118,7 +118,7 @@ object JwksError {
       KeyParameterExtractionError
   }
   object KeyParameterExtractionError extends PrettyPrintingCompanion[KeyParameterExtractionError] {
-    override val pretty: Pretty[KeyParameterExtractionError] =
+    override protected val pretty: Pretty[KeyParameterExtractionError] =
       prettyOfClass(unnamedParam(_.message.singleQuoted))
   }
 
