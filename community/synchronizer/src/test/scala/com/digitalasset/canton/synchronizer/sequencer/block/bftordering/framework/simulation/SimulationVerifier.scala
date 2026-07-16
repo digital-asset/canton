@@ -14,6 +14,8 @@ trait SimulationVerifier {
   def nodeStarted(at: CantonTimestamp, node: BftNodeId): Unit
 
   def aFutureHappened(node: BftNodeId): Unit
+
+  def dontCheckLiveness(node: BftNodeId): Unit
 }
 
 case object NoVerification extends SimulationVerifier {
@@ -24,6 +26,8 @@ case object NoVerification extends SimulationVerifier {
   override def nodeStarted(at: CantonTimestamp, node: BftNodeId): Unit = ()
 
   override def aFutureHappened(node: BftNodeId): Unit = ()
+
+  override def dontCheckLiveness(node: BftNodeId): Unit = ()
 }
 
 object SimulationVerifier {
@@ -36,5 +40,7 @@ object SimulationVerifier {
       override def nodeStarted(at: CantonTimestamp, node: BftNodeId): Unit = ()
 
       override def aFutureHappened(node: BftNodeId): Unit = ()
+
+      override def dontCheckLiveness(node: BftNodeId): Unit = ()
     }
 }

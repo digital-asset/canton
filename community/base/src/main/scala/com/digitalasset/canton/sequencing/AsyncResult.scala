@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing
 
 import cats.{Functor, Monoid, Semigroupal}
 import com.digitalasset.canton.DoNotDiscardLikeFuture
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   CanAbortDueToShutdown,
   FutureUnlessShutdown,

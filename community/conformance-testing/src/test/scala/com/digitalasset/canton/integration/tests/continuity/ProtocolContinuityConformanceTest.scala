@@ -82,6 +82,16 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       )(env)
   }
   def excludedTests(version: ReleaseVersion): Seq[String] = {
+    // GetPreferredPackageVersion was removed from the InteractiveSubmissionService (#29742).
+    // Test tools of previously released versions still exercise this RPC, which now returns
+    // UNIMPLEMENTED, so exclude those tests for all tested releases.
+    val removedGetPreferredPackageVersionTests =
+      Seq(
+        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionKnown",
+        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownParty",
+        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownPackageName",
+        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownSynchronizerId",
+      )
     val perReleaseExclusions =
       if (version.majorMinor == (3, 4))
         Seq(
@@ -96,7 +106,8 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
           "ExplicitDisclosureIT:EDDuplicates",
         )
       else Seq.empty
-    perReleaseExclusions ++ LedgerApiConformanceBase.excludedTests(testedProtocolVersion)
+    removedGetPreferredPackageVersionTests ++ perReleaseExclusions ++ LedgerApiConformanceBase
+      .excludedTests(testedProtocolVersion)
   }
 
 }
@@ -445,7 +456,9 @@ private[continuity] object ProtocolContinuityConformanceTest {
      */
     val perSequencer =
       Seq[String](
-        "sequencers.sequencer1.sequencer.block.circuit-breaker.messages.lsu-sequencing-test"
+        "sequencers.sequencer1.sequencer.block.circuit-breaker.messages.lsu-sequencing-test",
+        "sequencers.sequencer1.sequencer.block.throughput-cap.messages.confirmation-response", // Introduced with 3.6
+        "sequencers.sequencer1.sequencer.block.throughput-cap.delayed-activation", // Introduced with 3.6
       )
     perSequencer.map(_ -> Option.empty[(String, Any)]).toSet
   }

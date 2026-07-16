@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import com.digitalasset.canton.SynchronizedLikeMethod
 import com.digitalasset.canton.util.Mutex.MutexBlocker
 
 import java.lang.Thread.onSpinWait
@@ -24,6 +25,7 @@ class Mutex {
   @deprecated("use exclusive, not synchronize", since = "3.4")
   def synchronized[T](body: => T): T = sys.error("use exclusive to distinguish")
 
+  @SynchronizedLikeMethod
   def exclusive[T](f: => T): T =
     // We perform lock inflation to reduce the chance of having to use expensive locks
     // First level: Immediate acquisition

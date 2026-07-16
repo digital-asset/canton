@@ -22,6 +22,7 @@ import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.error.LsuError.FailedLsu
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -323,7 +324,7 @@ class GrpcSynchronizerConnectivityService(
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       _ = logger.info(show"Registering new synchronizer $config")
-      _ <- sync.addSynchronizer(config, validation)
+      _ <- sync.addSynchronizer(config, validation, NonEmpty.from(onboardingTransactions))
 
       _ = logger.info(s"Connecting to synchronizer $config")
       success <- sync
@@ -349,6 +350,7 @@ class GrpcSynchronizerConnectivityService(
       configPO,
       synchronizerConnectionP,
       sequencerConnectionValidationPO,
+      onboardingTransactionsPO,
     ) =
       request
 
@@ -364,8 +366,17 @@ class GrpcSynchronizerConnectivityService(
         validation <- EitherT.fromEither[FutureUnlessShutdown](
           parseSequencerConnectionValidation(sequencerConnectionValidationPO)
         )
+        expectedProtocolVersion = config.psid
+          .map(psid => ProtocolVersionValidation(psid.protocolVersion))
+          .getOrElse(ProtocolVersionValidation.NoValidation)
+
+        onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
+          onboardingTransactionsPO
+            .traverse(SignedTopologyTransaction.fromByteStringPVV(expectedProtocolVersion, _))
+            .leftMap(ProtoDeserializationFailure.Wrap(_))
+        )
         _ = logger.info(show"Registering new synchronizer $config")
-        _ <- sync.addSynchronizer(config, validation)
+        _ <- sync.addSynchronizer(config, validation, NonEmpty.from(onboardingTransactions))
         _ <-
           if (performHandshake) {
             logger.info(s"Performing handshake to synchronizer $config")
@@ -376,7 +387,7 @@ class GrpcSynchronizerConnectivityService(
                 synchronizerAlias = config.synchronizerAlias,
                 keepRetrying = false,
                 connectSynchronizer = ConnectSynchronizer.HandshakeOnly,
-                onboardingTransactions = None,
+                onboardingTransactions = NonEmpty.from(onboardingTransactions),
               )
               .leftWiden[CantonBaseError]
           } else EitherT.rightT[FutureUnlessShutdown, CantonBaseError](())

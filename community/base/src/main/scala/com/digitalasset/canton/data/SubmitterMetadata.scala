@@ -6,7 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.*
-import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.{HashOps, HashPurpose, Salt}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult

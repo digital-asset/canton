@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.topology
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SynchronizerAlias
@@ -19,6 +18,7 @@ import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
@@ -359,7 +359,7 @@ private class SynchronizerOnboardingOutbox(
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     override protected val crypto: SynchronizerCrypto,
-    providedTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
+    providedOnboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
 ) extends StoreBasedSynchronizerOutboxDispatchHelper
     with FlagCloseable {
 
@@ -369,7 +369,7 @@ private class SynchronizerOnboardingOutbox(
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Boolean] = (for {
-    initialTransactions <- providedTransactions match {
+    initialTransactions <- providedOnboardingTransactions match {
       case Some(transactions) => validateProvidedTransactions(transactions)
       case None => loadInitialTransactionsFromStore()
     }
@@ -414,7 +414,8 @@ private class SynchronizerOnboardingOutbox(
 
   /** Validates onboarding transactions provided by the operator at connect time. They must only
     * contain onboarding mappings (NamespaceDelegation, OwnerToKeyMapping,
-    * SynchronizerTrustCertificate).
+    * SynchronizerTrustCertificate), with exactly one OwnerToKeyMapping and exactly one
+    * SynchronizerTrustCertificate.
     */
   private def validateProvidedTransactions(
       transactions: Seq[GenericSignedTopologyTransaction]
@@ -428,17 +429,24 @@ private class SynchronizerOnboardingOutbox(
       applicable <- EitherT.right(
         synchronizeWithClosing(functionFullName)(onlyApplicable(transactions))
       )
-      unexpected = applicable.filterNot(tx =>
-        TopologyStore.initialParticipantDispatchingSet.contains(tx.mapping.code)
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        TopologyStore
+          .validateInitialParticipantDispatchingTransactions(participantId, applicable)
+          .leftMap(
+            SynchronizerRegistryError.InitialOnboardingError.Error(_): SynchronizerRegistryError
+          )
       )
+      wrongSynchronizer = applicable.map(_.mapping).collect {
+        case cert: SynchronizerTrustCertificate if cert.synchronizerId != psid.logical =>
+          cert.synchronizerId
+      }
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         Either.cond(
-          unexpected.isEmpty,
+          wrongSynchronizer.isEmpty,
           (),
           SynchronizerRegistryError.InitialOnboardingError.Error(
-            s"Provided onboarding transactions contain unexpected mappings (only " +
-              s"${TopologyStore.initialParticipantDispatchingSet.mkString(", ")} are allowed): " +
-              s"${unexpected.map(_.mapping).mkString(", ")}"
+            s"Provided onboarding transactions target synchronizer(s) ${wrongSynchronizer
+                .mkString(", ")} instead of ${psid.logical}"
           ): SynchronizerRegistryError,
         )
       )
@@ -453,8 +461,7 @@ private class SynchronizerOnboardingOutbox(
           ): SynchronizerRegistryError,
         )
       )
-      _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicable))
-    } yield applicable
+    } yield applicable.sortBy(TopologyStore.initialParticipantDispatchingOrder)
 
   private def dispatch(transactions: Seq[GenericSignedTopologyTransaction])(implicit
       traceContext: TraceContext
@@ -504,7 +511,7 @@ object SynchronizerOnboardingOutbox {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       crypto: SynchronizerCrypto,
-      providedTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
+      providedOnboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -519,7 +526,7 @@ object SynchronizerOnboardingOutbox {
       timeouts,
       loggerFactory,
       crypto,
-      providedTransactions,
+      providedOnboardingTransactions,
     )
     outbox.run().transform { res =>
       outbox.close()

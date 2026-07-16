@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.util
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.digitalasset.canton.data.{CantonTimestamp, ExternalCallReplayData}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -101,7 +101,7 @@ class DAMLeTest
           packageResolution = Map.empty,
           expectFailure = false,
           getEngineAbortStatus = getEngineAbortStatus,
-          externalCallReplayData = () => ExternalCallReplayData.empty,
+          externalCallReplayData = () => DAMLe.ExternalCallReplayData.empty,
         )
 
     def createCycleContract(): (LfNodeCreate, LfHash, GenContractInstance) = {

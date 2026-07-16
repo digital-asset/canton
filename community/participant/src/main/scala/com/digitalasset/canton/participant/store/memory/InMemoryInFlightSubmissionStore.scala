@@ -10,6 +10,7 @@ import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore
@@ -22,7 +23,6 @@ import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.collection.MapsUtil
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
@@ -139,8 +139,8 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
       messageId: MessageId,
       newSequencingInfo: UnsequencedSubmission,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    MapsUtil
-      .updateWithConcurrently(inFlights, changeIdHash) { submission =>
+    inFlights
+      .updateWith(changeIdHash)(_.map { submission =>
         submission.sequencingInfo.asUnsequenced match {
           case Some(unsequenced) =>
             if (
@@ -161,7 +161,7 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
             )
             submission
         }
-      }
+      })
       .discard
     FutureUnlessShutdown.unit
   }

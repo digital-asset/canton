@@ -922,7 +922,7 @@ class TopologyStateWriteThroughCache(
       .map(StateKey(_, uid))
       // this is safe as transaction types is an enum with a few elements
       // plus we batch within the batch aggregator
-      // TODO(#33650) – Safe because transaction types is an enum with a few elements
+      // TODO(#33650) – Replace with unboundedFlatTraverse; safe because transaction types is an enum with a few elements
       .parFlatTraverse(
         get(_, asOf.value, warnIfUncached).map(_.currentState.filterState(asOf, asOfInclusive, op))
       )
@@ -955,7 +955,7 @@ class TopologyStateWriteThroughCache(
   ): FutureUnlessShutdown[Seq[GenericStoredTopologyTransaction]] =
     transactionTypes.toSeq
       .map(StateKey(_, ns, None))
-      // TODO(#33650) – Safe as transaction types is an enum with a few elements
+      // TODO(#33650) – Replace with unboundedFlatTraverse; safe because transaction types is an enum with a few elements
       .parFlatTraverse(
         get(_, asOf.value, warnIfUncached)
           .map(_.currentState.filterState(asOf, asOfInclusive, Some(op)))

@@ -49,6 +49,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.*
@@ -114,12 +115,14 @@ import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClientWithInit,
   TopologySnapshot,
 }
+import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.VettedPackage
+import com.digitalasset.canton.topology.transaction.{SynchronizerTrustCertificate, VettedPackage}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -207,6 +210,15 @@ class CantonSyncService(
       loggerFactory,
     )
 
+  private[canton] val pendingOnboardingTransactionsStore: PendingOnboardingTransactions.Store =
+    PendingOperationStore(
+      syncPersistentStateManager.storage,
+      timeouts,
+      loggerFactory,
+      PendingOnboardingTransactions,
+      SynchronizerId.fromString,
+    )
+
   private val connectionsManager = new SynchronizerConnectionsManager(
     participantId,
     synchronizerRegistry,
@@ -227,6 +239,7 @@ class CantonSyncService(
     parameters,
     connectedSynchronizerFactory,
     pendingLsuOperationsStore,
+    pendingOnboardingTransactionsStore,
     metrics,
     sequencerInfoLoader,
     isActive,
@@ -943,14 +956,27 @@ class CantonSyncService(
     *
     * @param config
     *   The synchronizer configuration.
+    * @param onboardingTransactions
+    *   Optional topology transactions provided by the operator to be used for onboarding to the
+    *   synchronizer. They are persisted as a pending operation and used when the actual onboarding
+    *   happens (at handshake or at a subsequent connect/reconnect).
     * @return
     *   Error or unit.
     */
   def addSynchronizer(
       config: SynchronizerConnectionConfig,
       sequencerConnectionValidation: SequencerConnectionValidation,
+      onboardingTransactions: Option[NonEmpty[Seq[GenericSignedTopologyTransaction]]],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        onboardingTransactions
+          .traverse_(validateOnboardingTransactions(config, _))
+          .leftMap(err =>
+            SyncServiceError.SynchronizerRegistration
+              .Error(config.synchronizerAlias, err): SyncServiceError
+          )
+      )
       _ <- connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
       _ <- EitherT
         .rightT[FutureUnlessShutdown, SyncServiceError](
@@ -1003,7 +1029,98 @@ class CantonSyncService(
               )
           }
         }
+      _ <- onboardingTransactions.fold(EitherTUtil.unitUS[SyncServiceError])(
+        persistOnboardingTransactions(config, _)
+      )
     } yield ()
+
+  private def persistOnboardingTransactions(
+      config: SynchronizerConnectionConfig,
+      transactions: NonEmpty[Seq[GenericSignedTopologyTransaction]],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
+    for {
+      synchronizerId <- EitherT.fromEither[FutureUnlessShutdown] {
+        val synchronizerIds = transactions
+          .map(_.mapping)
+          .collect { case cert: SynchronizerTrustCertificate => cert.synchronizerId }
+          .distinct
+        synchronizerIds match {
+          case Seq(single) => Right(single)
+          case Seq() =>
+            Left(
+              SyncServiceError.SynchronizerRegistration
+                .Error(
+                  config.synchronizerAlias,
+                  "Provided onboarding transactions do not contain a synchronizer trust certificate",
+                ): SyncServiceError
+            )
+          case several =>
+            Left(
+              SyncServiceError.SynchronizerRegistration
+                .Error(
+                  config.synchronizerAlias,
+                  s"Provided onboarding transactions target several synchronizers: ${several.mkString(", ")}",
+                ): SyncServiceError
+            )
+        }
+      }
+      operation = PendingOnboardingTransactions(
+        transactions.sortBy(TopologyStore.initialParticipantDispatchingOrder),
+        ProtocolVersion.latest,
+      )
+        .toPendingOperation(synchronizerId, config.synchronizerAlias)
+      _ <- pendingOnboardingTransactionsStore
+        .insert(operation)
+        .leftFlatMap { _ =>
+          logger.info(
+            s"Overwriting the onboarding transactions for ${config.synchronizerAlias} with the newly provided ones"
+          )
+          EitherT.right[SyncServiceError](
+            pendingOnboardingTransactionsStore.updateOperation(
+              operation.operation,
+              synchronizerId,
+              operation.name,
+              operation.key,
+            )
+          )
+        }
+    } yield ()
+
+  /** Validates onboarding transactions provided at registration, so that obviously unusable
+    * transactions are rejected before being persisted. Only cheap, local checks are performed here;
+    * signatures and authorization are validated by the synchronizer at onboarding, and the protocol
+    * version is validated at connect (when the synchronizer's protocol version is known).
+    */
+  private def validateOnboardingTransactions(
+      config: SynchronizerConnectionConfig,
+      transactions: NonEmpty[Seq[GenericSignedTopologyTransaction]],
+  ): Either[String, Unit] = {
+    val trustCertificates = transactions.map(_.mapping).collect {
+      case cert: SynchronizerTrustCertificate => cert
+    }
+
+    for {
+      _ <- TopologyStore.validateInitialParticipantDispatchingTransactions(
+        participantId,
+        transactions.forgetNE,
+      )
+      _ <- trustCertificates.traverse_ { cert =>
+        for {
+          _ <- Either.cond(
+            cert.participantId == participantId,
+            (),
+            s"Provided synchronizer trust certificate is for participant ${cert.participantId} instead of $participantId",
+          )
+          _ <- Either.cond(
+            config.psid.forall(_.logical == cert.synchronizerId),
+            (),
+            s"Provided synchronizer trust certificate is for synchronizer ${cert.synchronizerId} which does not match the configured ${config.psid
+                .map(_.logical)}",
+          )
+        } yield ()
+      }
+    } yield ()
+  }
 
   /** Modifies the settings of an active synchronizer connection
     *

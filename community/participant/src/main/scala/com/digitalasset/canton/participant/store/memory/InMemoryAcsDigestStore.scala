@@ -8,37 +8,27 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
+import com.digitalasset.canton.participant.store.{AcsDigestJournal, AcsDigestStore}
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.ConcurrentSkipListMap
 import scala.concurrent.ExecutionContext
 
-class InMemoryAcsDigestStore(
-    indexedSynchronizer: IndexedSynchronizer,
-    stringInterning: StringInterning,
+class InMemoryAcsDigestStore @VisibleForTesting private[store] (
     override val loggerFactory: NamedLoggerFactory,
+    override protected val party_ : AcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest],
+    override protected val participant_ : AcsDigestJournal[
+      InternedParticipantId,
+      (RawDigest, HashedDigest),
+    ],
 )(override implicit val executionContext: ExecutionContext)
     extends AcsDigestStore
     with NamedLogging {
-  // Note: shardId=indexedSynchronizer.index is fixed so we don't have to store it in the journals
 
   private val checkpointJournal = new ConcurrentSkipListMap[Offset, CantonTimestamp]()
-  override protected val participant_ =
-    new InMemoryAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
-      indexedSynchronizer,
-      loggerFactory,
-      prettyKey = stringInterning.participantId.externalize,
-    )
-  override protected val party_ =
-    new InMemoryAcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest](
-      indexedSynchronizer,
-      loggerFactory,
-      prettyKey = _.map(stringInterning.party.externalize).party,
-    )
 
   override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -75,4 +65,21 @@ class InMemoryAcsDigestStore(
       Option(checkpointJournal.higherEntry(fromExclusive))
         .map(entry => (entry.getKey, entry.getValue))
     }
+}
+
+object InMemoryAcsDigestStore {
+  def create(stringInterning: StringInterning, loggerFactory: NamedLoggerFactory)(implicit
+      executionContext: ExecutionContext
+  ): InMemoryAcsDigestStore = {
+    val party = new InMemoryAcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest](
+      loggerFactory,
+      prettyKey = _.map(stringInterning.party.externalize).party,
+    )
+    val participant =
+      new InMemoryAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
+        loggerFactory,
+        prettyKey = stringInterning.participantId.externalize,
+      )
+    new InMemoryAcsDigestStore(loggerFactory, party, participant)
+  }
 }

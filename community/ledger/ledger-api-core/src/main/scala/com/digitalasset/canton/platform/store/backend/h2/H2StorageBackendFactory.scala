@@ -49,9 +49,10 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
 
   override def createCompletionStorageBackend(
       stringInterning: StringInterning,
+      ledgerEndCache: LedgerEndCache,
       loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend =
-    new CompletionStorageBackendTemplate(stringInterning, loggerFactory)
+    new CompletionStorageBackendTemplate(stringInterning, ledgerEndCache, loggerFactory)
 
   override def createContractStorageBackend(
       stringInterning: StringInterning,

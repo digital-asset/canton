@@ -28,10 +28,15 @@ import com.digitalasset.canton.ledger.participant.state.{
   TransactionMeta,
 }
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.commitment.{
+  ReceivedAcsCommitmentValidator,
+  ReceivedAcsCommitmentValidatorImpl,
+}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.*
@@ -375,7 +380,19 @@ class ConnectedSynchronizer(
     ephemeral.timeTracker,
   )
 
-  private val messageDispatcher: MessageDispatcher =
+  private val messageDispatcher: MessageDispatcher = {
+    val receivedAcsCommitmentValidator =
+      if (staticSynchronizerParameters.protocolVersion >= ProtocolVersion.acsCommitmentRedesign)
+        new ReceivedAcsCommitmentValidatorImpl(
+          psid,
+          participantId,
+          synchronizerCrypto,
+          metrics.commitments,
+          validationParallelism = parameters.acsCommitments.receivedCommitmentValidationParallelism,
+          loggerFactory,
+        )
+      else ReceivedAcsCommitmentValidator.Noop
+
     messageDispatcherFactory.create(
       psid,
       participantId,
@@ -386,6 +403,7 @@ class ConnectedSynchronizer(
       topologyProcessor,
       trafficProcessor,
       acsCommitmentProcessor.processBatch,
+      receivedAcsCommitmentValidator,
       ephemeral.requestCounterAllocator,
       ephemeral.recordOrderPublisher,
       badRootHashMessagesRequestProcessor,
@@ -394,6 +412,7 @@ class ConnectedSynchronizer(
       metrics,
       promiseFactory = this,
     )
+  }
 
   private val sequencerIdsRetriever = new SequencerIdsRetriever(
     psid,
@@ -795,11 +814,10 @@ class ConnectedSynchronizer(
             override def subscriptionStartsAt(
                 start: SubscriptionStart
             )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-              // TODO(#33650) – Statically bounded to 2 elements
-              Seq(
+              (
                 topologyProcessor.subscriptionStartsAt(start)(traceContext),
                 trafficProcessor.subscriptionStartsAt(start)(traceContext),
-              ).parSequence_
+              ).parMapN((_, _) => ())
 
             override def apply(
                 tracedEvents: Traced[Seq[PossiblyIgnoredSequencedEvent[Batch[ClosedEnvelope]]]]

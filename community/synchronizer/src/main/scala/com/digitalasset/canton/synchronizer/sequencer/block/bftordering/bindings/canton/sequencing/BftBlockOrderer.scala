@@ -15,6 +15,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.resource.{Storage, StorageSingleSetup}
@@ -320,7 +321,6 @@ final class BftBlockOrderer(
   private val mempoolRef = initResult.inputModuleRef
   private val p2pNetworkInModuleRef = initResult.p2pNetworkInModuleRef
   private val p2pNetworkOutAdminModuleRef = initResult.p2pNetworkOutAdminModuleRef
-  private val consensusAdminModuleRef = initResult.consensusAdminModuleRef
   private val outputModuleRef = initResult.outputModuleRef
   private val p2pNetworkManager = initResult.p2pNetworkManager
 
@@ -737,7 +737,7 @@ final class BftBlockOrderer(
         new BftOrderingSequencerAdminService(
           mempoolRef,
           p2pNetworkOutAdminModuleRef,
-          consensusAdminModuleRef,
+          outputModuleRef,
           loggerFactory,
         ),
         executionContext,

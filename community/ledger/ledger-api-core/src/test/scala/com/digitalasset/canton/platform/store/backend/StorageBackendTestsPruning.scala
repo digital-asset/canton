@@ -59,6 +59,8 @@ private[backend] trait StorageBackendTestsPruning
         previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
         pruneUpToInclusive = pruneUpToInclusive,
         incompleteReassignmentOffsets = incompleteReassignmentOffsets,
+        pruningDbLockMeta = testDbLockMeta,
+        contractPruningDbLockMeta = testDbLockMeta,
       )(
         conn,
         traceContext,
@@ -983,14 +985,14 @@ private[backend] trait StorageBackendTestsPruning
 
   it should "remove contract candidates correctly" in {
     val contractIds = pruningFixture()
-    executeSqlInTx(backend.event.cleanPruningCandidates()(_, implicitly))
+    executeSqlInTx(backend.event.cleanPruningCandidates(testDbLockMeta)(_, implicitly))
     contractCandidates shouldBe List(2, 6, 8, 9).map(contractIds)
     contracts shouldBe contractIds
   }
 
   it should "prune contract correctly after cleaning candidates" in {
     val contractIds = pruningFixture()
-    executeSqlInTx(backend.event.pruneContracts()(_, implicitly))
+    executeSqlInTx(backend.event.pruneContracts(testDbLockMeta)(_, implicitly))
     contractCandidates shouldBe Vector.empty
     contracts shouldBe (0 to 11).filterNot(Set(2, 6, 8, 9)).map(contractIds)
   }

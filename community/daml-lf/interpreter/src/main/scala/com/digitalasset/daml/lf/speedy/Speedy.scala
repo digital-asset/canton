@@ -132,11 +132,9 @@ private[lf] object Speedy {
 
   final case class ContractMetadata(
       signatories: Set[Party],
-      observers: Set[Party],
+      nonSignatoryStakeholders: Set[Party],
       keyOpt: Option[GlobalKeyWithMaintainers],
-  ) {
-    val stakeholders: Set[Party] = signatories union observers
-  }
+  )
 
   final case class ContractInfo(
       version: SerializationVersion,
@@ -163,9 +161,9 @@ private[lf] object Speedy {
       )
 
     lazy val metadata: ContractMetadata = ContractMetadata(
-      signatories,
-      observers,
-      keyOpt,
+      signatories = signatories,
+      nonSignatoryStakeholders = observers -- signatories,
+      keyOpt = keyOpt,
     )
   }
 

@@ -463,8 +463,8 @@ object ConfigValidations extends NamedLogging {
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     val errors = engineExtensionErrors(config) { case (name, extensionId, extensionConfig) =>
       Option.when(extensionConfig.port == Port.Dynamic)(
-        s"For participant ${name.unwrap}, engine.extensions.$extensionId.port must not be the " +
-          s"dynamic port ${Port.Dynamic}"
+        s"For participant ${name.unwrap}, engine.extensions.$extensionId.port must be " +
+          s"between 1 and ${Port.maxValidPort}, but found '${extensionConfig.port}'"
       )
     }
     toValidated(errors)
@@ -478,7 +478,7 @@ object ConfigValidations extends NamedLogging {
         extensionConfig.retryInitialDelay.underlying > extensionConfig.retryMaxDelay.underlying
       )(
         s"For participant ${name.unwrap}, engine.extensions.$extensionId retry delays must satisfy retry-initial-delay <= retry-max-delay; " +
-          s"respective values are ${extensionConfig.retryInitialDelay.underlying} and ${extensionConfig.retryMaxDelay.underlying}"
+          s"respective values are (${extensionConfig.retryInitialDelay.underlying}, ${extensionConfig.retryMaxDelay.underlying})"
       )
     }
     toValidated(errors)

@@ -43,8 +43,10 @@ import com.digitalasset.canton.participant.admin.data.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.admin.grpc.BaseWriteRequest
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.canton.{LedgerParticipantId, SynchronizerAlias, config}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Context
@@ -410,31 +412,40 @@ class ParticipantPartiesAdministrationGroup(
     val nextSerial = currentTransaction
       .map(_.context.serial.increment)
 
-    reference
-      .adminCommand(
-        TopologyAdminCommands.Write.Propose(
-          mapping = PartyToParticipant.create(
-            partyId,
-            PositiveInt.one,
-            Seq(
-              HostingParticipant(
-                participantId,
-                ParticipantPermission.Submission,
-              )
-            ),
-            partySigningKeysWithThreshold =
-              currentTransaction.flatMap(_.item.partySigningKeysWithThreshold),
-          ),
-          // let the topology service determine the appropriate keys to use
-          signedBy = Seq.empty,
-          serial = nextSerial,
-          store = synchronizerId,
-          mustFullyAuthorize = true,
-          change = TopologyChangeOp.Replace,
-          forceChanges = ForceFlags.none,
-          waitToBecomeEffective = synchronize,
-        )
+    for {
+      nodeStatus <- reference.adminCommand(
+        ParticipantAdminCommands.Health.ParticipantStatusCommand()
       )
+      result <- reference
+        .adminCommand(
+          TopologyAdminCommands.Write.Propose(
+            baseRequest = BaseWriteRequest(
+              clientVersion = Some(ReleaseVersion.current)
+            ),
+            mapping = PartyToParticipant.create(
+              partyId,
+              PositiveInt.one,
+              Seq(
+                HostingParticipant(
+                  participantId,
+                  ParticipantPermission.Submission,
+                )
+              ),
+              partySigningKeysWithThreshold =
+                currentTransaction.flatMap(_.item.partySigningKeysWithThreshold),
+            ),
+            // let the topology service determine the appropriate keys to use
+            signedBy = Seq.empty,
+            serial = nextSerial,
+            store = synchronizerId,
+            mustFullyAuthorize = true,
+            change = TopologyChangeOp.Replace,
+            forceChanges = ForceFlags.none,
+            waitToBecomeEffective = synchronize,
+            serverVersion = nodeStatus.releaseVersion,
+          )
+        )
+    } yield result
   }
 
   @Help.Summary("Disable party on participant")

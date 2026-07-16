@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,

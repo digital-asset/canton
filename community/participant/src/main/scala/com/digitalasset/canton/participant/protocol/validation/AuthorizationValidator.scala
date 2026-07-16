@@ -7,6 +7,7 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{FullTransactionViewTree, SubmitterMetadata, ViewPosition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.ParsedTransactionRequest
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.topology.ParticipantId

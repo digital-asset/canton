@@ -62,4 +62,10 @@ object BftOrderingIdentifiers {
     val First: FutureId = FutureId(0L)
     def apply(x: Long): FutureId = x.asInstanceOf[FutureId]
   }
+
+  type WorkflowId <: String
+  object WorkflowId {
+    def apply(x: String): WorkflowId = x.asInstanceOf[WorkflowId]
+  }
+
 }

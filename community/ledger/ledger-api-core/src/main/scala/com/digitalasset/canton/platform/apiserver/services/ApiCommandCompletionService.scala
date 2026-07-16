@@ -25,10 +25,15 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.tracing.TraceContextGrpc
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
+import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
+import scalapb.lenses.Lens
+
+import scala.concurrent.{ExecutionContext, Future}
 
 final class ApiCommandCompletionService(
     completionsService: IndexCompletionsService,
@@ -37,11 +42,11 @@ final class ApiCommandCompletionService(
 )(implicit
     esf: ExecutionSequencerFactory,
     mat: Materializer,
-) extends CommandCompletionServiceGrpc.CommandCompletionService
-    with StreamingServiceLifecycleManagement
+    executionContext: ExecutionContext,
+) extends StreamingServiceLifecycleManagement
     with NamedLogging {
 
-  override def completionStream(
+  def completionStream(
       request: CompletionStreamRequest,
       responseObserver: StreamObserver[CompletionStreamResponse],
   ): Unit = {
@@ -91,7 +96,7 @@ final class ApiCommandCompletionService(
   /** Subscribe to command completion events. This streaming endpoint provides more flexibility in
     * filtering than the predecessor ``CompletionStream``.
     */
-  override def getCompletions(
+  def getCompletions(
       request: GetCompletionsRequest,
       responseObserver: StreamObserver[CompletionStreamResponse],
   ): Unit = {
@@ -162,4 +167,64 @@ final class ApiCommandCompletionService(
       )
       .via(logger.logErrorsOnStream)
       .via(StreamMetrics.countElements(metrics.lapi.streams.completions))
+
+  /** Look up a completion by its transaction hash. This is only available for completions received
+    * after upgrading to Canton version 3.5. If:
+    *
+    *   - there is no completion with this transaction hash,
+    *   - or the completion is not visible to the user,
+    *   - or the completion was populated before upgrading to Canton version 3.5,
+    *   - or respective completions are all pruned,
+    *
+    * a COMPLETION_NOT_FOUND error will be raised.
+    */
+  def getCompletionByHash(
+      req: ApiCommandCompletionService.InternalGetCompletionByHashRequest
+  ): Future[GetCompletionByHashResponse] = {
+    val parties = req.parties.map(Ref.Party.assertFromString)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+    implicit val errorLoggingContext: ErrorLoggingContext = ErrorLoggingContext(
+      logger,
+      loggingContextWithTrace.toPropertiesMap,
+      loggingContextWithTrace.traceContext,
+    )
+    CompletionServiceRequestValidator
+      .validateCompletionByHash(req.transactionHash)
+      .fold(
+        t =>
+          Future.failed(
+            ValidationLogger.logFailureWithTrace(logger, req.transactionHash, t)
+          ),
+        validHash => {
+          logger.info(s"Received request for completion by hash.")
+          completionsService
+            .getCompletionByHash(validHash, parties)
+            .thereafter(
+              logger.logErrorsOnCall[GetCompletionByHashResponse](
+                loggingContextWithTrace.traceContext
+              )
+            )
+        },
+      )
+  }
+}
+
+object ApiCommandCompletionService {
+
+  /** Internal request for the by-hash lookup. `parties` is backfilled by the authorization layer
+    * from the caller's claims: empty means "no filter" (ReadAsAnyParty semantics), non-empty means
+    * "restrict to these parties".
+    */
+  final case class InternalGetCompletionByHashRequest(
+      transactionHash: ByteString,
+      parties: Set[String],
+  )
+
+  object InternalGetCompletionByHashRequest {
+    val partiesLens: Lens[InternalGetCompletionByHashRequest, Set[String]] =
+      Lens[InternalGetCompletionByHashRequest, Set[String]](_.parties)((q, p) =>
+        q.copy(parties = p)
+      )
+  }
 }

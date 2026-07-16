@@ -10,6 +10,7 @@ import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.admin.data.{ActiveContract, RepairContract}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus

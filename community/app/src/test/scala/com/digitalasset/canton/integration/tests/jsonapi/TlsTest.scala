@@ -9,7 +9,6 @@ import com.daml.test.evidence.tag.Security.SecurityTest
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
-import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.UseTls
 import org.apache.pekko.http.scaladsl.model.Uri
 
 @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
@@ -22,7 +21,7 @@ class TlsTest
   val authenticationSecurity: SecurityTest =
     SecurityTest(property = Authenticity, asset = "HTTP JSON API Service")
 
-  override def useTls = UseTls.Tls
+  override def useTls = true
 
   "JSON API" should {
     "connect normally with tls on" taggedAs authenticationSecurity.setHappyCase(

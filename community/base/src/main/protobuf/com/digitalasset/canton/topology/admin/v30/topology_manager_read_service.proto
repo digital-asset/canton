@@ -60,7 +60,7 @@ service TopologyManagerReadService {
 }
 
 message BaseQuery {
-  StoreId store = 1;
+  v30.StoreId store = 1;
 
   // whether to query only for proposals instead of approved topology mappings
   bool proposals = 2;
@@ -81,10 +81,13 @@ message BaseQuery {
   }
   string filter_signed_key = 8;
   optional int32 protocol_version = 9;
+
+  // The canton version of the client issuing the request, e.g. "3.5.0-rc3"
+  optional string client_version = 10;
 }
 
 message BaseResult {
-  StoreId store = 1;
+  v30.StoreId store = 1;
   google.protobuf.Timestamp sequenced = 2;
   google.protobuf.Timestamp valid_from = 3;
   google.protobuf.Timestamp valid_until = 4;
@@ -103,7 +106,9 @@ message ListNamespaceDelegationRequest {
 message ListNamespaceDelegationResponse {
   message Result {
     BaseResult context = 1;
-    com.digitalasset.canton.protocol.v30.NamespaceDelegation item = 2;
+    oneof item {
+      com.digitalasset.canton.protocol.v30.NamespaceDelegation v30 = 2;
+    }
   }
   repeated Result results = 1;
 }
@@ -130,7 +135,9 @@ message ListOwnerToKeyMappingRequest {
 message ListOwnerToKeyMappingResponse {
   message Result {
     BaseResult context = 1;
-    com.digitalasset.canton.protocol.v30.OwnerToKeyMapping item = 2;
+    oneof item {
+      com.digitalasset.canton.protocol.v30.OwnerToKeyMapping v30 = 2;
+    }
   }
   repeated Result results = 1;
 }
@@ -143,7 +150,9 @@ message ListPartyToKeyMappingRequest {
 message ListPartyToKeyMappingResponse {
   message Result {
     BaseResult context = 1;
-    com.digitalasset.canton.protocol.v30.PartyToKeyMapping item = 2;
+    oneof item {
+      com.digitalasset.canton.protocol.v30.PartyToKeyMapping v30 = 2;
+    }
   }
   repeated Result results = 1;
 }
@@ -208,7 +217,9 @@ message ListPartyToParticipantRequest {
 message ListPartyToParticipantResponse {
   message Result {
     BaseResult context = 1;
-    com.digitalasset.canton.protocol.v30.PartyToParticipant item = 2;
+    oneof item {
+      com.digitalasset.canton.protocol.v30.PartyToParticipant v30 = 2;
+    }
   }
   repeated Result results = 2;
 }
@@ -295,7 +306,7 @@ message ListLsuSequencerConnectionSuccessorResponse {
 message ListAvailableStoresRequest {}
 
 message ListAvailableStoresResponse {
-  repeated StoreId store_ids = 1;
+  repeated v30.StoreId store_ids = 1;
 }
 
 message ListAllRequest {
@@ -347,7 +358,7 @@ message ExportTopologySnapshotV2Response {
 
 message GenesisStateRequest {
   // Must be specified if the genesis state is requested from a participant node.
-  optional StoreId synchronizer_store = 1;
+  optional v30.StoreId synchronizer_store = 1;
   // Optional - the effective time used to fetch the topology transactions. If not provided the effective time of the last topology transaction is used.
   google.protobuf.Timestamp timestamp = 2;
 }
@@ -359,7 +370,7 @@ message GenesisStateResponse {
 
 message GenesisStateV2Request {
   // Must be specified if the genesis state is requested from a participant node.
-  optional StoreId synchronizer_store = 1;
+  optional v30.StoreId synchronizer_store = 1;
   // Optional - the effective time used to fetch the topology transactions. If not provided the effective time of the last topology transaction is used.
   google.protobuf.Timestamp timestamp = 2;
 }
@@ -371,7 +382,7 @@ message GenesisStateV2Response {
 
 message SequencerLsuStateRequest {
   // Must be specified if the node is configured with more than one active synchronizer.
-  optional StoreId synchronizer_store = 1;
+  optional v30.StoreId synchronizer_store = 1;
 
   // The effective time used to fetch the topology transactions
   // MUST be empty for regular LSUs.

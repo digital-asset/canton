@@ -73,10 +73,6 @@ object CantonGenerators {
       : Arbitrary[Option[lapi.package_reference.PackageReference]] =
     arbSomeOnly[lapi.package_reference.PackageReference]
 
-  implicit val arbOptPackageReference
-      : Arbitrary[Option[lapi.interactive.interactive_submission_service.PackagePreference]] =
-    arbSomeOnly[lapi.interactive.interactive_submission_service.PackagePreference]
-
   implicit val arbOptUpdateFormat: Arbitrary[Option[lapi.transaction_filter.UpdateFormat]] =
     arbSomeOnly[lapi.transaction_filter.UpdateFormat]
 

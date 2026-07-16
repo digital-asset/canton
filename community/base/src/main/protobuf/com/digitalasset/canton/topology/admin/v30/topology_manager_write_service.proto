@@ -41,6 +41,11 @@ service TopologyManagerWriteService {
   rpc DropTemporaryTopologyStore(DropTemporaryTopologyStoreRequest) returns (DropTemporaryTopologyStoreResponse);
 }
 
+message BaseWriteRequest {
+  // The canton version of the client issuing the request, e.g. "3.5.0-rc3"
+  optional string client_version = 1;
+}
+
 message GenerateTransactionsRequest {
   message Proposal {
     /** Replace / Remove */
@@ -54,13 +59,17 @@ message GenerateTransactionsRequest {
     uint32 serial = 2;
 
     /** The mapping to be authorized */
-    com.digitalasset.canton.protocol.v30.TopologyMapping mapping = 3;
+    oneof mapping {
+      com.digitalasset.canton.protocol.v30.TopologyMapping v30 = 3;
+    }
 
     // Target store
-    StoreId store = 4;
+    v30.StoreId store = 4;
   }
   // transaction proposals for which to generate topology transactions
   repeated Proposal proposals = 1;
+
+  optional BaseWriteRequest base_request = 2;
 }
 
 message GenerateTransactionsResponse {
@@ -83,7 +92,9 @@ message AuthorizeRequest {
     uint32 serial = 2;
 
     /** The mapping to be authorized */
-    com.digitalasset.canton.protocol.v30.TopologyMapping mapping = 3;
+    oneof mapping {
+      com.digitalasset.canton.protocol.v30.TopologyMapping v30 = 3;
+    }
   }
 
   oneof type {
@@ -128,7 +139,7 @@ message AuthorizeRequest {
    * Selecting a specific synchronizers store might be necessary, if the transaction to authorize by hash or the previous
    * generation of the submitted proposal is only available on the synchronizers store and not in the authorized store.
    */
-  StoreId store = 6;
+  v30.StoreId store = 6;
 
   /** Optional timeout to wait for the transaction to become effective in the store. */
   google.protobuf.Duration wait_to_become_effective = 7;
@@ -157,7 +168,7 @@ message AddTransactionsRequest {
    * Selecting a specific synchronizers store might be necessary, if the transaction to authorize by hash or the previous
    * generation of the submitted proposal is only available on the synchronizers store and not in the authorized store.
    */
-  StoreId store = 3;
+  v30.StoreId store = 3;
 
   /** Optional timeout to wait for the transaction to become effective in the store. */
   google.protobuf.Duration wait_to_become_effective = 7;
@@ -169,7 +180,7 @@ message AddTransactionsResponse {}
  */
 message ImportTopologySnapshotRequest {
   bytes topology_snapshot = 1;
-  StoreId store = 2;
+  v30.StoreId store = 2;
   /** Optional timeout to wait for the transaction to become effective in the store. */
   google.protobuf.Duration wait_to_become_effective = 3;
 }
@@ -180,7 +191,7 @@ message ImportTopologySnapshotResponse {}
  */
 message ImportTopologySnapshotV2Request {
   bytes topology_snapshot = 1;
-  StoreId store = 2;
+  v30.StoreId store = 2;
   /** Optional timeout to wait for the transaction to become effective in the store. */
   google.protobuf.Duration wait_to_become_effective = 3;
 }
@@ -199,7 +210,7 @@ message SignTransactionsRequest {
   repeated string signed_by = 2;
 
   // Target store
-  StoreId store = 3;
+  v30.StoreId store = 3;
 
   /** Force specific changes even if dangerous */
   repeated ForceFlag force_flags = 4;
@@ -219,12 +230,12 @@ message CreateTemporaryTopologyStoreRequest {
 
 message CreateTemporaryTopologyStoreResponse {
   /** The identifier of the topology store that should be used as a store filter string */
-  StoreId.Temporary store_id = 1;
+  v30.StoreId.Temporary store_id = 1;
 }
 
 message DropTemporaryTopologyStoreRequest {
   /** The identifier of the topology store that should be dropped */
-  StoreId.Temporary store_id = 1;
+  v30.StoreId.Temporary store_id = 1;
 }
 
 message DropTemporaryTopologyStoreResponse {}

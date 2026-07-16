@@ -88,7 +88,7 @@ import com.digitalasset.canton.topology.{
   Synchronizer,
   SynchronizerId,
 }
-import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
 import io.grpc.Context
@@ -250,11 +250,29 @@ private[console] object ParticipantCommands {
       // architecture-handbook-entry-end: OnboardParticipantToConfig
     }
 
+    /** Registers a synchronizer without necessarily connecting to it.
+      *
+      * @param config
+      *   The synchronizer connection configuration.
+      * @param performHandshake
+      *   Whether to perform a handshake with the synchronizer as part of the registration.
+      * @param validation
+      *   Whether to validate the connectivity and ids of the given sequencers.
+      * @param onboardingTransactions
+      *   Optional onboarding topology transactions used for onboarding. They must contain exactly
+      *   one SynchronizerTrustCertificate, exactly one OwnerToKeyMapping and at least one
+      *   NamespaceDelegation, each serialized with the synchronizer's protocol version and signed.
+      *   If empty, the participant uses the ones it automatically generates and persists. When
+      *   provided, they are persisted at registration and used when the participant
+      *   connects/reconnects.
+      */
     def register(
         runner: AdminCommandRunner,
         config: SynchronizerConnectionConfig,
         performHandshake: Boolean,
         validation: SequencerConnectionValidation,
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+          Seq.empty,
     ): ConsoleCommandResult[Unit] =
       runner.adminCommand(
         ParticipantAdminCommands.SynchronizerConnectivity
@@ -262,6 +280,7 @@ private[console] object ParticipantCommands {
             config.toInternal,
             performHandshake = performHandshake,
             validation.toInternal,
+            onboardingTransactions,
           )
       )
 
@@ -2074,6 +2093,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |  to have been effected on all local nodes.
         |- validation: Whether to validate the connectivity and ids of the given sequencers
         |  (default All)
+        |- onboardingTransactions: Optional onboarding topology transactions used for
+        |  onboarding. They must contain exactly one SynchronizerTrustCertificate, exactly
+        |  one OwnerToKeyMapping and at least one NamespaceDelegation, each serialized
+        |  with the synchronizer's protocol version and signed. If empty, the participant
+        |  uses the ones it automatically generates and persists.
         """
     )
     def register(
@@ -2088,6 +2112,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           consoleEnvironment.commandTimeouts.bounded
         ),
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+          Seq.empty,
     ): Unit = {
       val config = ParticipantCommands.synchronizers.reference_to_config(
         sequencers = Seq(sequencer),
@@ -2097,7 +2123,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         maxRetryDelay = maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
         priority = priority,
       )
-      register_by_config(config, performHandshake = performHandshake, validation, synchronize)
+      register_by_config(
+        config,
+        performHandshake = performHandshake,
+        validation,
+        synchronize,
+        onboardingTransactions,
+      )
     }
 
     @Help.Summary(
@@ -2112,6 +2144,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |  (default All)
         |- synchronize: A timeout duration indicating how long to wait for all topology changes
         |  to have been effected on all local nodes.
+        |- onboardingTransactions: Optional onboarding topology transactions used for
+        |  onboarding. They must contain exactly one SynchronizerTrustCertificate, exactly
+        |  one OwnerToKeyMapping and at least one NamespaceDelegation, each serialized
+        |  with the synchronizer's protocol version and signed. If empty, the participant
+        |  uses the ones it automatically generates and persists.
         """
     )
     def register_by_config(
@@ -2121,17 +2158,20 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
+        onboardingTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+          Seq.empty,
     ): Unit = {
       val current = this.config(config.synchronizerAlias)
-      // if the config is not found, then we register the synchronizer
-      if (current.isEmpty) {
-        // register the synchronizer configuration
+      // Register the synchronizer if it is not yet registered. If it is already registered but
+      // onboarding transactions are provided, re-register to overwrite the previously provided ones.
+      if (current.isEmpty || onboardingTransactions.nonEmpty) {
         consoleEnvironment.run {
           ParticipantCommands.synchronizers.register(
             runner,
             config,
             performHandshake = performHandshake,
             validation,
+            onboardingTransactions,
           )
         }
       }
@@ -2278,10 +2318,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |- validation: Whether to validate the connectivity and ids of the given sequencers
         |  (default all)
         |- onboardingTransactions: Optional onboarding topology transactions used for
-        |  onboarding. They should be a SynchronizerTrustCertificate, an OwnerToKeyMapping
-        |  and at least one NamespaceDelegation, each serialized with the synchronizer's
-        |  protocol version and signed. If empty, the participant uses the ones it
-        |  automatically generates and persists.
+        |  onboarding. They must contain exactly one SynchronizerTrustCertificate, exactly
+        |  one OwnerToKeyMapping and at least one NamespaceDelegation, each serialized
+        |  with the synchronizer's protocol version and signed. If empty, the participant
+        |  uses the ones it automatically generates and persists.
         """
     )
     def connect_by_config(
@@ -2308,6 +2348,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         }
         // architecture-handbook-entry-end: OnboardParticipantConnect
       } else {
+        if (onboardingTransactions.nonEmpty)
+          logger.warn(
+            s"Synchronizer ${config.synchronizerAlias} is already registered: the provided onboarding transactions are ignored"
+          )(TraceContext.empty)
         reconnect(config.synchronizerAlias, retry = false).discard
       }
 

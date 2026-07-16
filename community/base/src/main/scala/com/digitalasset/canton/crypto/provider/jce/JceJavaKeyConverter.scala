@@ -134,7 +134,7 @@ object JceJavaKeyConversionError {
     override def prettyCompanion: PrettyPrintingCompanion[GeneralError] = GeneralError
   }
   object GeneralError extends PrettyPrintingCompanion[GeneralError] {
-    override val pretty: Pretty[GeneralError] =
+    override protected val pretty: Pretty[GeneralError] =
       prettyOfClass(unnamedParam(_.error))
   }
 
@@ -146,7 +146,7 @@ object JceJavaKeyConversionError {
       UnsupportedKeyFormat
   }
   object UnsupportedKeyFormat extends PrettyPrintingCompanion[UnsupportedKeyFormat] {
-    override val pretty: Pretty[UnsupportedKeyFormat] =
+    override protected val pretty: Pretty[UnsupportedKeyFormat] =
       prettyOfClass(param("format", _.format), param("supportedKeyFormats", _.supportedKeyFormats))
   }
 
@@ -154,7 +154,7 @@ object JceJavaKeyConversionError {
     override def prettyCompanion: PrettyPrintingCompanion[InvalidKey] = InvalidKey
   }
   object InvalidKey extends PrettyPrintingCompanion[InvalidKey] {
-    override val pretty: Pretty[InvalidKey] =
+    override protected val pretty: Pretty[InvalidKey] =
       prettyOfClass(unnamedParam(_.error.unquoted))
   }
 

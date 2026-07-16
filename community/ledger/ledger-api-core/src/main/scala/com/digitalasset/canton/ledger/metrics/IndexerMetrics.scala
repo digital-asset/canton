@@ -60,6 +60,18 @@ class IndexerHistograms(val prefix: MetricName)(implicit
     description = "Histogram to collect the statistics of how long individual contracts lived.",
     qualification = MetricQualification.Debug,
   )
+
+  private[metrics] val acquireContractPruningLock: Item = Item(
+    prefix :+ "acquire_contract_pruning_lock",
+    summary =
+      "The time needed to acquire exclusive table lock for contract pruning during indexer initialization.",
+    description = """This DB lock ensures serial contract pruning execution. It should take normally
+                    |very little time to acquire, but external or internal (pruning running the same time) DB queries might
+                    |prevent acquisition leading to lock contention and timeouts. This metric
+                    |represents time necessary to acquire this table lock.""",
+    qualification = MetricQualification.Debug,
+  )
+
 }
 
 class IndexerMetrics(
@@ -74,6 +86,8 @@ class IndexerMetrics(
   val initialization = new DatabaseMetrics(prefix :+ "initialization", factory)
 
   val achsStateInitialization = new DatabaseMetrics(prefix :+ "achs_state_initialization", factory)
+  val vacuumAndReindexAchsState =
+    new DatabaseMetrics(prefix :+ "vacuum_and_reindex_achs_state", factory)
 
   // Number of state updates persisted to the database
   // (after the effect of the corresponding Update is persisted into the database,
@@ -320,6 +334,9 @@ class IndexerMetrics(
         ),
       )
     )
+
+  val acquireContractPruningLock: Timer =
+    factory.timer(histograms.acquireContractPruningLock.info)
 }
 
 object IndexerMetrics {

@@ -22,6 +22,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceSequencerWithTrafficControlApiTestBase.RateLimitManagerImplTest
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{LedgerApiServerHistograms, MetricsUtils}

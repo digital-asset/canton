@@ -72,7 +72,7 @@ object FullInformeeTree
     with PrettyPrintingCompanion[FullInformeeTree] {
   override val name: String = "FullInformeeTree"
 
-  override val pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
+  override protected val pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.FullInformeeTree)(

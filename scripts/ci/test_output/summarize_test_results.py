@@ -13,9 +13,15 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Summarize JUnit XML results for a single test shard and optionally write JSON output."
     )
-    parser.add_argument("--shard-index", type=int, required=True, help="Index of the current shard.")
-    parser.add_argument("--total-shards", type=int, required=True, help="Total number of shards in the test run.")
-    parser.add_argument("--junit-glob", required=True, help="Glob pattern used to find JUnit XML files.")
+    parser.add_argument(
+        "--shard-index", type=int, required=True, help="Index of the current shard."
+    )
+    parser.add_argument(
+        "--total-shards", type=int, required=True, help="Total number of shards in the test run."
+    )
+    parser.add_argument(
+        "--junit-glob", required=True, help="Glob pattern used to find JUnit XML files."
+    )
     parser.add_argument(
         "--summary-path",
         default="",
@@ -176,14 +182,17 @@ def _write_junit(tmp_path, content):
 
 def test_gather_results_counts():
     with tempfile.TemporaryDirectory() as tmp:
-        path = _write_junit(tmp, """
+        path = _write_junit(
+            tmp,
+            """
         <testsuite>
           <testcase classname="com.example.Foo" name="testA"/>
           <testcase classname="com.example.Foo" name="testB"><failure>boom</failure></testcase>
           <testcase classname="com.example.Foo" name="testC"><error>oops</error></testcase>
           <testcase classname="com.example.Foo" name="testD"><skipped/></testcase>
         </testsuite>
-        """)
+        """,
+        )
         r = gather_results([path])
         assert r["passed"] == 1, f"Expected 1 passed, got {r['passed']}"
         assert r["failures"] == 1, f"Expected 1 failure, got {r['failures']}"
@@ -197,31 +206,40 @@ def test_gather_results_counts():
 
 def test_gather_results_deduplicates():
     with tempfile.TemporaryDirectory() as tmp:
-        path = _write_junit(tmp, """
+        path = _write_junit(
+            tmp,
+            """
         <testsuite>
           <testcase classname="com.example.Foo" name="testA"><failure>boom</failure></testcase>
           <testcase classname="com.example.Foo" name="testA"><failure>boom again</failure></testcase>
         </testsuite>
-        """)
+        """,
+        )
         r = gather_results([path])
         assert r["failures"] == 2, f"Expected 2 failures counted, got {r['failures']}"
         assert r["failures_unique"] == 1, f"Expected 1 unique failure, got {r['failures_unique']}"
-        assert len(r["not_passed_tests"]) == 1, f"Expected 1 unique not-passed test after dedup, got {r['not_passed_tests']}"
+        assert len(r["not_passed_tests"]) == 1, (
+            f"Expected 1 unique not-passed test after dedup, got {r['not_passed_tests']}"
+        )
 
 
 def test_gather_results_skips_empty_full_name():
     with tempfile.TemporaryDirectory() as tmp:
         # testcase with no classname and no name produces empty full_name
-        path = _write_junit(tmp, """
+        path = _write_junit(
+            tmp,
+            """
         <testsuite>
           <testcase><failure>no name</failure></testcase>
           <testcase classname="com.example.Foo" name="testA"><failure>named</failure></testcase>
         </testsuite>
-        """)
+        """,
+        )
         r = gather_results([path])
         assert r["failures"] == 2, f"Expected 2 failures counted, got {r['failures']}"
-        assert r["not_passed_tests"] == ["com.example.Foo.testA"], \
+        assert r["not_passed_tests"] == ["com.example.Foo.testA"], (
             f"Expected only named test in not_passed_tests, got {r['not_passed_tests']}"
+        )
 
 
 def test_gather_results_handles_parse_error():
@@ -234,6 +252,7 @@ def test_gather_results_handles_parse_error():
 
 def _make_args(shard_index="1", total_shards="4", limit=100):
     import types
+
     args = types.SimpleNamespace(
         shard_index=shard_index,
         total_shards=total_shards,
@@ -244,9 +263,17 @@ def _make_args(shard_index="1", total_shards="4", limit=100):
 
 def test_build_summary_no_failures():
     args = _make_args()
-    results = {"passed": 5, "failures": 0, "failures_unique": 0,
-               "errors": 0, "errors_unique": 0, "skipped": 1,
-               "parse_errors": 0, "total": 6, "not_passed_tests": []}
+    results = {
+        "passed": 5,
+        "failures": 0,
+        "failures_unique": 0,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 1,
+        "parse_errors": 0,
+        "total": 6,
+        "not_passed_tests": [],
+    }
     summary = build_summary(args, ["a.xml", "b.xml"], results)
     assert "## Test summary (shard 1/4)" in summary, f"Missing header in: {summary}"
     assert "- JUnit files found: 2" in summary
@@ -257,10 +284,17 @@ def test_build_summary_no_failures():
 
 def test_build_summary_with_failures():
     args = _make_args()
-    results = {"passed": 3, "failures": 2, "failures_unique": 2,
-               "errors": 0, "errors_unique": 0, "skipped": 0,
-               "parse_errors": 0, "total": 5,
-               "not_passed_tests": ["com.example.Foo.testA", "com.example.Bar.testB"]}
+    results = {
+        "passed": 3,
+        "failures": 2,
+        "failures_unique": 2,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 5,
+        "not_passed_tests": ["com.example.Foo.testA", "com.example.Bar.testB"],
+    }
     summary = build_summary(args, [], results)
     assert "<details>" in summary, "Expected details block when failures present"
     assert "- com.example.Foo.testA" in summary
@@ -270,9 +304,17 @@ def test_build_summary_with_failures():
 def test_build_summary_limit():
     args = _make_args(limit=2)
     not_passed = [f"com.example.Test{i}.test" for i in range(5)]
-    results = {"passed": 0, "failures": 5, "failures_unique": 5,
-               "errors": 0, "errors_unique": 0, "skipped": 0,
-               "parse_errors": 0, "total": 5, "not_passed_tests": not_passed}
+    results = {
+        "passed": 0,
+        "failures": 5,
+        "failures_unique": 5,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 5,
+        "not_passed_tests": not_passed,
+    }
     summary = build_summary(args, [], results)
     assert "and 3 more" in summary, f"Expected 'and 3 more' in: {summary}"
     assert "shown 2" in summary, f"Expected 'shown 2' in: {summary}"

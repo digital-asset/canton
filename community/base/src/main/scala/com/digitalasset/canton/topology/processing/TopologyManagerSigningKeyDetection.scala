@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPrivateSt
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.cache.{
   StoreBasedTopologyStateLookupByNamespace,
@@ -71,6 +72,8 @@ class TopologyManagerSigningKeyDetection[+PureCrypto <: CryptoPureApi](
 )(implicit override val executionContext: ExecutionContext)
     extends TransactionAuthorizationCache[PureCrypto]
     with NamedLogging {
+
+  override val warnAboutDanglingKeys: Boolean = true
 
   override protected val lookup: TopologyStateLookupByNamespace =
     new StoreBasedTopologyStateLookupByNamespace(store)

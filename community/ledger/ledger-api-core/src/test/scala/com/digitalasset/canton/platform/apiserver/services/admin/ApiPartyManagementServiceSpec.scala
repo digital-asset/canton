@@ -215,7 +215,7 @@ class ApiPartyManagementServiceSpec
             publicKey = publicKey.keyData,
             // Deprecated field
             scheme = SIGNING_KEY_SCHEME_UNSPECIFIED,
-            usage = Seq(SigningKeyUsage.Namespace.toProtoEnum),
+            usage = Seq(SigningKeyUsage.Namespace.toProtoEnumV30),
             keySpec =
               publicKey.keySpec.transformInto[com.digitalasset.canton.crypto.v30.SigningKeySpec],
           )

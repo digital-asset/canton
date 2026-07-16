@@ -64,7 +64,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   }
   private object ExampleCaseClassViaCompanion
       extends PrettyPrintingCompanion[ExampleCaseClassViaCompanion] {
-    override val pretty: Pretty[ExampleCaseClassViaCompanion] =
+    override protected val pretty: Pretty[ExampleCaseClassViaCompanion] =
       prettyOfClass(param("alien", _.alien), param("singleton", _.singleton))
   }
 
@@ -196,7 +196,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
 
   "handle invalid control chars" in {
     final case class Invalid(str: String) extends PrettyPrinting {
-      override protected[pretty] def pretty: Pretty[Invalid] = prettyOfString(_.str)
+      override protected def pretty: Pretty[Invalid] = prettyOfString(_.str)
     }
 
     final case class Invalid2(str: String)

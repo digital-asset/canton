@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.synchronizer.sequencer.SynchronizerSequencingTestUtils
 import com.digitalasset.canton.topology.{Member, ParticipantId}

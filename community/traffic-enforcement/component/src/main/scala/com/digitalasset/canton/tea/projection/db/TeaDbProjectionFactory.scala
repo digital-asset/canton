@@ -98,6 +98,9 @@ private[projection] class TeaDbProjectionFactory(
       val account = envelope.value.account
       val event = envelope.value.event
       for {
+        // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
+        // which will add the offset persistence to it and wrap the whole thing into a transaction
+        // to provide exactlyOnce semantics
         _ <- store.persistDeltaDBIO(
           accountId = account,
           eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),

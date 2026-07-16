@@ -66,11 +66,11 @@ class EpochState[E <: Env[E]](
     with FlagCloseable {
 
   private val metricsAccumulator = new EpochMetricsAccumulator()
-  def emitEpochStats(metrics: BftOrderingMetrics, nextEpoch: EpochInfo): Unit =
-    IssConsensusModuleMetrics.emitEpochStats(
+  def emitEpochMetrics(metrics: BftOrderingMetrics, prevEpoch: Epoch): Unit =
+    IssConsensusModuleMetrics.emitEpochMetrics(
       metrics,
-      nextEpoch,
-      epoch,
+      epoch.info,
+      prevEpoch,
       metricsAccumulator.viewsCount,
       metricsAccumulator.discardedMessages,
       metricsAccumulator.retransmittedMessages,

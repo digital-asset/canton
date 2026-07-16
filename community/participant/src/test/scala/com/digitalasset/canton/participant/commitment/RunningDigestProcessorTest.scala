@@ -91,6 +91,7 @@ class RunningDigestProcessorTest
 
   val ts0 = ts(0)
   val off1 = off(1)
+  val tp1_0 = Timepoint(off1)(ts0)
 
   def mkRunningDigestProcessor(
       participant: ParticipantId = thisParticipant,
@@ -145,23 +146,23 @@ class RunningDigestProcessorTest
           InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val result = Source(
           Seq(
-            ProcessingContext(ts((2)), off(2), dummyAcsChange),
-            ProcessingContext(ts((3)), off(3), dummyAcsChange),
-            ProcessingContext(ts((5)), off(5), dummyAcsChange),
-            ProcessingContext(ts((6)), off(6), dummyAcsChange),
-            ProcessingContext(ts((7)), off(7), dummyAcsChange),
+            ProcessingContext(tp(2), dummyAcsChange),
+            ProcessingContext(tp(3), dummyAcsChange),
+            ProcessingContext(tp(5), dummyAcsChange),
+            ProcessingContext(tp(6), dummyAcsChange),
+            ProcessingContext(tp(7), dummyAcsChange),
           )
         ).via(rdp.checkpointing).runWith(Sink.seq).futureValue
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
           // TODO(#33084) Remove initial CheckpointFence once crash recovery is implemented
-          ProcessingContext(ts(0), off(1), None),
-          ProcessingContext(ts(2), off(2), Some(dummyAcsChange)),
-          ProcessingContext(ts(3), off(3), Some(dummyAcsChange)),
-          ProcessingContext(ts(5), off(5), Some(dummyAcsChange)),
-          ProcessingContext(ts(5), off(5), None),
-          ProcessingContext(ts(6), off(6), Some(dummyAcsChange)),
-          ProcessingContext(ts(7), off(7), Some(dummyAcsChange)),
+          ProcessingContext(tp1_0, None),
+          ProcessingContext(tp(2), Some(dummyAcsChange)),
+          ProcessingContext(tp(3), Some(dummyAcsChange)),
+          ProcessingContext(tp(5), Some(dummyAcsChange)),
+          ProcessingContext(tp(5), None),
+          ProcessingContext(tp(6), Some(dummyAcsChange)),
+          ProcessingContext(tp(7), Some(dummyAcsChange)),
         )
       }
 
@@ -176,26 +177,26 @@ class RunningDigestProcessorTest
           InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val result = Source(
           Seq(
-            ProcessingContext(ts(2), off(2), dummyAcsChange),
-            ProcessingContext(ts(2), off(3), dummyAcsChange),
-            ProcessingContext(ts(2), off(4), dummyAcsChange),
-            ProcessingContext(ts(3), off(5), dummyAcsChange),
-            ProcessingContext(ts(5), off(8), dummyAcsChange),
-            ProcessingContext(ts(6), off(9), dummyAcsChange),
+            ProcessingContext(tp(2), dummyAcsChange),
+            ProcessingContext(Timepoint(off(3))(ts(2)), dummyAcsChange),
+            ProcessingContext(Timepoint(off(4))(ts(2)), dummyAcsChange),
+            ProcessingContext(Timepoint(off(5))(ts(3)), dummyAcsChange),
+            ProcessingContext(Timepoint(off(8))(ts(5)), dummyAcsChange),
+            ProcessingContext(Timepoint(off(9))(ts(6)), dummyAcsChange),
           )
         ).via(rdp.checkpointing).runWith(Sink.seq).futureValue
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
           // TODO(#33084) Remove initial CheckpointFence once crash recovery is implemented
-          ProcessingContext(ts(0), off(1), None),
-          ProcessingContext(ts(2), off(2), Some(dummyAcsChange)),
-          ProcessingContext(ts(2), off(3), Some(dummyAcsChange)),
-          ProcessingContext(ts(2), off(4), Some(dummyAcsChange)),
-          ProcessingContext(ts(3).immediatePredecessor, off(4), None),
-          ProcessingContext(ts(3), off(5), Some(dummyAcsChange)),
-          ProcessingContext(ts(5), off(8), Some(dummyAcsChange)),
-          ProcessingContext(ts(6).immediatePredecessor, off(8), None),
-          ProcessingContext(ts(6), off(9), Some(dummyAcsChange)),
+          ProcessingContext(tp1_0, None),
+          ProcessingContext(tp(2), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(3))(ts(2)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(4))(ts(2)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(4))(ts(3).immediatePredecessor), None),
+          ProcessingContext(Timepoint(off(5))(ts(3)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(8))(ts(5)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(8))(ts(6).immediatePredecessor), None),
+          ProcessingContext(Timepoint(off(9))(ts(6)), Some(dummyAcsChange)),
         )
       }
 
@@ -210,7 +211,7 @@ class RunningDigestProcessorTest
         } yield PartyToParticipantAuthorization(alice, participant, authChange)
 
         val inputEvents = topologyEvents.zip(Iterator.from(1)).map { case (event, timeOffset) =>
-          ProcessingContext(ts(timeOffset), off(timeOffset), tte(event))
+          ProcessingContext(tp(timeOffset), tte(event))
         }
 
         val rdp = mkRunningDigestProcessor(
@@ -226,8 +227,8 @@ class RunningDigestProcessorTest
           // add a fence AFTER each input event with the same timestamp as the input event
           inputEvents.flatMap { input =>
             Seq(
-              ProcessingContext(input.recordTime, input.offset, Some(input.value)),
-              ProcessingContext(input.recordTime, input.offset, None),
+              ProcessingContext(input.timepoint, Some(input.value)),
+              ProcessingContext(input.timepoint, None),
             )
           }
 
@@ -240,7 +241,7 @@ class RunningDigestProcessorTest
       "pass checkpoint fences through" in {
         val rdp = mkRunningDigestProcessor()
 
-        val fence = ProcessingContext(ts0, off1, CheckpointFence)
+        val fence = ProcessingContext(tp1_0, CheckpointFence)
 
         val result = Source
           .single(fence)
@@ -249,7 +250,7 @@ class RunningDigestProcessorTest
           .futureValue
           .loneElement
 
-        result shouldBe ProcessingContext(ts0, off1, CheckpointFence)
+        result shouldBe ProcessingContext(tp1_0, CheckpointFence)
       }
 
       "handle ACS changes" in {
@@ -278,8 +279,7 @@ class RunningDigestProcessorTest
 
         val toProcess =
           ProcessingContext(
-            ts0,
-            off1,
+            tp1_0,
             NotCheckpointFence(
               topologySnapshot,
               InternalIndexService.AcsUpdate.AcsChangeUpdate(event),
@@ -323,7 +323,7 @@ class RunningDigestProcessorTest
         // mocked topology snapshot to verify that it is not being used.
         val topologySnapshot = mock[TopologySnapshot]
         val toProcess =
-          ProcessingContext(ts0, off1, NotCheckpointFence(topologySnapshot, tte(event)))
+          ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
         val rdp = mkRunningDigestProcessor()
 
         val result = Source
@@ -346,7 +346,7 @@ class RunningDigestProcessorTest
 
         val topologySnapshot = mock[TopologySnapshot]
         val toProcess =
-          ProcessingContext(ts0, off1, NotCheckpointFence(topologySnapshot, tte(event)))
+          ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
 
         val rdp = mkRunningDigestProcessor()
 
@@ -370,7 +370,7 @@ class RunningDigestProcessorTest
 
         val topologySnapshot = mock[TopologySnapshot]
         val toProcess =
-          ProcessingContext(ts0, off1, NotCheckpointFence(topologySnapshot, tte(event)))
+          ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
 
         val rdp = mkRunningDigestProcessor()
 
@@ -414,8 +414,7 @@ class RunningDigestProcessorTest
 
         val toProcess =
           ProcessingContext(
-            ts(2),
-            off(2),
+            tp(2),
             NotCheckpointFence(
               testingTopology.topologySnapshot(),
               tte(p1_unhosts_alice, p2_hosts_alice, p1_hosts_bob),
@@ -534,8 +533,7 @@ class RunningDigestProcessorTest
 
           val toProcess =
             ProcessingContext(
-              ts(3),
-              off(3),
+              tp(3),
               NotCheckpointFence(testingTopology.topologySnapshot(), tte(event)),
             )
 
@@ -693,8 +691,7 @@ class RunningDigestProcessorTest
 
         acsUpdates shouldBe Seq(
           ProcessingContext(
-            ts(3),
-            off(3),
+            tp(3),
             NotCheckpointFence(
               topologySnapshot,
               AcsUpdate(
@@ -710,8 +707,7 @@ class RunningDigestProcessorTest
             ),
           ),
           ProcessingContext(
-            ts(3),
-            off(3),
+            tp(3),
             NotCheckpointFence(
               topologySnapshot,
               AcsUpdate(
@@ -728,8 +724,7 @@ class RunningDigestProcessorTest
             ),
           ),
           ProcessingContext(
-            ts(3),
-            off(3),
+            tp(3),
             CheckpointFence,
           ),
         )
@@ -750,6 +745,8 @@ class RunningDigestProcessorTest
           counterpartyBatchSize = 2,
         )
 
+        val requestedTimepoint = Timepoint(requestedOffset)(requestedOffset.toEpochTimestamp)
+
         val acsUpdates = rdp
           .reinitializationAcsUpdates(
             requestedOffset.toEpochTimestamp,
@@ -761,8 +758,7 @@ class RunningDigestProcessorTest
 
         acsUpdates shouldBe Seq(
           ProcessingContext(
-            requestedOffset.toEpochTimestamp,
-            requestedOffset,
+            requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
               AcsUpdate(
@@ -778,8 +774,7 @@ class RunningDigestProcessorTest
             ),
           ),
           ProcessingContext(
-            requestedOffset.toEpochTimestamp,
-            requestedOffset,
+            requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
               AcsUpdate(
@@ -795,8 +790,7 @@ class RunningDigestProcessorTest
             ),
           ),
           ProcessingContext(
-            requestedOffset.toEpochTimestamp,
-            requestedOffset,
+            requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
               AcsUpdate(
@@ -812,8 +806,7 @@ class RunningDigestProcessorTest
             ),
           ),
           ProcessingContext(
-            requestedOffset.toEpochTimestamp,
-            requestedOffset,
+            requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
               AcsUpdate(
@@ -827,11 +820,7 @@ class RunningDigestProcessorTest
               ),
             ),
           ),
-          ProcessingContext(
-            requestedOffset.toEpochTimestamp,
-            requestedOffset,
-            CheckpointFence,
-          ),
+          ProcessingContext(requestedTimepoint, CheckpointFence),
         )
       }
     }
@@ -851,6 +840,7 @@ object RunningDigestProcessorTest {
   def cid(i: Int): LfContractId = ExampleTransactionFactory.suffixedId(i, i)
   def ts(i: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(i.toLong)
   def off(i: Int): Offset = Offset.tryFromLong(i.toLong)
+  def tp(i: Int): Timepoint = Timepoint(off(i))(ts(i))
   def tte(events: PartyToParticipantAuthorization*) =
     InternalIndexService.AcsUpdate.EffectivePartyToParticipantMappings(events.toSet)
   def party(s: String): LfPartyId = LfPartyId.assertFromString(s)

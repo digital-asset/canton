@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.daml.ledger.api.v2;
+
+option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+option java_outer_classname = "JoseServiceOuterClass";
+option java_package = "com.daml.ledger.api.v2";
+
+// Allows clients to access JOSE (JSON Object Signing and Encryption) primitives
+// to use for authentication
+service JoseService {
+  rpc GetJwks(GetJwksRequest) returns (GetJwksResponse);
+}
+
+message GetJwksRequest {
+  // The synchronizer containing the signing public keys for the party
+  //
+  // Required
+  string synchronizer_id = 1;
+
+  // The party to request the JWKS for
+  //
+  // Required
+  string party_id = 2;
+}
+
+message GetJwksResponse {
+  // List of JWKs for the specified party and synchronizer.
+  // Only keys of which the usage allows for Party JWT authentication will be returned.
+  //
+  // Optional: can be empty
+  repeated string keys = 1;
+}

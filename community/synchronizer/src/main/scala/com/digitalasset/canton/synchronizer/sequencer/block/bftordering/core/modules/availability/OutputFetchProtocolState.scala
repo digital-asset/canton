@@ -20,6 +20,10 @@ import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 
+/** A stream of jittered delays for retrying a request, based on the number of attempts. The delay
+  * is calculated using the provided `Jitter` implementation, and is at least `minimumDelay`. The
+  * `initialDelay` is used as the starting point for the first attempt.
+  */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 final case class JitterStream(
     jitter: Jitter,
@@ -40,6 +44,16 @@ final case class JitterStream(
 }
 
 object JitterStream {
+
+  /** Create a JitterStream from the given configuration and random source. It uses the
+    * `Jitter.full` implementation to calculate the delays, with the provided
+    * `outputFetchTimeoutCap`, `outputFetchTimeout`, and `outputFetchMinimumDelay` values.
+    * `Jitter.full.apply` produces a timeout value between 0 and the exponential (we use base 2) as
+    * `initialValue*math.pow(base.toDouble, attempt.toDouble)`, the unit of the initial delay is
+    * important because the exp is on the non-converted value, the cap is converted to the same unit
+    * of the initial delay with ceiling, and what guarantees that the jitter does not yield 0 is the
+    * minimum delay.
+    */
   def create(config: BftBlockOrdererConfig, random: Random): JitterStream =
     JitterStream(
       Jitter.full(config.outputFetchTimeoutCap, Jitter.randomSource(random.self)),
@@ -51,7 +65,6 @@ object JitterStream {
 final case class MissingBatchStatus(
     batchId: BatchId,
     originalProof: ProofOfAvailability,
-    remainingNodesToTry: Seq[BftNodeId],
     numberOfAttempts: Int,
     jitterStream: JitterStream,
     orderingMode: OrderingMode,

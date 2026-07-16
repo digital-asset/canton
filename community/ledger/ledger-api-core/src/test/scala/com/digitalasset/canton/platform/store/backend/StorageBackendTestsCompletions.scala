@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
+import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.platform.indexer.parallel.{PostPublishData, PublishSource}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -525,5 +527,592 @@ private[backend] trait StorageBackendTestsCompletions
         traceContext = testTraceContext,
       ),
     )
+  }
+
+  it should "correctly persist and read back transaction_hash" in {
+    val party = someParty
+    val hashBytes = someExternalTransactionHashBinary
+
+    val dtos = Vector(
+      dtoCompletion(offset(1), submitters = Set(party), transactionHash = Some(hashBytes)),
+      dtoCompletion(offset(2), submitters = Set(party), transactionHash = None),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+    val completions = executeSql(
+      backend.completion
+        .commandCompletions(
+          Offset.firstOffset,
+          offset(2),
+          Some(someUserId),
+          Set(party),
+          limit = 10,
+        )
+    ).toList
+
+    completions should have length 2
+    inside(completions) { case List(completionWithHash, completionWithoutHash) =>
+      completionWithHash.completionResponse.completion.toList.head.transactionHash shouldBe
+        Some(ByteString.copyFrom(hashBytes))
+      completionWithoutHash.completionResponse.completion.toList.head.transactionHash shouldBe
+        None
+    }
+  }
+
+  it should "look up rejected completions by hash" in {
+    val party = someParty
+    val hashBytes = someExternalTransactionHashBinary
+
+    val rejectedCompletion = dtoCompletion(
+      offset(1),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("some rejection"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejectedCompletion), _))
+    executeSql(updateLedgerEnd(offset(1), 1L))
+
+    val (accepted, rejected) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, Set.empty[Ref.Party])(
+          connection
+        ),
+        backend.completion
+          .rejectedCompletionsByHash(hashBytes, 10, None, Set.empty[Ref.Party])(
+            connection
+          ),
+      )
+    )
+
+    accepted shouldBe None
+    rejected should have length 1
+  }
+
+  it should "return empty results for non-existent hash" in {
+    val party = someParty
+    val existingHash = someExternalTransactionHashBinary
+    val nonExistentHash = CantonHash
+      .digest(HashPurpose.PreparedSubmission, ByteString.copyFromUtf8("non_existent"), Sha256)
+      .getCryptographicEvidence
+      .toByteArray
+
+    val completion = dtoCompletion(
+      offset(1),
+      submitters = Set(party),
+      transactionHash = Some(existingHash),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("some rejection"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(completion), _))
+    executeSql(updateLedgerEnd(offset(1), 1L))
+
+    val (accepted, rejected) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(nonExistentHash, Set.empty[Ref.Party])(
+          connection
+        ),
+        backend.completion
+          .rejectedCompletionsByHash(nonExistentHash, 10, None, Set.empty[Ref.Party])(
+            connection
+          ),
+      )
+    )
+
+    accepted shouldBe None
+    rejected shouldBe empty
+  }
+
+  it should "return both accepted and rejected completions by hash, respecting rejection limit" in {
+    val party = someParty
+    val hashBytes = someExternalTransactionHashBinary
+
+    val acceptedCompletion = dtoCompletion(
+      offset(4),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(4),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+    val rejectedCompletion1 = dtoCompletion(
+      offset(1),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection 1"),
+    )
+    val rejectedCompletion2 = dtoCompletion(
+      offset(2),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection 2"),
+    )
+    val rejectedCompletion3 = dtoCompletion(
+      offset(3),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection 3"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(
+      ingest(
+        Vector(
+          rejectedCompletion1,
+          rejectedCompletion2,
+          rejectedCompletion3,
+          acceptedCompletion,
+          meta,
+        ),
+        _,
+      )
+    )
+    executeSql(updateLedgerEnd(offset(4), 4L))
+
+    val (accepted, rejected) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, Set.empty[Ref.Party])(
+          connection
+        ),
+        backend.completion.rejectedCompletionsByHash(hashBytes, 2, None, Set.empty[Ref.Party])(
+          connection
+        ),
+      )
+    )
+
+    accepted shouldBe defined
+    inside(accepted) { case Some(completion) =>
+      completion.transactionHash shouldBe
+        Some(ByteString.copyFrom(hashBytes))
+    }
+    rejected should have length 2
+  }
+
+  it should "exclude hash lookups for completions above the ledger end" in {
+    val party = someParty
+    val hashBytes = someExternalTransactionHashBinary
+
+    val acceptedCompletion = dtoCompletion(
+      offset(3),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(3),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+    val rejectedCompletion = dtoCompletion(
+      offset(2),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("some rejection"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejectedCompletion, acceptedCompletion, meta), _))
+
+    // Ledger end is below both rows (offset 1 < offsets 2 and 3): they must be invisible.
+    executeSql(updateLedgerEnd(offset(1), 1L))
+    val (acceptedBefore, rejectedBefore) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, Set.empty[Ref.Party])(
+          connection
+        ),
+        backend.completion
+          .rejectedCompletionsByHash(hashBytes, 10, None, Set.empty[Ref.Party])(
+            connection
+          ),
+      )
+    )
+    acceptedBefore shouldBe None
+    rejectedBefore shouldBe empty
+
+    // After advancing the ledger end past both rows, the lookups return them.
+    executeSql(updateLedgerEnd(offset(3), 3L))
+    val (acceptedAfter, rejectedAfter) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, Set.empty[Ref.Party])(
+          connection
+        ),
+        backend.completion
+          .rejectedCompletionsByHash(hashBytes, 10, None, Set.empty[Ref.Party])(
+            connection
+          ),
+      )
+    )
+    acceptedAfter shouldBe defined
+    rejectedAfter should have length 1
+  }
+
+  it should "honor the party filter for by-hash rejected lookups, dropping non-overlapping submitters" in {
+    val hashBytes = someExternalTransactionHashBinary
+    val partyA = Ref.Party.assertFromString("party_alpha")
+    val partyB = Ref.Party.assertFromString("party_beta")
+
+    val rejectedA = dtoCompletion(
+      offset(1),
+      submitters = Set(partyA),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection a"),
+    )
+    val rejectedB = dtoCompletion(
+      offset(2),
+      submitters = Set(partyB),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection b"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejectedA, rejectedB), _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    val rejectedForA = executeSql(
+      backend.completion.rejectedCompletionsByHash(
+        hashBytes,
+        10,
+        None,
+        Set(partyA),
+      )
+    )
+    rejectedForA should have length 1
+    rejectedForA.head.actAs should contain theSameElementsAs Seq(partyA)
+  }
+
+  it should "honor the party filter for by-hash accepted lookups, dropping non-overlapping submitters" in {
+    val hashBytes = someExternalTransactionHashBinary
+    val partyA = Ref.Party.assertFromString("party_alpha")
+    val partyB = Ref.Party.assertFromString("party_beta")
+
+    val accepted = dtoCompletion(
+      offset(1),
+      submitters = Set(partyA),
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(1),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(accepted, meta), _))
+    executeSql(updateLedgerEnd(offset(1), 1L))
+
+    // A caller whose parties do not overlap the completion's submitters must not see it,
+    // even though the completion exists and the user_id is unconstrained.
+    val acceptedForB = executeSql(
+      backend.completion.acceptedCompletionByHash(
+        hashBytes,
+        Set(partyB),
+      )
+    )
+    acceptedForB shouldBe None
+
+    val acceptedForA = executeSql(
+      backend.completion.acceptedCompletionByHash(
+        hashBytes,
+        Set(partyA),
+      )
+    )
+    acceptedForA shouldBe defined
+    acceptedForA.value.actAs should contain theSameElementsAs Seq(partyA)
+  }
+
+  it should "redact non-overlapping submitters within a multi-party completion for by-hash lookups" in {
+    val hashBytes = someExternalTransactionHashBinary
+    val partyA = Ref.Party.assertFromString("party_alpha")
+    val partyB = Ref.Party.assertFromString("party_beta")
+
+    val accepted = dtoCompletion(
+      offset(2),
+      submitters = Set(partyA, partyB),
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(2),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+    val rejected = dtoCompletion(
+      offset(1),
+      submitters = Set(partyA, partyB),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejected, accepted, meta), _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // A caller authorized only for partyA sees the completion, but partyB is redacted from actAs.
+    val filterForA = Set(partyA)
+    val (acceptedForA, rejectedForA) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, filterForA)(connection),
+        backend.completion.rejectedCompletionsByHash(hashBytes, 10, None, filterForA)(connection),
+      )
+    )
+    acceptedForA shouldBe defined
+    acceptedForA.value.actAs should contain theSameElementsAs Seq(partyA)
+    rejectedForA should have length 1
+    rejectedForA.head.actAs should contain theSameElementsAs Seq(partyA)
+  }
+
+  it should "drop a multi-party completion with no party overlap for by-hash lookups" in {
+    val hashBytes = someExternalTransactionHashBinary
+    val partyA = Ref.Party.assertFromString("party_alpha")
+    val partyB = Ref.Party.assertFromString("party_beta")
+    val partyC = Ref.Party.assertFromString("party_gamma")
+
+    val accepted = dtoCompletion(
+      offset(2),
+      submitters = Set(partyA, partyB),
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(2),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+    val rejected = dtoCompletion(
+      offset(1),
+      submitters = Set(partyA, partyB),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejected, accepted, meta), _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // A caller authorized only for an unrelated party must see nothing: the completion's metadata
+    // (command id, user id, offset, transaction hash, status) must not leak once actAs is redacted
+    // to empty.
+    val filterForC = Set(partyC)
+    val (acceptedForC, rejectedForC) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, filterForC)(connection),
+        backend.completion.rejectedCompletionsByHash(hashBytes, 10, None, filterForC)(connection),
+      )
+    )
+    acceptedForC shouldBe None
+    rejectedForC shouldBe empty
+  }
+
+  it should "return all completions for an empty party set (no filter, any-party semantics)" in {
+    val party = someParty
+    val hashBytes = someExternalTransactionHashBinary
+
+    val accepted = dtoCompletion(
+      offset(2),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(2),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+    val rejected = dtoCompletion(
+      offset(1),
+      submitters = Set(party),
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejected, accepted, meta), _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // An empty party set means "no filter" (caller has CanReadAsAnyParty): everything is returned.
+    val noFilter = Set.empty[Ref.Party]
+    val (acceptedResult, rejectedResult) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, noFilter)(connection),
+        backend.completion.rejectedCompletionsByHash(hashBytes, 10, None, noFilter)(connection),
+      )
+    )
+    acceptedResult shouldBe defined
+    rejectedResult should have length 1
+  }
+
+  it should "return all completions for an empty parties set regardless of user or party" in {
+    val hashBytes = someExternalTransactionHashBinary
+    val partyA = Ref.Party.assertFromString("party_alpha")
+    val partyB = Ref.Party.assertFromString("party_beta")
+    val user1 = Ref.UserId.assertFromString("user_one")
+    val user2 = Ref.UserId.assertFromString("user_two")
+
+    val accepted = dtoCompletion(
+      offset(3),
+      submitters = Set(partyA),
+      userId = user1,
+      transactionHash = Some(hashBytes),
+    )
+    val meta = dtoTransactionMeta(
+      offset(3),
+      event_sequential_id_first = 1L,
+      event_sequential_id_last = 1L,
+      transactionHash = Some(hashBytes),
+    )
+    val rejected1 = dtoCompletion(
+      offset(1),
+      submitters = Set(partyA),
+      userId = user1,
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection 1"),
+    )
+    val rejected2 = dtoCompletion(
+      offset(2),
+      submitters = Set(partyB),
+      userId = user2,
+      transactionHash = Some(hashBytes),
+      updateId = None,
+      rejectionStatusCode = Some(10),
+      rejectionStatusMessage = Some("rejection 2"),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(Vector(rejected1, rejected2, accepted, meta), _))
+    executeSql(updateLedgerEnd(offset(3), 3L))
+
+    val (acceptedResult, rejectedResult) = executeSql(connection =>
+      (
+        backend.completion.acceptedCompletionByHash(hashBytes, Set.empty[Ref.Party])(
+          connection
+        ),
+        backend.completion
+          .rejectedCompletionsByHash(hashBytes, 10, None, Set.empty[Ref.Party])(
+            connection
+          ),
+      )
+    )
+    acceptedResult shouldBe defined
+    rejectedResult should have length 2
+  }
+
+  it should "return completions for all users when userId is None" in {
+    val party = someParty
+    val userId1 = Ref.UserId.assertFromString("user1")
+    val userId2 = Ref.UserId.assertFromString("user2")
+
+    val dtos = Vector(
+      dtoCompletion(offset(1), submitters = Set(party), userId = userId1),
+      dtoCompletion(offset(2), submitters = Set(party), userId = userId2),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // With userId = None, both completions should be returned
+    val completionsNoUser = executeSql(
+      backend.completion
+        .commandCompletions(Offset.firstOffset, offset(2), None, Set(party), limit = 10)
+    )
+    completionsNoUser should have length 2
+
+    // With userId = Some(userId1), only user1's completion should be returned
+    val completionsUser1 = executeSql(
+      backend.completion
+        .commandCompletions(Offset.firstOffset, offset(2), Some(userId1), Set(party), limit = 10)
+    )
+    completionsUser1 should have length 1
+    completionsUser1.head.completionResponse.completion.toList.head.userId shouldBe userId1
+  }
+
+  it should "return completions with no party filtering when parties is empty" in {
+    val party1 = Ref.Party.assertFromString("party_a")
+    val party2 = Ref.Party.assertFromString("party_b")
+
+    val dtos = Vector(
+      dtoCompletion(offset(1), submitters = Set(party1)),
+      dtoCompletion(offset(2), submitters = Set(party2)),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // With empty parties, all completions should be returned regardless of submitter
+    val completionsNoParties = executeSql(
+      backend.completion
+        .commandCompletions(Offset.firstOffset, offset(2), Some(someUserId), Set.empty, limit = 10)
+    )
+    completionsNoParties should have length 2
+
+    // With specific party, only matching completions should be returned
+    val completionsParty1 = executeSql(
+      backend.completion
+        .commandCompletions(
+          Offset.firstOffset,
+          offset(2),
+          Some(someUserId),
+          Set(party1),
+          limit = 10,
+        )
+    )
+    completionsParty1 should have length 1
+  }
+
+  it should "return all completions when both userId is None and parties is empty" in {
+    val party1 = Ref.Party.assertFromString("party_x")
+    val party2 = Ref.Party.assertFromString("party_y")
+    val userId1 = Ref.UserId.assertFromString("admin_user1")
+    val userId2 = Ref.UserId.assertFromString("admin_user2")
+
+    val dtos = Vector(
+      dtoCompletion(offset(1), submitters = Set(party1), userId = userId1),
+      dtoCompletion(offset(2), submitters = Set(party2), userId = userId2),
+      dtoCompletion(offset(3), submitters = Set(party1, party2), userId = userId1),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(3), 3L))
+
+    // With both None/empty, all completions should be returned (admin use case)
+    val allCompletions = executeSql(
+      backend.completion
+        .commandCompletions(Offset.firstOffset, offset(3), None, Set.empty, limit = 10)
+    )
+    allCompletions should have length 3
   }
 }

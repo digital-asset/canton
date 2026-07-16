@@ -5,6 +5,7 @@ package com.digitalasset.canton
 
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import org.scalactic.source.Position
 import org.scalatest.Assertion
 import org.scalatest.Assertions.fail

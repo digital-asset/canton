@@ -75,7 +75,6 @@ import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceInte
   HttpServiceTestFixtureData,
   dar1,
 }
-import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.UseTls
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetAfterLedgerEnd
 import com.digitalasset.canton.logging.NamedLogging.loggerWithoutTracing
 import com.digitalasset.canton.logging.SuppressionRule
@@ -114,7 +113,7 @@ class JsonV2Tests
     WebsocketConfig(httpListWaitTime = 1.milliseconds)
   )
 
-  override def useTls: UseTls = UseTls.Tls
+  override def useTls: Boolean = true
 
   "package management" should {
     "upload and download dar" in httpTestFixture { fixture =>

@@ -5,9 +5,11 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.config.{DbLockedConnectionConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances}
 import com.digitalasset.canton.resource.WithDbLock.{WithDbLockError, withDbLock}
 import com.digitalasset.canton.store.db.{DbTest, PostgresTest}
@@ -141,10 +143,7 @@ trait WithDbLockTest extends FixtureAsyncWordSpec with BaseTest with HasExecutio
       EitherT.right[String](l1P.future)
     }
 
-    for {
-      // TODO(#33650) – Statically bounded to 2 elements
-      _ <- List(l1F, l2F).parSequence.value
-    } yield succeed
+    (l1F, l2F).parTupled.value.as(succeed)
   }
 
 }

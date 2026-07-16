@@ -13,7 +13,6 @@ import com.digitalasset.canton.participant.store.{
   AcsDigestStore,
   PaginationTokenDone,
 }
-import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
@@ -23,7 +22,6 @@ import scala.collection.immutable.TreeMap
 import scala.util.Try
 
 class InMemoryAcsDigestJournal[K, V](
-    override val indexedSynchronizer: IndexedSynchronizer,
     override val loggerFactory: NamedLoggerFactory,
     prettyKey: K => String,
 ) extends AcsDigestJournal[K, V]

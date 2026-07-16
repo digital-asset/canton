@@ -89,14 +89,11 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
-  GetPreferredPackageVersionRequest,
-  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
   InteractiveSubmissionServiceGrpc,
   MinLedgerTime,
-  PackagePreference,
   PackageVettingRequirement,
   PartySignatures,
   PrepareSubmissionRequest,
@@ -2038,38 +2035,6 @@ object LedgerApiCommands {
 
       override def timeoutType: TimeoutType =
         optTimeout.map(CustomClientTimeout(_)).getOrElse(DefaultUnboundedTimeout)
-    }
-
-    final case class PreferredPackageVersion(
-        parties: Set[LfPartyId],
-        packageName: LfPackageName,
-        synchronizerIdO: Option[SynchronizerId],
-        vettingValidAt: Option[CantonTimestamp],
-    ) extends BaseCommand[
-          GetPreferredPackageVersionRequest,
-          GetPreferredPackageVersionResponse,
-          Option[PackagePreference],
-        ] {
-
-      override protected def submitRequest(
-          service: InteractiveSubmissionServiceStub,
-          request: GetPreferredPackageVersionRequest,
-      ): Future[GetPreferredPackageVersionResponse] =
-        service.getPreferredPackageVersion(request)
-
-      override protected def createRequest(): Either[String, GetPreferredPackageVersionRequest] =
-        Right(
-          GetPreferredPackageVersionRequest(
-            parties = parties.toSeq,
-            packageName = packageName,
-            synchronizerId = synchronizerIdO.map(_.toProtoPrimitive).getOrElse(""),
-            vettingValidAt = vettingValidAt.map(_.toProtoTimestamp),
-          )
-        )
-
-      override protected def handleResponse(
-          response: GetPreferredPackageVersionResponse
-      ): Either[String, Option[PackagePreference]] = Right(response.packagePreference)
     }
 
     final case class PreferredPackages(

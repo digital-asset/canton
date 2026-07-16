@@ -12,6 +12,7 @@ import com.digitalasset.canton.data.{
   ContractsReassignmentBatch,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
 import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.{
   ActivationChange,

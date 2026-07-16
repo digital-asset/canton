@@ -20,6 +20,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.util.FutureInstances.*
 
 import scala.concurrent.Future

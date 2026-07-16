@@ -367,6 +367,7 @@ object P2PGrpcConnectionState {
         param("p2pEndpointIdToNetworkRef", _.p2pEndpointIdToNetworkRef),
       )
 
+    // TODO(#34191) and restructure to avoid local mutability
     // Returns the new state with the endpoint associated to the node,
     //  the state transition with logs, potentially an error if the association is not allowed
     //  and the network refs to close, if any duplicates were replaced.
@@ -397,23 +398,27 @@ object P2PGrpcConnectionState {
               case Some(previousBftNodeId) =>
                 if (previousBftNodeId == bftNodeId) {
                   annotation =
-                    s"Endpoint $p2pEndpointId already associated with $bftNodeId, no change"
+                    s"Endpoint $p2pEndpointId already associated with $previousBftNodeId, no change"
                 } else {
-                  result = Left(
-                    P2PConnectionState.Error
-                      .P2PEndpointIdAlreadyAssociated(
-                        p2pEndpointId,
-                        previousBftNodeId,
-                        bftNodeId,
-                      )
-                  )
-                  annotation = "Possible impersonation attempt: " +
-                    s"endpoint $p2pEndpointId is already associated with $previousBftNodeId, " +
-                    s"not associating it to $bftNodeId; if this is a legitimate change, " +
-                    "the previous association must be removed first"
-                  logLevel = Level.WARN
+//                  result = Left(
+//                    P2PConnectionState.Error
+//                      .P2PEndpointIdAlreadyAssociated(
+//                        p2pEndpointId,
+//                        previousBftNodeId,
+//                        bftNodeId,
+//                      )
+//                  )
+//                  annotation = "Possible impersonation attempt: " +
+//                    s"endpoint $p2pEndpointId is already associated with $previousBftNodeId, " +
+//                    s"not associating it to $bftNodeId; if this is a legitimate change, " +
+//                    "the previous association must be removed first"
+//                  logLevel = Level.WARN
+                  annotation =
+                    s"Endpoint $p2pEndpointId was previously associated with $previousBftNodeId, changing to $bftNodeId"
+                  logLevel = Level.INFO
+                  result = Right(true)
                 }
-                Some(previousBftNodeId)
+                Some(bftNodeId)
               case _ if bftNodeId == thisNode =>
                 result = Left(
                   P2PConnectionState.Error
@@ -425,6 +430,7 @@ object P2PGrpcConnectionState {
                 None
               case _ =>
                 annotation = s"Associated $p2pEndpointId -> $bftNodeId, no previous association"
+                logLevel = Level.INFO
                 result = Right(true)
                 Some(bftNodeId)
             }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.engine.ResultNeedExternalCall

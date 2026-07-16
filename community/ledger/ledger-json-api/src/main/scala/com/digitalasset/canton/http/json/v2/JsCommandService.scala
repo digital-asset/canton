@@ -137,6 +137,10 @@ class JsCommandService(
       commandCompletionsStream,
       timeoutOpenEndedStream = (_: command_completion_service.GetCompletionsRequest) => true,
     ),
+    withServerLogic(
+      JsCommandService.completionByHashEndpoint,
+      completionByHash,
+    ),
   )
 
   private def commandCompletionStream(
@@ -165,6 +169,17 @@ class JsCommandService(
       commandCompletionServiceClient(caller.token()).getCompletions,
       Future.successful[command_completion_service.CompletionStreamResponse],
     )
+  }
+
+  private def completionByHash(
+      callerContext: CallerContext
+  ): TracedInput[command_completion_service.GetCompletionByHashRequest] => Future[
+    Either[JsCantonError, command_completion_service.GetCompletionByHashResponse]
+  ] = req => {
+    implicit val tc: TraceContext = callerContext.traceContext()
+    commandCompletionServiceClient(callerContext.token())
+      .getCompletionByHash(req.in)
+      .resultToRight
   }
 
   def submitAndWait(callerContext: CallerContext): TracedInput[JsCommands] => Future[
@@ -452,6 +467,12 @@ object JsCommandService extends DocumentationEndpoints {
        """.stripMargin.trim)
       .inStreamListParamsAndDescription()
 
+  val completionByHashEndpoint = commands.post
+    .in(sttp.tapir.stringToPath("completion-by-hash"))
+    .in(jsonBody[command_completion_service.GetCompletionByHashRequest])
+    .out(jsonBody[command_completion_service.GetCompletionByHashResponse])
+    .protoRef(command_completion_service.CommandCompletionServiceGrpc.METHOD_GET_COMPLETION_BY_HASH)
+
   override def documentation: Seq[AnyEndpoint] = Seq(
     submitAndWait,
     submitAndWaitForTransactionEndpoint,
@@ -463,6 +484,7 @@ object JsCommandService extends DocumentationEndpoints {
     completionListEndpoint,
     commandCompletionsEndpoint,
     commandCompletionsListEndpoint,
+    completionByHashEndpoint,
   )
 }
 
@@ -514,6 +536,11 @@ object JsCommandServiceCodecs {
 
   implicit val getCompletionsRequestRW: Codec[command_completion_service.GetCompletionsRequest] =
     deriveRelaxedCodec
+
+  implicit val getCompletionByHashRequestRW
+      : Codec[command_completion_service.GetCompletionByHashRequest] = deriveRelaxedCodec
+  implicit val getCompletionByHashResponseRW
+      : Codec[command_completion_service.GetCompletionByHashResponse] = deriveRelaxedCodec
 
   implicit val reassignmentCommandsRW: Codec[reassignment_commands.ReassignmentCommands] =
     deriveRelaxedCodec

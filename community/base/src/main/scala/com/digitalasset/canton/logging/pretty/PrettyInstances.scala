@@ -54,7 +54,7 @@ trait PrettyInstances {
       if (inst == null) PrettyUtil.nullTree
       else {
         // Cast is required to make IDEA happy.
-        inst.prettyCompanion.pretty.treeOf(inst.asInstanceOf[inst.type])
+        inst.prettyCompanion.prettyInternal.treeOf(inst.asInstanceOf[inst.type])
       }
 
   implicit def prettyTree[T <: Tree]: Pretty[T] = identity

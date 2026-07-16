@@ -17,6 +17,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -32,6 +33,7 @@ import com.digitalasset.canton.platform.store.backend.{
   LedgerEnd,
   ParameterStorageBackend,
   ReadStorageBackend,
+  StorageBackendTestValues,
 }
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
@@ -104,6 +106,8 @@ private class JdbcLedgerWriteDao(
     contractPruningDelayBeforeRetry =
       IndexServiceConfig.DefaultContractPruningDelayBeforeRetry.underlying,
     contractPruningMaxRetries = IndexServiceConfig.DefaultContractPruningMaxRetries,
+    pruningDbLockMeta = StorageBackendTestValues.testDbLockMeta,
+    contractPruningDbLockMeta = StorageBackendTestValues.testDbLockMeta,
   )
 
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()

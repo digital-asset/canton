@@ -31,6 +31,7 @@ import flaky_common
 import manage_flaky_issues
 import parse_failing_tests
 import report_to_datadog
+import select_rota
 
 
 def _artifact_dir() -> str:
@@ -49,6 +50,7 @@ def _run_self_tests() -> int:
         ("parse_failing_tests", parse_failing_tests.self_test),
         ("report_to_datadog", report_to_datadog.self_test),
         ("manage_flaky_issues", manage_flaky_issues.self_test),
+        ("select_rota", select_rota.self_test),
         ("alert_slack", alert_slack.self_test),
     ]
     rc = 0
@@ -65,10 +67,15 @@ def _run_self_tests() -> int:
 
 def main(argv) -> int:
     parser = argparse.ArgumentParser(description="Run the flaky-test CI pipeline.")
-    parser.add_argument("failure_message", nargs="?", default=None,
-                        help="Optional CI failure message recorded as the single failing test (sbt crash path).")
-    parser.add_argument("--self-test", action="store_true",
-                        help="Run every step's self-test and exit.")
+    parser.add_argument(
+        "failure_message",
+        nargs="?",
+        default=None,
+        help="Optional CI failure message recorded as the single failing test (sbt crash path).",
+    )
+    parser.add_argument(
+        "--self-test", action="store_true", help="Run every step's self-test and exit."
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
@@ -96,7 +103,10 @@ def main(argv) -> int:
         try:
             step()
         except Exception:
-            print(f"flaky pipeline: step '{name}' failed (continuing with remaining steps)", flush=True)
+            print(
+                f"flaky pipeline: step '{name}' failed (continuing with remaining steps)",
+                flush=True,
+            )
             traceback.print_exc()
             rc = 1
     return rc

@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.kms.mock.audit
 
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.kms.audit.KmsRequestResponseLogger
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

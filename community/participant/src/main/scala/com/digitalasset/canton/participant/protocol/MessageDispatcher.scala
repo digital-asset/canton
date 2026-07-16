@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol
 import cats.data.Chain
 import cats.syntax.alternative.*
 import cats.syntax.foldable.*
-import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.{Foldable, Monoid}
@@ -21,6 +20,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.SequencerIndexMoved
 import com.digitalasset.canton.ledger.participant.state.{SequencedEventUpdate, SequencedUpdate}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdown,
@@ -28,6 +28,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidator
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.MessageDispatcher.TicksAfter.{
@@ -99,7 +100,8 @@ trait MessageDispatcher { this: NamedLogging =>
 
   protected def topologyProcessor: ParticipantTopologyProcessor
   protected def trafficProcessor: TrafficControlProcessor
-  protected def acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType
+  protected def legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType
+  protected def acsCommitmentValidator: ReceivedAcsCommitmentValidator
   protected def requestCounterAllocator: RequestCounterAllocator
   protected def recordOrderPublisher: RecordOrderPublisher
   protected def badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor
@@ -111,7 +113,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   def handleAll(events: Traced[Seq[WithOpeningErrors[PossiblyIgnoredProtocolEvent]]]): HandlerResult
 
-  private def processAcsCommitmentEnvelope(
+  private def processLegacyAcsCommitmentEnvelope(
       envelopes: Seq[DefaultOpenEnvelope],
       sc: SequencerCounter,
       ts: CantonTimestamp,
@@ -135,12 +137,70 @@ trait MessageDispatcher { this: NamedLogging =>
           recordOrderPublisher.scheduleEmptyAcsChangePublication(sc, ts)
         )
         .flatMap(_ =>
-          doProcess(AcsCommitment { () =>
-            logger.debug(s"Processing ACS commitments for timestamp $ts")
-            acsCommitmentProcessor(ts, Traced(acsCommitments))
-          })
+          doProcess(
+            AcsCommitment(
+              None,
+              { () =>
+                logger.debug(s"Processing ACS commitments for timestamp $ts")
+                legacyAcsCommitmentProcessor(ts, Traced(acsCommitments))
+              },
+            )
+          )
         )
     } else pureProcessingResult
+  }
+
+  private def processAcsCommitmentEnvelopes(
+      envelopes: Seq[DefaultOpenEnvelope],
+      ts: CantonTimestamp,
+  )(implicit traceContext: TraceContext): ProcessingResult = {
+    val acsCommitments = envelopes.mapFilter(select[AcsCommitmentProtocolMessage])
+    NonEmpty.from(acsCommitments) match {
+      case None => pureProcessingResult
+      case Some(acsCommitmentsNE) =>
+        // ACS commitments should not be bundled up with confirmation requests.
+        // If they are, then we discard the ACS commitment envelopes in such a request.
+        // This ensures that we publish at most one single `SequencedUpdate` for each sequencer counter.
+        // We overapproximate whether the other envelopes could contain a confirmation request
+        // by looking for a `RootHashMessage`.
+        //
+        // It is OK to discard the ACS commitment in this case because commitments are messages
+        // exchanged bilaterally. It would be wrong to discard the confirmation request instead
+        // because not all other recipients of the confirmation request see the bundled ACS commitment envelope.
+        // So they would not discard the confirmation request.
+        val rootHashMessages =
+          envelopes.mapFilter(select[RootHashMessage[SerializedRootHashMessagePayload]])
+        if (rootHashMessages.nonEmpty) {
+          val senders = acsCommitmentsNE.map(_.protocolMessage.acsCommitment.sender).distinct
+          SyncServiceAlarm
+            .Warn(
+              s"Received ACS commitment envelopes bundled up with a root hash message at $ts. Discarding the ACS commitment envelopes. Purported senders: ${senders
+                  .mkString(",")}"
+            )
+            .report()
+          pureProcessingResult
+        } else {
+          val publishUpdatePromise = promiseFactory.mkPromise[Option[SequencedEventUpdate]](
+            s"Publication promise for received ACS commitment at $ts",
+            // No need for supervision: This promise delays the ticking of the record order publisher
+            // whose task scheduler monitors missing ticks.
+            FutureSupervisor.Noop,
+          )
+          val publishUpdateHandle = new PublishUpdateViaRecordOrderPublisherImpl(
+            publishUpdatePromise
+          )
+          doProcess(
+            AcsCommitment(
+              Some(FutureEventPublication(Some(publishUpdatePromise.futureUS.map { eventO =>
+                val event = eventO.getOrElse(sequencerIndexMovedEvent(ts))
+                EventPublicationData(event, None)
+              }))),
+              () =>
+                acsCommitmentValidator.validateAndPublish(ts, acsCommitmentsNE, publishUpdateHandle),
+            )
+          )
+        }
+    }
   }
 
   private def tryProtocolProcessor(
@@ -212,11 +272,12 @@ trait MessageDispatcher { this: NamedLogging =>
         envelopesWithCorrectSynchronizerId,
       )
       trafficResult <- processTraffic(ts, topologyTimestampO, envelopesWithCorrectSynchronizerId)
-      acsCommitmentResult <- processAcsCommitmentEnvelope(
+      legacyAcsCommitmentResult <- processLegacyAcsCommitmentEnvelope(
         envelopesWithCorrectSynchronizerId,
         sequencerCounter,
         ts,
       )
+      acsCommitmentResult <- processAcsCommitmentEnvelopes(envelopesWithCorrectSynchronizerId, ts)
       transactionReassignmentResult <- processTransactionAndReassignmentMessages(
         eventE,
         sequencerCounter,
@@ -227,6 +288,7 @@ trait MessageDispatcher { this: NamedLogging =>
       List(
         identityResult,
         trafficResult,
+        legacyAcsCommitmentResult,
         acsCommitmentResult,
         transactionReassignmentResult,
       )
@@ -361,7 +423,7 @@ trait MessageDispatcher { this: NamedLogging =>
             goodRequest.rootHashMessage.viewType,
             publishUpdatePromise.futureUS.map { eventO =>
               val event = eventO.getOrElse(sequencerIndexMovedEvent(ts))
-              EventPublicationData(event, rc)
+              EventPublicationData(event, Some(rc))
             },
             () => processor.processRequest(ts, rc, sc, batch, publishUpdateHandle, trafficCost),
           )
@@ -713,6 +775,8 @@ trait MessageDispatcher { this: NamedLogging =>
                 .map(_ => ", with sig")
             case TopologyTransactionsBroadcast(_, transactions) =>
               s"topo-bcast with ntx=${transactions.transactions.size}"
+            case AcsCommitmentProtocolMessage(acsCommitment, signature) =>
+              s"commitment=${acsCommitment.sender} for ts=${acsCommitment.period.toInclusive}"
             case other => other.toString
           }
         case (_, SignedProtocolMessage(typedMessage, _)) =>
@@ -864,7 +928,7 @@ private[participant] object MessageDispatcher {
   object TicksAfter {
     final case class EventPublicationData(
         event: SequencedUpdate,
-        requestCounter: RequestCounter,
+        requestCounter: Option[RequestCounter],
     )
 
     final case class FutureEventPublication(
@@ -1027,7 +1091,10 @@ private[participant] object MessageDispatcher {
   final case class ResultKind(viewType: ViewType, run: () => HandlerResult) extends MessageKind {
     override protected def pretty: Pretty[ResultKind] = prettyOfParam(_.viewType)
   }
-  final case class AcsCommitment(run: () => HandlerResult) extends MessageKind
+  final case class AcsCommitment(
+      futureEventPublication: Option[FutureEventPublication],
+      run: () => HandlerResult,
+  ) extends MessageKind
   final case class MalformedMessage(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
   final case class UnspecifiedMessageKind(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
   final case class DeliveryMessageKind(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
@@ -1054,7 +1121,8 @@ private[participant] object MessageDispatcher {
         requestProcessors: RequestProcessors,
         topologyProcessor: ParticipantTopologyProcessor,
         trafficProcessor: TrafficControlProcessor,
-        acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+        legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+        acsCommitmentValidator: ReceivedAcsCommitmentValidator,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
         badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
@@ -1073,7 +1141,8 @@ private[participant] object MessageDispatcher {
         assignmentProcessor: AssignmentProcessor,
         topologyProcessor: TopologyTransactionProcessor,
         trafficProcessor: TrafficControlProcessor,
-        acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+        legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+        acsCommitmentValidator: ReceivedAcsCommitmentValidator,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
         badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
@@ -1101,7 +1170,8 @@ private[participant] object MessageDispatcher {
         requestProcessors,
         topologyProcessor.processEnvelopes,
         trafficProcessor,
-        acsCommitmentProcessor,
+        legacyAcsCommitmentProcessor,
+        acsCommitmentValidator,
         requestCounterAllocator,
         recordOrderPublisher,
         badRootHashMessagesRequestProcessor,

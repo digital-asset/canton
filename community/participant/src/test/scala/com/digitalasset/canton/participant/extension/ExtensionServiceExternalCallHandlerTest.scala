@@ -39,7 +39,7 @@ class ExtensionServiceExternalCallHandlerTest
           },
           _.warningMessage shouldBe
             "External call to extension 'unknown-ext' (function 'test-func') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'unknown-ext' not configured\", retryable = false)",
+            "status=404, retryable=false, message=Extension 'unknown-ext' not configured",
         )
       } finally manager.close()
     }
@@ -90,24 +90,10 @@ class ExtensionServiceExternalCallHandlerTest
           },
           _.warningMessage shouldBe
             "External call to extension 'unknown-ext' (function 'test-func') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'unknown-ext' not configured\", retryable = false)",
+            "status=404, retryable=false, message=Extension 'unknown-ext' not configured",
         )
       } finally manager.close()
     }
 
-  }
-
-  "ExtensionCallError" should {
-    // The full-error log interpolates `$error`, so its rendering (via PrettyPrinting) must cover
-    // every field -- in particular the optional request id, which the 404 cases above omit.
-    "render all fields, including the request id, via pretty-printing" in {
-      ExtensionCallError(
-        statusCode = 503,
-        message = "boom",
-        requestId = Some("req-1"),
-        retryable = true,
-      ).toString shouldBe
-        "ExtensionCallError(status code = 503, message = \"boom\", request id = 'req-1', retryable = true)"
-    }
   }
 }

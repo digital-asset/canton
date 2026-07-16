@@ -57,7 +57,9 @@ def parse_cmd(cmd: str):
         if token == "":
             raise ValueError("Invalid cmd value: empty tokens are not allowed.")
         if "\n" in token or "\r" in token:
-            raise ValueError("Invalid cmd value: newline characters inside a token are not allowed.")
+            raise ValueError(
+                "Invalid cmd value: newline characters inside a token are not allowed."
+            )
         if any(ch in token for ch in {";", "&", "|", "<", ">"}):
             raise ValueError("Invalid cmd value: shell metacharacters are not allowed.")
 

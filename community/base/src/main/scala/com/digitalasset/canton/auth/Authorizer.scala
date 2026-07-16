@@ -273,6 +273,21 @@ final class Authorizer(
           }
           .map(_ => req)
 
+      case RequiredClaim.MatchReadAsParties(partiesL) =>
+        claims.canReadAsAnyParty match {
+          case Right(_) => Right(partiesL.set(Set.empty[String])(req))
+          case Left(_) =>
+            val parties: Set[String] = claims.claims.view.collect {
+              case ClaimActAsParty(p) => p
+              case ClaimReadAsParty(p) => p
+            }.toSet
+            Either.cond(
+              parties.nonEmpty,
+              partiesL.set(parties)(req),
+              AuthorizationError.NoReadableParties,
+            )
+        }
+
       case RequiredClaim.Admin() => claims.isAdmin.map(_ => req)
 
       case RequiredClaim.AdminOrIdpAdmin() => claims.isAdminOrIDPAdmin.map(_ => req)
@@ -342,13 +357,18 @@ final class Authorizer(
   )(
       requiredClaims: RequiredClaim[Req]*
   )(req: Req): Future[Res] =
+    withAuthorizedClaims(requiredClaims, req)((_, modifiedReq) => call(modifiedReq))
+
+  private def withAuthorizedClaims[Req, Res](
+      requiredClaims: Seq[RequiredClaim[Req]],
+      req: Req,
+  )(f: (ClaimSet.Claims, Req) => Future[Res]): Future[Res] =
     authenticatedClaimsFromContext() match {
       case Failure(ex) => Future.failed(ex)
       case Success(claims) =>
         authorized(requiredClaims.toList, claims, req) match {
-          case Right(modifiedReq) => call(modifiedReq)
-          case Left(ex) =>
-            Future.failed(ex)
+          case Right(modifiedReq) => f(claims, modifiedReq)
+          case Left(ex) => Future.failed(ex)
         }
     }
 }
@@ -375,6 +395,12 @@ object RequiredClaim {
       extends RequiredClaim[Req]
   final case class Admin[Req]() extends RequiredClaim[Req]
   final case class AdminOrIdpAdmin[Req]() extends RequiredClaim[Req]
+
+  /** Backfills parties for by-hash lookups. The auth layer always replaces the lens target: empty
+    * when the caller holds `CanReadAsAnyParty`, or their act/read parties. Fails if neither.
+    */
+  final case class MatchReadAsParties[Req](partiesL: Lens[Req, Set[String]])
+      extends RequiredClaim[Req]
   final case class AdminOrIdpAdminOrOperateAsParty[Req](parties: Seq[String])
       extends RequiredClaim[Req]
 }

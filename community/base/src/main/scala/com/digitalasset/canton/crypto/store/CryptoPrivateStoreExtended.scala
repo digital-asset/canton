@@ -25,6 +25,7 @@ import com.digitalasset.canton.crypto.{
   SigningPrivateKey,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult

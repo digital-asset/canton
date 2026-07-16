@@ -18,6 +18,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   LsuSequencingTestMessage,

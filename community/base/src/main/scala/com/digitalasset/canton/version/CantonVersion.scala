@@ -123,4 +123,18 @@ object ReleaseVersion {
 
   def fromProtoPrimitive(proto: String, fieldName: String): ParsingResult[ReleaseVersion] =
     create(proto).leftMap(ValueDeserializationError(fieldName, _))
+
+  // Useful for places where we need branching based on what a different node supports.
+  trait Feature {
+    def introduced: ReleaseVersion
+    def supported(versionO: Option[ReleaseVersion]): Boolean =
+      versionO.fold(false)(_ >= introduced)
+  }
+
+  object Feature {
+    object signingKeyUsageProtoV31 extends Feature {
+      // TODO(#32231) Switch to 3.6
+      override def introduced: ReleaseVersion = ReleaseVersion(42, 6, 0)
+    }
+  }
 }

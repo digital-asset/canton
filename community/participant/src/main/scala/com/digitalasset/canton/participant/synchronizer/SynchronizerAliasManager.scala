@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.synchronizer
 
 import cats.data.EitherT
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore

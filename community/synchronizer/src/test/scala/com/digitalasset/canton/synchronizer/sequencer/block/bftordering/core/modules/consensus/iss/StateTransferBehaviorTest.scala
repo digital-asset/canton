@@ -61,7 +61,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 }
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -215,7 +214,7 @@ class StateTransferBehaviorTest
             (None, None),
             (
               Some(
-                Consensus.NewEpochTopology(
+                Consensus.NewEpochMembership(
                   EpochNumber.First,
                   aMembership,
                   aFakeCryptoProviderInstance,
@@ -250,6 +249,7 @@ class StateTransferBehaviorTest
               eqTo(epochNumber),
               eqTo(aMembership),
               eqTo(aFakeCryptoProviderInstance),
+              nodeThatTimedOut = eqTo(Some(otherIds.head)),
             )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
             succeed
           }
@@ -264,6 +264,7 @@ class StateTransferBehaviorTest
           Some(EpochNumber(anEpochInfo.number)), // the same as the "current epoch", see below
         ).forEvery { minimumEndEpoch =>
           val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
+          val p2pNetworkOutModuleRefMock = mock[ModuleRef[P2PNetworkOut.Message]]
           when(epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext]))
             .thenReturn(() => Some(anEpochStoreEpoch))
           when(epochStoreMock.loadEpochProgress(eqTo(anEpochInfo))(any[TraceContext]))
@@ -272,11 +273,12 @@ class StateTransferBehaviorTest
             createStateTransferBehavior(
               epochStore = epochStoreMock,
               minimumStateTransferEndEpoch = minimumEndEpoch,
+              p2pNetworkOutModuleRef = p2pNetworkOutModuleRefMock,
             )
           implicit val ctx: ContextType = context
 
           stateTransferBehavior.maybeLastReceivedEpochTopology = Some(
-            Consensus.NewEpochTopology(
+            Consensus.NewEpochMembership(
               EpochNumber.First,
               aMembership,
               aFakeCryptoProviderInstance,
@@ -287,6 +289,12 @@ class StateTransferBehaviorTest
             StateTransferMessageResult.NothingToStateTransfer(otherIds.head),
             "aMessageType",
           )
+
+          verify(p2pNetworkOutModuleRefMock, times(1)).asyncSend(
+            eqTo(
+              P2PNetworkOut.EndWorkflow(stateTransferBehavior.workflowId)
+            )
+          )(any[TraceContext], any[MetricsContext])
 
           val becomes = context.extractBecomes()
           val aTopologyInfoWithPV = aTopologyInfo
@@ -335,14 +343,14 @@ class StateTransferBehaviorTest
       )
 
       stateTransferBehavior.receive(
-        Consensus.NewEpochTopology(
+        Consensus.NewEpochMembership(
           newEpochNumber,
           aMembership,
           aFakeCryptoProviderInstance,
         )
       )
 
-      verify(stateTransferManagerMock, times(1)).cancelTimeoutForEpoch(eqTo(startEpochNumber))(
+      verify(stateTransferManagerMock, times(1)).emitEpochTransferLatency(eqTo(startEpochNumber))(
         any[TraceContext]
       )
       verify(epochStoreMock, times(1)).completeEpoch(startEpochNumber)
@@ -413,34 +421,11 @@ class StateTransferBehaviorTest
             eqTo(anEpochInfo.number),
             eqTo(aMembership),
             eqTo(aFakeCryptoProviderInstance),
+            nodeThatTimedOut = eqTo(None),
           )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
 
           succeed
         }
-    }
-  }
-
-  "receiving a 'GetOrderingTopology' message" should {
-    "return the ordering topology" in {
-      val (context, stateTransferBehavior) = createStateTransferBehavior()
-      implicit val ctx: ContextType = context
-
-      val callbackCell = new SingleUseCell[Consensus.Admin.GetOrderingTopologyResponse]
-      def callback(response: Consensus.Admin.GetOrderingTopologyResponse): Unit =
-        callbackCell.putIfAbsent(response)
-
-      stateTransferBehavior.receive(Consensus.Admin.GetOrderingTopology(callback))
-
-      callbackCell.get shouldBe
-        Some(
-          Consensus.Admin.GetOrderingTopologyResponse(
-            Bootstrap.BootstrapEpochNumber,
-            aMembership.orderingTopology.nodes,
-            aMembership.leaders,
-            aMembership.blacklistedNodes,
-            aMembership.orderingTopology.sequencingParameters,
-          )
-        )
     }
   }
 

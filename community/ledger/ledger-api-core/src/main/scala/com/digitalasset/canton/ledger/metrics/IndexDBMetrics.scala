@@ -333,6 +333,26 @@ private[metrics] class MainIndexDBHistograms(val prefix: MetricName)(implicit
     prefix :+ "active_contract_keys_lookup"
   )
 
+  private[metrics] val acquirePruningLock: Item = Item(
+    prefix :+ "acquire_pruning_lock",
+    summary = "The time needed to acquire exclusive table lock for pruning.",
+    description = """This DB lock ensures serial pruning execution. It should take normally
+                    |very little time to acquire, but external or internal DB queries might
+                    |prevent acquisition leading to lock contention and timeouts. This metric
+                    |represents time necessary to do acquire this table lock.""",
+    qualification = MetricQualification.Debug,
+  )
+
+  private[metrics] val acquireContractPruningLock: Item = Item(
+    prefix :+ "acquire_contract_pruning_lock",
+    summary = "The time needed to acquire exclusive table lock for contract pruning.",
+    description = """This DB lock ensures serial contract pruning execution. It should take normally
+                    |very little time to acquire, but external or internal DB queries might
+                    |prevent acquisition leading to lock contention and timeouts. This metric
+                    |represents time necessary to do acquire this table lock.""",
+    qualification = MetricQualification.Debug,
+  )
+
   private val translationPrefix = prefix :+ "translation"
   // TODO(#17635): It's not an IndexDB op anymore
   private[metrics] val getLfPackage: Item = Item(
@@ -436,6 +456,7 @@ class MainIndexDBMetrics(
   val execAll: Timer = overall.executionTimer
 
   val getCompletions: DatabaseMetrics = createDbMetrics("get_completions")
+  val getCompletionByHash: DatabaseMetrics = createDbMetrics("get_completion_by_hash")
   val getParticipantId: DatabaseMetrics = createDbMetrics("get_participant_id")
   val getLedgerEnd: DatabaseMetrics = createDbMetrics("get_ledger_end")
   val getTopologyEventOffsetPublishedOnRecordTime: DatabaseMetrics = createDbMetrics(
@@ -460,10 +481,20 @@ class MainIndexDBMetrics(
   val loadParties: DatabaseMetrics = createDbMetrics("load_parties")
   val loadAllParties: DatabaseMetrics = createDbMetrics("load_all_parties")
   val pruneDbMetrics: DatabaseMetrics = createDbMetrics("prune")
+  val vacuumAndReindexPruningTableDbMetrics: DatabaseMetrics = createDbMetrics(
+    "vacuum_and_reindex_pruning_table"
+  )
+  val acquirePruningLock: Timer =
+    openTelemetryMetricsFactory.timer(inventory.acquirePruningLock.info)
+  val acquireContractPruningLock: Timer =
+    openTelemetryMetricsFactory.timer(inventory.acquireContractPruningLock.info)
   val cleanPruningCandidateContractsDbMetrics: DatabaseMetrics = createDbMetrics(
     "prune_clean_contract_candidates"
   )
   val pruneContractsDbMetrics: DatabaseMetrics = createDbMetrics("prune_contracts")
+  val vacuumAndReindexContractPruningTableDbMetrics: DatabaseMetrics = createDbMetrics(
+    "vacuum_and_reindex_contract_pruning_table"
+  )
   val fetchPruningOffsetsMetrics: DatabaseMetrics = createDbMetrics("fetch_pruning_offsets")
   val lookupActiveContractsDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_active_contracts"

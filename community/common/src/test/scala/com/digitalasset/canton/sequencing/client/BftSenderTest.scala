@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.SuppressionRule

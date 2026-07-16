@@ -115,9 +115,7 @@ class TodoRefsTest(unittest.TestCase):
     def test_rg_exclude_args_format(self):
         args = todo_refs.rg_exclude_args()
         self.assertTrue(all(a.startswith("--glob=!") for a in args))
-        self.assertEqual(
-            len(args), len(todo_refs.EXCLUDE_DIRS) + len(todo_refs.EXCLUDE_FILE_GLOBS)
-        )
+        self.assertEqual(len(args), len(todo_refs.EXCLUDE_DIRS) + len(todo_refs.EXCLUDE_FILE_GLOBS))
 
     def test_grep_exclude_args_format(self):
         args = todo_refs.grep_exclude_args()

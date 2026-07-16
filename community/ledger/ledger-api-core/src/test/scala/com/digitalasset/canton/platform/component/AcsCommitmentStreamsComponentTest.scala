@@ -7,6 +7,10 @@ import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Onboarding
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
   ContractStakeholdersAndReassignmentCounter,
@@ -15,6 +19,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.platform.component.IndexComponentTest.ServiceParams
 import com.digitalasset.canton.platform.config.IndexServiceConfig
 import com.digitalasset.canton.protocol.ContractInstance
 import com.digitalasset.canton.topology.SynchronizerId
@@ -33,11 +38,14 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
   private val alice: ValueParty = ValueParty(Ref.Party.assertFromString("alice"))
   private val bob: ValueParty = ValueParty(Ref.Party.assertFromString("bob"))
   private val charlie: ValueParty = ValueParty(Ref.Party.assertFromString("charlie"))
+  private val payload1 = ByteString.copyFromUtf8("commitment-payload-1")
+  private val payload2 = ByteString.copyFromUtf8("commitment-payload-2")
 
   private def createTx(
-      stakeholders: Set[ValueParty]
+      stakeholders: Set[ValueParty],
+      synchronizerId: SynchronizerId = synchronizer1,
   ): (Update.SequencedTransactionAccepted, ContractInstance) =
-    createTxOn(synchronizer1, stakeholders)
+    createTxOn(synchronizerId, stakeholders)
 
   private def createTxOn(
       synchronizerId: SynchronizerId,
@@ -224,9 +232,6 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
 
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
-      val payload1 = ByteString.copyFromUtf8("commitment-payload-1")
-      val payload2 = ByteString.copyFromUtf8("commitment-payload-2")
-
       val (create, createdContract) = createTx(Set(dsoParty, bob))
       val archive = archives(
         recordTime = nextRecordTime,
@@ -289,6 +294,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       )
     }
 
+    // TODO(i34124) move the test from the end here, remove this
     "ignore updates from a different synchronizer" in {
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
@@ -810,30 +816,99 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
         .futureValue shouldBe empty
     }
   }
+
+  // TODO(i34124) move this test in the right place, and fix the tests so that they are interdependent (currently adding one test is cumbersome as the state changes break other tests coming after)
+  "ignore updates from a different synchronizer" in {
+    val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
+
+    ingestUpdateSync(
+      acsCommitment(synchronizer2, ByteString.copyFromUtf8("other-synchronizer-commitment"))
+    ).discard
+
+    // A create on synchronizer1 which must be the first update observed.
+    val (create1, contract1) = createTx(Set(dsoParty, alice))
+    val (create2, contract2) = createTx(Set(dsoParty, alice), synchronizerId = synchronizer2)
+    val (assign1, contract3) = sequencedAssign(nextRecordTime(), Set(dsoParty, alice), 1L)
+    val (assign2, contract4) = sequencedAssign(
+      recordTime = nextRecordTime(),
+      stakeholders = Set(dsoParty, alice),
+      reassignmentCounter = 1L,
+      sourceSynchronizerId = synchronizer1,
+      targetSynchronizerId = synchronizer2,
+    )
+    // TODO(i34124) extract to factory function + DRY
+    val topo1 = TopologyTransactionEffective(
+      updateId = randomUpdateId,
+      events = List(
+        PartyToParticipantAuthorization(
+          party = Ref.Party.assertFromString("partyX"),
+          participant = Ref.ParticipantId.assertFromString("participant"),
+          authorizationEvent = Onboarding(AuthorizationLevel.Observation),
+        )
+      ).toSet,
+      synchronizerId = synchronizer1,
+      effectiveTime = nextRecordTime(),
+    )
+    val topo2 = TopologyTransactionEffective(
+      updateId = randomUpdateId,
+      events = List(
+        PartyToParticipantAuthorization(
+          party = Ref.Party.assertFromString("partyX"),
+          participant = Ref.ParticipantId.assertFromString("participant"),
+          authorizationEvent = Onboarding(AuthorizationLevel.Observation),
+        )
+      ).toSet,
+      synchronizerId = synchronizer2,
+      effectiveTime = nextRecordTime(),
+    )
+    val acsCommitment1 = acsCommitment(synchronizer1, payload1)
+    val acsCommitment2 = acsCommitment(synchronizer2, payload2)
+    ingestUpdates(
+      create1 -> Vector(contract1),
+      create2 -> Vector(contract2),
+      assign1 -> Vector(contract3),
+      assign2 -> Vector(contract4),
+      topo1 -> Vector.empty,
+      topo2 -> Vector.empty,
+      acsCommitment2 -> Vector.empty,
+      acsCommitment1 -> Vector.empty,
+    )
+
+    acsUpdateContainers(rangeStart, expected = 4).map(_.synchronizerTime) shouldBe List(
+      create1.recordTime,
+      assign1.recordTime,
+      topo1.recordTime,
+      acsCommitment1.recordTime,
+    )
+  }
 }
 
 final class AcsCommitmentStreamsComponentTestCachesDisabledH2
     extends AcsCommitmentStreamsComponentTest {
-  override protected val indexServiceConfig: IndexServiceConfig =
-    IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0)
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams
+      .copy(indexServiceConfig = IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0))
 }
 
 final class AcsCommitmentStreamsComponentTestCachesDisabledPostgres
     extends AcsCommitmentStreamsComponentTest
     with IndexComponentTest.WithPostgres {
-  override protected val indexServiceConfig: IndexServiceConfig =
-    IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0)
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams
+      .copy(indexServiceConfig = IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0))
 }
 
 final class AcsCommitmentStreamsComponentTestTinyBuffersPostgres
     extends AcsCommitmentStreamsComponentTest
     with IndexComponentTest.WithPostgres {
-  override protected val indexServiceConfig: IndexServiceConfig =
-    IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 3)
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams
+      .copy(indexServiceConfig = IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 3))
 }
 
 final class AcsCommitmentStreamsComponentTestDefaultPostgres
     extends AcsCommitmentStreamsComponentTest
     with IndexComponentTest.WithPostgres {
-  override protected val indexServiceConfig: IndexServiceConfig = IndexServiceConfig()
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams.copy(indexServiceConfig = IndexServiceConfig())
 }

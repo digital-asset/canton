@@ -30,24 +30,23 @@ from flaky_common import (
 
 def report_to_datadog(metric_name: str, test_name: str):
     from datadog import initialize, api
+
     api_key = os.environ.get('DATADOG_API_KEY', '').strip()
     if not api_key:
         raise RuntimeError("DATADOG_API_KEY is empty or missing")
-    options = {
-        'api_key': api_key,
-        'api_host': 'https://api.datadoghq.com/'
-    }
+    options = {'api_key': api_key, 'api_host': 'https://api.datadoghq.com/'}
     initialize(**options)
     send_args = {
         'metric': metric_name,
         'type': 'count',
         'points': 1,
-        'tags': [f"name:{format_test_name(test_name)}",
-                 f"branch:{branch}",
-                 f"url:{get_ci_build_url()}",
-                 f"container_index:{get_ci_node_index()}",
-                 f"job:{get_ci_job_name()}",
-                 ]
+        'tags': [
+            f"name:{format_test_name(test_name)}",
+            f"branch:{branch}",
+            f"url:{get_ci_build_url()}",
+            f"container_index:{get_ci_node_index()}",
+            f"job:{get_ci_job_name()}",
+        ],
     }
     resp = api.Metric.send(**send_args)
     if resp.get('status') != 'ok':
@@ -80,8 +79,11 @@ def run(failing_tests_json=None):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Report failing tests to Datadog.")
-    parser.add_argument("--failing-tests-json", default=None,
-                        help="Input path for the failing-tests JSON (default: shared CI temp dir).")
+    parser.add_argument(
+        "--failing-tests-json",
+        default=None,
+        help="Input path for the failing-tests JSON (default: shared CI temp dir).",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run self-tests and exit.")
     return parser.parse_args(argv)
 

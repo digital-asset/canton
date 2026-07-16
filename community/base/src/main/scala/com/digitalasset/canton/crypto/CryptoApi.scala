@@ -40,6 +40,7 @@ import com.digitalasset.canton.health.{
   HealthComponent,
   HealthQuasiComponent,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -50,8 +51,8 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{Member, PartyId}
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.{HasToByteString, ReleaseProtocolVersion}
@@ -340,6 +341,24 @@ trait SyncCryptoApi {
   def verifySequencerSignatures(
       hash: Hash,
       signatures: NonEmpty[Seq[Signature]],
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit]
+
+  /** Verifies a signature of raw bytes using the currently active signing keys of a party in the
+    * current topology state.
+    *
+    * JWT key fingerprints (JWK thumbprints) are different from Canton key fingerprints, so the
+    * signedBy field on Signature is ignored, and each key for the party is tried.
+    *
+    * We can only verify a single signature this way, so we additionally require that threshold is
+    * set to 1.
+    *
+    * TODO(i34094): Unify this with InteractiveSubmission.verifySignatures
+    */
+  def verifyPartyJwtSignature(
+      bytes: ByteString,
+      signer: PartyId,
+      signature: SignatureWithoutSigner,
       usage: NonEmpty[Set[SigningKeyUsage]],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit]
 

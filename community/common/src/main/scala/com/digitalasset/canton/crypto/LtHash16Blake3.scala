@@ -27,74 +27,30 @@ import java.util.Arrays
   * All set operations modify the current set. This class is not thread-safe, but thread-compatible.
   * It is the caller's responsibility to ensure proper synchronization.
   */
-class LtHash16Blake3 private (private val buffer: Array[Byte]) {
-  import LtHash16Blake3.*
-
-  require(
-    buffer.length == BYTE_LENGTH,
-    s"Can't initialize LtHash16Blake3 from the given ${buffer.length} bytes",
-  )
-
-  def setBytes(bytes: ByteString): Unit = {
-    require(
-      bytes.size() == BYTE_LENGTH,
-      s"Can't set LtHash16Blake3 from the given ${bytes.size()} bytes",
-    )
-    bytes.copyTo(buffer, 0)
-  }
-
-  private val shortBuffer: ShortBuffer = asShortBuffer(buffer)
-
-  private def vectorOp(other: ShortBuffer, f: (Short, Short) => Int): Unit = {
-    val sBuf = shortBuffer
-    for (i <- 0 until VECTOR_LENGTH) {
-      val newVal = f(sBuf.get(i), other.get(i))
-      // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
-      // gives us the desired semantics of addition modulo 2^16.
-      sBuf.put(i, newVal.toShort).discard[ShortBuffer]
-    }
-  }
-
-  private def hashInput(bytes: Array[Byte]): ShortBuffer = {
-    val hash = Blake3Xof.digest(bytes, BYTE_LENGTH)
-    asShortBuffer(hash)
-  }
+sealed trait LtHash16Blake3 {
+  protected def shortBuffer: ShortBuffer
 
   /** Adds the given bytes to this digest. */
-  def add(bytes: Array[Byte]): Unit =
-    vectorOp(hashInput(bytes), _ + _)
+  def add(bytes: Array[Byte]): Unit
 
   /** Removes the given bytes from this digest. */
-  def remove(bytes: Array[Byte]): Unit =
-    vectorOp(hashInput(bytes), _ - _)
+  def remove(bytes: Array[Byte]): Unit
 
   /** Adds all elements in the other digest to this digest. The caller must ensure that the other
     * digest's set of bytes is disjoint from this digest's set of bytes.
     */
-  def union(other: LtHash16Blake3): Unit =
-    vectorOp(other.shortBuffer, _ + _)
+  def union(other: LtHash16Blake3): Unit
 
   /** Removes all elements in the other digest from this digest. The caller must ensure that the
     * other digest's set of bytes is a subset of this digest's set of bytes.
     */
-  def removeAll(other: LtHash16Blake3): Unit =
-    vectorOp(other.shortBuffer, _ - _)
+  def removeAll(other: LtHash16Blake3): Unit
 
-  def getByteString: ByteString =
-    ByteString.copyFrom(buffer)
+  def getByteString: ByteString
 
-  def isEmpty: Boolean =
-    buffer.forall(_ == 0)
+  def isEmpty: Boolean
 
-  def hexString(): String = HexString.toHexString(buffer)
-
-  override def equals(obj: Any): Boolean = obj match {
-    case other: LtHash16Blake3 =>
-      Arrays.equals(buffer, other.buffer)
-    case _ => false
-  }
-
-  override def hashCode(): Int = Arrays.hashCode(buffer)
+  def hexString(): String
 }
 
 object LtHash16Blake3 {
@@ -102,23 +58,95 @@ object LtHash16Blake3 {
   private val SIZEOF_SHORT = 2
   private val BYTE_LENGTH = VECTOR_LENGTH * SIZEOF_SHORT
 
-  def empty: LtHash16Blake3 =
-    new LtHash16Blake3(new Array[Byte](BYTE_LENGTH)) // initialized to zeros
+  def empty: LtHash16Blake3Impl =
+    new LtHash16Blake3Impl(new Array[Byte](BYTE_LENGTH)) // initialized to zeros
 
-  def tryCreate(bytes: Array[Byte]): LtHash16Blake3 = new LtHash16Blake3(bytes)
-
-  def tryCreate(bytes: ByteString): LtHash16Blake3 = new LtHash16Blake3(bytes.toByteArray)
+  def tryCreate(bytes: ByteString): LtHash16Blake3 = {
+    val hash = empty
+    hash.setBytes(bytes)
+    hash
+  }
 
   private def asShortBuffer(bytes: Array[Byte]): ShortBuffer =
     ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer
-}
 
-private object Blake3Xof {
-  def digest(bytes: Array[Byte], outputBytes: Int): Array[Byte] = {
-    val digest = new Blake3Digest()
-    digest.update(bytes, 0, bytes.length)
-    val out = new Array[Byte](outputBytes)
-    digest.doOutput(out, 0, outputBytes)
-    out
+  class LtHash16Blake3Impl private[LtHash16Blake3] (private val buffer: Array[Byte])
+      extends LtHash16Blake3 {
+
+    require(
+      buffer.length == BYTE_LENGTH,
+      s"Can't initialize LtHash16Blake3 from the given ${buffer.length} bytes",
+    )
+
+    def setBytes(bytes: ByteString): Unit = {
+      require(
+        bytes.size() == BYTE_LENGTH,
+        s"Can't set LtHash16Blake3 from the given ${bytes.size()} bytes",
+      )
+      bytes.copyTo(buffer, 0)
+    }
+
+    override protected val shortBuffer: ShortBuffer = asShortBuffer(buffer)
+
+    private def vectorOp(other: ShortBuffer, f: (Short, Short) => Int): Unit = {
+      val sBuf = shortBuffer
+      for (i <- 0 until VECTOR_LENGTH) {
+        val newVal = f(sBuf.get(i), other.get(i))
+        // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
+        // gives us the desired semantics of addition modulo 2^16.
+        sBuf.put(i, newVal.toShort).discard[ShortBuffer]
+      }
+    }
+
+    private def hashInput(bytes: Array[Byte]): ShortBuffer = {
+      val hash = Blake3Xof.digest(bytes, BYTE_LENGTH)
+      asShortBuffer(hash)
+    }
+
+    /** Adds the given bytes to this digest. */
+    override def add(bytes: Array[Byte]): Unit =
+      vectorOp(hashInput(bytes), _ + _)
+
+    /** Removes the given bytes from this digest. */
+    override def remove(bytes: Array[Byte]): Unit =
+      vectorOp(hashInput(bytes), _ - _)
+
+    /** Adds all elements in the other digest to this digest. The caller must ensure that the other
+      * digest's set of bytes is disjoint from this digest's set of bytes.
+      */
+    override def union(other: LtHash16Blake3): Unit =
+      vectorOp(other.shortBuffer, _ + _)
+
+    /** Removes all elements in the other digest from this digest. The caller must ensure that the
+      * other digest's set of bytes is a subset of this digest's set of bytes.
+      */
+    override def removeAll(other: LtHash16Blake3): Unit =
+      vectorOp(other.shortBuffer, _ - _)
+
+    def getByteString: ByteString =
+      ByteString.copyFrom(buffer)
+
+    def isEmpty: Boolean =
+      buffer.forall(_ == 0)
+
+    def hexString(): String = HexString.toHexString(buffer)
+
+    override def equals(obj: Any): Boolean = obj match {
+      case other: LtHash16Blake3Impl =>
+        Arrays.equals(buffer, other.buffer)
+      case _ => false
+    }
+
+    override def hashCode(): Int = Arrays.hashCode(buffer)
+  }
+
+  private object Blake3Xof {
+    def digest(bytes: Array[Byte], outputBytes: Int): Array[Byte] = {
+      val digest = new Blake3Digest()
+      digest.update(bytes, 0, bytes.length)
+      val out = new Array[Byte](outputBytes)
+      digest.doOutput(out, 0, outputBytes)
+      out
+    }
   }
 }

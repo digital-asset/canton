@@ -8,6 +8,8 @@ package com.digitalasset.canton.test.protocontinuity.v30;
 import "com/digitalasset/canton/test/protocontinuity/v30/dependency.proto";
 import "scalapb/scalapb.proto";
 
+// Dependency diagram (inclusion) can be rendered in dependencies.md
+
 service ProtoContinuityService {
   rpc Endpoint(EndpointRequest) returns (EndpointResponse);
   rpc Endpoint2(Endpoint2Request) returns (Endpoint2Request.Endpoint2Response);

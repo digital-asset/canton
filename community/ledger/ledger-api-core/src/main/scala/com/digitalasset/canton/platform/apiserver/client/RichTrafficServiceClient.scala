@@ -8,6 +8,7 @@ import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorServic
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{

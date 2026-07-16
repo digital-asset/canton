@@ -25,6 +25,7 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.util.MultiSynchronizerFeatureFlag
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}

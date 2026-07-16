@@ -120,6 +120,7 @@ final class DaBftBinding(
   private val readExecutor = Executors.newCachedThreadPool(threadFactory)
   private val writeExecutor = Executors.newCachedThreadPool(threadFactory)
 
+  @SuppressWarnings(Array("com.digitalasset.canton.SynchronizedFuture"))
   override def write(
       node: BftBenchmarkConfig.WriteNode[?],
       txId: String,

@@ -5,6 +5,7 @@ package com.digitalasset.canton.lifecycle
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.{BaseTest, DiscardedFuture, DiscardedFutureTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec

@@ -18,6 +18,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -1084,6 +1085,7 @@ trait SequencerApiTestUtils
   )(implicit
       materializer: Materializer
   ): FutureUnlessShutdown[Seq[(Member, SequencedSerializedEvent)]] =
+    // TODO(#33650) – replace with unboundedTraverseFilter; OK because members are statically bounded to a small number
     members
       .parTraverseFilter { member =>
         for {

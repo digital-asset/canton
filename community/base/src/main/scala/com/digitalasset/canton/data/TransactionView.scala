@@ -238,50 +238,11 @@ final case class TransactionView private (
       loggingContext: NamedLoggingContext
   ): Map[LfContractId, CreatedContractInView] = getOrError(createdContractsE)
 
-  /** The single recorded output per external-call key, aggregated over this view and its subviews.
-    *
-    * @throws java.lang.IllegalStateException
-    *   if the [[ViewParticipantData]] of this view or any subview is blinded, or if the same key
-    *   was recorded with conflicting outputs, which a validated view cannot contain
-    */
-  def tryExternalCallReplayData(implicit
-      loggingContext: NamedLoggingContext
-  ): ExternalCallReplayData = getOrError(externalCallReplayDataE)
-
   private def inputContractsE: Either[String, Map[LfContractId, InputContract]] =
     inputsAndCreatedE.map(_._1)
 
   private def createdContractsE: Either[String, Map[LfContractId, CreatedContractInView]] =
     inputsAndCreatedE.map(_._2)
-
-  private lazy val externalCallReplayDataE: Either[String, ExternalCallReplayData] =
-    for {
-      vpd <- unblindViewParticipantData("External-call replay data")
-      _ <- subviews.allUnblinded(hash =>
-        s"External-call replay data of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
-      )
-      subviewData <- subviews.unblindedElements.traverse(_.externalCallReplayDataE)
-      merged <- ExternalCallReplayData.merge(subviewData, vpd.externalCallResults.map(_.result))
-    } yield merged
-
-  /** Conflict check for `validated` over the visible parts of the subtree: blinded participant data
-    * and blinded subviews contribute no results, like the other `validated` checks, which also skip
-    * blinded data — `validated` runs while blinding, so it must tolerate blinded parts.
-    * [[externalCallReplayDataE]] instead reports blinded data as an error, so replay never runs on
-    * silently-partial data. Both recurse via the subviews' memoized values, so the aggregation
-    * costs each view only its direct children plus its own results.
-    */
-  private lazy val visibleExternalCallReplayDataE: Either[String, ExternalCallReplayData] =
-    subviews.unblindedElements
-      .traverse(_.visibleExternalCallReplayDataE)
-      .flatMap(subviewData =>
-        ExternalCallReplayData.merge(
-          subviewData,
-          viewParticipantData.unwrap.toOption.toList
-            .flatMap(_.externalCallResults)
-            .map(_.result),
-        )
-      )
 
   private lazy val inputsAndCreatedE: Either[
     String,
@@ -397,10 +358,6 @@ final case class TransactionView private (
         case Right(d) =>
           validateViewParticipantData(d, childParticipantData, inputContractsO)
       }
-      // Grouped with the participant-data validation above: a key recorded with conflicting
-      // outputs across this view's subtree makes the view malformed, because reinterpretation
-      // cannot proceed on an ambiguous recorded result.
-      _ <- visibleExternalCallReplayDataE
       _ <- viewCommonData.unwrap match {
         case Left(_) => Either.unit
         case Right(d) => validateViewCommonData(d, childCommonData)

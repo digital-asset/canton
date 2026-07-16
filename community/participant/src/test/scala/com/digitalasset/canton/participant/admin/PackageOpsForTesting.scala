@@ -13,6 +13,7 @@ import com.digitalasset.canton.ledger.api.{
   UpdateVettedPackagesForceFlags,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.PackageInUse
 import com.digitalasset.canton.participant.topology.{PackageOps, ParticipantTopologyManagerError}

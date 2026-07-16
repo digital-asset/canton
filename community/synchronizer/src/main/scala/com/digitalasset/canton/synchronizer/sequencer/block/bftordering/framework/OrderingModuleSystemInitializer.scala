@@ -96,7 +96,6 @@ class OrderingModuleSystemInitializer[
       mempoolRef,
       p2pNetworkInRef,
       p2pNetworkOutRef,
-      consensusRef,
       outputRef,
       pruningRef,
       p2pNetworkManager,

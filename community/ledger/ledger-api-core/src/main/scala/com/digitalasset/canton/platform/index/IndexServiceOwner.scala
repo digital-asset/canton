@@ -25,6 +25,7 @@ import com.digitalasset.canton.platform.apiserver.TimedIndexService
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, UpdateServiceConfig}
 import com.digitalasset.canton.platform.index.IndexServiceOwner.GetPackagePreferenceForViewsUpgrading
 import com.digitalasset.canton.platform.store.backend.common.MismatchException
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.cache.*
 import com.digitalasset.canton.platform.store.dao.events.{
   BufferedUpdateReader,
@@ -125,7 +126,7 @@ final class IndexServiceOwner(
 
       bufferedCommandCompletionsReader = BufferedCommandCompletionsReader(
         inMemoryFanoutBuffer = inMemoryState.inMemoryFanoutBuffer,
-        delegate = ledgerDao.completions,
+        dbReader = ledgerDao.completions,
         metrics = metrics,
         loggerFactory = loggerFactory,
       )(queryExecutionContext)
@@ -149,6 +150,7 @@ final class IndexServiceOwner(
         executionContext = commandExecutionContext,
         ledgerEndCache = inMemoryState.ledgerEndCache,
         updateServiceConfig = updateServiceConfig,
+        maxRejectedCompletionsByHash = config.maxRejectedCompletionsByHash,
       )
     } yield new TimedIndexService(indexService, metrics)
   }
@@ -275,6 +277,18 @@ final class IndexServiceOwner(
       achsStateCache = achsStateCache,
       contractPruningMaxRetries = config.contractPruningMaxRetries,
       contractPruningDelayBeforeRetry = config.contractPruningDelayBeforeRetry.underlying,
+      contractPruningDbLockMeta = DbLockMeta(
+        lockDescription = "exclusive table lock on contract pruning table",
+        timeoutConfig = "index-service-config.contract-pruning-db-lock-timeout",
+        timeoutMillis = config.contractPruningDbLockTimeout.underlying.toMillis.toInt,
+        timer = metrics.index.db.acquireContractPruningLock,
+      ),
+      pruningDbLockMeta = DbLockMeta(
+        lockDescription = "exclusive table lock on pruning table",
+        timeoutConfig = "index-service-config.pruning-db-lock-timeout",
+        timeoutMillis = config.pruningDbLockTimeout.underlying.toMillis.toInt,
+        timer = metrics.index.db.acquirePruningLock,
+      ),
       scheduler = scheduler,
     )(queryExecutionContext)
 

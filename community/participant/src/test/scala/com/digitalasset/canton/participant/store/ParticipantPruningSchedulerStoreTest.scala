@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.scheduler.ParticipantPruningSchedule
 import com.digitalasset.canton.store.PruningSchedulerStoreTest
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}

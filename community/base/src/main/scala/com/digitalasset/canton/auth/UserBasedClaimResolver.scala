@@ -58,7 +58,7 @@ class UserBasedClaimResolver(
             case Right(userRights: Set[UserRight]) =>
               Future.successful(
                 ClaimSet.Claims(
-                  claims = convertUserRightsToClaims(userRights),
+                  claims = convertUserRightsToClaims(userRights, idpId),
                   participantId = participantId,
                   userId = Some(userId),
                   expiration = expiration,
@@ -152,8 +152,20 @@ class UserBasedClaimResolver(
 
 object UserBasedClaimResolver {
 
-  def convertUserRightsToClaims(userRights: Set[UserRight]): Seq[Claim] =
-    userRights.view.map(userRightToClaim).toList.prepended(ClaimPublic)
+  def convertUserRightsToClaims(
+      userRights: Set[UserRight],
+      identityProviderId: IdentityProviderId,
+  ): Seq[Claim] =
+    userRights.view
+      .map(userRightToClaim)
+      .toList
+      .prepended(ClaimPublic)
+      .filter {
+        // There is no such thing as being an IDP admin for the default IDP:
+        // the default IDP indicates a lack of an IDP, rather than behaving like a real one.
+        case ClaimIdentityProviderAdmin if identityProviderId == IdentityProviderId.Default => false
+        case _ => true
+      }
 
   private[this] def userRightToClaim(r: UserRight): Claim = r match {
     case UserRight.CanActAs(p) => ClaimActAsParty(Ref.Party.assertFromString(p))

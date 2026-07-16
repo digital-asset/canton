@@ -8,6 +8,7 @@ import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.sequencing.protocol.{SequencerDeliverError, SequencerErrors}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}

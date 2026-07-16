@@ -18,7 +18,10 @@ import com.digitalasset.canton.participant.protocol.party.{
   PartyReplicationTargetParticipantMessage,
 }
 import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData
-import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
+import com.digitalasset.canton.participant.synchronizer.{
+  PendingLsuOperation,
+  PendingOnboardingTransactions,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.pruning.*
@@ -78,7 +81,12 @@ final class SerializationDeserializationTest
         generators.protocol,
       )
     val participantGenerators =
-      new GeneratorsParticipant(generators.topology, generators.lf, version)
+      new GeneratorsParticipant(
+        generators.topology,
+        generators.transaction,
+        generators.lf,
+        version,
+      )
 
     import com.digitalasset.canton.crypto.GeneratorsCrypto.*
     import generators.data.*
@@ -103,7 +111,7 @@ final class SerializationDeserializationTest
 
         if (version >= ProtocolVersion.v36) {
           test(AcsCommitment, version)
-          testContext(AcsCommitmentProtocolMessage, version, version)
+          testContext(AcsCommitmentProtocolMessage, ProtocolVersionValidation.PV(version), version)
 
           test(AcsCommitmentSummary, version)
           testContext(AcsCommitmentSummaryProtocolMessage, version, version)
@@ -133,6 +141,7 @@ final class SerializationDeserializationTest
         )
         test(ConfirmationResultMessage, version)
         test(PendingLsuOperation, version)
+        test(PendingOnboardingTransactions, version)
         if (version >= ProtocolVersion.v35) {
           test(OnboardingClearanceOperation, version)
         }

@@ -32,7 +32,7 @@ final case class SynchronizerAlias(protected val str: String255)
 object SynchronizerAlias
     extends LengthLimitedStringWrapperCompanion[String255, SynchronizerAlias]
     with PrettyPrintingCompanion[SynchronizerAlias] {
-  override val pretty: Pretty[SynchronizerAlias] =
+  override protected val pretty: Pretty[SynchronizerAlias] =
     prettyOfString(inst => show"Synchronizer ${inst.unwrap.singleQuoted}")
   override protected def companion: String255.type = String255
   override def instanceName: String = "SynchronizerAlias"
@@ -72,7 +72,7 @@ object SequencerAlias
   override def instanceName: String = "SequencerAlias"
   override protected def factoryMethodWrapper(str: String255): SequencerAlias = SequencerAlias(str)
 
-  override val pretty: Pretty[SequencerAlias] =
+  override protected val pretty: Pretty[SequencerAlias] =
     prettyOfString(inst => show"Sequencer ${inst.unwrap.singleQuoted}")
 
   override def create(str: String): Either[String, SequencerAlias] =
@@ -111,7 +111,7 @@ object CommandId extends PrettyPrintingCompanion[CommandId] {
   implicit val setParameterCommandId: SetParameter[CommandId] = (v, pp) =>
     pp >> v.toLengthLimitedString
 
-  override val pretty: Pretty[CommandId] = prettyOfParam(_.unwrap)
+  override protected val pretty: Pretty[CommandId] = prettyOfParam(_.unwrap)
 }
 
 /** User identifier for identifying customer users in the ledger api
@@ -141,7 +141,7 @@ object UserId extends PrettyPrintingCompanion[UserId] {
 
   implicit val setParameterUserId: SetParameter[UserId] = (v, pp) => pp >> v.toLengthLimitedString
 
-  override val pretty: Pretty[UserId] = prettyOfParam(_.unwrap)
+  override protected val pretty: Pretty[UserId] = prettyOfParam(_.unwrap)
 }
 
 /** Workflow identifier for identifying customer workflows, i.e. individual requests, in the ledger
@@ -160,5 +160,5 @@ object WorkflowId extends PrettyPrintingCompanion[WorkflowId] {
   def assertFromString(str: String) = WorkflowId(LfWorkflowId.assertFromString(str))
   def fromProtoPrimitive(str: String): Either[String, WorkflowId] =
     LfWorkflowId.fromString(str).map(WorkflowId(_))
-  override val pretty: Pretty[WorkflowId] = prettyOfParam(_.unwrap)
+  override protected val pretty: Pretty[WorkflowId] = prettyOfParam(_.unwrap)
 }

@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ClientSettings,
   FutureSettings,
   LocalSettings,
+  NetworkPartitionFaultSettings,
   NetworkSettings,
   PartitionMode,
   PartitionSymmetry,
@@ -239,11 +240,13 @@ class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest 
           LocalSettings(randomSourceToCreateSettings.nextLong()),
           NetworkSettings(
             randomSourceToCreateSettings.nextLong(),
-            partitionStability = 20.seconds,
-            unPartitionStability = 10.seconds,
-            partitionProbability = Probability(0.1),
-            partitionMode = PartitionMode.IsolateSingle,
-            partitionSymmetry = PartitionSymmetry.Symmetric,
+            networkPartitionFaultSettings = NetworkPartitionFaultSettings(
+              partitionStability = 20.seconds,
+              unPartitionStability = 10.seconds,
+              partitionProbability = Probability(0.1),
+              partitionMode = PartitionMode.IsolateSingle,
+              partitionSymmetry = PartitionSymmetry.Symmetric,
+            ),
           ),
           FutureSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
@@ -456,10 +459,10 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
       )
       logEntry.loggerName should include("AvailabilityModule")
     },
-    // We might get messages about waiting for new topology after epoch completion, don't count these as errors.
+    // We might get messages about waiting for new membership after epoch completion, don't count these as errors.
     { logEntry =>
       logEntry.message should include(
-        "Waiting for new topology after epoch completion"
+        "Waiting for new membership after epoch completion"
       )
       logEntry.loggerName should include("IssConsensusModule")
     },

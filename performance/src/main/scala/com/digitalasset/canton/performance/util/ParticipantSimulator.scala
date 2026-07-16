@@ -6,7 +6,11 @@ package com.digitalasset.canton.performance.util
 import cats.data.EitherT
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, TopologyAdminCommands}
+import com.digitalasset.canton.admin.api.client.commands.{
+  GrpcAdminCommand,
+  ParticipantAdminCommands,
+  TopologyAdminCommands,
+}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
 import com.digitalasset.canton.console.{
@@ -72,7 +76,7 @@ import com.digitalasset.canton.sequencing.{
   SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.synchronizer.service.GrpcSequencerConnectionService
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.admin.grpc.{BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{
@@ -107,7 +111,7 @@ import com.digitalasset.canton.util.{
   Mutex,
   SingleUseCell,
 }
-import com.digitalasset.canton.version.ParticipantProtocolFeatureFlags
+import com.digitalasset.canton.version.{ParticipantProtocolFeatureFlags, ReleaseVersion}
 import com.digitalasset.canton.{SynchronizerAlias, config as cfg}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.OptionValues
@@ -458,30 +462,37 @@ class ParticipantSimulator(
       identifier: String,
       pid: ParticipantId,
       synchronize: Option[cfg.NonNegativeDuration],
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val command = TopologyAdminCommands.Write.Propose(
-      mapping = PartyToParticipant.create(
-        partyId = PartyId.tryCreate(identifier, namespace),
-        threshold = PositiveInt.one,
-        participants = Seq(
-          HostingParticipant(
-            pid,
-            ParticipantPermission.Confirmation,
-            onboarding = false,
-          )
-        ),
-        partySigningKeysWithThreshold = None,
-      ),
-      signedBy = Seq.empty,
-      serial = None,
-      change = TopologyChangeOp.Replace,
-      mustFullyAuthorize = true,
-      store = TopologyStoreId.Synchronizer(synchronizerId),
-      forceChanges = ForceFlags.none,
-      waitToBecomeEffective = synchronize,
-    )
-    runAdminCommand(command).map(_ => ())
-  }
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    for {
+      nodeStatus <- runAdminCommand(ParticipantAdminCommands.Health.ParticipantStatusCommand())
+      result <- runAdminCommand(
+        TopologyAdminCommands.Write.Propose(
+          BaseWriteRequest(
+            clientVersion = Some(ReleaseVersion.current)
+          ),
+          mapping = PartyToParticipant.create(
+            partyId = PartyId.tryCreate(identifier, namespace),
+            threshold = PositiveInt.one,
+            participants = Seq(
+              HostingParticipant(
+                pid,
+                ParticipantPermission.Confirmation,
+                onboarding = false,
+              )
+            ),
+            partySigningKeysWithThreshold = None,
+          ),
+          signedBy = Seq.empty,
+          serial = None,
+          change = TopologyChangeOp.Replace,
+          mustFullyAuthorize = true,
+          store = TopologyStoreId.Synchronizer(synchronizerId),
+          forceChanges = ForceFlags.none,
+          waitToBecomeEffective = synchronize,
+          serverVersion = nodeStatus.releaseVersion,
+        )
+      )
+    } yield ()
 
   def startSubscriptionForParticipant(
       pid: ParticipantId,

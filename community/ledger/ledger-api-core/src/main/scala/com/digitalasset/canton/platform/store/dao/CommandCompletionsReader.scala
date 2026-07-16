@@ -9,10 +9,13 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.CompletionStorageBackend
+import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsReader.CompletionsByHash
 import com.digitalasset.canton.platform.store.dao.events.QueryValidRange
 import com.digitalasset.canton.platform.{Party, UserId}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
+
+import scala.concurrent.Future
 
 /** @param pageSize
   *   a single DB fetch query is guaranteed to fetch no more than this many results.
@@ -80,4 +83,29 @@ private[dao] final class CommandCompletionsReader(
       }
     source.map(response => offsetFor(response) -> response.withPrecomputedSerializedSize())
   }
+
+  override def getCompletionByHash(
+      hash: Array[Byte],
+      maxRejectedCompletions: Int,
+      parties: Set[Party],
+      rejectedBeforeOffset: Option[Offset],
+      includeAccepted: Boolean,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[CompletionsByHash] =
+    dispatcher.executeSql(metrics.index.db.getCompletionByHash) { connection =>
+      CompletionsByHash(
+        accepted =
+          if (includeAccepted) storageBackend.acceptedCompletionByHash(hash, parties)(connection)
+          else None,
+        rejected = storageBackend.rejectedCompletionsByHash(
+          hash,
+          maxRejectedCompletions,
+          rejectedBeforeOffset,
+          parties,
+        )(
+          connection
+        ),
+      )
+    }
 }

@@ -6,7 +6,9 @@ package com.digitalasset.canton.platform.store.backend.common
 import anorm.SqlParser.*
 import anorm.{Row, SimpleSql}
 import cats.syntax.all.*
+import cats.{FunctorFilter, MonoidK}
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -19,6 +21,7 @@ import com.digitalasset.canton.platform.store.backend.{
   Conversions,
   RowDef,
 }
+import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{Party, SubmissionId, UserId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -31,6 +34,7 @@ import java.util.UUID
 
 class CompletionStorageBackendTemplate(
     stringInterning: StringInterning,
+    ledgerEndCache: LedgerEndCache,
     val loggerFactory: NamedLoggerFactory,
 ) extends CompletionStorageBackend
     with NamedLogging {
@@ -130,6 +134,26 @@ class CompletionStorageBackendTemplate(
       rejectionStatus,
     ).mapN(CompletionFromTransaction.rejectedCompletion)
 
+    def unfilteredAcceptedCompletionParser: RowDef[Completion] = (
+      unfilteredCommandCompletionSharedColumns(stringInterning),
+      updateId,
+    ).mapN(CompletionFromTransaction.toApiAcceptedCompletion)
+
+    def unfilteredRejectedCompletionParser: RowDef[Completion] = (
+      unfilteredCommandCompletionSharedColumns(stringInterning),
+      rejectionStatus,
+    ).mapN(CompletionFromTransaction.toApiRejectedCompletion)
+
+    def acceptedCompletionParser(parties: Set[Party]): RowDef[Completion] = (
+      filteredCommandCompletionSharedColumns(stringInterning, parties),
+      updateId,
+    ).mapN(CompletionFromTransaction.toApiAcceptedCompletion)
+
+    def rejectedCompletionParser(parties: Set[Party]): RowDef[Completion] = (
+      filteredCommandCompletionSharedColumns(stringInterning, parties),
+      rejectionStatus,
+    ).mapN(CompletionFromTransaction.toApiRejectedCompletion)
+
     private def postPublishDataForTransactionParser: RowDef[PostPublishData] = (
       synchronizerId(stringInterning),
       publishSource,
@@ -206,6 +230,106 @@ class CompletionStorageBackendTemplate(
           results.filter(_.getCompletion.actAs.nonEmpty)
         else
           results
+    }
+  }
+
+  override def acceptedCompletionByHash(
+      hash: Array[Byte],
+      parties: Set[Party],
+  )(
+      connection: Connection
+  ): Option[Completion] = {
+    import ComposableQuery.*
+    import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
+
+    runByHashLookup[Option](
+      parties = parties,
+      filteredParser = RowDefs.acceptedCompletionParser,
+      unfilteredParser = RowDefs.unfilteredAcceptedCompletionParser,
+    ) { (parser, ledgerEndOffset) =>
+      val query = (columns: CompositeSql) => SQL"""
+          SELECT
+            $columns
+          FROM
+            lapi_command_completions c
+          WHERE
+            c.completion_offset <= $ledgerEndOffset AND
+            c.completion_offset = (
+              SELECT m.event_offset FROM lapi_update_meta m
+              WHERE m.transaction_hash = $hash
+                AND m.event_offset <= $ledgerEndOffset
+              LIMIT 1
+            )"""
+      parser.querySingleOptRow(query)(connection)
+    }
+  }
+
+  override def rejectedCompletionsByHash(
+      hash: Array[Byte],
+      limit: Int,
+      beforeOffset: Option[Offset],
+      parties: Set[Party],
+  )(
+      connection: Connection
+  ): Vector[Completion] = {
+    import ComposableQuery.*
+    import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
+
+    // We apply the LIMIT in SQL and redact rows to the requesting parties only afterwards, which is
+    // fine even if it looks like a dropped row could leave us with fewer than `limit` results while
+    // there's more in the DB. The transaction hash covers the whole transaction, including the actAs
+    // parties, so all rejections with the same hash have the same submitters. So the party filter
+    // either keeps all of them or drops all of them, and fetching more rows would just give us ones
+    // that get dropped the same way. The limited set we read is already the right one.
+    runByHashLookup[Vector](
+      parties = parties,
+      filteredParser = RowDefs.rejectedCompletionParser,
+      unfilteredParser = RowDefs.unfilteredRejectedCompletionParser,
+    ) { (parser, ledgerEndOffset) =>
+      val beforeOffsetFilter = beforeOffset match {
+        case Some(offset) => cSQL"AND completion_offset < $offset"
+        case None => cSQL""
+      }
+      val query = (columns: CompositeSql) => SQL"""
+          SELECT
+            $columns
+          FROM
+            lapi_command_completions
+          WHERE
+            transaction_hash = $hash AND
+            update_id IS NULL AND
+            completion_offset <= $ledgerEndOffset
+            $beforeOffsetFilter
+          ORDER BY completion_offset DESC
+          ${QueryStrategy.limitClause(Some(limit))}"""
+      parser.queryMultipleRows(query)(connection)
+    }
+  }
+
+  /** Runs a by-hash completion lookup, bounding [[run]] by the current ledger end and applying the
+    * party filter consistently across the accepted and rejected variants.
+    *
+    * The ledger-end bound is required because the completion and update_meta tables are written
+    * before the ledger end advances, so a matching row may exist that is not yet visible via the
+    * Ledger API.
+    *
+    * Security invariant: a single `parties.nonEmpty` check selects the redacting parser and drops
+    * fully-redacted (empty `actAs`) completions together, so the two cannot drift; an empty party
+    * set means no filtering (caller has `CanReadAsAnyParty`).
+    */
+  private def runByHashLookup[F[_]: MonoidK: FunctorFilter](
+      parties: Set[Party],
+      filteredParser: Set[Party] => RowDef[Completion],
+      unfilteredParser: RowDef[Completion],
+  )(
+      run: (RowDef[Completion], Offset) => F[Completion]
+  ): F[Completion] = {
+    val ledgerEndOffset = ledgerEndCache().map(_.lastOffset)
+    ledgerEndOffset.fold(MonoidK[F].empty[Completion]) { endOffset =>
+      if (parties.nonEmpty)
+        run(filteredParser(parties), endOffset).filter(_.actAs.nonEmpty)
+      else
+        run(unfilteredParser, endOffset)
     }
   }
 

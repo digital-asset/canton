@@ -44,7 +44,7 @@ trait PrettyPrintingFromCompanion extends CanPrettyPrint {
   // Do not cache the toString representation because it could be outdated in classes with mutable state
   override final def toString: String =
     // Special construction here to fail gracefully if this is a mocked instance.
-    Pretty.PrettyOps[this.type](this)(prettyCompanion.pretty).toPrettyString()
+    Pretty.PrettyOps[this.type](this)(prettyCompanion.prettyInternal).toPrettyString()
 }
 
 trait PrettyPrintingCompanion[-T] extends ShowUtil with PrettyUtil {
@@ -52,6 +52,7 @@ trait PrettyPrintingCompanion[-T] extends ShowUtil with PrettyUtil {
   /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
     * implement this method.
     */
-  protected[pretty] val pretty: Pretty[T]
+  protected val pretty: Pretty[T]
+  @inline private[pretty] final def prettyInternal: Pretty[T] = pretty
   implicit lazy val contravariantShow: ContravariantShow[T] = showPretty(pretty)
 }

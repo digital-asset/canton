@@ -161,8 +161,6 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
             trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
           )
         )
-        .focus(_.parameters.alphaVersionSupport)
-        .replace(true)
     ),
     // Shorten network timeout so retries to the non-existent traffic service give up quickly
     _.focus(_.parameters.timeouts.processing.network)

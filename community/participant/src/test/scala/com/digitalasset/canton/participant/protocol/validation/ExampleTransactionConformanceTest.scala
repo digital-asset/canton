@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
@@ -113,7 +114,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
-          externalCallReplayData: () => ExternalCallReplayData,
+          externalCallReplayData: () => DAMLe.ExternalCallReplayData,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -161,7 +162,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
-          externalCallReplayData: () => ExternalCallReplayData,
+          externalCallReplayData: () => DAMLe.ExternalCallReplayData,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -463,7 +464,7 @@ class ExampleTransactionConformanceTest
           output = Bytes.fromStringUtf8("output"),
         )
         val expectedReplayData =
-          ExternalCallReplayData.fromResults(Seq(externalCallResult)).value
+          DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult))
         val example = factory.SingleExercise(factory.deriveNodeSeed(0))
         val transaction =
           withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult))
@@ -512,9 +513,9 @@ class ExampleTransactionConformanceTest
         def observedExternalCallArguments(
             fullTree: FullTransactionViewTree,
             checkingParties: Set[LfPartyId],
-        ): Future[ExternalCallReplayData] = {
+        ): Future[DAMLe.ExternalCallReplayData] = {
           val observed = new AtomicReference[
-            Option[ExternalCallReplayData]
+            Option[DAMLe.ExternalCallReplayData]
           ](None)
           val recordingReinterpreter = new HasReinterpret {
             override def reinterpret(
@@ -529,7 +530,7 @@ class ExampleTransactionConformanceTest
                 packageResolution: Map[PackageName, PackageId],
                 expectFailure: Boolean,
                 getEngineAbortStatus: GetEngineAbortStatus,
-                externalCallReplayData: () => ExternalCallReplayData,
+                externalCallReplayData: () => DAMLe.ExternalCallReplayData,
             )(implicit traceContext: TraceContext): EitherT[
               FutureUnlessShutdown,
               DAMLe.ReinterpretationError,
@@ -590,7 +591,7 @@ class ExampleTransactionConformanceTest
 
       "observe empty external-call replay data" onlyRunWhen (testedProtocolVersion < ProtocolVersion.dev) in {
         val example = factory.SingleExercise(factory.deriveNodeSeed(0))
-        val observed = new AtomicReference[Option[ExternalCallReplayData]](None)
+        val observed = new AtomicReference[Option[DAMLe.ExternalCallReplayData]](None)
         val recordingReinterpreter = new HasReinterpret {
           override def reinterpret(
               contracts: ReplayContractLookup,
@@ -604,7 +605,7 @@ class ExampleTransactionConformanceTest
               packageResolution: Map[PackageName, PackageId],
               expectFailure: Boolean,
               getEngineAbortStatus: GetEngineAbortStatus,
-              externalCallReplayData: () => ExternalCallReplayData,
+              externalCallReplayData: () => DAMLe.ExternalCallReplayData,
           )(implicit traceContext: TraceContext): EitherT[
             FutureUnlessShutdown,
             DAMLe.ReinterpretationError,
@@ -641,7 +642,7 @@ class ExampleTransactionConformanceTest
           .failOnShutdown
           .map { result =>
             inside(result) { case Right(_) => succeed }
-            observed.get() shouldBe Some(ExternalCallReplayData.empty)
+            observed.get() shouldBe Some(DAMLe.ExternalCallReplayData.empty)
           }
       }
 

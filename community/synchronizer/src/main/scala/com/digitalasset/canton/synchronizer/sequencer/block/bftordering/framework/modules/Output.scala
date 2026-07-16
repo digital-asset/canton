@@ -7,13 +7,18 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
   BlockNumber,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.CompleteBlockData
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  Membership,
+  OrderingTopology,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   Env,
   Module,
@@ -25,6 +30,21 @@ object Output {
   sealed trait Message[+E] extends Product
 
   final case object Start extends Message[Nothing]
+
+  sealed trait Admin extends Message[Nothing]
+  object Admin {
+    final case class GetOrderingTopologyResponse(
+        epochNumber: EpochNumber,
+        nodes: Set[BftNodeId],
+        leaders: Seq[BftNodeId],
+        blacklisted: Seq[BftNodeId],
+        sequencingParameters: SequencingParameters,
+    )
+
+    final case class GetOrderingTopology(callback: GetOrderingTopologyResponse => Unit)
+        extends Admin
+    final case class SetPerformanceMetricsEnabled(enabled: Boolean) extends Admin
+  }
 
   /** Sent by the sequencer core subscription to the output module when processing may be able to be
     * resumed after a sequencer core slowdown in consuming blocks, allowing to always and timely
@@ -58,7 +78,7 @@ object Output {
 
   final case class MetadataStoredForNewEpoch[E <: Env[E]](
       newEpochNumber: EpochNumber,
-      orderingTopology: OrderingTopology,
+      membership: Membership,
       cryptoProvider: CryptoProvider[E],
   ) extends Message[E]
 

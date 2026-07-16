@@ -182,23 +182,16 @@ final class GeneratorsData(
           exerciseIndex,
           checkingParties,
         )
-      }.map { results =>
-        // A key recorded with conflicting outputs makes the view malformed (rejected by
-        // TransactionView.validated) and must not be generated. Several occurrences recording
-        // the same output for one key are legal, so they keep their multiplicity and only the
-        // outputs are canonicalized per key.
-        val canonicalOutputByKey = results.groupMapReduce { case (result, _, _) =>
-          ExternalCallKey.fromResult(result)
-        } { case (result, _, _) => result.output }((first, _) => first)
+      }.map(results =>
         results.zipWithIndex.map { case ((result, exerciseIndex, checkingParties), callIndex) =>
           ViewParticipantData.ViewExternalCallResult(
-            result = result.copy(output = canonicalOutputByKey(ExternalCallKey.fromResult(result))),
+            result = result,
             exerciseIndex = exerciseIndex,
             callIndex = NonNegativeInt.tryCreate(callIndex),
             checkingParties = checkingParties,
           )
         }
-      }
+      )
     } else Gen.const(Seq.empty)
 
   val createViewParticipantDataArb: Arbitrary[ViewParticipantData] = Arbitrary(

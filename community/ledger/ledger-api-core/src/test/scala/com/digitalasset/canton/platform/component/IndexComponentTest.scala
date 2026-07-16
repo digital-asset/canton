@@ -33,6 +33,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   TransactionMeta,
   Update,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.{CommonMockMetrics, LedgerApiServerMetrics}
@@ -101,7 +102,7 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
 
-import IndexComponentTest.TestServices
+import IndexComponentTest.{ServiceParams, TestServices}
 
 trait IndexComponentTest
     extends PekkoBeforeAndAfterAll
@@ -125,13 +126,10 @@ trait IndexComponentTest
 
   protected def jdbcUrl: String = LedgerApiJdbcUrl.fromDbConfig(dbConfig).value.url
 
-  protected val indexerConfig: IndexerConfig = IndexerConfig()
-
-  protected val indexServiceConfig: IndexServiceConfig = IndexServiceConfig()
-
-  protected val updateServiceConfig: UpdateServiceConfig = UpdateServiceConfig()
-
-  protected val indexReadConnectionPoolSize: Int = 10
+  protected def serviceParams: ServiceParams =
+    ServiceParams(buildFutureQueue =
+      (indexerF, _) => indexingFutureQueue(indexerF, repairMode = false)
+    )
 
   private val testServicesRef: AtomicReference[TestServices] = new AtomicReference()
 
@@ -366,7 +364,7 @@ trait IndexComponentTest
           dbConfig = DbConfig(
             jdbcUrl = jdbcUrl,
             connectionPool = ConnectionPoolConfig(
-              connectionPoolSize = indexReadConnectionPoolSize,
+              connectionPoolSize = 10,
               connectionTimeout = 250.millis,
             ),
             postgres = PostgresDataSourceConfig(
@@ -398,23 +396,15 @@ trait IndexComponentTest
     } yield (indexer, participantContractStore, dbSupport, inMemoryState)
 
   private def indexResourceOwner(
-      config: IndexerConfig,
-      serviceConfig: IndexServiceConfig,
-      repairMode: Boolean,
-      incompleteOffsets: Seq[Offset],
+      params: ServiceParams
   ): ResourceOwner[
     (IndexService, FutureQueue[Update], LedgerApiContractStoreImpl, DbSupport, InMemoryState)
   ] =
     for {
       (indexerF, participantContractStore, dbSupport, inMemoryState) <-
-        jdbcIndexerResourceOwner(config, serviceConfig)
-      indexerFutureQueueConsumer <- ResourceOwner.forFuture(() =>
-        indexerF(
-          IndexerParams(repairMode = repairMode, commit = _ => (), shutdownRequested = () => false)
-        ).flatMap(identity)
-      )
+        jdbcIndexerResourceOwner(params.indexerConfig, params.indexServiceConfig)
       indexer <- ResourceOwner.forReleasable(() =>
-        new IndexingFutureQueue(indexerFutureQueueConsumer)
+        params.buildFutureQueue(indexerF, params.indexerConfig)
       ) { indexer =>
         indexer.shutdown()
         indexer.done.map(_ => ())
@@ -434,13 +424,14 @@ trait IndexComponentTest
       )
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
-        config = serviceConfig,
+        config = params.indexServiceConfig,
         participantId = Ref.ParticipantId.assertFromString(IndexComponentTest.TestParticipantId),
         metrics = LedgerApiServerMetrics.ForTesting,
         inMemoryState = inMemoryState,
         tracer = NoReportingTracerProvider.tracer,
         loggerFactory = loggerFactory,
-        incompleteOffsets = (_, _, _) => FutureUnlessShutdown.pure(incompleteOffsets.toVector),
+        incompleteOffsets = (_, _, _) =>
+          FutureUnlessShutdown.pure(params.incompleteOffsets.toVector),
         contractLoader = contractLoader,
         getPackageMetadataSnapshot = _ => PackageMetadata(),
         lfValueTranslation = new LfValueTranslation(
@@ -459,26 +450,34 @@ trait IndexComponentTest
         ) => FutureUnlessShutdown.pure(Left("not used")),
         participantContractStore = participantContractStore,
         materializer = materializer,
-        updateServiceConfig = updateServiceConfig,
+        updateServiceConfig = UpdateServiceConfig(),
         scheduler = system.scheduler,
       )
     } yield (indexService, indexer, participantContractStore, dbSupport, inMemoryState)
 
+  def indexingFutureQueue(
+      indexerF: Indexer,
+      repairMode: Boolean,
+  ): FutureQueue[Update] = {
+    val consumer = indexerF(
+      IndexerParams(repairMode = repairMode, commit = _ => (), shutdownRequested = () => false)
+    ).flatMap(identity)
+      .futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
+    new IndexingFutureQueue(consumer)
+  }
+
   protected def indexerResourceOwner(
       config: IndexerConfig
   ): ResourceOwner[(Indexer, DbSupport)] =
-    jdbcIndexerResourceOwner(config, indexServiceConfig).map { case (indexer, _, dbSupport, _) =>
-      (indexer, dbSupport)
+    jdbcIndexerResourceOwner(config, serviceParams.indexServiceConfig).map {
+      case (indexer, _, dbSupport, _) =>
+        (indexer, dbSupport)
     }
 
-  protected def acquireServices(
-      config: IndexerConfig,
-      serviceConfig: IndexServiceConfig,
-      repairMode: Boolean,
-      incompleteOffsets: Seq[Offset],
+  private def acquireServices(
+      params: ServiceParams
   )(implicit resourceContext: ResourceContext): Unit = {
-    val indexResource =
-      indexResourceOwner(config, serviceConfig, repairMode, incompleteOffsets).acquire()
+    val indexResource = indexResourceOwner(params).acquire()
     val (index, indexer, participantContractStore, dbSupport, inMemoryState) =
       indexResource.asFuture.futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
 
@@ -495,29 +494,20 @@ trait IndexComponentTest
   }
 
   /** Restarts the indexer and all related services by releasing and re-acquiring all resources.
-    * Optionally accepts a new IndexerConfig to change the configuration on restart.
     */
-  protected def restartIndexer(
-      config: IndexerConfig = indexerConfig,
-      serviceConfig: IndexServiceConfig = indexServiceConfig,
-      repairMode: Boolean = false,
-      incompleteOffsets: Seq[Offset] = Vector.empty,
+  protected def restartServices(
+      params: ServiceParams = serviceParams
   ): Unit = {
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
     testServices.indexResource.release().futureValue
-    acquireServices(config, serviceConfig, repairMode, incompleteOffsets)
+    acquireServices(params)
   }
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
-    acquireServices(
-      config = indexerConfig,
-      serviceConfig = indexServiceConfig,
-      repairMode = false,
-      incompleteOffsets = Vector.empty,
-    )
+    acquireServices(serviceParams)
   }
 
   override def afterAll(): Unit = {
@@ -1012,6 +1002,13 @@ trait IndexComponentTest
 object IndexComponentTest {
 
   val TestParticipantId = "index-component-test-participant-id"
+
+  final case class ServiceParams(
+      indexerConfig: IndexerConfig = IndexerConfig(),
+      indexServiceConfig: IndexServiceConfig = IndexServiceConfig(),
+      incompleteOffsets: Seq[Offset] = Vector.empty,
+      buildFutureQueue: (Indexer, IndexerConfig) => FutureQueue[Update],
+  )
 
   final case class TestServices(
       indexResource: Resource[Any],

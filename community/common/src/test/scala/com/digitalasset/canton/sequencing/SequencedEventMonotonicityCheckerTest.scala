@@ -56,8 +56,8 @@ final class SequencedEventMonotonicityCheckerTest
       val checkedHandler = checker.handler(handler)
       val (batch1, batch2) = bobEvents.splitAt(2)
 
-      checkedHandler(Traced(batch1)).futureValueUS.unwrap.futureValueUS.future.futureValueUS
-      checkedHandler(Traced(batch2)).futureValueUS.unwrap.futureValueUS.future.futureValueUS
+      checkedHandler(Traced(batch1)).handlerResultValue
+      checkedHandler(Traced(batch2)).handlerResultValue
       handler.invocations.get.flatMap(_.value) shouldBe bobEvents
     }
 
@@ -82,9 +82,9 @@ final class SequencedEventMonotonicityCheckerTest
       val handler = mkHandler()
       val checkedHandler = checker.handler(handler)
 
-      checkedHandler(Traced(Seq(event1))).futureValueUS.unwrap.futureValueUS.future.futureValueUS
+      checkedHandler(Traced(Seq(event1))).handlerResultValue
       loggerFactory.assertThrowsAndLogs[MonotonicityFailureException](
-        checkedHandler(Traced(Seq(event2))).futureValueUS.unwrap.futureValueUS.future.futureValueUS,
+        checkedHandler(Traced(Seq(event2))).handlerResultValue,
         _.errorMessage should include(ErrorUtil.internalErrorMessage),
       )
     }

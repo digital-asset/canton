@@ -71,8 +71,8 @@ DEBUG="${DEBUG:-false}"
 USE_MAVEN_MIRROR="${USE_MAVEN_MIRROR:-false}"
  # Init vars and assign values or default values
 if [[ "$IS_GHA" == "true" ]]; then
-  EXECUTOR_JVM_HEAP_SIZE="${EXECUTOR_JVM_HEAP_SIZE:-14000M}"
-  EXECUTOR_JVM_METASPACE_SIZE="${EXECUTOR_JVM_METASPACE_SIZE:-4000M}"
+  EXECUTOR_JVM_HEAP_SIZE="${EXECUTOR_JVM_HEAP_SIZE:-6500M}"
+  EXECUTOR_JVM_METASPACE_SIZE="${EXECUTOR_JVM_METASPACE_SIZE:-2500M}"
 else
   EXECUTOR_JVM_HEAP_SIZE="${EXECUTOR_JVM_HEAP_SIZE:-6500M}"
   EXECUTOR_JVM_METASPACE_SIZE="${EXECUTOR_JVM_METASPACE_SIZE:-2500M}"
@@ -176,7 +176,8 @@ on_exit() {
 trap on_exit EXIT
 
 # Necessary workaround to prevent sbt from setting default JVM options
-export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
+# (Making sure to not overwrite pre-existing SBT_OPTS which contain maven mirror settings setup by Github Action runner)
+export SBT_OPTS="${SBT_OPTS} -Xmx$EXECUTOR_JVM_HEAP_SIZE"
 
 # Create a local temp folder in the working directory
 # This prevents protoc failures caused by 'noexec' locks on the global /tmp partition.
@@ -231,9 +232,9 @@ if [[ "$DEBUG" == "true" || "$DEBUG" == "1" ]]; then
 else
   SBT_CMD+=("--verbose")
 fi
-# Use maven mirror
+# Use azure maven mirror (in CircleCI only)
 # ${variable,,} -- convert value to lowercase (Bash ver > 4)
-if [[ "${USE_MAVEN_MIRROR,,}" == "true" || "${USE_MAVEN_MIRROR}" == "1" ]]; then
+if [[ ("${USE_MAVEN_MIRROR,,}" == "true" || "${USE_MAVEN_MIRROR}" == "1") && "$IS_GHA" != "true" ]]; then
   # Allow override repositories
   SBT_CMD+=("-Dsbt.override.build.repos=true")
   SBT_CMD+=("-Dsbt.repository.config=${ABSDIR}/repositories")

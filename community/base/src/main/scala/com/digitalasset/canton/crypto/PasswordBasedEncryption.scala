@@ -193,7 +193,7 @@ object PasswordBasedEncryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[KeyCreationError] = KeyCreationError
   }
   object KeyCreationError extends PrettyPrintingCompanion[KeyCreationError] {
-    override val pretty: Pretty[KeyCreationError] = prettyOfClass(
+    override protected val pretty: Pretty[KeyCreationError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
@@ -202,7 +202,7 @@ object PasswordBasedEncryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[DecryptError] = DecryptError
   }
   object DecryptError extends PrettyPrintingCompanion[DecryptError] {
-    override val pretty: Pretty[DecryptError] = prettyOfClass(
+    override protected val pretty: Pretty[DecryptError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
@@ -211,7 +211,7 @@ object PasswordBasedEncryptionError {
     override def prettyCompanion: PrettyPrintingCompanion[EncryptError] = EncryptError
   }
   object EncryptError extends PrettyPrintingCompanion[EncryptError] {
-    override val pretty: Pretty[EncryptError] = prettyOfClass(
+    override protected val pretty: Pretty[EncryptError] = prettyOfClass(
       unnamedParam(_.error)
     )
   }
@@ -222,7 +222,7 @@ object PasswordBasedEncryptionError {
       PbkdfOutputLengthInvalid
   }
   object PbkdfOutputLengthInvalid extends PrettyPrintingCompanion[PbkdfOutputLengthInvalid] {
-    override val pretty: Pretty[PbkdfOutputLengthInvalid] = prettyOfClass(
+    override protected val pretty: Pretty[PbkdfOutputLengthInvalid] = prettyOfClass(
       param("expectedLength", _.expectedLength),
       param("actualLength", _.actualLength),
     )

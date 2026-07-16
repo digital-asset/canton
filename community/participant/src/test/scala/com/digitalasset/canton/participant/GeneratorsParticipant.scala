@@ -36,10 +36,14 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SubmissionTrackingData,
   TransactionSubmissionTrackingData,
 }
-import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
+import com.digitalasset.canton.participant.synchronizer.{
+  PendingLsuOperation,
+  PendingOnboardingTransactions,
+}
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.{GeneratorsTransaction, ParticipantPermission}
 import com.digitalasset.canton.topology.{
   GeneratorsTopology,
   ParticipantId,
@@ -61,6 +65,7 @@ import org.scalacheck.{Arbitrary, Gen}
 
 final class GeneratorsParticipant(
     generatorsTopology: GeneratorsTopology,
+    generatorsTransaction: GeneratorsTransaction,
     generatorsLf: GeneratorsLf,
     version: ProtocolVersion,
 ) {
@@ -68,6 +73,7 @@ final class GeneratorsParticipant(
   import GeneratorsConfig.*
   import com.digitalasset.canton.Generators.*
   import generatorsTopology.*
+  import generatorsTransaction.*
   import generatorsLf.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
   import com.digitalasset.canton.crypto.GeneratorsCrypto.*
@@ -293,6 +299,14 @@ final class GeneratorsParticipant(
         psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
         rpv = PendingLsuOperation.protocolVersionRepresentativeFor(version)
       } yield PendingLsuOperation(psid)(rpv)
+    )
+
+  implicit val pendingOnboardingTransactionsArb: Arbitrary[PendingOnboardingTransactions] =
+    Arbitrary(
+      for {
+        transactions <- nonEmptyListGen[GenericSignedTopologyTransaction]
+        rpv = PendingOnboardingTransactions.protocolVersionRepresentativeFor(version)
+      } yield PendingOnboardingTransactions(transactions)(rpv)
     )
 
   implicit val onboardingClearanceOperationArb: Arbitrary[OnboardingClearanceOperation] =

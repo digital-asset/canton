@@ -7,6 +7,7 @@ import cats.Eval
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.config
+import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
@@ -37,6 +38,8 @@ import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
+import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.user.store.{IdentityProviderConfigStore, UserManagementStore}
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
@@ -127,6 +130,8 @@ object ApiServices {
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
       externalCallHandler: ExternalCallHandler,
+      lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
+      pureCryptoApi: CryptoPureApi,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -202,6 +207,12 @@ object ApiServices {
             packageServiceConfig,
             loggerFactory,
           )
+        val apiJoseService =
+          new ApiJoseService(
+            pureCrypto = pureCryptoApi,
+            lookupTopologyClient = lookupTopologyClient,
+            loggerFactory = loggerFactory,
+          )
 
         val services = apiTimeServiceOpt.toList :::
           List(
@@ -211,6 +222,7 @@ object ApiServices {
             new UpdateServiceAuthorization(apiUpdateService, authorizer),
             new StateServiceAuthorization(apiStateService, authorizer),
             new ContractServiceAuthorization(apiContractService, authorizer),
+            new JoseServiceAuthorization(apiJoseService, authorizer),
             apiVersionService,
           )
 

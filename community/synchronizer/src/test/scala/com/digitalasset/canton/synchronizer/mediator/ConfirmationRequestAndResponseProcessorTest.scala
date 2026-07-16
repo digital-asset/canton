@@ -13,6 +13,7 @@ import com.digitalasset.canton.data.ViewType.{AssignmentViewType, TransactionVie
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.ParticipantEquivocation
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*

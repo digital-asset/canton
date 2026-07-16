@@ -7,6 +7,7 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
@@ -153,6 +154,7 @@ class TransactionConfirmationResponsesFactory(
             )
           )
 
+        // TODO(#33650) - replace with unboundedTraverseFilter; safe because the number of views is bounded by the transaction's maximum payload size (at worst views are in the hundreds).
         responses <- transactionValidationResult.viewValidationResults.toSeq
           .parTraverseFilter { case (viewPosition, viewValidationResult) =>
             for {

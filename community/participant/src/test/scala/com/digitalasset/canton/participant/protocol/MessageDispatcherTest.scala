@@ -17,10 +17,13 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.ledger.participant.state.Update.ReceivedAcsCommitment
 import com.digitalasset.canton.ledger.participant.state.{SequencedEventUpdate, SequencedUpdate}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.PrettyUtil
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
+import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidator
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.{
   ConnectedSynchronizerMetrics,
@@ -55,6 +58,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerTestUtils,
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
+import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.processing.{SequencedTime, TopologyTransactionTestFactory}
@@ -105,7 +109,8 @@ trait MessageDispatcherTest {
       otherTestProcessor: RequestProcessor[OtherTestViewType, SequencedEventUpdate],
       topologyProcessor: ParticipantTopologyProcessor,
       trafficProcessor: TrafficControlProcessor,
-      acsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+      legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+      acsCommitmentValidator: ReceivedAcsCommitmentValidator,
       requestCounterAllocator: RequestCounterAllocator,
       recordOrderPublisher: RecordOrderPublisher,
       badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
@@ -122,6 +127,7 @@ trait MessageDispatcherTest {
             ParticipantTopologyProcessor,
             TrafficControlProcessor,
             AcsCommitmentProcessor.ProcessorType,
+            ReceivedAcsCommitmentValidator,
             RequestCounterAllocator,
             RecordOrderPublisher,
             BadRootHashMessagesRequestProcessor,
@@ -187,14 +193,32 @@ trait MessageDispatcherTest {
         )(anyTraceContext)
       ).thenReturn(FutureUnlessShutdown.unit)
 
-      val acsCommitmentProcessor = mock[AcsCommitmentProcessor.ProcessorType]
+      val legacyAcsCommitmentProcessor = mock[AcsCommitmentProcessor.ProcessorType]
       when(
-        acsCommitmentProcessor.apply(
+        legacyAcsCommitmentProcessor.apply(
           any[CantonTimestamp],
           any[Traced[List[OpenEnvelope[SignedProtocolMessage[LegacyAcsCommitment]]]]],
         )
       )
         .thenReturn(HandlerResult.done)
+
+      val acsCommitmentValidator = mock[ReceivedAcsCommitmentValidator]
+      when(
+        acsCommitmentValidator.validateAndPublish(
+          any[CantonTimestamp],
+          any[NonEmpty[Seq[OpenEnvelope[AcsCommitmentProtocolMessage]]]],
+          any[PublishUpdateViaRecordOrderPublisher[ReceivedAcsCommitment]],
+        )(anyTraceContext)
+      ).thenAnswer {
+        (
+            _: CantonTimestamp,
+            _: NonEmpty[Seq[OpenEnvelope[AcsCommitmentProtocolMessage]]],
+            handle: PublishUpdateViaRecordOrderPublisher[ReceivedAcsCommitment],
+            _: TraceContext,
+        ) =>
+          handle(None)
+          HandlerResult.done
+      }
 
       val requestCounterAllocator =
         new RequestCounterAllocatorImpl(initRc, cleanReplaySequencerCounter, loggerFactory)
@@ -258,7 +282,8 @@ trait MessageDispatcherTest {
         protocolProcessors,
         identityProcessor,
         trafficProcessor,
-        acsCommitmentProcessor,
+        legacyAcsCommitmentProcessor,
+        acsCommitmentValidator,
         requestCounterAllocator,
         recordOrderPublisher,
         badRootHashMessagesRequestProcessor,
@@ -274,7 +299,8 @@ trait MessageDispatcherTest {
         otherTestViewProcessor,
         identityProcessor,
         trafficProcessor,
-        acsCommitmentProcessor,
+        legacyAcsCommitmentProcessor,
+        acsCommitmentValidator,
         requestCounterAllocator,
         recordOrderPublisher,
         badRootHashMessagesRequestProcessor,
@@ -363,6 +389,7 @@ trait MessageDispatcherTest {
           ParticipantTopologyProcessor,
           TrafficControlProcessor,
           AcsCommitmentProcessor.ProcessorType,
+          ReceivedAcsCommitmentValidator,
           RequestCounterAllocator,
           RecordOrderPublisher,
           BadRootHashMessagesRequestProcessor,
@@ -388,15 +415,32 @@ trait MessageDispatcherTest {
       List(factory.ns1k1_k1),
     )
 
-    val rawCommitment = mock[LegacyAcsCommitment]
-    when(rawCommitment.psid).thenReturn(psid)
-    when(rawCommitment.representativeProtocolVersion).thenReturn(
+    val legacyRawCommitment = mock[LegacyAcsCommitment]
+    when(legacyRawCommitment.psid).thenReturn(psid)
+    when(legacyRawCommitment.representativeProtocolVersion).thenReturn(
       LegacyAcsCommitment.protocolVersionRepresentativeFor(testedProtocolVersion)
     )
-    when(rawCommitment.pretty).thenReturn(PrettyUtil.prettyOfString(_ => "test"))
+    when(legacyRawCommitment.pretty).thenReturn(PrettyUtil.prettyOfString(_ => "test"))
+    when(legacyRawCommitment.period).thenReturn(
+      LegacyCommitmentPeriod(
+        CantonTimestampSecond.ofEpochSecond(10),
+        PositiveSeconds.tryOfSeconds(10),
+      )
+    )
 
-    val commitment =
-      SignedProtocolMessage.from(rawCommitment, dummySignature)
+    val legacyCommitment =
+      SignedProtocolMessage.from(legacyRawCommitment, dummySignature)
+
+    val rawCommitment = AcsCommitment.create(
+      psid,
+      DefaultTestIdentities.participant4.toLf,
+      DefaultTestIdentities.participant1.toLf,
+      CommitmentPeriod
+        .tryCreate(CantonTimestamp.ofEpochSecond(5), CantonTimestamp.ofEpochSecond(15)),
+      ByteString.empty,
+      testedProtocolVersion,
+    )
+    val commitment = AcsCommitmentProtocolMessage(rawCommitment, dummySignature)
 
     def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
       MediatorReject.tryCreate(
@@ -620,8 +664,28 @@ trait MessageDispatcherTest {
       }
     }
 
-    "ACS commitments" should {
+    "legacy ACS commitments" should {
       "be passed to the ACS commitment processor" in {
+        val sut = mk()
+        val sc = SequencerCounter(2)
+        val ts = CantonTimestamp.ofEpochSecond(2)
+        val event = mkDeliver(
+          Batch.of(testedProtocolVersion, legacyCommitment -> Recipients.cc(participantId)),
+          ts,
+        )
+        handle(sut, sc, event) {
+          verify(sut.legacyAcsCommitmentProcessor)
+            .apply(
+              isEq(ts),
+              any[Traced[List[OpenEnvelope[SignedProtocolMessage[LegacyAcsCommitment]]]]],
+            )
+          checkTicks(sut, sc, ts)
+        }
+      }.futureValue
+    }
+
+    "ACS commitments" should {
+      "be passed to the ACS commitment validator" in {
         val sut = mk()
         val sc = SequencerCounter(2)
         val ts = CantonTimestamp.ofEpochSecond(2)
@@ -630,11 +694,12 @@ trait MessageDispatcherTest {
           ts,
         )
         handle(sut, sc, event) {
-          verify(sut.acsCommitmentProcessor)
-            .apply(
+          verify(sut.acsCommitmentValidator)
+            .validateAndPublish(
               isEq(ts),
-              any[Traced[List[OpenEnvelope[SignedProtocolMessage[LegacyAcsCommitment]]]]],
-            )
+              any[NonEmpty[Seq[OpenEnvelope[AcsCommitmentProtocolMessage]]]],
+              any[PublishUpdateViaRecordOrderPublisher[ReceivedAcsCommitment]],
+            )(anyTraceContext)
           checkTicks(sut, sc, ts)
         }
       }.futureValue
@@ -657,7 +722,7 @@ trait MessageDispatcherTest {
       )
         .thenReturn(HandlerResult.synchronous(FutureUnlessShutdown.abortedDueToShutdown))
       when(
-        sut.acsCommitmentProcessor.apply(
+        sut.legacyAcsCommitmentProcessor.apply(
           any[CantonTimestamp],
           any[Traced[List[OpenEnvelope[SignedProtocolMessage[LegacyAcsCommitment]]]]],
         )
@@ -673,7 +738,7 @@ trait MessageDispatcherTest {
         sut.messageDispatcher.handleAll(signAddCounterAndTrace(sc, event)).unwrap.futureValue
 
       result shouldBe UnlessShutdown.AbortedDueToShutdown
-      verify(sut.acsCommitmentProcessor, never)
+      verify(sut.legacyAcsCommitmentProcessor, never)
         .apply(
           any[CantonTimestamp],
           any[Traced[List[OpenEnvelope[SignedProtocolMessage[LegacyAcsCommitment]]]]],
@@ -1054,7 +1119,7 @@ trait MessageDispatcherTest {
             testedProtocolVersion,
             view -> Recipients.cc(participantId),
             rootHashMessage -> Recipients.cc(MemberRecipient(participantId), mediatorGroup),
-            commitment -> Recipients.cc(participantId),
+            legacyCommitment -> Recipients.cc(participantId),
           ) -> Seq()
         )
 
@@ -1086,6 +1151,15 @@ trait MessageDispatcherTest {
               .cc(MemberRecipient(participantId), MemberRecipient(otherParticipant), mediatorGroup2),
           ) -> Seq(
             "The root hash message has invalid recipient groups."
+          ),
+          Batch.of[ProtocolMessage](
+            testedProtocolVersion,
+            view -> Recipients.cc(participantId),
+            rootHashMessage -> Recipients.cc(MemberRecipient(participantId), mediatorGroup),
+            commitment -> Recipients.cc(participantId),
+          ) -> Seq(
+            s"Received ACS commitment envelopes bundled up with a root hash message at ${CantonTimestamp
+                .ofEpochSecond(5)}. Discarding the ACS commitment envelopes. Purported senders: ${DefaultTestIdentities.participant4.toLf}"
           ),
         )
 
@@ -1325,6 +1399,7 @@ trait MessageDispatcherTest {
 
         val envelopes = Seq[(ProtocolMessage, Recipients)](
           idTx -> Recipients.cc(TopologyBroadcastAddress.recipient),
+          legacyCommitment -> Recipients.cc(participantId),
           commitment -> Recipients.cc(participantId),
           MalformedMediatorConfirmationRequestResult -> Recipients.cc(participantId),
           testMediatorResult -> Recipients.cc(participantId),

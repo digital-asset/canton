@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.extension
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.{PemFileOrString, ProcessingTimeout}
 import com.digitalasset.canton.http.HttpService
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ExtensionServiceConfig
@@ -131,8 +132,9 @@ class ExtensionServiceManager(
     // Log the full error here, at the last common point before the per-consumer
     // sanitization drops the message.
     result.map(_.tapLeft { error =>
+      val requestId = error.requestId.fold("")(id => s", requestId=$id")
       logger.warn(
-        s"External call to extension '$extensionId' (function '$functionId') failed: $error"
+        s"External call to extension '$extensionId' (function '$functionId') failed: status=${error.statusCode}, retryable=${error.retryable}$requestId, message=${error.message}"
       )
     })
   }

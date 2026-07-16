@@ -69,8 +69,18 @@ trait StorageBackendSpec
         f(connections)
       }
 
+  @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
   protected def withConnections[T](n: Int)(f: List[Connection] => T): T =
-    tryWithConnections(n)(f).success.value
+    tryWithConnections(n)(f).get
+
+  protected def withOneConnection[T](f: Connection => T): T =
+    withConnections(1)(cs => f(cs.head))
+
+  protected def withTwoConnections[T](f: (Connection, Connection) => T): T =
+    withConnections(2)(cs => f(cs.head, cs(1)))
+
+  protected def withThreeConnections[T](f: (Connection, Connection, Connection) => T): T =
+    withConnections(3)(cs => f(cs.head, cs(1), cs(2)))
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()

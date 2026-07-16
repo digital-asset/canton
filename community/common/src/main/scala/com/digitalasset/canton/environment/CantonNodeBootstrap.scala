@@ -55,6 +55,7 @@ import com.digitalasset.canton.health.{
   LivenessHealthService,
   ServiceHealthStatusManager,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -1160,6 +1161,7 @@ abstract class CantonNodeBootstrapImpl[
                   lookupActivePsid,
                   ips,
                   bootstrapStageCallback.loggerFactory,
+                  parameters.batchingConfig,
                 ),
                 executionContext,
               )

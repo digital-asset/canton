@@ -10,7 +10,6 @@ import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.http.HttpService
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.{
-  UseTls,
   clientTlsConfig,
   serverTlsConfig,
 }
@@ -35,7 +34,7 @@ class JsonTlsConfigTests
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  override def useTls: UseTls = UseTls.Tls
+  override def useTls: Boolean = true
 
   private lazy val testCases = Table(
     ("participantName", "testCase", "tlsConfig", "expectedStatus"),

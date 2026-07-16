@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.admin.sequencer.v30.SequencerStatusServiceGrpc
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
@@ -11,7 +12,12 @@ import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorServic
 import com.digitalasset.canton.config.AdminTokenConfig
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
-import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto, SynchronizerCryptoClient}
+import com.digitalasset.canton.crypto.{
+  Crypto,
+  CryptoHandshakeValidator,
+  SynchronizerCrypto,
+  SynchronizerCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.*
@@ -419,6 +425,9 @@ class SequencerNodeBootstrap(
                 PhysicalSynchronizerId(synchronizerId, request.synchronizerParameters)
               )
             )
+            _ <- CryptoHandshakeValidator
+              .validate(request.synchronizerParameters, cryptoConfig)
+              .toEitherT[FutureUnlessShutdown]
           } yield StageResult(
             request.synchronizerParameters,
             sequencerFactory,

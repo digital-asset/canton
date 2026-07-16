@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.store.*
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.PruningContractsBlockedException
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
@@ -65,6 +66,8 @@ private[platform] class JdbcLedgerDao(
     contractPruningMaxRetries: Int,
     contractPruningDelayBeforeRetry: FiniteDuration,
     scheduler: Scheduler,
+    pruningDbLockMeta: DbLockMeta,
+    contractPruningDbLockMeta: DbLockMeta,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
     with NamedLogging {
@@ -152,6 +155,8 @@ private[platform] class JdbcLedgerDao(
             previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
             pruneUpToInclusive = pruneUpToInclusive,
             incompleteReassignmentOffsets = incompleteReassignmentOffsets,
+            pruningDbLockMeta = pruningDbLockMeta,
+            contractPruningDbLockMeta = contractPruningDbLockMeta,
           )(
             conn,
             loggingContext.traceContext,
@@ -170,6 +175,12 @@ private[platform] class JdbcLedgerDao(
         .thereafter { _ =>
           pruningOffsetService.reEnableCache()
         }
+        .flatMap(_ =>
+          dbDispatcher.executeSql(metrics.index.db.vacuumAndReindexPruningTableDbMetrics) {
+            implicit conn =>
+              readStorageBackend.eventStorageBackend.vacuumAndReindexPruningTable()
+          }
+        )
         .thereafter {
           case Success(_) =>
             logger.info(
@@ -179,51 +190,61 @@ private[platform] class JdbcLedgerDao(
             logger.warn("Pruning failed", ex)
         }
         .flatMap(_ =>
-          pattern.retry(
-            attempt = () => pruneContracts(),
-            shouldRetry = (_: Unit, t: Throwable) =>
-              t match {
-                case _: PruningContractsBlockedException => true
-                case _ => false
+          pattern
+            .retry(
+              attempt = () => pruneContracts(),
+              shouldRetry = (_: Unit, t: Throwable) =>
+                t match {
+                  case _: PruningContractsBlockedException => true
+                  case _ => false
+                },
+              attempts = contractPruningMaxRetries + 1,
+              delayFunction = attempt => {
+                // recording the retry count of this pruning operation
+                metrics.services.pruning.contractPruningRetried
+                  .update(attempt.toLong)(MetricsContext.Empty)
+                // fix delay between retries
+                Some(contractPruningDelayBeforeRetry)
               },
-            attempts = contractPruningMaxRetries + 1,
-            delayFunction = attempt => {
-              // recording the retry count of this pruning operation
-              metrics.services.pruning.contractPruningRetried
-                .update(attempt.toLong)(MetricsContext.Empty)
-              // fix delay between retries
-              Some(contractPruningDelayBeforeRetry)
-            },
-          )(commandExecutionContext, scheduler)
-        )
-        .transform {
-          case Success(()) =>
-            logger.info(s"Completed pruning of contracts")
-            Success(())
-          case Failure(_: PruningContractsBlockedException) =>
-            metrics.services.pruning.contractPruningBlocked.inc()
-            Failure(
-              LedgerApiErrors.ParticipantContractPruningBlocked
-                .Reject(
-                  retries = contractPruningMaxRetries,
-                  delay = contractPruningDelayBeforeRetry,
+            )(commandExecutionContext, scheduler)
+            .transform {
+              case Success(()) =>
+                logger.info(s"Completed pruning of contracts")
+                Success(())
+              case Failure(_: PruningContractsBlockedException) =>
+                metrics.services.pruning.contractPruningBlocked.inc()
+                Failure(
+                  LedgerApiErrors.ParticipantContractPruningBlocked
+                    .Reject(
+                      retries = contractPruningMaxRetries,
+                      delay = contractPruningDelayBeforeRetry,
+                    )
+                    .asGrpcError
                 )
-                .asGrpcError
-            )
-          case Failure(t) =>
-            logger.warn("Pruning of contracts failed", t)
-            Failure(t)
-        }
+              case Failure(t) =>
+                logger.warn("Pruning of contracts failed", t)
+                Failure(t)
+            }
+        )
     }
 
   private def pruneContracts()(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
     for {
       _ <- dbDispatcher.executeSql(
         metrics.index.db.cleanPruningCandidateContractsDbMetrics
-      )(implicit conn => readStorageBackend.eventStorageBackend.cleanPruningCandidates())
+      )(implicit conn =>
+        readStorageBackend.eventStorageBackend.cleanPruningCandidates(contractPruningDbLockMeta)
+      )
       prunedInternalContractIds <- dbDispatcher.executeSql(
         metrics.index.db.pruneContractsDbMetrics
-      )(implicit conn => readStorageBackend.eventStorageBackend.pruneContracts())
+      )(implicit conn =>
+        readStorageBackend.eventStorageBackend.pruneContracts(contractPruningDbLockMeta)
+      )
+      _ <- dbDispatcher.executeSql(
+        metrics.index.db.vacuumAndReindexContractPruningTableDbMetrics
+      )(implicit conn =>
+        readStorageBackend.eventStorageBackend.vacuumAndReindexContractPruningTable()
+      )
     } yield contractStore.contractsPruned(prunedInternalContractIds)
 
   override def indexDbPrunedUpTo(implicit

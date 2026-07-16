@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.platform.index
 
-import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.command_completion_service.{
+  CompletionStreamResponse,
+  GetCompletionByHashResponse,
+}
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse.Update
@@ -55,8 +58,8 @@ import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.cache.{LedgerEndCache, OffsetCheckpoint}
 import com.digitalasset.canton.platform.store.dao.{
+  BufferedCommandCompletionsReader,
   EventProjectionProperties,
-  LedgerDaoCommandCompletionsReader,
   LedgerDaoUpdateReader,
   LedgerReadDao,
 }
@@ -73,9 +76,11 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.PackageResolution
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.util.HexString
 import com.digitalasset.canton.{ReassignmentCounter, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{FullIdentifier, Identifier, NameTypeConRef, PackageId}
+import com.google.protobuf.ByteString
 import com.google.rpc.Status
 import io.grpc.StatusRuntimeException
 import org.apache.pekko.NotUsed
@@ -92,7 +97,7 @@ private[index] class IndexServiceImpl(
     ledgerDao: LedgerReadDao,
     updatesReader: LedgerDaoUpdateReader,
     acsChangesReader: AcsChangesReader,
-    commandCompletionsReader: LedgerDaoCommandCompletionsReader,
+    commandCompletionsReader: BufferedCommandCompletionsReader,
     contractStore: ContractStore,
     pruneBuffers: PruneBuffers,
     dispatcher: () => Dispatcher[Offset],
@@ -106,6 +111,7 @@ private[index] class IndexServiceImpl(
     executionContext: ExecutionContext,
     ledgerEndCache: LedgerEndCache,
     updateServiceConfig: UpdateServiceConfig,
+    maxRejectedCompletionsByHash: Int,
 ) extends IndexService
     with NamedLogging {
 
@@ -338,6 +344,34 @@ private[index] class IndexServiceImpl(
           .mapError(shutdownError)
       }
       .buffered(metrics.index.completionsBufferSize, LedgerApiStreamsBufferSize)
+
+  override def getCompletionByHash(
+      hash: ByteString,
+      parties: Set[Party],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[GetCompletionByHashResponse] =
+    commandCompletionsReader
+      .getCompletionByHash(hash.toByteArray, maxRejectedCompletionsByHash, parties)
+      .flatMap { completionsByHash =>
+        val acceptedCompletion = completionsByHash.accepted
+        val rejectedCompletions = completionsByHash.rejected
+        if (acceptedCompletion.isEmpty && rejectedCompletions.isEmpty) {
+          implicit val errorLoggingContext: ErrorLoggingContext =
+            ErrorLoggingContext(logger, loggingContext)
+          Future.failed(
+            RequestValidationErrors.NotFound.Completion
+              .RejectWithHash(HexString.toHexString(hash))
+              .asGrpcError
+          )
+        } else
+          Future.successful(
+            GetCompletionByHashResponse(
+              acceptedCompletion = acceptedCompletion,
+              lastRejectedCompletions = rejectedCompletions,
+            )
+          )
+      }(executionContext)
 
   override def getActiveContracts(
       eventFormat: EventFormat,

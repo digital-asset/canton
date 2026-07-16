@@ -34,6 +34,7 @@ final class BftOrderingVerifier(
     onboardingTimes: Map[BftNodeId, TopologyActivationTime],
     offboardingTimes: Map[BftNodeId, CantonTimestamp],
     initialNodes: Seq[BftNodeId],
+    initialPermanentlyDownNodes: Set[BftNodeId],
     simSettings: SimulationSettings,
     simEpochChecker: SimEpochChecker,
     override val loggerFactory: NamedLoggerFactory,
@@ -54,6 +55,9 @@ final class BftOrderingVerifier(
   private var livenessState: LivenessState = LivenessState.NotChecking
 
   private val offboardingProgress = mutable.Map.empty[BftNodeId, OffboardingStatus]
+
+  private val permanentlyCrashed: mutable.Set[BftNodeId] =
+    mutable.Set.from(initialPermanentlyDownNodes)
 
   override def resumeCheckingLiveness(at: CantonTimestamp): Unit =
     livenessState match {
@@ -89,6 +93,9 @@ final class BftOrderingVerifier(
 
   override def aFutureHappened(node: BftNodeId): Unit = ()
 
+  override def dontCheckLiveness(node: BftNodeId): Unit =
+    permanentlyCrashed.add(node)
+
   def lastSequencerAcknowledgedBlock(node: BftNodeId): Option[BlockNumber] =
     peanoQueues
       .get(node)
@@ -114,6 +121,7 @@ final class BftOrderingVerifier(
         newOnboardingTimes,
         newOffboardingTimes,
         Seq.empty,
+        permanentlyCrashed.toSet,
         simulationSettings,
         simEpochChecker,
         loggerFactory,
@@ -132,7 +140,7 @@ final class BftOrderingVerifier(
           .partition(x => offboardingTimes.get(x._1).forall(at <= _))
         val hasEveryoneMadeProgress = nodesInTopology
           .forall { case (node, peanoQueueHead) =>
-            peanoQueues(node).head.unwrap > peanoQueueHead
+            permanentlyCrashed.contains(node) || peanoQueues(node).head.unwrap > peanoQueueHead
           }
         if (currentLog.sizeIs > logSizeAtStart && hasEveryoneMadeProgress) {
           // There has been progress since the simulation became healthy, so we don't need to check anymore

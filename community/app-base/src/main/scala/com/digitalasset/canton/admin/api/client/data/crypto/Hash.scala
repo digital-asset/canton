@@ -6,7 +6,7 @@ package com.digitalasset.canton.admin.api.client.data.crypto
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
 sealed abstract class HashAlgorithm(val name: String) extends PrettyPrinting {
-  override val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
 }
 
 object HashAlgorithm {

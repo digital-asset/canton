@@ -4,18 +4,15 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.{
-  ExternalCallKey,
-  ParticipantTransactionView,
-  ViewParticipantData,
-  ViewPosition,
-}
+import com.digitalasset.canton.data.{ParticipantTransactionView, ViewParticipantData, ViewPosition}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsistencyChecker.{
   ExternalCallOccurrence,
   Inconsistency,
 }
+import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
@@ -35,8 +32,8 @@ import scala.concurrent.ExecutionContext
   * `ExternalCallCheck.Result`: a disagreement from either part rejects the request on behalf of all
   * hosted confirming parties, and a recorded result that cannot be re-validated leads to an
   * abstention instead of an approval (see [[TransactionConfirmationResponsesFactory]]).
-  * Disagreements among the recorded results within a single view's subtree are rejected earlier, as
-  * a malformed view when the view is validated, independently of this check.
+  * Disagreements within the replay data of a single reinterpretation already surface as
+  * model-conformance errors independently of this check.
   *
   * @param externalCallValidator
   *   The validator used to re-run external calls against the extension service.
@@ -103,9 +100,10 @@ class ExternalCallCheck(
   }
 
   /** Re-validates the recorded results, one validator call per distinct semantic call
-    * ([[com.digitalasset.canton.data.ExternalCallKey]]). At this point every key has a single
-    * recorded output: a key with disagreeing outputs is a visible inconsistency and was rejected
-    * before re-validation. Outcomes are examined in key order, so the result is deterministic.
+    * ([[com.digitalasset.canton.participant.util.DAMLe.ExternalCallKey]]). At this point every key
+    * has a single recorded output: a key with disagreeing outputs is a visible inconsistency and
+    * was rejected before re-validation. Outcomes are examined in key order, so the result is
+    * deterministic.
     */
   private def validateRecordedResults(
       requestId: RequestId,
@@ -115,7 +113,7 @@ class ExternalCallCheck(
       ec: ExecutionContext,
   ): FutureUnlessShutdown[Result] = {
     val occurrencesByKey = recordedResults
-      .groupMap { case (_, result) => ExternalCallKey.fromResult(result.result) } {
+      .groupMap { case (_, result) => DAMLe.ExternalCallKey.fromResult(result.result) } {
         case (viewPosition, result) =>
           ExternalCallOccurrence(viewPosition, result.exerciseIndex, result.callIndex) ->
             result.result.output

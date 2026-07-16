@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.indexer
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, Update}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.indexer.IndexerState.RepairInProgress
@@ -1542,6 +1543,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
   }
 
   class TestRecoveringIndexer extends RecoveringFutureQueue[Update] {
+
     val donePromise = Promise[Done]()
     val shutdownPromise = Promise[Unit]()
     val firstSuccessfulConsumerInitializationPromise = Promise[Unit]()
@@ -1559,6 +1561,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     override def shutdown(): Unit = shutdownPromise.trySuccess(())
 
     override def done: Future[Done] = donePromise.future
+    override def healthStatus: HealthStatus = HealthStatus.healthy
   }
 
   class TestRepairIndexer extends FutureQueue[Update] {

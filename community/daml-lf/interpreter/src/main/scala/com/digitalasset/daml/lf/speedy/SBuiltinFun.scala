@@ -2968,8 +2968,7 @@ private[lf] object SBuiltinFun {
 
     List(
       check(_.signatories, "signatories"),
-      // Comparing stakeholders allows observers to lose parties that are signatories
-      check(_.stakeholders, "stakeholders"),
+      check(_.nonSignatoryStakeholders, "nonSignatoryStakeholders"),
       check(_.keyOpt.map(_.maintainers), "key maintainers"),
       check(_.keyOpt.map(_.globalKey.key), "key value"),
       Option.when(srcPkgName != dstPkgName)(
@@ -2987,10 +2986,10 @@ private[lf] object SBuiltinFun {
               srcPackageName = srcPkgName,
               dstPackageName = dstPkgName,
               originalSignatories = original.signatories,
-              originalObservers = original.observers,
+              originalSignatoryStakeholders = original.nonSignatoryStakeholders,
               originalKeyOpt = original.keyOpt,
               recomputedSignatories = recomputed.signatories,
-              recomputedObservers = recomputed.observers,
+              recomputedSignatoryStakeholders = recomputed.nonSignatoryStakeholders,
               recomputedKeyOpt = recomputed.keyOpt,
               msg = errors.mkString("['", "', '", "']"),
             )

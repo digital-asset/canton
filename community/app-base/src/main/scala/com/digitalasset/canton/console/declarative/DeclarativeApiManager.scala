@@ -109,6 +109,7 @@ object DeclarativeApiManager {
           instance.getNode.flatMap(n =>
             Option.when(n.isActive)(n.adminTokenDispenser.getCurrentToken)
           ),
+          instance.getNode.map(_.status),
           runnerFactory,
           instance.closeContext,
           instance.metrics.declarativeApiMetrics,

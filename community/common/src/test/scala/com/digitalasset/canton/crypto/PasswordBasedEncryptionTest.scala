@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.crypto.CryptoTestHelper.TestMessage
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec

@@ -22,7 +22,7 @@ final case class ComponentStatus(name: String, state: ComponentHealthState) exte
       status = state.toComponentStatusV0,
     )
 
-  override val pretty: Pretty[ComponentStatus] = ComponentStatus.componentStatusPretty
+  override protected val pretty: Pretty[ComponentStatus] = ComponentStatus.componentStatusPretty
 }
 
 object ComponentStatus {

@@ -17,7 +17,6 @@ import com.digitalasset.canton.config.RequireTypes.{ExistingFile, PositiveInt}
 import com.digitalasset.canton.config.{AuthServiceConfig, PemFile}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.http.WebsocketConfig
-import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.UseTls
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.ParticipantSelector
 import com.digitalasset.canton.integration.{
@@ -41,7 +40,7 @@ trait HttpJsonApiTestBase extends CantonFixture {
   protected def packageFiles: List[java.io.File] = List()
   protected def authSecret: Option[String] = None
   def wsConfig: Option[WebsocketConfig] = None
-  def useTls: UseTls = UseTls.NoTls
+  def useTls: Boolean = false
   val maxPartiesPageSize = PositiveInt.tryCreate(100)
 
   implicit override val defaultPatience: PatienceConfig =

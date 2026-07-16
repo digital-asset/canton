@@ -20,7 +20,7 @@ import com.digitalasset.canton.data.ViewParticipantData.{
 }
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{v30, v31, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.EitherUtil

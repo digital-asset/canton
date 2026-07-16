@@ -32,6 +32,7 @@ object DefaultTestIdentities {
   val (participant2, party2) = createParticipantAndParty(2)
   val (participant3, party3) = createParticipantAndParty(3)
   val (participant4, party4) = createParticipantAndParty(4)
+  val (participant5, party5) = createParticipantAndParty(5)
 
   val defaultDynamicSynchronizerParameters: DynamicSynchronizerParameters =
     DynamicSynchronizerParameters.initialValues(
