@@ -4,7 +4,7 @@
 package com.digitalasset.canton.tea.projection.memory
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tea.projection.{EventId, ProjectionEvent, TeaProjection}
+import com.digitalasset.canton.tea.projection.{EventId, ProjectionEvent, TeaProjectionFactory}
 import com.digitalasset.canton.tracing.Traced
 import org.apache.pekko.Done
 import org.apache.pekko.actor.typed.Behavior
@@ -17,12 +17,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** In memory only projection. Offsets are not persisted.
   */
-private[projection] class TeaMemoryProjection(
+private[projection] class TeaMemoryProjectionFactory(
     override val loggerFactory: NamedLoggerFactory,
     store: TeaMemoryTrafficStore,
 )(implicit
     ec: ExecutionContext
-) extends TeaProjection
+) extends TeaProjectionFactory
     with NamedLogging {
   override def projection(
       projectionId: ProjectionId,

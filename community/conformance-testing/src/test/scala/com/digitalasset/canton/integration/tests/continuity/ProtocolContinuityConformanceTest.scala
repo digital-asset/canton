@@ -420,6 +420,10 @@ private[continuity] object ProtocolContinuityConformanceTest {
     val perParticipant = (1 to 3).flatMap { p =>
       val base = s"participants.participant$p"
       Seq(
+        s"$base.parameters.ledger-api-server.indexer.contract-pruning-db-lock-timeout",
+        s"$base.parameters.ledger-api-server.indexer.contract-read-row-db-lock-timeout",
+        s"$base.ledger-api.index-service.pruning-db-lock-timeout",
+        s"$base.ledger-api.index-service.contract-pruning-db-lock-timeout",
         s"$base.admin-api.max-concurrent-calls-per-connection",
         s"$base.crypto.parallelism",
         s"$base.crypto.session-signing-keys",

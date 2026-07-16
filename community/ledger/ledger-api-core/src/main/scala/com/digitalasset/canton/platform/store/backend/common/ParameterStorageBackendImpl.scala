@@ -10,13 +10,14 @@ import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.store.backend.Conversions.offset
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
   AchsState,
 }
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.withoutNetworkTimeout
 import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
@@ -389,9 +390,23 @@ private[backend] class ParameterStorageBackendImpl(
     }
   }
 
-  override def clearAchsStateAndData(connection: Connection): Unit = {
-    discard(SQL"truncate table lapi_achs_state".execute()(connection))
-    discard(SQL"truncate table lapi_filter_achs_stakeholder".execute()(connection))
+  override def clearAchsStateAndData()(implicit
+      connection: Connection,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Unit =
+    withoutNetworkTimeout {
+      errorLoggingContext.info("Cleaning lapi_achs_state")
+      queryStrategy.cleanTable("lapi_achs_state")
+      errorLoggingContext.info("Cleaning lapi_filter_achs_stakeholder")
+      queryStrategy.cleanTable("lapi_filter_achs_stakeholder")
+    }(connection, errorLoggingContext.noTracingLogger)
+
+  override def vacuumAndReindexAchsTables()(implicit
+      connection: Connection,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Unit = {
+    queryStrategy.vacuumAndReindexTable("lapi_achs_state")
+    queryStrategy.vacuumAndReindexTable("lapi_filter_achs_stakeholder")
   }
 
   private def batchSql(

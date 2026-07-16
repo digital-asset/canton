@@ -56,6 +56,27 @@ class PartitionManagerTest extends AsyncWordSpec with BftSequencerBaseTest {
           partitionName shouldBe s"${tableName}_p3"
       }
     }
+    // this use case is used with newly onboarded nodes
+    "if given uninitialized -1 value, create current partition and the next" in {
+      // testing on common tables (excluding batches table) first.
+      // we see that for each table, we create both the partition for the current epoch and one partition ahead as well
+      inside(
+        newPartitions(partitionSize, EpochNumber(3550), HighestCreatedPartitionNumbers(-1, 50))
+      ) { case (partitions, HighestCreatedPartitionNumbers(36, 50)) =>
+        partitions should have size (12)
+        partitions.collect { case Partition(_, _, 3500, 3600) => } should have size (6)
+        partitions.collect { case Partition(_, _, 3600, 3700) => } should have size (6)
+      }
+
+      // for the batches table we start creating partitions 500 epochs in the past (batch validity) all the way to
+      // 1000 epochs ahead (twice batch validity, which is what we are supposed to support).
+      inside(
+        newPartitions(partitionSize, EpochNumber(3550), HighestCreatedPartitionNumbers(50, -1))
+      ) { case (partitions, HighestCreatedPartitionNumbers(50, 45)) =>
+        partitions should have size (16)
+        forAll(partitions)(p => p.tableName shouldBe PartitionManager.batchesTable)
+      }
+    }
 
     "prune partitions below current epoch number or block number" in {
       // nothing to prune because already pruned
@@ -130,7 +151,7 @@ class PartitionManagerDatabaseTest
     with BftSequencerBaseTest
     with PostgresTest {
 
-  def create() = PartitionManager.create(storage, timeouts, loggerFactory)
+  def create() = PartitionManager.create(storage, timeouts, loggerFactory, None)
 
   override def cleanDb(storage: DbStorage)(implicit
       tc: TraceContext
@@ -157,14 +178,38 @@ class PartitionManagerDatabaseTest
     storage.query(explain, "explain")
   }
 
+  def getPartitionSettings(partitionName: String) = {
+    import storage.api.*
+    storage.query(
+      sql"""select c.reloptions from pg_class c where c.oid = '#$partitionName'::regclass;"""
+        .as[String](GetResult(_.nextString()))
+        .map(_.headOption.getOrElse("")),
+      "get settings",
+    )
+  }
+
+  def getVacuumStats(partitionName: String) = {
+    import storage.api.*
+    storage.query(
+      sql"""select vacuum_count, autovacuum_count from pg_stat_user_tables where relid = '#$partitionName'::regclass;"""
+        .as[(Long, Long)](
+          GetResult(r => (r.nextLong(), r.nextLong()))
+        )
+        .map(_.headOption.getOrElse(fail())),
+      "get manual vacuum stats",
+    )
+  }
+
   "PartitionManagerDatabase" should {
+    lazy val createPartitionManagement = create().futureUnlessShutdown()
+
     "prune and creation of partitions does not error" in {
       val initStore = new PruningManagerInitStore(storage, timeouts, loggerFactory)
       def getMinMaxPartitionNumbers =
         initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
 
       (for {
-        case Some((creator, pruner)) <- create().futureUnlessShutdown()
+        case Some((creator, pruner)) <- createPartitionManagement
 
         partitionSizeEntry <- initStore.latestPartitionSizeEntry
         _ = partitionSizeEntry shouldBe PartitionManager.PartitionSizeEntry(EpochNumber(0), 0, 100)
@@ -175,13 +220,13 @@ class PartitionManagerDatabaseTest
 
         msg <- pruner.prune(EpochNumber(98L), EpochNumber(98L)).futureUnlessShutdown()
         (minMap1, maxMap1) <- getMinMaxPartitionNumbers
-        _ = msg shouldBe "Pruned no partitions at epoch 98"
+        _ = msg should include("Pruned no partitions at epoch 98")
         _ = forAll(minMap1.values)(_ shouldBe (0))
         _ = forAll(maxMap1.values)(_ shouldBe (1))
 
         msg2 <- pruner.prune(EpochNumber(99L), EpochNumber(99L)).futureUnlessShutdown()
         (minMap2, maxMap2) <- getMinMaxPartitionNumbers
-        _ = msg2 shouldBe "Pruned 6 partitions at epoch 99"
+        _ = msg2 should include("Pruned 6 partitions at epoch 99")
         _ = {
           minMap2(PartitionManager.batchesTable) shouldBe (0)
           forAll((minMap2 - PartitionManager.batchesTable).values)(_ shouldBe (1))
@@ -197,6 +242,11 @@ class PartitionManagerDatabaseTest
           maxMap3(PartitionManager.batchesTable) shouldBe (11)
           forAll((maxMap3 - PartitionManager.batchesTable).values)(_ shouldBe (2))
         }
+
+        // checking that custom autovacuum settings are applied to a new partition
+        opts <- getPartitionSettings(s"${PartitionManager.consensusInProgressTable}_p2")
+        _ =
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=\d+,autovacuum_vacuum_insert_scale_factor=\d+,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\.01,autovacuum_vacuum_cost_limit=\d+,autovacuum_vacuum_cost_delay=\d+\}".r
 
         _ <- creator
           .createPartitionsIfNeeded(EpochNumber(200))
@@ -214,7 +264,7 @@ class PartitionManagerDatabaseTest
       val outputStore = new DbOutputMetadataStore(storage, timeouts, loggerFactory)
 
       (for {
-        case Some((creator, _)) <- create().futureUnlessShutdown()
+        case Some((creator, _)) <- createPartitionManagement
 
         // we create 100 partitions
         _ <- creator
@@ -272,6 +322,64 @@ class PartitionManagerDatabaseTest
         result7 <- howManyPartitionsAreSearched(BlockNumber(100))
         _ = result7 shouldBe 1
 
+      } yield succeed).onShutdown(fail())
+    }
+
+    "autovacuum" in {
+      val partitionName = s"${PartitionManager.outputBlocksTable}_p2"
+      (for {
+        case Some((creator, _)) <- createPartitionManagement
+
+        // checking that custom autovacuum settings are applied to a new partition
+        opts <- getPartitionSettings(partitionName)
+        _ =
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=\d+,autovacuum_vacuum_insert_scale_factor=\d+,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\.01,autovacuum_vacuum_cost_limit=\d+,autovacuum_vacuum_cost_delay=\d+\}".r
+
+        _ = eventually() {
+          // we should see that manual vacuum took place (twice instead of once because of how unit tests run everything twice)
+          // and autovacuum does not run
+          getVacuumStats(partitionName).onShutdown(fail()).futureValue shouldBe (2, 0)
+        }
+        _ = creator.close()
+      } yield succeed).onShutdown(fail())
+    }
+  }
+
+}
+
+class PartitionManagerOnboardingTest
+    extends AsyncWordSpec
+    with BftSequencerBaseTest
+    with PostgresTest {
+
+  def create(onboardedSequencerEpochNumber: EpochNumber) =
+    PartitionManager.create(storage, timeouts, loggerFactory, Some(onboardedSequencerEpochNumber))
+
+  override def cleanDb(storage: DbStorage)(implicit
+      tc: TraceContext
+  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
+
+  override def mkDbConfig(basicConfig: DbBasicConfig): DbConfig.Postgres = {
+    val defaultDbConfig = super.mkDbConfig(basicConfig)
+    defaultDbConfig.copy(parameters =
+      DbParametersConfig(partitions = PartitionConfig(initialBftOrdererTablesPartitionSize = 100))
+    )
+  }
+
+  "Onboarding" should {
+    "be able to start up on a specified initial epoch number" in {
+      val initStore = new PruningManagerInitStore(storage, timeouts, loggerFactory)
+      def getMinMaxPartitionNumbers =
+        initStore.queryLowestAndHighestExistingPartitionNumberPerTableName
+      (for {
+        _ <- create(EpochNumber(3500L)).futureUnlessShutdown()
+        (minMap0, maxMap0) <- getMinMaxPartitionNumbers
+        _ = {
+          maxMap0(PartitionManager.batchesTable) shouldBe (45)
+          forAll((maxMap0 - PartitionManager.batchesTable).values)(_ shouldBe (36L))
+          minMap0(PartitionManager.batchesTable) shouldBe (30)
+          forAll((minMap0 - PartitionManager.batchesTable).values)(_ shouldBe (35L))
+        }
       } yield succeed).onShutdown(fail())
     }
   }

@@ -7,11 +7,11 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "3.5.1-snapshot.20260512.14681.0.v677a8b60"
+  val version: String = "3.5.2"
 
   /** The dpm registry to install daml components from.
     */
-  val dpm_registry: String = "europe-docker.pkg.dev/da-images/public-unstable"
+  val dpm_registry: String = "europe-docker.pkg.dev/da-images/public-all"
 
   /** Custom Daml artifacts override version.
     */

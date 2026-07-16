@@ -10,8 +10,8 @@ import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
-import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
@@ -23,6 +23,7 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   PruneUptoInclusiveAndLedgerEnd,
 }
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.CompositeSql
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
@@ -185,7 +186,17 @@ trait ParameterStorageBackend {
   def updateAchsLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
 
   /** Clears all ACHS data (both the state row and the filter data table). */
-  def clearAchsStateAndData(connection: Connection): Unit
+  def clearAchsStateAndData()(implicit
+      connection: Connection,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Unit
+
+  /** WARNING: This should be executed outside a transaction!
+    */
+  def vacuumAndReindexAchsTables()(implicit
+      connection: Connection,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Unit
 }
 
 object ParameterStorageBackend {
@@ -384,7 +395,16 @@ trait EventStorageBackend {
       previousIncompleteReassignmentOffsets: Vector[Offset],
       pruneUpToInclusive: Offset,
       incompleteReassignmentOffsets: Vector[Offset],
+      pruningDbLockMeta: DbLockMeta,
+      contractPruningDbLockMeta: DbLockMeta,
   )(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit
+
+  /** WARNING: This should be executed outside a transaction!
+    */
+  def vacuumAndReindexPruningTable()(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit
@@ -399,15 +419,22 @@ trait EventStorageBackend {
     * @return
     *   The pruned internal_contract_id-s.
     */
-  def pruneContracts()(implicit
+  def pruneContracts(contractPruningDbLockMeta: DbLockMeta)(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Iterable[Long]
 
+  /** WARNING: This should be executed outside a transaction!
+    */
+  def vacuumAndReindexContractPruningTable()(implicit
+      connection: Connection,
+      traceContext: TraceContext,
+  ): Unit
+
   /** Removes all contract candidates from lapi_pruning_contract_candidate table which are not
     * eligible for pruning.
     */
-  def cleanPruningCandidates()(implicit
+  def cleanPruningCandidates(contractPruningDbLockMeta: DbLockMeta)(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit
@@ -419,7 +446,10 @@ trait EventStorageBackend {
     * as candidates, which will be validated and potentially pruned as part of the next pruning
     * Index DB pruning.
     */
-  def addContractPruningCandidatesAfter(eventSeqIdExclusive: Long)(implicit
+  def addContractPruningCandidatesAfter(
+      eventSeqIdExclusive: Long,
+      contractPruningDbLockMeta: DbLockMeta,
+  )(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit
@@ -531,14 +561,21 @@ trait EventStorageBackend {
       connection: Connection
   ): Unit
 
-  def lockExclusivelyPruningProcessingTable(connection: Connection): Unit
+  def lockExclusivelyPruningProcessingTable(
+      pruningDbLockMeta: DbLockMeta
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit
 
-  def lockExclusivelyContractPruningProcessingTable(connection: Connection): Unit
+  def lockExclusivelyContractPruningProcessingTable(
+      contractPruningDbLockMeta: DbLockMeta
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit
 
   /** @return
     *   the missing internal contract IDs
     */
-  def readLockInternalContractIds(internalContractIds: Set[Long])(connection: Connection): Set[Long]
+  def readLockInternalContractIds(
+      internalContractIds: Set[Long],
+      dbLockMeta: DbLockMeta,
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Set[Long]
 
   def writeLockInternalContractIds(whereInternalContractIdExprs: CompositeSql)(
       connection: Connection

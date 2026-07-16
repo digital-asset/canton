@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
@@ -46,11 +46,12 @@ trait LeaderSelectionInitializer[E <: Env[E]] {
 }
 
 object LeaderSelectionInitializer {
+
   def create[E <: Env[E]](
       thisNode: BftNodeId,
       protocolVersion: ProtocolVersion,
       store: OutputMetadataStore[E],
-      timeouts: ProcessingTimeout,
+      initQueryTimeout: config.NonNegativeFiniteDuration,
       failBootstrap: String => TraceContext => Nothing,
       metrics: BftOrderingMetrics,
       loggerFactory: NamedLoggerFactory,
@@ -59,7 +60,7 @@ object LeaderSelectionInitializer {
       thisNode,
       protocolVersion,
       store,
-      timeouts,
+      initQueryTimeout,
       failBootstrap,
       metrics,
       loggerFactory,

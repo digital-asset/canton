@@ -2490,14 +2490,14 @@ object LedgerApiCommands {
 
     final case class UpdateAccount(
         accountId: String,
-        balance: Option[Long],
+        balanceDelta: Option[Long],
         deduplicationId: String,
     ) extends BaseCommand[
           UpdateAccountRequest,
           UpdateAccountResponse,
         ] {
       override protected def createRequest(): Either[String, UpdateAccountRequest] =
-        Right(UpdateAccountRequest(accountId, balance, deduplicationId))
+        Right(UpdateAccountRequest(accountId, balanceDelta, deduplicationId))
 
       override protected def submitRequest(
           service: TrafficServiceStub,

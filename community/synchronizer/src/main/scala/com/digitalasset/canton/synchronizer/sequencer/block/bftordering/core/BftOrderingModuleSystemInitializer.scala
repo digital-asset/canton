@@ -127,7 +127,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           P2PConnectionEventListener,
           ModuleRef[BftOrderingMessage],
       ) => P2PNetworkManagerT,
-  ): SystemInitializationResult[
+  )(implicit traceContext: TraceContext): SystemInitializationResult[
     E,
     P2PNetworkManagerT,
     BftOrderingMessage,
@@ -138,8 +138,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       node,
       synchronizerProtocolVersion,
       stores.outputStore,
-      timeouts,
-      msg => implicit context => failBootstrap(msg),
+      config.initQueryTimeout,
+      msg => context => failBootstrap(msg)(context),
       metrics,
       loggerFactory,
     )
@@ -234,12 +234,15 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             bootstrapTopologyInfo.thisNode,
             isGenesis = initialEpoch == Bootstrap.BootstrapEpochNumber,
             p2pNetworkOutModuleStateFactory(bootstrapTopologyInfo.currentMembership),
+            random,
+            clock,
             stores.p2pEndpointsStore,
             metrics,
             dependencies,
             loggerFactory,
             timeouts,
             config.blockingDbReadTimeout,
+            config.sendBlacklistTtl,
           )
           (p2pNetworkOutModule, p2pNetworkOutModule.p2pNetworkManager)
         },
@@ -290,7 +293,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             clock,
             metrics,
             segmentModuleRefFactory,
-            random,
             dependencies,
             loggerFactory,
             timeouts,
@@ -329,8 +331,9 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
   private def fetchBootstrapTopologyInfo(
       moduleSystem: ModuleSystem[E],
       leaderSelectionPolicyFactory: LeaderSelectionInitializer[E],
+  )(implicit
+      traceContext: TraceContext
   ): (EpochNumber, OrderingTopologyInfo[E], BlacklistLeaderSelectionPolicyState) = {
-    import TraceContext.Implicits.Empty.*
 
     val bti @ BootstrapTopologyInfo(
       initialEpochNumber,
@@ -340,7 +343,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     ) =
       getInitialAndPreviousTopologyQueryTimestamps(moduleSystem)
 
-    logger.debug(s"Retrieved bootstrap topologies timestamps: $bti")
+    logger.info(s"Retrieved bootstrap topologies timestamps: $bti")
 
     val (initialTopology, initialCryptoProvider) =
       getOrderingTopologyAt(moduleSystem, initialTopologyQueryTimestampO, "initial")
@@ -483,7 +486,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         topologyQueryTimestampO,
         checkPendingChanges = false,
       ),
-      s"Fetch $topologyDesignation ordering topology for bootstrap",
+      s"Fetching $topologyDesignation ordering topology for bootstrap",
     ).getOrElse(failBootstrap(s"Failed to fetch $topologyDesignation ordering topology"))
 
   private def reconstructOwnActivationTime(
@@ -493,7 +496,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     awaitFuture(
       moduleSystem,
       orderingTopologyProvider.getFirstKnownAt(headTopology.activationTime),
-      "Fetch this node's activation time for onboarding crash recovery",
+      "Fetching this node's activation time for onboarding crash recovery",
     ).flatMap(_.get(node))
   }
 
@@ -506,7 +509,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     awaitFuture(
       moduleSystem,
       stores.epochStore.latestEpoch(includeInProgress),
-      s"Fetch latest${if (includeInProgress) " in-progress " else " "}epoch",
+      s"Fetching latest${if (includeInProgress) " in-progress " else " "}epoch",
     )
 
   private def failBootstrap(msg: String)(implicit traceContext: TraceContext) = {
@@ -519,10 +522,10 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       future: E#FutureUnlessShutdownT[X],
       description: String,
   )(implicit traceContext: TraceContext): X = {
-    logger.debug(description)
+    logger.info(description)
     moduleSystem.rootActorContext.blockingAwait(
       future,
-      timeouts.default.asFiniteApproximation,
+      config.initQueryTimeout.underlying,
     )
   }
 }

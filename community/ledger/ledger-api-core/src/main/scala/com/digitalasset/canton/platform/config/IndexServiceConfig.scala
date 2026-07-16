@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.config
 
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.typesafe.scalalogging.Logger
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -47,6 +47,12 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   *   the timeout duration for checking if a new OffsetCheckpoint is created
   * @param maxLookupLimit
   *   the maximum limit for contract key lookups. Requests will be capped at this value.
+  * @param contractPruningDbLockTimeout
+  *   This timeout controls how long the system waits to acquire the table lock on the contract
+  *   pruning service table.
+  * @param pruningDbLockTimeout
+  *   This timeout controls how long the system waits to acquire the table lock on the pruning
+  *   service table.
   */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
@@ -75,6 +81,9 @@ final case class IndexServiceConfig(
     contractPruningMaxRetries: Int = IndexServiceConfig.DefaultContractPruningMaxRetries,
     contractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
       IndexServiceConfig.DefaultContractPruningDelayBeforeRetry,
+    contractPruningDbLockTimeout: PositiveFiniteDuration =
+      IndexServiceConfig.DefaultContractPruningDbLockTimeout,
+    pruningDbLockTimeout: PositiveFiniteDuration = IndexServiceConfig.DefaultPruningDbLockTimeout,
     maxLookupLimit: Int = IndexServiceConfig.DefaultMaxLookupLimit,
 )
 
@@ -96,6 +105,10 @@ object IndexServiceConfig {
   val DefaultContractPruningMaxRetries: Int = 10
   val DefaultContractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(2)
+  val DefaultContractPruningDbLockTimeout: PositiveFiniteDuration =
+    PositiveFiniteDuration.ofSeconds(20)
+  val DefaultPruningDbLockTimeout: PositiveFiniteDuration =
+    PositiveFiniteDuration.ofSeconds(20)
   val DefaultMaxLookupLimit: Int = 1000
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {

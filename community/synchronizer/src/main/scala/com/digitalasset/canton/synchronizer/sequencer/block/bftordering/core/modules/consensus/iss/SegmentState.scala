@@ -288,13 +288,35 @@ class SegmentState(
     } else if (inViewChange) {
       // if we are in a view change, we help others make progress to complete the view change
       val vcState = viewChangeState(currentViewNumber)
-      val msgsToRetransmit = remoteStatus match {
+      val msgsToRetransmit: Seq[SignedMessage[PbftViewChangeMessage]] = remoteStatus match {
         case status if status.viewNumber < currentViewNumber =>
           val newView = highestNewViewWeKnow.filter(_.message.viewNumber >= status.viewNumber)
-          // if remote node is in an earlier view change, retransmit all view change messages we have
-          (vcState.viewChangeMessagesToRetransmit(Seq.empty): Seq[
-            SignedMessage[PbftViewChangeMessage]
-          ]) ++ newView.toList
+          // if remote node is in an earlier view change, retransmit view change messages to help go up in view number
+          newView match {
+            case Some(signedNewView) =>
+              // should return new view message plus all view change messages above it
+              signedNewView +: (signedNewView.message.viewNumber + 1 to currentViewNumber)
+                .flatMap[SignedMessage[PbftViewChangeMessage]] { viewNumber =>
+                  viewChangeState
+                    .get(ViewNumber(viewNumber))
+                    .toList
+                    .flatMap(_.viewChangeMessagesToRetransmit(Seq.empty))
+                }
+            case None =>
+              // should return all view change messages between originating node's view number and current latest view
+              (status.viewNumber to currentViewNumber).flatMap { viewNumber =>
+                val viewChangeMessagesPresent = status match {
+                  case ConsensusStatus.SegmentStatus.InViewChange(_, messages, _)
+                      if (viewNumber == status.viewNumber) =>
+                    messages
+                  case _ => Seq.empty
+                }
+                viewChangeState
+                  .get(ViewNumber(viewNumber))
+                  .toList
+                  .flatMap(_.viewChangeMessagesToRetransmit(viewChangeMessagesPresent))
+              }
+          }
         case ConsensusStatus.SegmentStatus.InViewChange(_, remoteVcMsgs, _) =>
           // if remote node is in the same view change, retransmit view change messages we have that they don't
           vcState.viewChangeMessagesToRetransmit(remoteVcMsgs)

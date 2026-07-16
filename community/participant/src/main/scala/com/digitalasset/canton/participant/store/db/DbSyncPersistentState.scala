@@ -7,7 +7,7 @@ import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.data.SynchronizerPredecessor
-import com.digitalasset.canton.lifecycle.LifeCycle
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
@@ -34,7 +34,7 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
-import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ReassignmentTag
 
 import scala.concurrent.ExecutionContext
@@ -188,6 +188,11 @@ class DbPhysicalSyncPersistentState(
       parameters.batchingConfig,
       loggerFactory,
     )
+
+  override protected def doInitialize()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    connectivityStatusStore.initialize()
 
   override def close(): Unit =
     LifeCycle.close(

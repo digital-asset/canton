@@ -9,6 +9,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.store.SynchronizerConnectivityStatusStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -26,9 +27,25 @@ trait DbSynchronizerConnectivityStatusStoreTest
   }
 
   "DbSynchronizerConnectivityStatusStore" should {
-    behave like synchronizerConnectivityStatusStore(synchronizerId =>
-      new DbSynchronizerConnectivityStatusStore(synchronizerId, storage, timeouts, loggerFactory)
-    )
+    behave like synchronizerConnectivityStatusStore { synchronizerId =>
+      val store =
+        new DbSynchronizerConnectivityStatusStore(synchronizerId, storage, timeouts, loggerFactory)
+      store.initialize().futureValueUS
+      store
+    }
+
+    "throw an error if it is used without initialization" in {
+      val store = new DbSynchronizerConnectivityStatusStore(
+        DefaultTestIdentities.physicalSynchronizerId,
+        storage,
+        timeouts,
+        loggerFactory,
+      )
+      loggerFactory.assertThrowsAndLogs[IllegalStateException](
+        store.isTopologyInitialized,
+        _.throwable.value.getLocalizedMessage should include regex ("Invalid read access to .* before it has been initialized."),
+      )
+    }
   }
 }
 

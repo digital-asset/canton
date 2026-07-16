@@ -20,6 +20,7 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsState,
   LedgerEnd,
 }
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.backend.{
   CompletionStorageBackend,
   EventStorageBackend,
@@ -54,6 +55,7 @@ private[platform] final case class InitializeParallelIngestion(
     postProcessor: (Vector[PostPublishData], TraceContext) => Future[Unit],
     achsStateCache: AchsStateCache,
     achsConfig: Option[AchsConfig],
+    contractPruningDbLockMeta: DbLockMeta,
     metrics: LedgerApiServerMetrics,
     loggerFactory: NamedLoggerFactory,
 )(implicit materializer: Materializer)
@@ -88,7 +90,8 @@ private[platform] final case class InitializeParallelIngestion(
         eventStorageBackend.addContractPruningCandidatesAfter(
           eventSeqIdExclusive = ledgerEnd
             .map(_.lastEventSeqId)
-            .getOrElse(-1L) // if no watermark we gather candidates from all events
+            .getOrElse(-1L), // if no watermark we gather candidates from all events
+          contractPruningDbLockMeta = contractPruningDbLockMeta,
         )(
           connection = connection,
           traceContext = loggingContext.traceContext,
@@ -126,9 +129,17 @@ private[platform] final case class InitializeParallelIngestion(
       _ <- dbDispatcher.executeSql(metrics.indexer.postProcessingEndIngestion)(
         parameterStorageBackend.updatePostProcessingEnd(ledgerEnd.map(_.lastOffset))
       )
-      achsState <- dbDispatcher.executeSql(metrics.indexer.achsStateInitialization)(
+      (achsState, achsRequiresVacuumingAndReindexing) <- dbDispatcher.executeSql(
+        metrics.indexer.achsStateInitialization
+      )(
         initializeAchsState(achsConfig)
       )
+      _ <-
+        if (achsRequiresVacuumingAndReindexing) {
+          dbDispatcher.executeSql(metrics.indexer.vacuumAndReindexAchsState)(implicit c =>
+            parameterStorageBackend.vacuumAndReindexAchsTables()
+          )
+        } else Future.unit
       _ <- initializeInMemoryState(ledgerEnd, achsState)
     } yield {
       logger.info(s"Indexer initialized at $ledgerEnd with ACHS state $achsState")
@@ -145,24 +156,26 @@ private[platform] final case class InitializeParallelIngestion(
       achsConfigO: Option[AchsConfig]
   )(connection: Connection)(implicit
       loggingContext: LoggingContextWithTrace
-  ): AchsState =
+  ): (AchsState, Boolean) =
     (parameterStorageBackend.fetchAchsState(connection), achsConfigO) match {
       case (None, None) =>
         logger.info(s"ACHS State not found, also not configured")
-        AchsState.empty
+        AchsState.empty -> false
 
       case (None, Some(_)) =>
         logger.info(s"ACHS State not found, creating new empty state as ACHS is enabled")
+        // Clearing ACHS data first to start from scratch
+        parameterStorageBackend.clearAchsStateAndData()(connection, implicitly)
         parameterStorageBackend.insertAchsState(AchsState.empty)(connection)
-        AchsState.empty
+        AchsState.empty -> true
 
       case (Some(_), None) =>
         logger.info("ACHS is disabled, clearing existing ACHS data")
         // Clearing ACHS data here is safe because configuration is not changing dynamically.
         // Otherwise, clearing could race with ACS retrieval that relies on ACHS data,
         // as pointers would be updated after the data is already evicted.
-        parameterStorageBackend.clearAchsStateAndData(connection)
-        AchsState.empty
+        parameterStorageBackend.clearAchsStateAndData()(connection, implicitly)
+        AchsState.empty -> true
 
       case (Some(existingState), Some(_)) =>
         // snapshot exists (behind or ahead), use existing state.
@@ -173,7 +186,7 @@ private[platform] final case class InitializeParallelIngestion(
         eventStorageBackend.deletePartiallyIngestedAchsData(
           fromExclusiveEventSeqId = existingState.lastPointers.lastPopulated
         )(connection)
-        existingState
+        existingState -> false
     }
 
   private def initializeAchs(

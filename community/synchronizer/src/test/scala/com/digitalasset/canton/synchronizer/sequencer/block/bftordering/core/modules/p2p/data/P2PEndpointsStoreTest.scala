@@ -28,10 +28,10 @@ trait P2PEndpointsStoreTest extends AsyncWordSpec {
         for {
           updated1 <- store.addEndpoint(endpoint1)
           updated2 <- store.addEndpoint(endpoint1)
-          list1 <- store.listEndpoints
+          list1 <- store.listEndpoints()
 
           updated3 <- store.addEndpoint(endpoint3)
-          list2 <- store.listEndpoints
+          list2 <- store.listEndpoints()
         } yield {
           list1 should contain only endpoint1
           list2 should contain theSameElementsInOrderAs Seq(endpoint1, endpoint3)
@@ -45,11 +45,11 @@ trait P2PEndpointsStoreTest extends AsyncWordSpec {
         val store = createStore()
         for {
           updated1 <- store.addEndpoint(endpoint1)
-          list1 <- store.listEndpoints
+          list1 <- store.listEndpoints()
           updated2 <- store.removeEndpoint(endpoint1.id)
-          list2 <- store.listEndpoints
+          list2 <- store.listEndpoints()
           updated3 <- store.removeEndpoint(endpoint1.id)
-          list3 <- store.listEndpoints
+          list3 <- store.listEndpoints()
         } yield {
           list1 should contain only endpoint1
           list2 should be(empty)
@@ -65,11 +65,11 @@ trait P2PEndpointsStoreTest extends AsyncWordSpec {
         for {
           updated1 <- store.addEndpoint(endpoint1)
           updated2 <- store.addEndpoint(endpoint2)
-          list1 <- store.listEndpoints
+          list1 <- store.listEndpoints()
           _ <- store.clearAllEndpoints()
-          list2 <- store.listEndpoints
+          list2 <- store.listEndpoints()
           _ <- store.clearAllEndpoints()
-          list3 <- store.listEndpoints
+          list3 <- store.listEndpoints()
         } yield {
           list1 should contain theSameElementsInOrderAs Seq[P2PEndpoint](endpoint1, endpoint2)
           list2 should be(empty)

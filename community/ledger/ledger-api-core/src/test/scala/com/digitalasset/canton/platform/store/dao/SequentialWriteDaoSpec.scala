@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
 import com.digitalasset.canton.ledger.participant.state.{SynchronizerIndex, Update}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
   LedgerEnd,
@@ -259,9 +259,17 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     ): Unit =
       throw new UnsupportedOperationException
 
-    override def clearAchsStateAndData(connection: Connection): Unit =
+    override def clearAchsStateAndData()(implicit
+        connection: Connection,
+        errorLoggingContext: ErrorLoggingContext,
+    ): Unit =
       throw new UnsupportedOperationException
 
+    override def vacuumAndReindexAchsTables()(implicit
+        connection: Connection,
+        errorLoggingContext: ErrorLoggingContext,
+    ): Unit =
+      throw new UnsupportedOperationException
   }
 }
 

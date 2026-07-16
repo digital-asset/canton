@@ -6,10 +6,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 import cats.{Applicative, Traverse}
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config
 import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelApplicativeFutureUnlessShutdown
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework
@@ -40,11 +41,6 @@ import scala.concurrent.duration.*
 import scala.util.Try
 
 object PekkoModuleSystem {
-
-  // Should be a few millis, but giving it a good margin to be safe.
-  private val PekkoActorSystemStartupMaxDuration = 15.seconds
-
-  private val BlockingOperationTimeout = 30.seconds
 
   private def pekkoBehavior[MessageT](
       moduleSystem: PekkoModuleSystem,
@@ -95,11 +91,11 @@ object PekkoModuleSystem {
         .supervise(
           Behaviors
             .receiveMessage[ModuleControl[PekkoEnv, MessageT]] {
-              case SetBehavior(m: framework.Module[PekkoEnv, MessageT], ready) =>
+              case setBehavior @ SetBehavior(m: framework.Module[PekkoEnv, MessageT], ready, _) =>
                 maybeModule.foreach(_.close())
                 maybeModule = Some(m)
                 if (ready)
-                  m.ready(pekkoContext.self)
+                  m.ready(pekkoContext.self)(setBehavior.traceContext)
                 // Emit queue stats for postponed messages that were awaiting a module
                 sendsAwaitingAModule.foreach {
                   case Send(
@@ -234,7 +230,7 @@ object PekkoModuleSystem {
     override def setModule[OtherModuleMessageT](
         moduleRef: PekkoModuleRef[OtherModuleMessageT],
         module: framework.Module[PekkoEnv, OtherModuleMessageT],
-    ): Unit =
+    )(implicit traceContext: TraceContext): Unit =
       moduleSystem.setModule(moduleRef, module)
 
     override protected def pipeToSelfInternal[X](
@@ -272,9 +268,6 @@ object PekkoModuleSystem {
           case None => NoOp()
         }
       }
-
-    override def blockingAwait[X](actionAndFuture: PekkoFutureUnlessShutdown[X]): X =
-      blockingAwait(actionAndFuture, BlockingOperationTimeout)
 
     override def blockingAwait[X](
         actionAndFuture: PekkoFutureUnlessShutdown[X],
@@ -319,8 +312,10 @@ object PekkoModuleSystem {
       isOrdererHealthy.set(false)
     }
 
-    override def become(module: framework.Module[PekkoEnv, MessageT]): Unit =
-      underlying.self ! SetBehavior(module, ready = true)
+    override def become(module: framework.Module[PekkoEnv, MessageT])(implicit
+        traceContext: TraceContext
+    ): Unit =
+      underlying.self ! SetBehavior(module, ready = true, traceContext)
 
     // Note that further messages sent to stopped actors land in the dead letters. Pekko is configured to log them.
     override def stop(onStop: () => Unit): Unit =
@@ -547,8 +542,8 @@ object PekkoModuleSystem {
     override def setModule[AcceptedMessageT](
         moduleRef: PekkoModuleRef[AcceptedMessageT],
         module: framework.Module[PekkoEnv, AcceptedMessageT],
-    ): Unit =
-      moduleRef.ref ! SetBehavior(module, ready = false)
+    )(implicit traceContext: TraceContext): Unit =
+      moduleRef.ref ! SetBehavior(module, ready = false, traceContext)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
@@ -566,6 +561,7 @@ object PekkoModuleSystem {
       ) => PekkoP2PGrpcNetworkManager,
       exitOnFatalFailures: Boolean,
       isOrdererHealthy: AtomicBoolean,
+      initTimeout: config.NonNegativeFiniteDuration,
       metrics: BftOrderingMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -614,10 +610,13 @@ object PekkoModuleSystem {
           BootstrapSetup().withDefaultExecutionContext(executionContext).withConfig(config),
       )
     }
-    // The code within Behaviors.setup will be run as soon as the ActorSystem is created, so
-    // the future below will not take more than a few millis. In this case, waiting is more sensible than
-    // propagating Future values.
-    val result = blocking(Await.result(resultPromise.future, PekkoActorSystemStartupMaxDuration))
+    // Behaviors.setup runs during ActorSystem creation and performs the module system initialization,
+    //  which can be expensive (for example during onboarding). We block here up to `initTimeout`
+    //  for simplicity rather than propagating Future values further up the construction path.
+    val result =
+      initTimeout.await(s"Initializing Pekko module system within $initTimeout")(
+        resultPromise.future
+      )(ErrorLoggingContext.fromTracedLogger(logger))
     PekkoModuleSystemInitResult(
       actorSystem,
       result,

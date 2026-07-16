@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.store.DbSupport.{
   ParticipantDataSourceConfig,
 }
 import com.digitalasset.canton.platform.store.backend.StorageBackendFactory
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, LfValueTranslation}
@@ -103,6 +104,12 @@ object JdbcIndexer {
           postProcessor = postProcessor,
           achsStateCache = inMemoryState.achsStateCache,
           achsConfig = config.achsConfig,
+          contractPruningDbLockMeta = DbLockMeta(
+            lockDescription = "exclusive table lock on contract pruning table",
+            timeoutConfig = "indexer-config.contract-pruning-db-lock-timeout",
+            timeoutMillis = config.contractPruningDbLockTimeout.underlying.toMillis.toInt,
+            timer = metrics.indexer.acquireContractPruningLock,
+          ),
           metrics = metrics,
           loggerFactory = loggerFactory,
         ),
@@ -135,6 +142,12 @@ object JdbcIndexer {
           submissionBatchInsertionSize = config.submissionBatchInsertionSize,
           maxTailerBatchSize = config.maxTailerBatchSize,
           postProcessingParallelism = config.postProcessingParallelism,
+          parContractReadRowLock = DbLockMeta(
+            lockDescription = "read row lock of contract table",
+            timeoutConfig = "indexer-config.contract-read-row-db-lock-timeout",
+            timeoutMillis = config.contractReadRowDbLockTimeout.underlying.toMillis.toInt,
+            timer = metrics.indexer.ingestionBlockedByPruningDuration,
+          ),
           achsConfig = config.achsConfig,
           maxOutputBatchedBufferSize = config.maxOutputBatchedBufferSize,
           metrics = metrics,

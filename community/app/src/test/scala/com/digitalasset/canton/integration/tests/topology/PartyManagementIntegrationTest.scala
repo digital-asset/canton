@@ -12,7 +12,10 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.topology.TopologyManagerError.MappingAlreadyExists
+import com.digitalasset.canton.topology.TopologyManagerError.{
+  MappingAlreadyExists,
+  TopologyStoreUnknown,
+}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId, UniqueIdentifier}
 
@@ -212,9 +215,11 @@ trait PartyManagementIntegrationTest extends CommunityIntegrationTest with Share
         .list(filterParty = "LordSandwich", filterParticipant = "one")
         .map(_.party) shouldBe empty
 
-      participant1.parties.list(synchronizerIds =
-        Set(SynchronizerId.tryFromString("nada::nada"))
-      ) shouldBe empty
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.parties
+          .list(synchronizerIds = Set(SynchronizerId.tryFromString("nada::nada"))),
+        _.shouldBeCantonErrorCode(TopologyStoreUnknown),
+      )
 
       val parties = participant1.parties
         .list(

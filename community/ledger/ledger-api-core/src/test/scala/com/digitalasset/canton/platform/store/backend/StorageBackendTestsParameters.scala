@@ -256,7 +256,11 @@ private[backend] trait StorageBackendTestsParameters
     executeSql(backend.parameter.fetchAchsState) shouldBe Some(achsState2)
 
     // clear the state
-    executeSql(backend.parameter.clearAchsStateAndData)
+    executeSql { c =>
+      c.setAutoCommit(false)
+      backend.parameter.clearAchsStateAndData()(c, implicitly)
+      c.setAutoCommit(true)
+    }
     executeSql(backend.parameter.fetchAchsState) shouldBe None
 
     // updating a non-existing state with validAt fails

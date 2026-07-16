@@ -32,12 +32,26 @@ object DatabaseSelfServiceError {
     case ex: SQLRecoverableException => retryable(ex)
     case ex: SQLTransientException => retryable(ex)
     case ex: SQLNonTransientException => nonRetryable(ex)
-    case ex: PSQLException => if (isRetryablePsqlException(ex)) retryable(ex) else nonRetryable(ex)
+    case ex: PSQLException => checkPSQLException(ex)
     case ex: BatchUpdateException if ex.getCause != null => DatabaseSelfServiceError(ex.getCause)
     case ex: SQLException => nonRetryable(ex)
     // Don't handle other exceptions that can be thrown from non-client interactions (e.g. index initialization)
     case ex => ex
   }
+
+  def isNetworkTimeoutException(exception: PSQLException): Boolean =
+    exception.getSQLState == "08006" && (exception.getCause match {
+      case _: java.net.SocketTimeoutException => true
+      case _ => false
+    })
+
+  def checkPSQLException(exception: PSQLException)(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): StatusRuntimeException =
+    if (isNetworkTimeoutException(exception))
+      IndexErrors.DatabaseErrors.SqlNetworkTimeoutError.Reject(exception).asGrpcError
+    else if (isRetryablePsqlException(exception)) retryable(exception)
+    else nonRetryable(exception)
 
   private def retryable(ex: SQLException)(implicit
       errorLoggingContext: ErrorLoggingContext

@@ -18,6 +18,7 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -1164,6 +1165,7 @@ object PekkoUtil extends HasLoggerName {
     def firstSuccessfulConsumerInitialization: Future[Unit]
 
     def uncommittedQueueSnapshot: Vector[(Long, T)]
+    def healthStatus: HealthStatus
   }
 
   def exponentialRetryWithCap(
@@ -1197,6 +1199,7 @@ object PekkoUtil extends HasLoggerName {
       recoveringQueueMetrics: RecoveringQueueMetrics,
       consumerFactory: Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[T]]],
   ) extends RecoveringFutureQueue[T] {
+
     assert(maxBlockedOffer > 0)
     assert(retryAttemptWarnThreshold > 0)
     assert(retryAttemptErrorThreshold > 0)
@@ -1205,6 +1208,7 @@ object PekkoUtil extends HasLoggerName {
     private val logger = loggerFactory.getLogger(this.getClass)
     private implicit val directEC: ExecutionContext = DirectExecutionContext(logger)
 
+    @volatile
     private var consumer: Consumer[T] = Consumer.InitializationInProgress
 
     private val recoveringQueue: RecoveringQueue[T] = new RecoveringQueue(
@@ -1266,12 +1270,20 @@ object PekkoUtil extends HasLoggerName {
 
     override def done: Future[Done] = donePromise.future
 
+    override def healthStatus: HealthStatus =
+      if (shuttingDown.get()) HealthStatus.unhealthy else isConsumerHealthy
+
+    private def isConsumerHealthy: HealthStatus = consumer match {
+      case Consumer.Initialized(_, consumerHealthStatus) => consumerHealthStatus.get()
+      case _ => HealthStatus.unhealthy
+    }
+
     private def shutdownStepTwo(): Unit = blockingSynchronized {
       logger.info("Shutdown initiated")
       shuttingDown.set(true)
       recoveringQueue.shutdown()
       consumer match {
-        case Consumer.Initialized(c) =>
+        case Consumer.Initialized(c, _) =>
           logger.info("Consumer shutdown initiated")
           c.shutdown()
 
@@ -1286,30 +1298,46 @@ object PekkoUtil extends HasLoggerName {
       }
     }
 
+    private def commitProxy(consumerHealthStatus: AtomicReference[HealthStatus]): Commit = commit =>
+      {
+        consumerHealthStatus.set(HealthStatus.healthy)
+        recoveringQueue.commit(commit)
+      }
+
     private def initializeConsumer(attempt: Int = 1): Unit = blockingSynchronized {
       logger.info("Initializing consumer...")
+      val atomicHealthStatus =
+        new AtomicReference(
+          HealthStatus.unhealthy // At this point we don't know it there will be uncomitted updates when consumer is up. Some late ayncrhonous commit may still arrive from previous consumer that died. We assume unhealthy, it will be updated in consumerInitialized
+        )
       consumer = Consumer.InitializationInProgress
-      consumerFactory(recoveringQueue.commit)(() => shuttingDown.get())
+      consumerFactory(commitProxy(atomicHealthStatus))(() => shuttingDown.get())
         .flatMap { innerFuture =>
           firstSuccessfulConsumerInitializationPromise.trySuccess(()).discard
           innerFuture
         }(directEC)
-        .onComplete(consumerInitialized(_, attempt))(directEC)
+        .onComplete(consumerInitialized(_, attempt, atomicHealthStatus))(directEC)
     }
 
     private def consumerInitialized(
         result: Try[FutureQueueConsumer[T]],
         attempt: Int,
+        consumerHealthStatus: AtomicReference[HealthStatus],
     ): Unit = blockingSynchronized {
       result match {
         case Success(queueConsumer) =>
-          try {
-            recoveringQueue.recover(queueConsumer.fromExclusive)
-          } catch {
-            case t: Throwable =>
-              logger.error(s"Exception caught while recovering: ${t.getMessage}. Shutting down.", t)
-              shutdown()
-          }
+          val haveUncommittedElements =
+            try {
+              recoveringQueue.recover(queueConsumer.fromExclusive)
+            } catch {
+              case t: Throwable =>
+                logger.error(
+                  s"Exception caught while recovering: ${t.getMessage}. Shutting down.",
+                  t,
+                )
+                shutdown()
+                false // We don't care about uncommitted elements when we are going down
+            }
           if (shuttingDown.get()) {
             logger.info(
               "Consumer initialized, but since shutdown already in progress, consumer shutdown initiated"
@@ -1318,13 +1346,17 @@ object PekkoUtil extends HasLoggerName {
             queueConsumer.futureQueue.done.onComplete(consumerTerminated)(directEC)
           } else {
             logger.info("Consumer initialized")
+            if (!haveUncommittedElements) { // If there are no outstanding uncommitted elements, we assume healthy, so idle indexer is healthy
+              consumerHealthStatus.set(HealthStatus.healthy)
+            }
             consumer = Consumer.Initialized(
               new FutureQueuePullProxy(
                 initialEndIndex = queueConsumer.fromExclusive,
                 pull = recoveringQueue.dequeue,
                 delegate = queueConsumer.futureQueue,
                 loggerFactory = loggerFactory,
-              )
+              ),
+              consumerHealthStatus,
             )
             consumer.ifInitialized(
               _.done.onComplete(consumerTerminated)(directEC)
@@ -1387,7 +1419,7 @@ object PekkoUtil extends HasLoggerName {
   sealed trait Consumer[+T] {
     def ifInitialized(f: FutureQueuePullProxy[T] => Unit): Unit =
       this match {
-        case Consumer.Initialized(consumer) => f(consumer)
+        case Consumer.Initialized(consumer, _) => f(consumer)
         case _ => ()
       }
   }
@@ -1397,7 +1429,10 @@ object PekkoUtil extends HasLoggerName {
 
     case object WaitingForRetry extends Consumer[Nothing]
 
-    final case class Initialized[+T](consumer: FutureQueuePullProxy[T]) extends Consumer[T]
+    final case class Initialized[+T](
+        consumer: FutureQueuePullProxy[T],
+        consumerHealthStatus: AtomicReference[HealthStatus],
+    ) extends Consumer[T]
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -1569,8 +1604,12 @@ object PekkoUtil extends HasLoggerName {
           updateMetrics()
         }
 
-    def recover(fromExclusive: Long): Unit = blockingSynchronized {
+    /** @return
+      *   If there were any uncomitted elements
+      */
+    def recover(fromExclusive: Long): Boolean = blockingSynchronized {
       commit(fromExclusive)
+      val ret = uncommitted.nonEmpty
       uncommitted.headOption.foreach { case (uncommittedHeadIndex, _) =>
         assert(
           uncommittedHeadIndex == fromExclusive + 1,
@@ -1583,6 +1622,7 @@ object PekkoUtil extends HasLoggerName {
         .map(_._2)
         .foreach(buffered.prepend)
       updateMetrics()
+      ret
     }
 
     // complete all blocked futures with success (anyway no guarantees that an offered elem makes it through),

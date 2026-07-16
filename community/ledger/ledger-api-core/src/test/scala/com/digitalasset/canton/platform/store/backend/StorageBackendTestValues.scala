@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.daml.metrics.api.noop.NoOpTimer
+import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -16,6 +18,7 @@ import com.digitalasset.canton.platform.store.backend.Conversions.{
   authorizationEventInt,
   participantPermissionInt,
 }
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -676,4 +679,15 @@ private[store] object StorageBackendTestValues extends OptionValues {
           event_sequential_id_last = dtoEventSeqId(dbDtosInOrder.lastOption.value),
         )
       )
+
+  val noOpTimer: NoOpTimer = NoOpTimer(
+    MetricInfo(MetricName("test"), "test", MetricQualification.Debug)
+  )
+  val testDbLockMeta: DbLockMeta = DbLockMeta(
+    lockDescription = "test",
+    timeoutConfig = "test",
+    timeoutMillis = 2000,
+    timer = noOpTimer,
+  )
+
 }

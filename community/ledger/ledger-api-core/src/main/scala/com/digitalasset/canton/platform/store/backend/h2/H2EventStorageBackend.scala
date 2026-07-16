@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.platform.store.backend.h2
 
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
 import com.digitalasset.canton.platform.store.backend.common.{
   ComposableQuery,
   EventStorageBackendTemplate,
@@ -25,15 +26,21 @@ class H2EventStorageBackend(
     ) {
 
   // no need for locking in H2 as we access H2 DB on a single connection
-  override def lockExclusivelyPruningProcessingTable(connection: Connection): Unit = ()
+  override def lockExclusivelyPruningProcessingTable(
+      pruningDbLockMeta: DbLockMeta
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit = ()
 
   // no need for locking in H2 as we access H2 DB on a single connection
-  override def lockExclusivelyContractPruningProcessingTable(connection: Connection): Unit = ()
+  override def lockExclusivelyContractPruningProcessingTable(
+      contractPruningDbLockMeta: DbLockMeta
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit = ()
 
   // no need for locking in H2 as we access H2 DB on a single connection
-  override def readLockInternalContractIds(internalContractIds: Set[Long])(
-      connection: Connection
-  ): Set[Long] = Set.empty
+  override def readLockInternalContractIds(
+      internalContractIds: Set[Long],
+      dbLockMeta: DbLockMeta,
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Set[Long] =
+    Set.empty
 
   // no need for locking in H2 as we access H2 DB on a single connection
   override def writeLockInternalContractIds(
