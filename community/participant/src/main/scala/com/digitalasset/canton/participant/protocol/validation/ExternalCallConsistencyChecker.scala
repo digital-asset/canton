@@ -6,13 +6,9 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.Order
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.{ParticipantTransactionView, ViewPosition}
+import com.digitalasset.canton.data.ExternalCallPayloadDescription.{byteCount, hexPayloadSize}
+import com.digitalasset.canton.data.{ExternalCallKey, ParticipantTransactionView, ViewPosition}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.participant.util.ExternalCallPayloadDescription.{
-  byteCount,
-  hexPayloadSize,
-}
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
@@ -49,7 +45,7 @@ object ExternalCallConsistencyChecker {
       .orElseBy(_.callIndex.unwrap)
 
   final case class Inconsistency(
-      key: DAMLe.ExternalCallKey,
+      key: ExternalCallKey,
       outputs: Set[Bytes],
       occurrences: Set[ExternalCallOccurrence],
   ) extends PrettyPrinting {
@@ -108,7 +104,7 @@ object ExternalCallConsistencyChecker {
     *   [[com.digitalasset.canton.data.ViewParticipantData.ViewExternalCallResult]].
     */
   private final case class VisibleExternalCallOccurrence(
-      key: DAMLe.ExternalCallKey,
+      key: ExternalCallKey,
       output: Bytes,
       occurrence: ExternalCallOccurrence,
       checkingParties: Set[LfPartyId],
@@ -127,13 +123,13 @@ object ExternalCallConsistencyChecker {
     import scala.math.Ordering.Implicits.seqOrdering
     implicit val occurrenceOrdering: Ordering[ExternalCallOccurrence] = orderExternalCallOccurrence
     Ordering
-      .by[Inconsistency, DAMLe.ExternalCallKey](_.key)
+      .by[Inconsistency, ExternalCallKey](_.key)
       .orElseBy(_.outputs)(orderOutputSets)
       .orElseBy(_.occurrences.toSeq.sorted)
   }
 
   private def inconsistencyFor(
-      key: DAMLe.ExternalCallKey,
+      key: ExternalCallKey,
       outputsAndOccurrences: Seq[(Bytes, ExternalCallOccurrence)],
   ): Option[Inconsistency] = {
     val occurrencesByOutput = outputsAndOccurrences.groupMap(_._1)(_._2)
@@ -159,7 +155,7 @@ object ExternalCallConsistencyChecker {
             externalCallResult.callIndex,
           )
           VisibleExternalCallOccurrence(
-            DAMLe.ExternalCallKey.fromResult(externalCallResult.result),
+            ExternalCallKey.fromResult(externalCallResult.result),
             externalCallResult.result.output,
             occurrence,
             externalCallResult.checkingParties,

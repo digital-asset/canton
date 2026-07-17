@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
+import com.digitalasset.canton.data.ExternalCallKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Bytes
 
 trait ExternalCallValidator {
   def validate(
-      key: DAMLe.ExternalCallKey,
+      key: ExternalCallKey,
       recordedOutput: Bytes,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ExternalCallValidator.Result]
 }

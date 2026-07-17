@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -13,7 +14,14 @@ final case class ExtensionCallError(
     message: String,
     requestId: Option[String],
     retryable: Boolean,
-)
+) extends PrettyPrinting {
+  override protected def pretty: Pretty[ExtensionCallError] = prettyOfClass(
+    param("status code", _.statusCode),
+    param("message", _.message.doubleQuoted),
+    paramIfDefined("request id", _.requestId.map(_.singleQuoted)),
+    param("retryable", _.retryable),
+  )
+}
 
 /** Result of validating an extension service at startup. */
 sealed trait ExtensionValidationResult extends Product with Serializable

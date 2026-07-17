@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.extension
 
+import com.digitalasset.canton.data.ExternalCallKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
-import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Bytes
@@ -19,7 +19,7 @@ class ExtensionServiceExternalCallValidator(
     extends ExternalCallValidator {
 
   override def validate(
-      key: DAMLe.ExternalCallKey,
+      key: ExternalCallKey,
       recordedOutput: Bytes,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ExternalCallValidator.Result] =
     extensionServiceManager
@@ -66,7 +66,7 @@ object ExtensionServiceExternalCallValidator {
   private val unconfigured: ExternalCallValidator =
     new ExternalCallValidator {
       override def validate(
-          key: DAMLe.ExternalCallKey,
+          key: ExternalCallKey,
           recordedOutput: Bytes,
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[ExternalCallValidator.Result] =
         FutureUnlessShutdown.pure(

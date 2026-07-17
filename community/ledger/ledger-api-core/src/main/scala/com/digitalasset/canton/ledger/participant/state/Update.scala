@@ -7,7 +7,7 @@ import com.daml.logging.entries.{LoggingEntry, LoggingValue, ToLoggingValue}
 import com.digitalasset.base.error.GrpcStatuses
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.RejectionReasonTemplate
 import com.digitalasset.canton.ledger.participant.state.Update.EmptyAcsPublicationRequired.{
@@ -704,15 +704,9 @@ object Update {
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       payload: ByteString,
+      updateId: UpdateId,
   )(implicit override val traceContext: TraceContext)
       extends SequencedEventUpdate {
-
-    lazy val updateId: UpdateId = {
-      val builder = Hash.build(HashPurpose.AcsCommitmentUpdateId, HashAlgorithm.Sha256)
-      builder.addString(synchronizerId.toProtoPrimitive)
-      builder.addLong(recordTime.toProtoPrimitive)
-      UpdateId(builder.finish())
-    }
 
     override protected def pretty: Pretty[ReceivedAcsCommitment] = ReceivedAcsCommitment.pretty
   }

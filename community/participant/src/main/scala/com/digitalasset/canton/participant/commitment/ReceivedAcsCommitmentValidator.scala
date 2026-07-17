@@ -5,7 +5,13 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
+import com.digitalasset.canton.crypto.{
+  Hash,
+  HashAlgorithm,
+  HashPurpose,
+  SyncCryptoApi,
+  SyncCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.Update.ReceivedAcsCommitment
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -16,6 +22,7 @@ import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.protocol.v30 as v30participant
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
+import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.protocol.messages.AcsCommitmentProtocolMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.sequencing.{HandlerResult, UnthrottledImmediate}
@@ -54,6 +61,18 @@ object ReceivedAcsCommitmentValidator {
       publish.apply(None)
       HandlerResult.done
     }
+  }
+
+  def updateId(
+      localParticipantId: ParticipantId,
+      synchronizerId: PhysicalSynchronizerId,
+      recordTime: CantonTimestamp,
+  ): UpdateId = {
+    val builder = Hash.build(HashPurpose.AcsCommitmentUpdateId, HashAlgorithm.Sha256)
+    builder.addString(localParticipantId.toProtoPrimitive)
+    builder.addString(synchronizerId.toProtoPrimitive)
+    builder.addLong(recordTime.toProtoPrimitive)
+    UpdateId(builder.finish())
   }
 }
 
@@ -157,12 +176,16 @@ class ReceivedAcsCommitmentValidatorImpl(
     val serializedMessages =
       ReceivedAcsCommitments(messages).toByteString(ReleaseProtocolVersion.acsCommitmentRedesign.v)
     ReceivedAcsCommitment(
-      physicalSynchronizerId.logical,
-      timestamp,
-      serializedMessages,
+      synchronizerId = physicalSynchronizerId.logical,
+      recordTime = timestamp,
+      payload = serializedMessages,
+      updateId = ReceivedAcsCommitmentValidator.updateId(
+        localParticipantId = participantId,
+        synchronizerId = physicalSynchronizerId,
+        recordTime = timestamp,
+      ),
     )
   }
-
 }
 
 /** Contains the [[com.digitalasset.canton.protocol.messages.AcsCommitmentProtocolMessage]]s that

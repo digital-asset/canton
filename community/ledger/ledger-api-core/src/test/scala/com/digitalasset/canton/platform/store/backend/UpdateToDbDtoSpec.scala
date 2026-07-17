@@ -2891,6 +2891,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         synchronizerId = someSynchronizerId1,
         recordTime = recordTime,
         payload = payload,
+        updateId = TestUpdateId("ReceivedAcsCommitment"),
       )
       val dtos = updateToDtos(update)
 
