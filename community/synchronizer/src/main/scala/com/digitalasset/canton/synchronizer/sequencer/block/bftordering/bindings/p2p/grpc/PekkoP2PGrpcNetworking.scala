@@ -61,6 +61,7 @@ final class PekkoP2PNetworkRef(
 ) extends P2PNetworkRef[BftOrderingMessage]
     with NamedLogging {
 
+  outstandingMessages.incrementAndGet().discard
   connectionManagingActorRef ! Initialize
 
   override def toString: String = this.getClass.getSimpleName + s"($actorName)"
@@ -197,6 +198,7 @@ object PekkoP2PGrpcNetworking {
               )(metricsContext)
 
             case Initialize =>
+              outstandingMessages.decrementAndGet()
               logger.debug(s"Connection-managing actor $actorName received Initialize")
 
             case _ =>
@@ -233,6 +235,7 @@ object PekkoP2PGrpcNetworking {
                     sendInstant = Instant.now,
                     maybeDelay = Some(SendRetryDelay),
                   )
+                  outstandingMessages.incrementAndGet().discard
                   context
                     .scheduleOnce(SendRetryDelay, target = context.self, delayedMessage)
                     .discard
@@ -252,6 +255,7 @@ object PekkoP2PGrpcNetworking {
                   s"Connection-managing actor $actorName " +
                     s"couldn't yet obtain connection for Initialize, retrying it in $SendRetryDelay"
                 )
+                outstandingMessages.incrementAndGet().discard
                 context.scheduleOnce(SendRetryDelay, target = context.self, message).discard
                 metrics.p2p.send.sendsRetried.inc()(MetricsContext.Empty)
 
@@ -324,6 +328,7 @@ object PekkoP2PGrpcNetworking {
                           s"attempt $newAttemptNumber out of $MaxAttempts",
                         exception,
                       )
+                      outstandingMessages.incrementAndGet().discard
                       pekkoActorContext
                         .scheduleOnce(
                           SendRetryDelay,

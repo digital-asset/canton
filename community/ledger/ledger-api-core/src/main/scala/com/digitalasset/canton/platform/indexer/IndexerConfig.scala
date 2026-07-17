@@ -50,6 +50,10 @@ final case class IndexerConfig(
     disableMonotonicityChecks: Boolean = false,
     postgresDataSource: PostgresDataSourceConfig = DefaultPostgresDataSourceConfig,
     achsConfig: Option[AchsConfig] = DefaultAchsConfig,
+    contractReadRowDbLockTimeout: config.PositiveFiniteDuration =
+      DefaultContractReadRowDbLockTimeout,
+    contractPruningDbLockTimeout: config.PositiveFiniteDuration =
+      DefaultContractPruningDbLockTimeout,
 )
 
 object IndexerConfig {
@@ -129,8 +133,12 @@ object IndexerConfig {
   val DefaultQueueRecoveryRetryAttemptWarnThreshold: Int = 50
   val DefaultQueueRecoveryRetryAttemptErrorThreshold: Int = 100
   val DefaultPostgresDataSourceConfig: PostgresDataSourceConfig =
-    PostgresDataSourceConfig(networkTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(20)))
+    PostgresDataSourceConfig(networkTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(40)))
   val DefaultAchsConfig: Option[AchsConfig] = None
+  val DefaultContractReadRowDbLockTimeout: config.PositiveFiniteDuration =
+    config.PositiveFiniteDuration.ofSeconds(20)
+  val DefaultContractPruningDbLockTimeout: config.PositiveFiniteDuration =
+    config.PositiveFiniteDuration.ofSeconds(20)
 
   /** Configuration for the Active Contracts Head Snapshot (ACHS). See
     * [[com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsState]] for more.

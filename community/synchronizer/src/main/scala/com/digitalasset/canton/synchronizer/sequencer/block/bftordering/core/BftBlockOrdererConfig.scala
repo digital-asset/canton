@@ -35,6 +35,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferTimeout,
+  DefaultInitQueryTimeout,
+  DefaultInitTimeout,
   DefaultMaxBatchCreationInterval,
   DefaultMaxBatchesPerProposal,
   DefaultMaxMempoolQueueSize,
@@ -47,6 +49,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
   DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
+  DefaultSendBlacklistTtl,
   DefaultSequencerCoreSubscriptionConfig,
   P2PNetworkConfig,
   SequencerCoreSubscriptionConfig,
@@ -62,6 +65,12 @@ import scala.concurrent.duration.*
 
 /** Configuration class for the BFT Block Orderer.
   *
+  * @param segmentLengthForPv34
+  *   Optionally, the number of blocks per segment (only taken into account in Protocol Version 34).
+  *   If set to [[scala.None]], the default epoch length is used.
+  * @param leaderSelectionPolicyConfigForPv34
+  *   The leader selection policy to enforce in the presence of View Changes of segments (only taken
+  *   into account in Protocol Version 34).
   * @param maxRequestPayloadBytes
   *   The maximum number of bytes allowed per individual request submitted by clients
   * @param maxMempoolQueueSize
@@ -87,6 +96,9 @@ import scala.concurrent.duration.*
   * @param availabilityDisseminationPatience
   *   The amount of time that the availability module waits for a dissemination acknowledgement from
   *   a peer before re-sending the batch. If `None`, re-sending is disabled.
+  * @param availabilityMinProposalCreationDelay
+  *   The minimum delay between consecutive proposal creations in the availability module. This
+  *   prevents the node from creating proposals too frequently.
   * @param maxBatchesPerBlockProposal
   *   The maximum number of batches per block proposal (pre-prepare). Needs to be the same across
   *   the network for the BFT time assumptions to hold.
@@ -116,14 +128,33 @@ import scala.concurrent.duration.*
   *   up to receiving all the corresponding batches.
   * @param outputFetchTimeout
   *   The baseline timeout that a node's availability module will wait while fetching batch data
-  *   from a peer before giving up and trying a different peer.
+  *   from a peer before giving up and trying a different peer. Timeouts for subsequent fetch
+  *   attempts are increased via exponential backoff and random jitter between 0 and the computed
+  *   value. The unit is important, as the exponential is computed on the non-converted value.
+  * @param outputFetchMinimumDelay
+  *   The minimum delay between consecutive output fetch attempts. This prevents a node from
+  *   overwhelming peers with rapid successive fetch requests, for example if the jitter returns
+  *   very low values.
   * @param outputFetchTimeoutCap
   *   The maximum timeout, after jitter and backoff are considered, that a node's availability
   *   module will wait while fetching batch data from a peer.
+  * @param outputEnqueueMaxRetries
+  *   The maximum number of retry attempts when enqueuing ordered output blocks for delivery to the
+  *   sequencer core.
+  * @param outputEnqueueMaxRetryDelay
+  *   The maximum delay between retry attempts when enqueuing ordered output blocks for delivery to
+  *   the sequencer core.
+  * @param outputSizeOfChunkOfEpochsToLoadAtStart
+  *   The number of epochs to load per chunk when restoring output state from the database on
+  *   startup. Larger values may speed up startup but consume more memory.
   * @param blockingDbReadTimeout
   *   The maximum time allowed for block reads to restore state from the database after restarts.
   *   Currently, if the timeout is reached during any of the blocking reads on startup, the node
   *   shuts down and must restart to try again.
+  * @param sendBlacklistTtl
+  *   The time-to-live for blacklisting randomly chosen peers that have failed to respond to a
+  *   request as part of a workflow (e.g., batches fetching or a state transfer session). After this
+  *   time has elapsed, the peer is removed from the blacklist and can be re-contacted.
   * @param initialNetwork
   *   Optionally, the set of peers for which the local node has connections with on startup. If set
   *   to [[scala.None]], the peer starts up with no preexisting peers.
@@ -132,13 +163,6 @@ import scala.concurrent.duration.*
   *   allowing the BFT layer to bypass the sequencer to directly receive requests from and serve
   *   reads to clients. This mode is useful for isolated performance and scale testing. If set to
   *   [[scala.None]], the BFT layer behaves as normal with the co-located Sequencer component.
-  * @param leaderSelectionPolicy
-  *   The leader selection policy to enforce in the presence of View Changes of segments. There are
-  *   currently two policies to choose from: `Simple` and `Blacklisting`. With the `Simple` policy,
-  *   every node in the topology is assigned a segment, regardless of past behavior. Whereas with
-  *   the `Blacklisting` policy, nodes that recently misbehaved (i.e., their segment resulted in a
-  *   View Change) are penalized and not assigned a segment in the following epoch(s) until
-  *   sufficient time has elapsed.
   * @param storage
   *   Optionally, a dedicated storage solution for the BFT ordering layer, separate from the
   *   co-located sequencer. If set to [[scala.None]], the BFT layer shares the same storage as the
@@ -158,6 +182,12 @@ import scala.concurrent.duration.*
   *   execution context as the sequencer.
   * @param sequencerCoreSubscriptionConfig
   *   Configuration for the subscription of the sequencer core to the BFT block orderer.
+  * @param initTimeout
+  *   The maximum total time allowed for the BFT block orderer to complete initialization, including
+  *   all startup queries and state restoration. If exceeded, the node fails to start.
+  * @param initQueryTimeout
+  *   The maximum time allowed for individual queries during BFT block orderer initialization (e.g.,
+  *   topology or state queries). Must be less than or equal to `initTimeout`.
   */
 final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
@@ -190,6 +220,7 @@ final case class BftBlockOrdererConfig(
     outputEnqueueMaxRetryDelay: FiniteDuration = DefaultOutputEnqueueMaxRetryDelay,
     outputSizeOfChunkOfEpochsToLoadAtStart: Int = DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
     blockingDbReadTimeout: FiniteDuration = DefaultBlockingDbReadTimeout,
+    sendBlacklistTtl: FiniteDuration = DefaultSendBlacklistTtl,
     initialNetwork: Option[P2PNetworkConfig] = None,
     standalone: Option[BftBlockOrderingStandaloneNetworkConfig] = None,
     storage: Option[StorageConfig] = None,
@@ -199,14 +230,22 @@ final case class BftBlockOrdererConfig(
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
     sequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
       DefaultSequencerCoreSubscriptionConfig,
+    initTimeout: config.NonNegativeFiniteDuration = DefaultInitTimeout,
+    initQueryTimeout: config.NonNegativeFiniteDuration = DefaultInitQueryTimeout,
 ) {
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
+
   require(
     maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
     s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
       s"$maxBatchesPerBlockProposal maximum batches per block proposal means " +
       s"$maxRequestsPerBlock maximum requests per block, " +
       s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
+  )
+
+  require(
+    initTimeout.underlying >= initQueryTimeout.underlying,
+    s"initTimeout $initTimeout must be >= initQueryTimeout $initQueryTimeout",
   )
 }
 
@@ -215,29 +254,30 @@ object BftBlockOrdererConfig {
   // Minimum epoch length that allows 16 nodes (i.e., the current CN load test target) to all act as consensus leaders
   val DefaultEpochLength: EpochLength = EpochLength(16)
 
-  val DefaultMaxRequestPayloadBytes: Int = 1 * 1024 * 1024
-  val DefaultMaxMempoolQueueSize: Int = 10 * 1024
+  val DefaultMaxRequestPayloadBytes: Int = 10 * 1_024 * 1_024
+  val DefaultMaxMempoolQueueSize: Int = 10 * 1_024
   val DefaultMaxRequestsInBatch: Short = 32
   val DefaultMinRequestsInBatch: Short = 3
   val DefaultMaxBatchCreationInterval: FiniteDuration = 100.milliseconds
   val DefaultMaxBatchesPerProposal: Short = 16
   val DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int = 5
-  val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1000
+  val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1_000
   val DefaultAvailabilityDisseminationPatience: Option[FiniteDuration] = Some(5.seconds)
   val DefaultAvailabilityMinProposalCreationDelay: FiniteDuration = 250.millis
-  val DefaultConsensusQueueMaxSize: Int = 10 * 1024
-  val DefaultConsensusQueuePerNodeQuota: Int = 1024
+  val DefaultConsensusQueueMaxSize: Int = 10 * 1_024
+  val DefaultConsensusQueuePerNodeQuota: Int = 1_024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 5.seconds
-  val DefaultDelayedInitQueueMaxSize: Int = 1024
-  val DefaultEpochStateTransferTimeout: FiniteDuration = 10.seconds
-  val DefaultOutputFetchTimeout: FiniteDuration = 500.milliseconds
-  val DefaultOutputFetchMinimumDelay: FiniteDuration = 500.milliseconds
+  val DefaultDelayedInitQueueMaxSize: Int = 1_024
+  val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
+  val DefaultOutputFetchTimeout: FiniteDuration = 1_000.millis
+  val DefaultOutputFetchMinimumDelay: FiniteDuration = 1_000.millis
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
   val DefaultOutputSizeOfChunkOfEpochsToLoadAtStart: Int = 10
   val DefaultBlockingDbReadTimeout: FiniteDuration = 1.minute
+  val DefaultSendBlacklistTtl: FiniteDuration = 3.minutes
 
   val DefaultDedicatedExecutionContextDivisor: Option[Int] = None
 
@@ -246,6 +286,11 @@ object BftBlockOrdererConfig {
 
   val DefaultSequencerCoreSubscriptionConfig: SequencerCoreSubscriptionConfig =
     SequencerCoreSubscriptionConfig()
+
+  val DefaultInitTimeout: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(10.minutes)
+  val DefaultInitQueryTimeout: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(5.minutes)
 
   /** Configuration for peer-to-peer network settings
     *

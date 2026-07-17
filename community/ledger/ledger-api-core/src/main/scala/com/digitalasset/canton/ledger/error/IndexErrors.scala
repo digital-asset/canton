@@ -53,6 +53,52 @@ object IndexErrors extends IndexErrorGroup {
             throwableO = Some(throwable),
           )
     }
+
+    @Explanation(
+      "This error occurs if a network timeout happens during the execution of a query against the index database."
+    )
+    @Resolution(
+      "Try increasing the network timeout value in indexer or ledger-api configuration " +
+        "(indexer.postgres_data_source.network_timeout or ledger-api.postgres_data_source.network_timeout)."
+    )
+    object SqlNetworkTimeoutError
+        extends ErrorCode(
+          id = "INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR",
+          ErrorCategory.SystemInternalAssumptionViolated,
+        ) {
+      final case class Reject(throwable: Throwable)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends DbError(
+            cause =
+              s"Processing the request failed due to a network timeout database error: ${throwable.getMessage}",
+            throwableO = Some(throwable),
+          )
+    }
+
+    @Explanation(
+      "This error occurs if cannot acquire a database lock in time. This could signal lock contention, which can disturb participant operation."
+    )
+    @Resolution(
+      "Try to investigate DB Lock contention. The configuration for the timeout can be also increased for more tolerance." +
+        " (Please see current configured timeout and the participant configuration property in the error message)."
+    )
+    object DbLockTimeoutError
+        extends ErrorCode(
+          id = "INDEX_DB_LOCK_TIMEOUT_ERROR",
+          ErrorCategory.SystemInternalAssumptionViolated,
+        ) {
+      final case class Reject(
+          lockDescription: String,
+          timeoutConfig: String,
+          timeoutMillis: Int,
+      )(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends DbError(
+            cause =
+              s"Acquisition of DB Lock timed out (timeout config: \"$timeoutConfig\": $timeoutMillis ms). Lock description: $lockDescription",
+            throwableO = None,
+          )
+    }
   }
 
   // Decorator that returns a specialized StatusRuntimeException (IndexDbException)

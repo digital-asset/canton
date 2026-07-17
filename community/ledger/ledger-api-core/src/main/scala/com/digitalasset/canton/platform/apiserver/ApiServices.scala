@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver
 
+import cats.Eval
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.config
@@ -126,7 +127,7 @@ object ApiServices {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -390,7 +391,7 @@ object ApiServices {
       val trafficServiceO = trafficEnforcementBackendO
         .map(trafficClient =>
           new TrafficServiceAuthorization(
-            new ApiTrafficService(trafficClient.trafficServiceClient, loggerFactory),
+            new ApiTrafficService(trafficClient.map(_.trafficServiceClient), loggerFactory),
             authorizer,
           )
         )

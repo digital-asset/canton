@@ -34,7 +34,7 @@ trait SynchronizerConnectivityStatusStore {
 
   def setTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
-  def isTopologyInitialized()(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
+  def isTopologyInitialized(implicit traceContext: TraceContext): Boolean
 }
 
 object SynchronizerConnectivityStatusStore {

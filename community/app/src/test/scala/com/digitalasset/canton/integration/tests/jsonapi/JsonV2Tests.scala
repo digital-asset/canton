@@ -744,6 +744,22 @@ class JsonV2Tests
               ErrorCategory.InvalidIndependentOfSystemState.asInt
             )
           }
+          _ <- {
+            val unparseableTemplateId = "not-a-valid-template-id"
+            val jsonWithUnparseableTemplate = jsCommands(createJsCommand).asJson.noSpaces
+              .replace(s"$iouPkgId:Iou:Iou", unparseableTemplateId)
+            postJsonStringRequestEncoded(
+              uri = fixture.uri.withPath(Uri.Path("/v2/commands/submit-and-wait")),
+              jsonString = jsonWithUnparseableTemplate,
+              headers = headers,
+            ).map { case (statusCode, body) =>
+              statusCode should be(StatusCodes.BadRequest)
+              body shouldBe
+                s"Invalid value for: body (Invalid identifier format ($unparseableTemplateId) " +
+                "not matching the expected format (<package>:<moduleName>:<entityName>) " +
+                "at 'commands[0].CreateCommand.templateId')"
+            }
+          }
           _ <- postJsonRequest(
             uri = fixture.uri.withPath(Uri.Path("/v2/commands/submit-and-wait")),
             json = jsCommands(createJsCommand).asJson,

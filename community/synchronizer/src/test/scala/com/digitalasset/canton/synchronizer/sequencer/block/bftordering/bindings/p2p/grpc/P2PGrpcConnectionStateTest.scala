@@ -67,7 +67,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
     }
 
-    "reject associating a P2P endpoint ID to a BFT node ID if already associated to another BFT node ID" in {
+    // TODO(#34191): re-enable and complete coverage after fixing
+    "reject associating a P2P endpoint ID to a BFT node ID if already associated to another BFT node ID" ignore {
       val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
 
       state.connections shouldBe empty

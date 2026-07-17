@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
+import com.daml.metrics.api.MetricHandle
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
@@ -135,7 +137,12 @@ object QueryStrategy {
     )
 
   def withoutNetworkTimeout[T](
-      f: Connection => T
+      f: => T
+  )(implicit connection: Connection, logger: Logger): T =
+    withNetworkTimeout(0)(f)
+
+  def withNetworkTimeout[T](timeoutMillis: Int)(
+      f: => T
   )(implicit connection: Connection, logger: Logger): T = {
     // The postgres jdbc driver ignores the execution context for the network timeout setting and uses its internal
     // query executor https://github.com/pgjdbc/pgjdbc/blob/release/42.7.x/pgjdbc/src/main/java/org/postgresql/jdbc/PgConnection.java#L1692 .
@@ -146,13 +153,26 @@ object QueryStrategy {
     val directEc = DirectExecutionContext(logger)
     val originalNetworkTimeout = connection.getNetworkTimeout
     try {
-      connection.setNetworkTimeout(directEc, 0) // disable network timeout
-      f(connection)
+      connection.setNetworkTimeout(directEc, timeoutMillis)
+      f
     } finally {
-      connection.setNetworkTimeout(directEc, originalNetworkTimeout) // restore original timeout
+      try {
+        connection.setNetworkTimeout(directEc, originalNetworkTimeout) // restore original timeout
+      } catch {
+        case cause: Throwable =>
+          logger.info("Could not set back original timeout", cause)
+      }
     }
   }
 
+  final case class DbLockMeta(
+      lockDescription: String,
+      timeoutConfig: String,
+      timeoutMillis: Int,
+      timer: MetricHandle.Timer,
+  ) {
+    assert(timeoutMillis > 0)
+  }
 }
 
 trait QueryStrategy {
@@ -201,4 +221,19 @@ trait QueryStrategy {
   def analyzeTable(tableName: String): CompositeSql
 
   def forceSynchronousCommitForCurrentTransactionForPostgreSQL(connection: Connection): Unit = ()
+
+  def cleanTable(tableName: String)(implicit connection: Connection): Unit
+
+  def vacuumTable(tableName: String)(implicit connection: Connection): Unit
+
+  def reindexTableIfPossible(tableName: String)(implicit connection: Connection): Boolean
+
+  /** WARNING: This should be executed outside a transaction! First the current transaction is
+    * committed. Then (non-blocking) vacuuming will happen. Then in a new transaction ACCESS
+    * EXCLUSIVE lock is attempted to be acquired on the table. If successful this is followed by
+    * reindexing of the table. Finally, this transaction is committed.
+    */
+  def vacuumAndReindexTable(
+      tableName: String
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit
 }

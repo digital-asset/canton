@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.digitalasset.canton.http.json.v2.ApiDocsGenerator
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
 
 final class OpenApiTests
@@ -41,11 +42,15 @@ final class OpenApiTests
     "updates",
   )
 
+  // The traffic service is not part of the static docs. Disable it so the live server matches.
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition.addConfigTransform(ConfigTransforms.disableTrafficAccounting)
+
   "JSON openapi documentation" should {
     val protoInfo = apiDocsGenerator.loadProtoData()
     val staticDocs = apiDocsGenerator.createStaticDocs(protoInfo)
 
-    "should be consistent with live docs" in httpTestFixture { fixture =>
+    "be consistent with live docs" in httpTestFixture { fixture =>
       /** We generate documentation "statically" without starting an http server. However, when the
         * server is running the documentation is generated from actually running endpoints This test
         * checks that both of them are matching
@@ -69,7 +74,7 @@ final class OpenApiTests
       }
     }
 
-    "has proper version" in { _ =>
+    "have proper version" in { _ =>
       val yaml = io.circe.yaml.parser.parse(staticDocs.openApi)
       val version = (yaml.value \\ "info").head \\ "version"
 
@@ -79,7 +84,7 @@ final class OpenApiTests
       version.head.asString.getOrElse("") should fullyMatch regex semVerRegex
     }
 
-    "contains expected openapi services " in { _ =>
+    "contain expected openapi services " in { _ =>
       val yaml = io.circe.yaml.parser.parse(staticDocs.openApi)
       val openapiServices =
         (yaml.value \\ "paths").head.asObject.value.keys
@@ -98,7 +103,7 @@ final class OpenApiTests
       openApiRootServices should contain theSameElementsAs expectedRootOpenApiServices
     }
 
-    "contains expected async services " in { _ =>
+    "contain expected async services " in { _ =>
       val yaml = io.circe.yaml.parser.parse(staticDocs.asyncApi)
       val asyncServices =
         (yaml.value \\ "channels").head.asObject.value.keys

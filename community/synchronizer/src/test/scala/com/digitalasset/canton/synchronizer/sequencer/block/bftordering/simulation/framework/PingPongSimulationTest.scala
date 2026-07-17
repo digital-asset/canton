@@ -32,6 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Module,
   ModuleName,
   ModuleRef,
+  ModuleSystem,
   P2PAddress,
   P2PConnectionEventListener,
   P2PNetworkManager,
@@ -82,8 +83,8 @@ final case class Ping[E <: Env[E]](
 
   private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
-  override def ready(self: ModuleRef[String]): Unit =
-    ifCompleteNotifyNodes(self)(TraceContext.empty)
+  override def ready(self: ModuleRef[String])(implicit traceContext: TraceContext): Unit =
+    ifCompleteNotifyNodes(self)
 
   override def receiveInternal(message: String)(implicit
       context: E#ActorContextT[String],
@@ -173,33 +174,43 @@ object TestSystem {
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
   ): SystemInitializer[E, P2PNetworkManagerT, String, String] =
-    (system, createP2PNetworkManager) => {
-      val inputModuleRef = system.newModuleRef[String](ModuleName("ping"))()
-      val p2pNetworkManager =
-        createP2PNetworkManager(P2PConnectionEventListener.NoOp, inputModuleRef)
-      val pongerRef = p2pNetworkManager.createNetworkRef(
-        system.rootActorContext,
-        P2PAddress.Endpoint(pongerEndpoint),
-      )(TraceContext.empty)
-      val module = Ping[E](pongerRef, recorder, loggerFactory, timeouts)
-      system.setModule[String](inputModuleRef, module)
-      val p2PAdminModuleRef =
-        system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
-      val consensusAdminModuleRef =
-        system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
-      val outputModuleRef =
-        system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
-      val pruningModuleRef =
-        system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
-      SystemInitializationResult(
-        inputModuleRef,
-        inputModuleRef,
-        p2PAdminModuleRef,
-        consensusAdminModuleRef,
-        outputModuleRef,
-        pruningModuleRef,
-        p2pNetworkManager,
-      )
+    new SystemInitializer[E, P2PNetworkManagerT, String, String] {
+      override def initialize(
+          system: ModuleSystem[E],
+          createP2PNetworkManager: (
+              P2PConnectionEventListener,
+              ModuleRef[String],
+          ) => P2PNetworkManagerT,
+      )(implicit
+          traceContext: TraceContext
+      ): SystemInitializationResult[E, P2PNetworkManagerT, String, String] = {
+        val inputModuleRef = system.newModuleRef[String](ModuleName("ping"))()
+        val p2pNetworkManager =
+          createP2PNetworkManager(P2PConnectionEventListener.NoOp, inputModuleRef)
+        val pongerRef = p2pNetworkManager.createNetworkRef(
+          system.rootActorContext,
+          P2PAddress.Endpoint(pongerEndpoint),
+        )(TraceContext.empty)
+        val module = Ping[E](pongerRef, recorder, loggerFactory, timeouts)
+        system.setModule[String](inputModuleRef, module)
+        val p2PAdminModuleRef =
+          system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
+        val consensusAdminModuleRef =
+          system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
+        val outputModuleRef =
+          system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
+        val pruningModuleRef =
+          system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
+        SystemInitializationResult(
+          inputModuleRef,
+          inputModuleRef,
+          p2PAdminModuleRef,
+          consensusAdminModuleRef,
+          outputModuleRef,
+          pruningModuleRef,
+          p2pNetworkManager,
+        )
+      }
     }
 
   def mkPonger[
@@ -211,33 +222,43 @@ object TestSystem {
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
   ): SystemInitializer[E, P2PNetworkManagerT, String, String] =
-    (system, createP2PNetworkManager) => {
-      val inputModuleRef = system.newModuleRef[String](ModuleName("pong"))()
-      val p2pNetworkManager =
-        createP2PNetworkManager(P2PConnectionEventListener.NoOp, inputModuleRef)
-      val pingerRef = p2pNetworkManager.createNetworkRef(
-        system.rootActorContext,
-        P2PAddress.Endpoint(pingerEndpoint),
-      )(TraceContext.empty)
-      val module = Pong[E](pingerRef, recorder, loggerFactory, timeouts)
-      system.setModule[String](inputModuleRef, module)
-      val p2PAdminModuleRef =
-        system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
-      val consensusAdminModuleRef =
-        system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
-      val outputModuleRef =
-        system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
-      val pruningModuleRef =
-        system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
-      SystemInitializationResult(
-        inputModuleRef,
-        inputModuleRef,
-        p2PAdminModuleRef,
-        consensusAdminModuleRef,
-        outputModuleRef,
-        pruningModuleRef,
-        p2pNetworkManager,
-      )
+    new SystemInitializer[E, P2PNetworkManagerT, String, String] {
+      override def initialize(
+          system: ModuleSystem[E],
+          createP2PNetworkManager: (
+              P2PConnectionEventListener,
+              ModuleRef[String],
+          ) => P2PNetworkManagerT,
+      )(implicit
+          traceContext: TraceContext
+      ): SystemInitializationResult[E, P2PNetworkManagerT, String, String] = {
+        val inputModuleRef = system.newModuleRef[String](ModuleName("pong"))()
+        val p2pNetworkManager =
+          createP2PNetworkManager(P2PConnectionEventListener.NoOp, inputModuleRef)
+        val pingerRef = p2pNetworkManager.createNetworkRef(
+          system.rootActorContext,
+          P2PAddress.Endpoint(pingerEndpoint),
+        )(TraceContext.empty)
+        val module = Pong[E](pingerRef, recorder, loggerFactory, timeouts)
+        system.setModule[String](inputModuleRef, module)
+        val p2PAdminModuleRef =
+          system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
+        val consensusAdminModuleRef =
+          system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
+        val outputModuleRef =
+          system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
+        val pruningModuleRef =
+          system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
+        SystemInitializationResult(
+          inputModuleRef,
+          inputModuleRef,
+          p2PAdminModuleRef,
+          consensusAdminModuleRef,
+          outputModuleRef,
+          pruningModuleRef,
+          p2pNetworkManager,
+        )
+      }
     }
 
   def pingerClient[E <: Env[E]](

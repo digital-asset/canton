@@ -13,12 +13,13 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
-import com.digitalasset.canton.topology.admin.v30
+import com.digitalasset.canton.topology.admin.{grpc, v30}
 import com.digitalasset.canton.topology.client.*
+import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{
   NoPackageDependencies,
   TopologyStore,
-  TopologyStoreId,
+  TopologyStoreId as InternalTopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{
@@ -35,7 +36,10 @@ import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcTopologyAggregationService(
-    stores: => Seq[TopologyStore[TopologyStoreId.SynchronizerStore]],
+    stores: => Seq[
+      TopologyStoreInitializationStatus[InternalTopologyStoreId.SynchronizerStore, TopologyStore]
+    ],
+    physicalSynchronizerIdLookup: PsidLookup,
     ips: IdentityProvidingServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -44,7 +48,7 @@ class GrpcTopologyAggregationService(
 
   private def getTopologySnapshot(
       asOf: CantonTimestamp,
-      store: TopologyStore[TopologyStoreId.SynchronizerStore],
+      store: TopologyStore[InternalTopologyStoreId.SynchronizerStore],
   ): TopologySnapshotLoader =
     new StoreBasedTopologySnapshot(
       store.storeId.psid,
@@ -55,34 +59,38 @@ class GrpcTopologyAggregationService(
     )
 
   private def snapshots(
-      synchronizerIds: Set[SynchronizerId],
+      requestedSynchronizerIds: Set[SynchronizerId],
       asOf: Option[ProtoTimestamp],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, List[
+  ): EitherT[FutureUnlessShutdown, RpcError, Seq[
     (PhysicalSynchronizerId, TopologySnapshotLoader)
   ]] =
     for {
       asOfO <- wrapErrUS(asOf.traverse(CantonTimestamp.fromProtoTimestamp))
+
+      activeStores <- EitherT.fromEither[FutureUnlessShutdown](
+        GrpcTopologyServiceUtil.collectActiveStores[SynchronizerStore](
+          requestedSynchronizerIds.map(lsid => grpc.TopologyStoreId.Synchronizer(lsid)).toSeq,
+          stores,
+          physicalSynchronizerIdLookup,
+        )
+      )
     } yield {
-      stores.collect {
-        case store
-            if synchronizerIds.contains(
-              store.storeId.psid.logical
-            ) || synchronizerIds.isEmpty =>
-          val synchronizerId = store.storeId.psid
-          // get approximate timestamp from synchronizer client to prevent race conditions (when we have written data into the stores but haven't yet updated the client)
-          val asOf = asOfO.getOrElse(
-            ips
-              .forSynchronizer(synchronizerId)
-              .map(_.approximateTimestamp)
-              .getOrElse(CantonTimestamp.MaxValue)
-          )
-          (
-            synchronizerId,
-            getTopologySnapshot(asOf, store),
-          )
-      }.toList
+      activeStores.map { store =>
+        val psid = store.storeId.psid
+        // get approximate timestamp from synchronizer client to prevent race conditions (when we have written data into the stores but haven't yet updated the client)
+        val asOf = asOfO.getOrElse(
+          ips
+            .forSynchronizer(psid)
+            .map(_.approximateTimestamp)
+            .getOrElse(CantonTimestamp.MaxValue)
+        )
+        (
+          psid,
+          getTopologySnapshot(asOf, store),
+        )
+      }
     }
 
   private def groupBySnd[A, B, C](item: Seq[(A, B, C)]): Map[B, Seq[(A, C)]] =
@@ -96,7 +104,7 @@ class GrpcTopologyAggregationService(
     }
 
   private def findMatchingParties(
-      clients: List[(PhysicalSynchronizerId, TopologySnapshotLoader)],
+      clients: Seq[(PhysicalSynchronizerId, TopologySnapshotLoader)],
       filterParty: String,
       filterParticipant: String,
       limit: Int,
@@ -112,7 +120,7 @@ class GrpcTopologyAggregationService(
     .map(_._1)
 
   private def findParticipants(
-      clients: List[(PhysicalSynchronizerId, TopologySnapshotLoader)],
+      clients: Seq[(PhysicalSynchronizerId, TopologySnapshotLoader)],
       partyId: PartyId,
   )(implicit
       traceContext: TraceContext
@@ -123,7 +131,7 @@ class GrpcTopologyAggregationService(
           .activeParticipantsOf(partyId.toLf)
           .map(_.map { case (participantId, attributes) =>
             (synchronizerId, participantId, attributes.permission)
-          }.toList)
+          }.toSeq)
       }
       .map(_.groupBy { case (_, participantId, _) => participantId }.map { case (k, v) =>
         (k, v.map { case (synchronizerId, _, permission) => (synchronizerId, permission) }.toMap)

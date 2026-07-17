@@ -38,6 +38,8 @@ import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
+import scala.concurrent.duration.FiniteDuration
+
 object Availability {
 
   sealed trait Message[+E] extends Product
@@ -289,8 +291,12 @@ object Availability {
         orderingMode: OrderingMode,
     ) extends LocalOutputFetch
 
-    final case class FetchRemoteBatchDataTimeout(batchId: BatchId, epochNumber: EpochNumber)
-        extends LocalOutputFetch
+    final case class FetchRemoteBatchDataTimeout(
+        nodeThatTimedOut: Option[BftNodeId],
+        batchId: BatchId,
+        epochNumber: EpochNumber,
+        timeout: FiniteDuration,
+    ) extends LocalOutputFetch
 
     final case class AttemptedBatchDataLoadForNode(
         batchId: BatchId,

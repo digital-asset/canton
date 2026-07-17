@@ -324,6 +324,11 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
       .protoRef(
         interactive_submission_service.InteractiveSubmissionServiceGrpc.METHOD_GET_PREFERRED_PACKAGE_VERSION
       )
+      .deprecated()
+      .description(
+        """Get the preferred package version for constructing a command submission.
+        |This endpoint (GET /interactive-submission/preferred-package-version) is deprecated and will be removed in Canton 3.6. Please use POST /interactive-submission/preferred-packages instead.""".stripMargin
+      )
 
   val preferredPackagesEndpoint =
     preferredPackages.post

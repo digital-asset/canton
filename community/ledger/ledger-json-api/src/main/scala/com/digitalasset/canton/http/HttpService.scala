@@ -59,6 +59,7 @@ class HttpService(
     channel: Channel,
     packageSyncService: PackageSyncService,
     packagePreferenceBackend: PackagePreferenceBackend,
+    trafficEnforcementEnabled: Boolean,
     apiLoggingConfig: ApiLoggingConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -120,6 +121,7 @@ class HttpService(
         v2Routes = V2Routes(
           ledgerClient,
           metadataServiceEnabled = startSettings.damlDefinitionsServiceEnabled,
+          trafficEnforcementEnabled = trafficEnforcementEnabled,
           packageSyncService,
           packagePreferenceBackend,
           mat.executionContext,

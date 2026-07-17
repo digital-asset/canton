@@ -1034,6 +1034,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
+          BuildInfoKey("dpmRegistry" -> Dependencies.dpm_registry),
           BuildInfoKey("stableProtocolVersions" -> List("34", "35")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),

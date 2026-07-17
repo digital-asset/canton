@@ -3591,17 +3591,17 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
 
       @Help.Summary("Update details for the account-id", FeatureFlag.Testing)
       @Help.Description(
-        """Update the account details (the balance) for the specified account-id.
+        """Update the account details (by adding the balance delta) for the specified account-id.
           |If unset, the balance will not be updated
           |subsequent balance updates with the same deduplicationId will be ignored"""
       )
       def update_account(
           accountId: String,
-          balance: Option[Long],
+          balanceDelta: Option[Long],
           deduplicationId: String = UUID.randomUUID().toString,
       ): UpdateAccountResponse = consoleEnvironment.run {
         ledgerApiCommand(
-          LedgerApiCommands.Traffic.UpdateAccount(accountId, balance, deduplicationId)
+          LedgerApiCommands.Traffic.UpdateAccount(accountId, balanceDelta, deduplicationId)
         )
       }
     }

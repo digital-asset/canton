@@ -28,7 +28,11 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.store.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
-import com.digitalasset.canton.platform.store.backend.{ParameterStorageBackend, ReadStorageBackend}
+import com.digitalasset.canton.platform.store.backend.{
+  ParameterStorageBackend,
+  ReadStorageBackend,
+  StorageBackendTestValues,
+}
 import com.digitalasset.canton.platform.store.cache.{AchsStateCache, LedgerEndCache}
 import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.protocol.{ContractInstance, TestUpdateId, UpdateId}
@@ -100,6 +104,8 @@ private class JdbcLedgerWriteDao(
     contractPruningDelayBeforeRetry =
       IndexServiceConfig.DefaultContractPruningDelayBeforeRetry.underlying,
     contractPruningMaxRetries = IndexServiceConfig.DefaultContractPruningMaxRetries,
+    pruningDbLockMeta = StorageBackendTestValues.testDbLockMeta,
+    contractPruningDbLockMeta = StorageBackendTestValues.testDbLockMeta,
   )
 
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()

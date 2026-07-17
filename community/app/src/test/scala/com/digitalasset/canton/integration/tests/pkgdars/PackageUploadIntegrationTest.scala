@@ -26,6 +26,7 @@ import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, Package
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageTestUtils
 import com.digitalasset.canton.platform.apiserver.services.admin.PackageTestUtils.ArchiveOps
 import com.digitalasset.canton.topology.TopologyManagerError
+import com.digitalasset.canton.topology.TopologyManagerError.TopologyStoreUnknown
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -72,8 +73,6 @@ trait PackageUploadIntegrationTest
     "enable the package" in { implicit env =>
       import env.*
 
-      inStore(daId, participant1) shouldBe empty
-
       clue("uploading tests without vetting " + CantonTestsPath) {
         participant1.dars.upload(
           CantonTestsPath,
@@ -82,7 +81,11 @@ trait PackageUploadIntegrationTest
         )
       }
 
-      inStore(daId, participant1) shouldBe empty
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        inStore(daId.logical, participant1),
+        // TopologyStoreUnknown, because the participant has never connected to the synchronizer
+        _.shouldBeCantonErrorCode(TopologyStoreUnknown),
+      )
 
       clue("connecting to synchronizer") {
         participant1.synchronizers.connect_local(sequencer1, alias = daName)

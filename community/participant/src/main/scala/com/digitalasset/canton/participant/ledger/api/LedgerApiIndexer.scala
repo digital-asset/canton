@@ -12,7 +12,7 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout, StorageConfig}
-import com.digitalasset.canton.health.{HealthStatus, Healthy, ReportsHealth, Unhealthy}
+import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NoLogging.logger
@@ -57,10 +57,8 @@ import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
 
 import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Success
 
 class LedgerApiIndexer(
     val indexerHealth: ReportsHealth,
@@ -153,7 +151,6 @@ object LedgerApiIndexer {
             ledgerApiStore.value.stringInterningView,
           )
           .afterReleased(initializationLogger.info("Ledger API Indexer stopped."))
-      healthStatusRef = new AtomicReference[HealthStatus](Unhealthy)
       indexerCreateFunction <- new JdbcIndexer.Factory(
         ledgerApiIndexerConfig.ledgerParticipantId,
         DbSupport.ParticipantDataSourceConfig(ledgerApiStore.value.ledgerApiStorage.jdbcUrl),
@@ -181,18 +178,7 @@ object LedgerApiIndexer {
         postProcessor,
         sequentialPostProcessor,
         contractStore.value,
-      ).initialized().map { indexer => (params: IndexerParams) =>
-        val result = indexer(params)
-        result.flatMap(identity).onComplete {
-          case Success(indexer) =>
-            healthStatusRef.set(Healthy)
-            indexer.futureQueue.done.onComplete(_ => healthStatusRef.set(Unhealthy))
-
-          case _ =>
-            healthStatusRef.set(Unhealthy)
-        }
-        result
-      }
+      ).initialized()
       normalIndexerCreateFunction =
         (commit: Commit) =>
           (shutdownRequested: ShutdownInProgress) =>
@@ -265,7 +251,7 @@ object LedgerApiIndexer {
       initializationLogger.info("Ledger API Indexer started, initializing recoverable indexing.")
 
       new LedgerApiIndexer(
-        indexerHealth = () => healthStatusRef.get(),
+        indexerHealth = () => indexerState.healthStatus,
         enqueue = event => {
           commandProgressTracker.indexingStarts(event)
           IndexerQueueProxy(indexerState.withStateUnlessShutdown)

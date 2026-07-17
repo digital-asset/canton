@@ -671,7 +671,7 @@ class AvailabilityModuleDisseminationTest
 
       val outputFetchProtocolState = new MainOutputFetchProtocolState()
       outputFetchProtocolState.localOutputMissingBatches.addOne(
-        ABatchMissingBatchStatusNode1And2AcksWithNoAttemptsLeft
+        ABatchId -> AMissingBatchStatusNode1And2Acks
       )
 
       val availability = createAndStartAvailability[ProgrammableUnitTestEnv](

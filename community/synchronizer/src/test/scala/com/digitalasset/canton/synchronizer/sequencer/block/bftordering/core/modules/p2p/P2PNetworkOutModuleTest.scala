@@ -20,13 +20,17 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   P2PEndpoint,
   PlainTextP2PEndpoint,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultSendBlacklistTtl
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.memory.GenericInMemoryP2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   ProgrammableUnitTestContext,
   ProgrammableUnitTestEnv,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  WorkflowId,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopology,
@@ -51,8 +55,10 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
   BftOrderingMessage,
   BftOrderingMessageBody,
 }
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import org.mockito.captor.ArgCaptor
 import org.scalatest.Assertions.fail
 import org.scalatest.wordspec.AnyWordSpec
 import shapeless.*
@@ -61,13 +67,17 @@ import shapeless.syntax.std.traversable.*
 
 import java.time.Instant
 import scala.collection.mutable
-import scala.util.{Failure, Success, Try}
+import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
+import scala.util.{Failure, Random, Success, Try}
 
 class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
   import P2PNetworkOutModuleTest.*
 
   implicit val pv: ProtocolVersion = testedProtocolVersion
+
+  private val simClock = new SimClock(loggerFactory = loggerFactory)
 
   "p2p output" when {
     "ready" should {
@@ -341,10 +351,288 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
-    "it is requested to add a new endpoint" should {
+    "is requested to send a network message to a random authenticated peer among a set of possible recipients" should {
+
+      "do it" when {
+        "at least one of the possible recipients is authenticated" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          Seq(
+            otherInitialEndpointsTupled._1,
+            otherInitialEndpointsTupled._2,
+            otherInitialEndpointsTupled._3,
+          ).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val otherNodeEndpoint = otherInitialEndpointsTupled._1
+          val otherNodeId = endpointToTestBftNodeId(otherNodeEndpoint)
+          val possibleRecipients = Seq(otherNodeId, endpointToTestBftNodeId(anotherEndpoint))
+
+          val networkMessageBody = BftOrderingMessageBody(BftOrderingMessageBody.Message.Empty)
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+            )
+          )
+
+          verify(sendActionSpy, times(1)).apply(
+            eqTo(otherNodeEndpoint),
+            eqTo(
+              BftOrderingMessage(
+                "",
+                Some(networkMessageBody),
+                sentBy = selfNode,
+                sentAt = None,
+              )
+            ),
+          )
+        }
+      }
+
+      "do nothing" when {
+        "none among the possible recipients is authenticated" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, _) = setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          val possibleRecipients =
+            Seq(
+              endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+              endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+              endpointToTestBftNodeId(anotherEndpoint),
+            )
+
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+            )
+          )
+
+          verify(sendActionSpy, never).apply(
+            any[P2PEndpoint],
+            any[BftOrderingMessage],
+          )
+        }
+      }
+
+      "blacklist peers" when {
+        "they get retried for a given workflow" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+          val onRecipientDecisionSpy = spyLambda((_: Option[BftNodeId]) => ())
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          val possibleRecipients = Seq(
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+          )
+
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+              Some(WorkflowId("test-workflow")),
+              nodeThatFailed = None,
+              Some(onRecipientDecisionSpy),
+            )
+          )
+
+          // The `onRecipientDecision` callback is also called when there's no authenticated peer
+          verify(onRecipientDecisionSpy, times(1)).apply(None)
+
+          reset(onRecipientDecisionSpy)
+
+          Seq(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val networkMessageBody = BftOrderingMessageBody(BftOrderingMessageBody.Message.Empty)
+          val p2pEndpointCaptor = ArgCaptor[P2PEndpoint]
+          var initial = true
+          for (
+            nodeThatTimedOutF <- Seq[() => Option[BftNodeId]](
+              () => None,
+              () => Some(endpointToTestBftNodeId(p2pEndpointCaptor.value)),
+              () => None,
+            )
+          ) {
+            val nodeThatTimedOut = nodeThatTimedOutF()
+            module.receive(
+              P2PNetworkOut.SendToRandomAuthenticated(
+                P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+                possibleRecipients,
+                Some(WorkflowId("test-workflow")),
+                nodeThatTimedOut,
+                Some(onRecipientDecisionSpy),
+              )
+            )
+            verify(sendActionSpy, times(1)).apply(
+              if (initial) p2pEndpointCaptor.capture else any[P2PEndpoint],
+              eqTo(
+                BftOrderingMessage(
+                  "",
+                  Some(networkMessageBody),
+                  sentBy = selfNode,
+                  sentAt = None,
+                )
+              ),
+            )
+            verify(onRecipientDecisionSpy, times(1)).apply(any[Option[BftNodeId]])
+
+            reset(sendActionSpy)
+            reset(onRecipientDecisionSpy)
+            initial = false
+          }
+
+          module.state.workflowBlacklists
+            .get(WorkflowId("test-workflow"))
+            .map(_.keys.toSet) shouldBe Some(
+            Set(endpointToTestBftNodeId(p2pEndpointCaptor.value))
+          )
+
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+              Some(WorkflowId("test-workflow")),
+              nodeThatFailed = None,
+            )
+          )
+
+          verify(sendActionSpy, times(1)).apply(
+            argThat((e: P2PEndpoint) => e != p2pEndpointCaptor.value),
+            eqTo(
+              BftOrderingMessage(
+                "",
+                Some(networkMessageBody),
+                sentBy = selfNode,
+                sentAt = None,
+              )
+            ),
+          )
+        }
+      }
+
+      "remove blacklists" when {
+        "they expire" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          Seq(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val possibleRecipients = Seq(
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+          )
+
+          for (
+            nodeThatTimedOut <- Seq(
+              None,
+              Some(endpointToTestBftNodeId(otherInitialEndpointsTupled._1)),
+            )
+          ) {
+            module.receive(
+              P2PNetworkOut.SendToRandomAuthenticated(
+                P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+                possibleRecipients,
+                Some(WorkflowId("test-workflow")),
+                nodeThatTimedOut,
+              )
+            )
+          }
+
+          simClock.advance(DefaultSendBlacklistTtl.plus(1.second).toJava)
+
+          // Trigger expiration check by sending a new message
+          module.receive(
+            P2PNetworkOut.SendToRandomAuthenticated(
+              P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+              possibleRecipients,
+              Some(WorkflowId("test-workflow")),
+              nodeThatFailed = None,
+            )
+          )
+
+          module.state.workflowBlacklists.get(WorkflowId("test-workflow")) shouldBe Some(
+            Map.empty
+          )
+        }
+      }
+
+      "clean all blacklist info" when {
+        "requested to end a workflow" in {
+          val sendActionSpy =
+            spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(sendActionSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          Seq(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2).foreach { e =>
+            connect(p2pNetworkManager, e)
+            authenticate(p2pNetworkManager, e)
+          }
+          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+
+          val possibleRecipients = Seq(
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
+            endpointToTestBftNodeId(otherInitialEndpointsTupled._2),
+          )
+
+          for (
+            nodeThatTimedOut <- Seq(
+              None,
+              Some(endpointToTestBftNodeId(otherInitialEndpointsTupled._1)),
+            )
+          ) {
+            module.receive(
+              P2PNetworkOut.SendToRandomAuthenticated(
+                P2PNetworkOut.BftOrderingNetworkMessage.Empty,
+                possibleRecipients,
+                Some(WorkflowId("test-workflow")),
+                nodeThatTimedOut,
+              )
+            )
+          }
+
+          module.receive(
+            P2PNetworkOut.EndWorkflow(WorkflowId("test-workflow"))
+          )
+
+          module.state.workflowBlacklists.get(WorkflowId("test-workflow")) shouldBe None
+        }
+      }
+    }
+
+    "it is requested to add an endpoint" should {
 
       "add and connect the new endpoint" when {
-        "the endpoint is not already stored" in {
+        "the endpoint is not already stored nor connected" in {
           val mempoolSpy =
             spy(fakeIgnoringModule[Mempool.Message])
           val (context, state, module, p2pNetworkManager) =
@@ -370,7 +658,8 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           context.runPipedMessagesThenVerifyAndReceiveOnModule(module) { message =>
             message shouldBe P2PNetworkOut.Internal.Connect(anotherEndpoint)
           }
-          module.p2pEndpointsStore.listEndpoints
+          module.p2pEndpointsStore
+            .listEndpoints()
             .apply() should contain theSameElementsInOrderAs otherInitialEndpoints :+ anotherEndpoint
 
           endpointAdded shouldBe true
@@ -385,8 +674,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         }
       }
 
-      // Check that we handle racing endpoint additions correctly
-      "do nothing" when {
+      "connect the endpoint" when {
         "it is already stored but not yet connected" in {
           val mempoolSpy =
             spy(fakeIgnoringModule[Mempool.Message])
@@ -401,7 +689,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
 
           val newEndpoint = anotherEndpoint
-          p2pEndpointsStore.addEndpoint(newEndpoint).apply() // Simulate a racing addition
+          p2pEndpointsStore.addEndpoint(newEndpoint).apply() // Endpoint already in store
 
           var endpointAdded = false
           module.receive(
@@ -411,7 +699,78 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
+          context.runPipedMessages() should contain only P2PNetworkOut.Internal.Connect(
+            anotherEndpoint
+          )
+          endpointAdded shouldBe false
+          state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
+
+          verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
+        }
+      }
+
+      "just store the endpoint" when {
+        "it is not stored but it is connected" in {
+          val mempoolSpy =
+            spy(fakeIgnoringModule[Mempool.Message])
+          val (context, state, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(mempool = mempoolSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          p2pNetworkManager.createNetworkRef(
+            ctx,
+            P2PAddress.Endpoint(anotherEndpoint),
+          ) // Endpoint already connected
+
+          connect(p2pNetworkManager, anotherEndpoint)
+          authenticate(p2pNetworkManager, anotherEndpoint)
+          context.extractSelfMessages().foreach(module.receive) // Authenticate the endpoint
+
+          var endpointAdded = false
+          module.receive(
+            P2PNetworkOut.Admin.AddEndpoint(
+              anotherEndpoint,
+              added => endpointAdded = added,
+            )
+          )
+
           context.runPipedMessages() shouldBe empty
+          module.p2pEndpointsStore
+            .listEndpoints()
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints :+ anotherEndpoint
+
+          endpointAdded shouldBe true
+          state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections :+ Some(
+            anotherEndpoint.id
+          ) -> Some(endpointToTestBftNodeId(anotherEndpoint))
+
+          verify(mempoolSpy, times(1)).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
+        }
+      }
+
+      "do nothing" when {
+        "it is stored and connected" in {
+          val mempoolSpy =
+            spy(fakeIgnoringModule[Mempool.Message])
+          val (context, state, module, _) =
+            setupWithIgnoringDefaultDeps(mempool = mempoolSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          var endpointAdded = false
+          module.receive(
+            P2PNetworkOut.Admin.AddEndpoint(
+              otherInitialEndpointsTupled._1,
+              added => endpointAdded = added,
+            )
+          )
+
+          context.runPipedMessages() shouldBe empty
+          module.p2pEndpointsStore
+            .listEndpoints()
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints
+
           endpointAdded shouldBe false
           state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
 
@@ -420,35 +779,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
-    "it is requested to add an existing endpoint" should {
-      "do nothing" in {
-        val mempoolSpy =
-          spy(fakeIgnoringModule[Mempool.Message])
-        val (context, state, module, _) =
-          setupWithIgnoringDefaultDeps(mempool = mempoolSpy)
-
-        implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
-
-        var endpointAdded = false
-        module.receive(
-          P2PNetworkOut.Admin.AddEndpoint(
-            otherInitialEndpointsTupled._1,
-            added => endpointAdded = added,
-          )
-        )
-
-        context.runPipedMessages() shouldBe empty
-        module.p2pEndpointsStore.listEndpoints
-          .apply() should contain theSameElementsInOrderAs otherInitialEndpoints
-
-        endpointAdded shouldBe false
-        state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
-
-        verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
-      }
-    }
-
-    "it is requested to remove an existing endpoint" should {
+    "it is requested to remove an endpoint" should {
 
       "remove and disconnect it" when {
         "it is stored" in {
@@ -475,7 +806,8 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
           val remainingEndpoints =
             Seq(otherInitialEndpointsTupled._2, otherInitialEndpointsTupled._3)
-          module.p2pEndpointsStore.listEndpoints
+          module.p2pEndpointsStore
+            .listEndpoints()
             .apply() should contain theSameElementsInOrderAs remainingEndpoints
           context.extractSelfMessages().foreach(module.receive) // Disconnect endpoint
           endpointRemoved shouldBe true
@@ -485,11 +817,9 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         }
       }
 
-      // Check that we handle racing endpoint removals correctly
-      "do nothing" when {
+      "just disconnect the endpoint" when {
         "it is not stored anymore but still connected" in {
-          val mempoolSpy =
-            spy(fakeIgnoringModule[Mempool.Message])
+          val mempoolSpy = spy(fakeIgnoringModule[Mempool.Message])
           val p2pEndpointsStore = new InMemoryUnitTestP2PEndpointsStore(otherInitialEndpoints.toSet)
           val (context, state, module, _) =
             setupWithIgnoringDefaultDeps(
@@ -501,7 +831,35 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
           p2pEndpointsStore
             .removeEndpoint(otherInitialEndpointsTupled._1.id)
-            .apply() // Simulate a racing removal
+            .apply() // Endpoint not in store anymore
+
+          var endpointRemoved = false
+          module.receive(
+            P2PNetworkOut.Admin.RemoveEndpoint(
+              otherInitialEndpointsTupled._1.id,
+              removed => endpointRemoved = removed,
+            )
+          )
+
+          context.runPipedMessages() should contain only P2PNetworkOut.Internal.Disconnect(
+            otherInitialEndpointsTupled._1.id
+          )
+          endpointRemoved shouldBe false
+          state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
+
+          verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
+          verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
+        }
+      }
+
+      "just remove the endpoint" when {
+        "it is stored but not connected" in {
+          val mempoolSpy =
+            spy(fakeIgnoringModule[Mempool.Message])
+          val (context, state, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(mempool = mempoolSpy, connectToInitialNodes = false)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
 
           var endpointRemoved = false
           module.receive(
@@ -512,43 +870,72 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           )
 
           context.runPipedMessages() shouldBe empty
-          endpointRemoved shouldBe false
-          state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
+          module.p2pEndpointsStore
+            .listEndpoints()
+            .apply() should contain theSameElementsInOrderAs Seq(
+            otherInitialEndpointsTupled._2,
+            otherInitialEndpointsTupled._3,
+          )
+
+          endpointRemoved shouldBe true
 
           verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
           verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
         }
       }
+
+      "do nothing" when {
+        "it is not stored nor connected anymore" in {
+          val mempoolSpy =
+            spy(fakeIgnoringModule[Mempool.Message])
+          val (context, state, module, _) =
+            setupWithIgnoringDefaultDeps(mempool = mempoolSpy)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          var endpointRemoved = false
+          module.receive(
+            P2PNetworkOut.Admin.RemoveEndpoint(
+              anotherEndpoint.id,
+              removed => endpointRemoved = removed,
+            )
+          )
+
+          context.runPipedMessages() shouldBe empty
+          module.p2pEndpointsStore
+            .listEndpoints()
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints
+
+          import state.*
+
+          endpointRemoved shouldBe false
+          p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
+
+          verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
+          verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
+        }
+      }
     }
 
-    "it is requested to remove a non-existing endpoint" should {
-      "do nothing" in {
+    "it is queried about configured endpoints" should {
+      "return them" in {
         val mempoolSpy =
           spy(fakeIgnoringModule[Mempool.Message])
-        val (context, state, module, _) =
+        val (context, _, module, _) =
           setupWithIgnoringDefaultDeps(mempool = mempoolSpy)
+
+        otherInitialEndpoints.foreach(module.p2pEndpointsStore.addEndpoint(_).apply())
 
         implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
 
-        var endpointRemoved = false
+        var endpoints: Option[Seq[P2PEndpoint]] = None
         module.receive(
-          P2PNetworkOut.Admin.RemoveEndpoint(
-            anotherEndpoint.id,
-            removed => endpointRemoved = removed,
-          )
+          P2PNetworkOut.Admin.ListConfiguredEndpoints(e => endpoints = Some(e))
         )
 
         context.runPipedMessages() shouldBe empty
-        module.p2pEndpointsStore.listEndpoints
-          .apply() should contain theSameElementsInOrderAs otherInitialEndpoints
 
-        import state.*
-
-        endpointRemoved shouldBe false
-        p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
-
-        verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
-        verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
+        endpoints should contain(otherInitialEndpoints)
       }
     }
 
@@ -557,7 +944,12 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         val mempoolSpy =
           spy(fakeIgnoringModule[Mempool.Message])
         val (context, _, module, p2pNetworkManager) =
-          setupWithIgnoringDefaultDeps(mempool = mempoolSpy)
+          setupWithIgnoringDefaultDeps(
+            mempool = mempoolSpy,
+            p2pEndpointsStore = new InMemoryUnitTestP2PEndpointsStore(
+              (yetAnotherEndpoint +: otherInitialEndpoints).toSet
+            ),
+          )
 
         implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
 
@@ -569,6 +961,13 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         connect(p2pNetworkManager, otherInitialEndpointsTupled._2)
 
         // Peer 3 is known but disconnected
+
+        // Another peer is unknown
+
+        // Yet another peer was authenticated but got disconnected
+        connect(p2pNetworkManager, yetAnotherEndpoint)
+        authenticate(p2pNetworkManager, yetAnotherEndpoint)
+        disconnect(p2pNetworkManager, yetAnotherEndpoint)
 
         context.extractSelfMessages().foreach(module.receive) // Authenticate
 
@@ -626,6 +1025,11 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
                 isOutgoingConnection = true,
                 PeerEndpointHealth(PeerEndpointHealthStatus.Disconnected, None),
               ),
+              PeerConnectionStatus.PeerEndpointStatus(
+                yetAnotherEndpoint.id,
+                isOutgoingConnection = true,
+                PeerEndpointHealth(PeerEndpointHealthStatus.Disconnected, None),
+              ),
             )
           ),
         ) forEvery { (queriedEndpoints, expectedStatus) =>
@@ -657,7 +1061,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         )
 
         verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
-        verify(mempoolSpy, times(2)).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
+        verify(mempoolSpy, times(3)).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
       }
     }
 
@@ -690,6 +1094,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           otherInitialEndpoints.toSet
         ),
       isGenesis: Boolean = true,
+      connectToInitialNodes: Boolean = true,
   ): (
       ProgrammableUnitTestContext[P2PNetworkOut.Message],
       P2PNetworkOutModule.State,
@@ -706,6 +1111,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       p2pNetworkIn,
       p2pEndpointsStore,
       isGenesis,
+      connectToInitialNodes,
     )
 
   private def setupWithDefaultDepsExpectingSilence(
@@ -721,6 +1127,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           otherInitialEndpoints.toSet
         ),
       isGenesis: Boolean = true,
+      connectToInitialNodes: Boolean = true,
   ): (
       ProgrammableUnitTestContext[P2PNetworkOut.Message],
       P2PNetworkOutModule.State,
@@ -748,9 +1155,10 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         p2pEndpointsStore,
         isGenesis,
       )
-    module.ready(context.self)
+    module.ready(context.self)(TraceContext.createNew("p2p-network-out-module-test"))
     context.selfMessages should contain only P2PNetworkOut.Start
-    context.extractSelfMessages().foreach(module.receive) // Start connecting to initial nodes
+    if (connectToInitialNodes)
+      context.extractSelfMessages().foreach(module.receive) // Start connecting to initial nodes
     (context, state, module, p2pNetworkManager)
   }
 
@@ -779,11 +1187,14 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       output,
       pruning,
     )
+    simClock.reset()
     val module =
       new P2PNetworkOutModule[ProgrammableUnitTestEnv, FakeP2PNetworkManager](
         selfNode,
         isGenesis,
         state,
+        new Random(4),
+        simClock,
         p2pEndpointsStore,
         SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
         dependencies,
@@ -798,7 +1209,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       endpoint: P2PEndpoint,
   ): Unit =
     fakeClientP2PNetworkManager
-      .nodeActions(endpoint)
+      .nodeActions(endpoint.id)
       .onConnect(Some(endpoint.id))
 
   private def disconnect(
@@ -806,7 +1217,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       endpoint: P2PEndpoint,
   ): Unit =
     fakeClientP2PNetworkManager
-      .nodeActions(endpoint)
+      .nodeActions(endpoint.id)
       .onDisconnect(
         endpoint.id
       )
@@ -818,7 +1229,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
   ): Unit = {
     val bftNodeId = customNode.getOrElse(endpointToTestBftNodeId(endpoint))
     fakeClientP2PNetworkManager
-      .nodeActions(endpoint)
+      .nodeActions(endpoint.id)
       .onSequencerId(bftNodeId, Some(endpoint))
   }
 
@@ -831,13 +1242,15 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
     override val timeouts: ProcessingTimeout = P2PNetworkOutModuleTest.this.timeouts
     override val loggerFactory: NamedLoggerFactory = P2PNetworkOutModuleTest.this.loggerFactory
 
-    val nodeActions: mutable.Map[P2PEndpoint, P2PConnectionEventListener] =
+    val nodeActions: mutable.Map[P2PEndpoint.Id, P2PConnectionEventListener] =
       mutable.Map.empty
     override def createNetworkRef[ActorContextT](
         context: ProgrammableUnitTestContext[ActorContextT],
         p2pAddress: P2PAddress,
     )(implicit traceContext: TraceContext): P2PNetworkRef[BftOrderingMessage] = {
-      p2pAddress.maybeP2PEndpoint.foreach(nodeActions.put(_, p2pConnectionEventListener).discard)
+      p2pAddress.maybeP2PEndpoint
+        .map(_.id)
+        .foreach(nodeActions.put(_, p2pConnectionEventListener).discard)
 
       new P2PNetworkRef[BftOrderingMessage]() {
         override def asyncP2PSend(createMsg: Option[Instant] => BftOrderingMessage)(implicit
@@ -878,7 +1291,7 @@ object P2PNetworkOutModuleTest {
     endpointToTestBftNodeId(PlainTextP2PEndpoint(s"host0", Port.tryCreate(5000)))
 
   private lazy val otherInitialEndpoints =
-    List(1, 2, 3)
+    (1 to 3)
       .map(i => PlainTextP2PEndpoint(s"host$i", Port.tryCreate(5000 + i)))
 
   private lazy val otherInitialEndpointIds =
@@ -889,6 +1302,9 @@ object P2PNetworkOutModuleTest {
 
   private lazy val anotherEndpoint =
     PlainTextP2PEndpoint("host4", Port.tryCreate(5004))
+
+  private lazy val yetAnotherEndpoint =
+    PlainTextP2PEndpoint("host5", Port.tryCreate(5005))
 
   @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   private lazy val otherInitialEndpointsTupled =

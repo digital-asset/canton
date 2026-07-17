@@ -8,12 +8,16 @@ import anorm.{SqlParser, ~}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.error.IndexErrors.IndexDbException
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.CannotAcquireAllRowLocksException
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
   SqlStringInterpolation,
 }
-import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.withoutNetworkTimeout
+import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.{
+  DbLockMeta,
+  withoutNetworkTimeout,
+}
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.postgresql.{
   PostgresDataSourceConfig,
@@ -27,12 +31,16 @@ import org.scalatest.flatspec.AnyFlatSpec
 import java.sql.{Connection, SQLException}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
+import scala.util.{Failure, Try}
 
 final class StorageBackendSpecPostgres
     extends AnyFlatSpec
     with StorageBackendProviderPostgres
     with StorageBackendSuite
+    with StorageBackendTestsBatchSize
     with Inside {
+
+  private val blockingAwaitMillis: Int = 1000
 
   behavior of "StorageBackend (Postgres)"
 
@@ -114,8 +122,8 @@ final class StorageBackendSpecPostgres
 
     // when the network timeout is disabled, the long-running query should complete successfully
     val connection2 = dataSource.getConnection
-    withoutNetworkTimeout { connection =>
-      SQL"SELECT pg_sleep(5);".execute()(connection)
+    withoutNetworkTimeout {
+      SQL"SELECT pg_sleep(5);".execute()(connection2)
     }(connection2, noTracingLogger)
 
     // and when re-enabling the network timeout, it should again throw after the specified time
@@ -330,130 +338,221 @@ final class StorageBackendSpecPostgres
     connection2.close()
   }
 
-  behavior of "exclusive table locking"
+  case class NamedQuery(name: String)(val query: DbLockMeta => Connection => Any) {
+    implicit class QueryDecorator(query: Connection => Any) {
+      def blocks(query2: Connection => Any): Unit =
+        withTwoConnections { (c1, c2) =>
+          c1.setAutoCommit(false)
+          c2.setAutoCommit(false)
+          c2.setNetworkTimeout(parallelExecutionContext, blockingAwaitMillis * 2)
+          query(c1)
+          val blockedCall = Future(query2(c2))(parallelExecutionContext)
+          Threading.sleep(blockingAwaitMillis.toLong)
+          blockedCall.value shouldBe None
+          c1.commit()
+          blockedCall.futureValue
+        }
 
-  it should "block other exclusive lock in lockExclusivelyPruningProcessingTable" in withConnections(
-    2
-  ) {
-    case List(c1, c2) =>
-      c1.setAutoCommit(false)
-      c2.setAutoCommit(false)
-      backend.event.lockExclusivelyPruningProcessingTable(c1)
-      val blockedCall =
-        Future(backend.event.lockExclusivelyPruningProcessingTable(c2))(parallelExecutionContext)
-      Threading.sleep(1000)
-      blockedCall.value shouldBe None
-      c1.commit()
-      c1.close()
-      blockedCall.futureValue
-      c2.close()
+      def doesNotBlock(query2: Connection => Any): Unit =
+        withTwoConnections { (c1, c2) =>
+          c1.setAutoCommit(false)
+          c2.setAutoCommit(false)
+          c2.setNetworkTimeout(parallelExecutionContext, blockingAwaitMillis)
+          query(c1)
+          query2(c2)
+          c1.commit()
+          c2.commit()
+        }
+    }
 
-    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
+    def shouldBlock(query2: NamedQuery): Unit =
+      it should s"block ${query2.name}" in (query(testDbLockMeta) blocks query2.query(
+        testDbLockMeta
+      ))
+
+    def shouldNotBlock(query2: NamedQuery): Unit =
+      it should s"not block ${query2.name}" in (query(testDbLockMeta) doesNotBlock query2.query(
+        testDbLockMeta
+      ))
+
+    def shouldBlockedBy(query2: NamedQuery): Unit =
+      it should s"blocked by ${query2.name}" in (query2.query(testDbLockMeta) blocks query(
+        testDbLockMeta
+      ))
+
+    def shouldBlockedByWithErrorCodeReporting(query2: NamedQuery): Unit = {
+      shouldBlockedBy(query2)
+
+      it should s"report DbLockTimeoutError if blocked by ${query2.name}" in withTwoConnections {
+        (c1, c2) =>
+          c1.setAutoCommit(false)
+          c2.setAutoCommit(false)
+          query2.query(testDbLockMeta)(c1)
+          loggerFactory.assertLogs(
+            Try(query(testDbLockMeta.copy(timeoutMillis = 100))(c2)) match {
+              case Failure(_: IndexDbException) => succeed
+              case unexpected => fail(s"unexpected result $unexpected")
+            },
+            _.errorMessage should include(
+              "INDEX_DB_LOCK_TIMEOUT_ERROR(4,0): Acquisition of DB Lock timed out (timeout config: \"test\": 100 ms). Lock description: test"
+            ),
+          )
+          c1.commit()
+      }
+    }
+
+    def shouldNotBlockedBy(query2: NamedQuery): Unit =
+      it should s"not blocked by ${query2.name}" in (query2.query(
+        testDbLockMeta
+      ) doesNotBlock query(testDbLockMeta))
   }
 
-  it should "block other exclusive locks in lockExclusivelyContractPruningProcessingTable" in withConnections(
-    2
-  ) {
-    case List(c1, c2) =>
-      c1.setAutoCommit(false)
-      c2.setAutoCommit(false)
-      backend.event.lockExclusivelyContractPruningProcessingTable(c1)
-      val blockedCall =
-        Future(backend.event.lockExclusivelyContractPruningProcessingTable(c2))(
-          parallelExecutionContext
-        )
-      Threading.sleep(1000)
-      blockedCall.value shouldBe None
-      c1.commit()
-      c1.close()
-      blockedCall.futureValue
-      c2.close()
+  private val testDbLockMeta = StorageBackendTestValues.testDbLockMeta
+  private val lockExclusivelyPruningProcessingTable = NamedQuery(
+    "lockExclusivelyPruningProcessingTable"
+  )(dbLockMeta => implicit c => backend.event.lockExclusivelyPruningProcessingTable(dbLockMeta))
+  private val insertingToPruningCandidateTable =
+    NamedQuery("insertingToPruningCandidateTable")(_ =>
+      implicit c =>
+        SQL"INSERT INTO lapi_pruning_candidate_deactivated(deactivate_event_sequential_id) VALUES (11)"
+          .execute()
+    )
+  private val readingFromPruningCandidateTable =
+    NamedQuery("readingFromPruningCandidateTable")(_ =>
+      implicit c =>
+        SQL"SELECT * FROM lapi_pruning_candidate_deactivated"
+          .execute()
+    )
+  private val accessExclusiveLockOnPruningCandidateTable =
+    NamedQuery("accessExclusiveLockOnPruningCandidateTable")(_ =>
+      implicit c =>
+        SQL"LOCK TABLE lapi_pruning_candidate_deactivated IN ACCESS EXCLUSIVE MODE"
+          .execute()
+    )
+  private val accessShareLockOnPruningCandidateTable =
+    NamedQuery("accessShareLockOnPruningCandidateTable(pg_dump)")(_ =>
+      implicit c =>
+        SQL"LOCK TABLE lapi_pruning_candidate_deactivated IN ACCESS SHARE MODE"
+          .execute()
+    )
 
-    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
-  }
+  behavior of lockExclusivelyPruningProcessingTable.name
 
-  it should "block other operations accessing contract candidate table (locked by lockExclusivelyContractPruningProcessingTable)" in withConnections(
-    2
-  ) {
-    case List(c1, c2) =>
-      c1.setAutoCommit(false)
-      c2.setAutoCommit(false)
-      backend.event.lockExclusivelyContractPruningProcessingTable(c1)
-      val blockedCall =
-        Future(backend.event.cleanPruningCandidates()(c2, implicitly))(parallelExecutionContext)
-      Threading.sleep(1000)
-      blockedCall.value shouldBe None
-      c1.commit()
-      c1.close()
-      blockedCall.futureValue
-      c2.close()
+  lockExclusivelyPruningProcessingTable shouldBlockedByWithErrorCodeReporting lockExclusivelyPruningProcessingTable
+  lockExclusivelyPruningProcessingTable shouldBlock lockExclusivelyPruningProcessingTable
+  lockExclusivelyPruningProcessingTable shouldBlockedByWithErrorCodeReporting insertingToPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldBlock insertingToPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldBlockedByWithErrorCodeReporting accessExclusiveLockOnPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldBlock accessExclusiveLockOnPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldNotBlockedBy accessShareLockOnPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldNotBlock accessShareLockOnPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldNotBlockedBy readingFromPruningCandidateTable
+  lockExclusivelyPruningProcessingTable shouldNotBlock readingFromPruningCandidateTable
 
-    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
-  }
-
-  it should "block other operations inserting into contract candidate table (locked by lockExclusivelyContractPruningProcessingTable)" in withConnections(
-    2
-  ) {
-    case List(c1, c2) =>
-      c1.setAutoCommit(false)
-      c2.setAutoCommit(false)
-      backend.event.lockExclusivelyContractPruningProcessingTable(c1)
-      val blockedCall = Future(
+  private val lockExclusivelyContractPruningProcessingTable = NamedQuery(
+    "lockExclusivelyContractPruningProcessingTable"
+  )(dbLockMeta =>
+    implicit c => backend.event.lockExclusivelyContractPruningProcessingTable(dbLockMeta)
+  )
+  private val insertingToPruningContractCandidateTable =
+    NamedQuery("insertingToPruningContractCandidateTable")(_ =>
+      implicit c =>
         SQL"INSERT INTO lapi_pruning_contract_candidate(internal_contract_id) VALUES (11)"
-          .execute()(c2)
-      )(parallelExecutionContext)
-      Threading.sleep(1000)
-      blockedCall.value shouldBe None
-      c1.commit()
-      c1.close()
-      blockedCall.futureValue
-      c2.close()
+          .execute()
+    )
+  private val readingFromPruningContractCandidateTable =
+    NamedQuery("readingFromPruningContractCandidateTable")(_ =>
+      implicit c =>
+        SQL"SELECT * FROM lapi_pruning_contract_candidate"
+          .execute()
+    )
+  private val accessExclusiveLockOnPruningContractCandidateTable =
+    NamedQuery("accessExclusiveLockOnPruningContractCandidateTable")(_ =>
+      implicit c =>
+        SQL"LOCK TABLE lapi_pruning_contract_candidate IN ACCESS EXCLUSIVE MODE"
+          .execute()
+    )
+  private val accessShareLockOnPruningContractCandidateTable =
+    NamedQuery("accessShareLockOnPruningContractCandidateTable(pg_dump)")(_ =>
+      implicit c =>
+        SQL"LOCK TABLE lapi_pruning_contract_candidate IN ACCESS SHARE MODE"
+          .execute()
+    )
 
-    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
-  }
+  behavior of lockExclusivelyContractPruningProcessingTable.name
 
-  it should "be block by other operations accessing contract candidate table (attempt to lock by lockExclusivelyContractPruningProcessingTable)" in withConnections(
-    2
-  ) {
-    case List(c1, c2) =>
-      c1.setAutoCommit(false)
-      c2.setAutoCommit(false)
-      backend.event.cleanPruningCandidates()(c1, implicitly)
-      val blockedCall =
-        Future(backend.event.lockExclusivelyContractPruningProcessingTable(c2))(
-          parallelExecutionContext
-        )
-      Threading.sleep(1000)
-      blockedCall.value shouldBe None
-      c1.commit()
-      c1.close()
-      blockedCall.futureValue
-      c2.close()
+  lockExclusivelyContractPruningProcessingTable shouldBlockedByWithErrorCodeReporting lockExclusivelyContractPruningProcessingTable
+  lockExclusivelyContractPruningProcessingTable shouldBlock lockExclusivelyContractPruningProcessingTable
+  lockExclusivelyContractPruningProcessingTable shouldBlockedByWithErrorCodeReporting insertingToPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldBlock insertingToPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldBlockedByWithErrorCodeReporting accessExclusiveLockOnPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldBlock accessExclusiveLockOnPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldNotBlockedBy accessShareLockOnPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldNotBlock accessShareLockOnPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldNotBlockedBy lockExclusivelyPruningProcessingTable
+  lockExclusivelyContractPruningProcessingTable shouldNotBlock lockExclusivelyPruningProcessingTable
+  lockExclusivelyContractPruningProcessingTable shouldNotBlockedBy readingFromPruningContractCandidateTable
+  lockExclusivelyContractPruningProcessingTable shouldNotBlock readingFromPruningContractCandidateTable
 
-    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
-  }
+  behavior of "vacuum"
 
-  it should "be block by other operations inserting into contract candidate table (attempt to lock by lockExclusivelyContractPruningProcessingTable)" in withConnections(
-    2
-  ) {
-    case List(c1, c2) =>
-      c1.setAutoCommit(false)
-      c2.setAutoCommit(false)
-      SQL"INSERT INTO lapi_pruning_contract_candidate(internal_contract_id) VALUES (11)"
-        .execute()(c1)
-      val blockedCall =
-        Future(backend.event.lockExclusivelyContractPruningProcessingTable(c2))(
-          parallelExecutionContext
-        )
-      Threading.sleep(1000)
-      blockedCall.value shouldBe None
-      c1.commit()
-      c1.close()
-      blockedCall.futureValue
-      c2.close()
+  private val vacuumPruningContractCandidateTable =
+    NamedQuery("vacuumPruningContractCandidateTable") { _ => implicit c =>
+      c.setAutoCommit(true)
+      PostgresQueryStrategy.vacuumTable("lapi_pruning_contract_candidate")
+      c.setAutoCommit(false)
+    }
 
-    case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
-  }
+  vacuumPruningContractCandidateTable shouldBlockedBy lockExclusivelyContractPruningProcessingTable
+  vacuumPruningContractCandidateTable shouldNotBlockedBy accessShareLockOnPruningContractCandidateTable
+  vacuumPruningContractCandidateTable shouldNotBlockedBy insertingToPruningContractCandidateTable
+  vacuumPruningContractCandidateTable shouldNotBlockedBy readingFromPruningContractCandidateTable
+  vacuumPruningContractCandidateTable shouldBlockedBy accessExclusiveLockOnPruningContractCandidateTable
+  // blocking/non-blocking cannot be verified as vacuum cannot run in a transaction
+
+  behavior of "reindex"
+
+  private def reindexPruningContractCandidateTable(successful: Boolean) =
+    NamedQuery("reindexPruningContractCandidateTable") { _ => implicit c =>
+      PostgresQueryStrategy.reindexTableIfPossible(
+        "lapi_pruning_contract_candidate"
+      ) shouldBe successful
+    }
+
+  reindexPruningContractCandidateTable(
+    false
+  ) shouldNotBlockedBy lockExclusivelyContractPruningProcessingTable
+  reindexPruningContractCandidateTable(
+    true
+  ) shouldBlock lockExclusivelyContractPruningProcessingTable
+  reindexPruningContractCandidateTable(
+    false
+  ) shouldNotBlockedBy accessShareLockOnPruningContractCandidateTable
+  reindexPruningContractCandidateTable(
+    true
+  ) shouldBlock accessShareLockOnPruningContractCandidateTable
+  reindexPruningContractCandidateTable(
+    false
+  ) shouldNotBlockedBy insertingToPruningContractCandidateTable
+  reindexPruningContractCandidateTable(true) shouldBlock insertingToPruningContractCandidateTable
+  reindexPruningContractCandidateTable(
+    false
+  ) shouldNotBlockedBy readingFromPruningContractCandidateTable
+  reindexPruningContractCandidateTable(true) shouldBlock readingFromPruningContractCandidateTable
+  reindexPruningContractCandidateTable(
+    false
+  ) shouldNotBlockedBy accessExclusiveLockOnPruningContractCandidateTable
+  reindexPruningContractCandidateTable(
+    true
+  ) shouldBlock accessExclusiveLockOnPruningContractCandidateTable
+  reindexPruningContractCandidateTable(
+    false
+  ) shouldNotBlockedBy reindexPruningContractCandidateTable(
+    true
+  )
+  reindexPruningContractCandidateTable(true) shouldNotBlock reindexPruningContractCandidateTable(
+    false
+  )
 
   behavior of "read/write row locking of internal contract IDs"
 
@@ -475,9 +574,12 @@ final class StorageBackendSpecPostgres
     import env.*
     backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
     val f = Future(
-      backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c2) shouldBe Set(-15)
+      backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+        c2,
+        implicitly,
+      ) shouldBe Set(-15)
     )(parallelExecutionContext)
-    Threading.sleep(1000)
+    Threading.sleep(blockingAwaitMillis.toLong)
     f.value shouldBe None
     c1.commit()
     f.futureValue
@@ -485,7 +587,10 @@ final class StorageBackendSpecPostgres
 
   it should "read should block write" in testRowLocking { env =>
     import env.*
-    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c1) shouldBe Set(-15)
+    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+      c1,
+      implicitly,
+    ) shouldBe Set(-15)
     assertThrows[CannotAcquireAllRowLocksException] {
       backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
     }
@@ -496,8 +601,14 @@ final class StorageBackendSpecPostgres
 
   it should "read should not block read" in testRowLocking { env =>
     import env.*
-    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c1) shouldBe Set(-15)
-    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c2) shouldBe Set(-15)
+    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+      c1,
+      implicitly,
+    ) shouldBe Set(-15)
+    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+      c2,
+      implicitly,
+    ) shouldBe Set(-15)
   }
 
   it should "write should block write" in testRowLocking { env =>
@@ -514,7 +625,10 @@ final class StorageBackendSpecPostgres
   it should "read lock should block write lock, write lock also might be starved by further read locks, and also the blocked writer progressively locking all entries as soon as possible" in testRowLocking {
     env =>
       import env.*
-      backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c1) shouldBe Set(-15)
+      backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+        c1,
+        implicitly,
+      ) shouldBe Set(-15)
       // write is blocked by the read for cid2, but cid1 is write locked
       val writeF = Future(
         blockingWriteLockInternalContractIds(
@@ -524,7 +638,10 @@ final class StorageBackendSpecPostgres
       Threading.sleep(500)
       writeF.value shouldBe None
       // another read is not blocked by the current read on cid2, so it executes immediately
-      backend.event.readLockInternalContractIds(Set(cid2, cid4, -18))(c3) shouldBe Set(-18)
+      backend.event.readLockInternalContractIds(Set(cid2, cid4, -18), testDbLockMeta)(
+        c3,
+        implicitly,
+      ) shouldBe Set(-18)
       Threading.sleep(500)
       writeF.value shouldBe None
       c1.commit()
@@ -532,14 +649,20 @@ final class StorageBackendSpecPostgres
       // although c1 already released it's cid2 read lock, c3 still has an open tx with cid2 read lock
       writeF.value shouldBe None
       // another tx incoming for cid2, c3 still hold the read lock, but this one can execute immediately
-      backend.event.readLockInternalContractIds(Set(cid2, cid3, -19))(c1) shouldBe Set(-19)
+      backend.event.readLockInternalContractIds(Set(cid2, cid3, -19), testDbLockMeta)(
+        c1,
+        implicitly,
+      ) shouldBe Set(-19)
       c3.commit()
       Threading.sleep(500)
       // although c3 released its cid2 read lock, c1 still holds it o writer is still blocked (starving)
       writeF.value shouldBe None
       // c3 now blocked as cid1 held by c2 with a write lock
       val readF = Future(
-        backend.event.readLockInternalContractIds(Set(cid1, cid3, -19))(c3) shouldBe Set(-19)
+        backend.event.readLockInternalContractIds(Set(cid1, cid3, -19), testDbLockMeta)(
+          c3,
+          implicitly,
+        ) shouldBe Set(-19)
       )(parallelExecutionContext)
       Threading.sleep(500)
       // c1 still holds the read lock for cid2
@@ -556,14 +679,20 @@ final class StorageBackendSpecPostgres
 
   it should "read lock should not block contract upsert" in testRowLocking { env =>
     import env.*
-    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c1) shouldBe Set(-15)
+    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+      c1,
+      implicitly,
+    ) shouldBe Set(-15)
     upsertParContracts(c2)
   }
 
   it should "contract upsert should not block read lock" in testRowLocking { env =>
     import env.*
     upsertParContracts(c1)
-    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15))(c2) shouldBe Set(-15)
+    backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
+      c2,
+      implicitly,
+    ) shouldBe Set(-15)
   }
 
   it should "write lock should not block contract upsert" in testRowLocking { env =>
@@ -589,25 +718,22 @@ final class StorageBackendSpecPostgres
   )
 
   private def testRowLocking(test: TestRowLockingEnv => Unit): Unit =
-    withConnections(3) {
-      case cs @ List(c1, c2, c3) =>
-        cs.foreach { c =>
-          c.setAutoCommit(false) // operations running in a transaction
-          c.setNetworkTimeout(null, 5000) // in 5 second all JDBC calls should finish
-        }
-        test(
-          TestRowLockingEnv(
-            c1,
-            c2,
-            c3,
-            insertParContract("first"),
-            insertParContract("second"),
-            insertParContract("third"),
-            insertParContract("fourth"),
-          )
+    withThreeConnections { (c1, c2, c3) =>
+      List(c1, c2, c3).foreach { c =>
+        c.setAutoCommit(false) // operations running in a transaction
+        c.setNetworkTimeout(null, 5000) // in 5 second all JDBC calls should finish
+      }
+      test(
+        TestRowLockingEnv(
+          c1,
+          c2,
+          c3,
+          insertParContract("first"),
+          insertParContract("second"),
+          insertParContract("third"),
+          insertParContract("fourth"),
         )
-
-      case unexpected => fail(s"Incorrect amount of connections: ${unexpected.size}")
+      )
     }
 
   private def insertParContract(contractId: String): Long = {

@@ -950,10 +950,10 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
   private def createConnectionOpener(
       thisNode: BftNodeId
-  ): BftOrderingMessage = {
+  )(implicit traceContext: TraceContext): BftOrderingMessage = {
     val networkSendInstant = Instant.now()
     BftOrderingMessage(
-      "",
+      traceContext.asW3CTraceContext.map(_.parent).getOrElse(""),
       Some(
         BftOrderingMessageBody(
           BftOrderingMessageBody.Message.ConnectionOpened(ConnectionOpened())

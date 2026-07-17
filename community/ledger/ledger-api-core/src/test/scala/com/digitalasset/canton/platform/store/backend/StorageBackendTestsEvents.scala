@@ -3395,9 +3395,11 @@ private[backend] trait StorageBackendTestsEvents
   }
 
   it should "wipe the complete ACHS" in withAchsData {
-    executeSql(
-      backend.parameter.clearAchsStateAndData
-    )
+    executeSql { c =>
+      c.setAutoCommit(false)
+      backend.parameter.clearAchsStateAndData()(c, implicitly)
+      c.setAutoCommit(true)
+    }
     queryFullAchs shouldBe Vector()
   }
 }

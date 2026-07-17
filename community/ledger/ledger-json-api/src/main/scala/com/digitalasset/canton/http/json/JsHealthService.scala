@@ -48,12 +48,14 @@ class JsHealthService(
 
   private def readyz(@unused caller: CallerContext): TracedInput[Unit] => Future[
     Either[JsCantonError, (StatusCode, String)]
-  ] =
+  ] = {
+    implicit val tc = caller.traceContext()
     _ =>
       healthService
         .ready()
         .map(response => (response.getStatusCode, response.getResponseBody))
         .resultToRight
+  }
 }
 
 object JsHealthService extends DocumentationEndpoints {

@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.platform.config
 
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.PositiveFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.resource.{DbStorageSingle, Storage}
 import com.typesafe.config.{Config, ConfigFactory}
@@ -16,13 +17,19 @@ import com.typesafe.config.{Config, ConfigFactory}
   * @param enabled
   *   Whether to enable the traffic enforcement feature. Note: This feature is experimental,
   *   unstable and is disabled by default. Enabling it in production environments is not
-  *   recommended.
+  *   recommended. Disabled by default
+  * @param enforceCostOnSubmissions
+  *   Whether to enforce traffic cost on submissions. If enabled, the participant will validate that
+  *   the account associated with the submission is correctly permissioned and has sufficient
+  *   balance to cover the expected traffic cost. If the account has insufficient balance, the
+  *   submission will be rejected. Disabled by default.
   * @param trafficEnforcementServer
   *   The configuration for the connection to the traffic server. Currently, only the internal,
   *   in-process server variant is supported.
   */
 final case class TrafficEnforcementConfig(
     enabled: Boolean = false,
+    enforceCostOnSubmissions: Boolean = false,
     trafficEnforcementServer: TrafficEnforcementServerConfig =
       TrafficEnforcementServerConfig.Internal(),
 )
@@ -41,6 +48,10 @@ object TrafficEnforcementServerConfig {
       inProcessTeaServerName: String = "TeaGrpcInProcServer",
       projection: ProjectionConfig = ProjectionConfig(),
   ) extends TrafficEnforcementServerConfig {
+
+    def processServerNameForInstance(instance: InstanceName, ledgerApiPort: Port): String =
+      s"$inProcessTeaServerName-${instance.unwrap}-${ledgerApiPort.unwrap}"
+
     def pekkoConfig(storage: Storage): Config = storage match {
       case storage: DbStorageSingle =>
         storage.profile match {
@@ -61,13 +72,26 @@ object TrafficEnforcementServerConfig {
   }
 
   /** Config of the pekko projection in the internal traffic enforcement component
-    * @param maxRetries
-    *   max number of retries on projection failure
-    * @param retryDelay
-    *   delay between restarts of the projection when failing
+    * @param maxHandlerRetries
+    *   max number of retries on projection handler failure
+    * @param handlerRetryDelay
+    *   delay between restarts of retrying a failed event processing
+    * @param minProjectionRestartBackoff
+    *   minimum amount of time before retrying the projection on failure
+    * @param maxProjectionRestartBackoff
+    *   maximum amount of time before between retries of the projection on failure
+    * @param initialCompletionOffsetBeginExclusive
+    *   the first ever time the TEA is started it will have no prior offset to start its completion
+    *   stream from. By default it will start at ledgerEnd. Use this config to override the offset
+    *   at which it will start.
     */
   final case class ProjectionConfig(
-      maxRetries: PositiveInt = PositiveInt.MaxValue,
-      retryDelay: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
+      maxHandlerRetries: PositiveInt = PositiveInt.MaxValue,
+      handlerRetryDelay: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
+      minProjectionRestartBackoff: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
+      maxProjectionRestartBackoff: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(30),
+      projectionRestartRandomFactor: Double = 0.2d,
+      projectionMaxRestarts: Int = Int.MaxValue,
+      initialCompletionOffsetBeginExclusive: Option[Long] = None,
   )
 }

@@ -687,7 +687,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql { connection =>
       // non-auto commit is enforced by the PG locking mechanism used inside
       connection.setAutoCommit(false)
-      backend.event.addContractPruningCandidatesAfter(ledgerEnd)(connection, implicitly)
+      backend.event.addContractPruningCandidatesAfter(ledgerEnd, testDbLockMeta)(
+        connection,
+        implicitly,
+      )
       connection.commit()
     }
     contractCandidates() shouldBe Vector(1, 2, 100, 101, 103, 104)

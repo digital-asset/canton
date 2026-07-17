@@ -33,6 +33,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BlockNumber,
   EpochLength,
   EpochNumber,
+  WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
@@ -66,18 +67,31 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.util.Random
-
 class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
+
   import StateTransferManagerTest.*
 
   implicit private val config: BftBlockOrdererConfig = BftBlockOrdererConfig()
+
+  class P2pNetworkOutRefExpectingSendToRandomAuthenticated
+      extends ModuleRef[P2PNetworkOut.Message] {
+    override def asyncSend(msg: P2PNetworkOut.Message)(implicit
+        traceContext: TraceContext,
+        metricsContext: MetricsContext,
+    ): Unit =
+      msg
+        .asInstanceOf[P2PNetworkOut.SendToRandomAuthenticated]
+        .onRecipientDecision
+        .foreach(
+          _.apply(Some(otherId))
+        )
+  }
 
   "StateTransferManager" should {
     "start catch-up and try to restart" in {
       implicit val context: ContextType = new ProgrammableUnitTestContext
 
-      val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
+      val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](
           p2pNetworkOutModuleRef = p2pNetworkOutRef
@@ -103,7 +117,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       assertBlockTransferRequestHasBeenSent(
         p2pNetworkOutRef,
         blockTransferRequest,
-        to = otherId,
+        possibleRecipients = Seq(otherId),
         numberOfTimes = 1,
       )
 
@@ -120,7 +134,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     "state transfer new epoch (start onboarding)" in {
       implicit val context: ContextType = new ProgrammableUnitTestContext
 
-      val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
+      val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](
           p2pNetworkOutModuleRef = p2pNetworkOutRef
@@ -133,6 +147,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         startEpoch,
         aMembershipBeforeOnboarding,
         ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+        nodeThatTimedOut = None,
       )(abort = fail(_))
       context.runPipedMessages()
 
@@ -145,7 +160,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       assertBlockTransferRequestHasBeenSent(
         p2pNetworkOutRef,
         blockTransferRequest,
-        to = otherId,
+        possibleRecipients = Seq(otherId),
         numberOfTimes = 1,
       )
     }
@@ -153,7 +168,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     "schedule a retry and send block transfer request" in {
       implicit val context: ContextType = new ProgrammableUnitTestContext()
 
-      val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
+      val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](
           p2pNetworkOutModuleRef = p2pNetworkOutRef
@@ -174,7 +189,8 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         .create(startEpoch, from = myId)
         .fakeSign
       stateTransferManager.handleStateTransferMessage(
-        StateTransferMessage.RetryBlockTransferRequest(blockTransferRequest),
+        StateTransferMessage
+          .RetryBlockTransferRequest(blockTransferRequest, nodeThatTimedOut = Some(otherId)),
         aTopologyInfo,
         latestCompletedEpoch,
         aBootstrapEpoch.info,
@@ -184,7 +200,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       assertBlockTransferRequestHasBeenSent(
         p2pNetworkOutRef,
         blockTransferRequest,
-        to = otherId,
+        possibleRecipients = Seq(otherId),
         numberOfTimes = 2, // +1 from start
       )
     }
@@ -305,10 +321,15 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       new ProgrammableUnitTestContext()
 
     val outputRef = mock[ModuleRef[Output.Message[ProgrammableUnitTestEnv]]]
+    val timeoutManagerMock =
+      mock[
+        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[ProgrammableUnitTestEnv], String]
+      ]
     val stateTransferManager =
       createStateTransferManager[ProgrammableUnitTestEnv](
         outputModuleRef = outputRef,
         p2pNetworkOutModuleRef = fakeIgnoringModule,
+        maybeCustomTimeoutManager = Some(timeoutManagerMock),
       )
 
     // Initiate state transfer so that it's in progress.
@@ -359,6 +380,8 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       latestCompletedEpochLocally,
       currentEpochInfo,
     )(fail(_))
+
+    verify(timeoutManagerMock, times(1)).cancelTimeout()
 
     // Store the block.
     val blockStoredMessage = context.runPipedMessages()
@@ -504,7 +527,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       myId,
       dependencies,
       epochStore,
-      new Random(4),
+      WorkflowId("test-workflow-id"),
       metrics,
       loggerFactory,
     )(maybeCustomTimeoutManager)
@@ -513,25 +536,61 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   private def assertBlockTransferRequestHasBeenSent(
       p2pNetworkOutRef: ModuleRef[P2PNetworkOut.Message],
       blockTransferRequest: SignedMessage[StateTransferMessage.BlockTransferRequest],
-      to: BftNodeId,
+      possibleRecipients: Seq[BftNodeId],
       numberOfTimes: Int,
   )(implicit context: ContextType): Unit = {
     // Should have scheduled a retry.
     context.lastDelayedMessage shouldBe Some(
-      numberOfTimes -> StateTransferMessage.RetryBlockTransferRequest(blockTransferRequest)
+      numberOfTimes -> StateTransferMessage.RetryBlockTransferRequest(
+        blockTransferRequest,
+        Some(otherId),
+      )
     )
     // Should have sent a block transfer request to the other node only.
     val order = inOrder(p2pNetworkOutRef)
     order
-      .verify(p2pNetworkOutRef, times(numberOfTimes))
+      .verify(p2pNetworkOutRef, times(1))
       .asyncSend(
-        eqTo(
-          P2PNetworkOut.send(
-            P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(blockTransferRequest),
-            to,
-          )
+        argThat((msg: P2PNetworkOut.Message) =>
+          msg match {
+            case P2PNetworkOut.SendToRandomAuthenticated(
+                  message,
+                  `possibleRecipients`,
+                  Some(workflowId),
+                  None,
+                  Some(_),
+                )
+                if workflowId == WorkflowId(
+                  "test-workflow-id"
+                ) && message == P2PNetworkOut.BftOrderingNetworkMessage
+                  .StateTransferMessage(blockTransferRequest) =>
+              true
+            case _ => false
+          }
         )
       )(any[TraceContext], any[MetricsContext])
+    if (numberOfTimes > 1)
+      order
+        .verify(p2pNetworkOutRef, times(numberOfTimes - 1))
+        .asyncSend(
+          argThat((msg: P2PNetworkOut.Message) =>
+            msg match {
+              case P2PNetworkOut.SendToRandomAuthenticated(
+                    message,
+                    `possibleRecipients`,
+                    Some(workflowId),
+                    Some(`otherId`),
+                    Some(_),
+                  )
+                  if workflowId == WorkflowId(
+                    "test-workflow-id"
+                  ) && message == P2PNetworkOut.BftOrderingNetworkMessage
+                    .StateTransferMessage(blockTransferRequest) =>
+                true
+              case _ => false
+            }
+          )
+        )(any[TraceContext], any[MetricsContext])
     order
       .verify(p2pNetworkOutRef, never)
       .asyncSend(any[P2PNetworkOut.Message])(any[TraceContext], any[MetricsContext])

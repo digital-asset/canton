@@ -9,11 +9,30 @@ import "com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v3
 import "com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto";
 
 service SequencerBftAdministrationService {
+  // Add a peer endpoint to the list of known endpoints. The sequencer will attempt to connect to the endpoint and
+  //  authenticate it.
   rpc AddPeerEndpoint(AddPeerEndpointRequest) returns (AddPeerEndpointResponse);
+
+  // Remove a peer endpoint from the list of known endpoints. The sequencer will disconnect from the endpoint if it is
+  //  currently connected.
   rpc RemovePeerEndpoint(RemovePeerEndpointRequest) returns (RemovePeerEndpointResponse);
+
+  // List the peer endpoints that have been configured and stored in DB.
+  rpc ListConfiguredEndpoints(ListConfiguredEndpointsRequest) returns (ListConfiguredEndpointsResponse);
+
+  // Get the status of the peer network for the current node; if no endpoints are provided as arguments,
+  //  it returns the global P2P network status, including both outgoing and incoming connections.
   rpc GetPeerNetworkStatus(GetPeerNetworkStatusRequest) returns (GetPeerNetworkStatusResponse);
+
+  // Get the write readiness of the current node, which indicates whether the node is ready to accept writes
+  //  based on its peer connections and quorum requirements.
   rpc GetWriteReadiness(GetWriteReadinessRequest) returns (GetWriteReadinessResponse);
+
+  // Get the current ordering topology, including the active sequencer IDs, sequencing parameters,
+  //  and leader/blacklisted sequencer IDs.
   rpc GetOrderingTopology(GetOrderingTopologyRequest) returns (GetOrderingTopologyResponse);
+
+  // Enable or disable the collection of performance metrics on the sequencer node.
   rpc SetPerformanceMetricsEnabled(SetPerformanceMetricsEnabledRequest) returns (SetPerformanceMetricsEnabledResponse);
 }
 
@@ -23,6 +42,12 @@ message AddPeerEndpointRequest {
 
 message RemovePeerEndpointRequest {
   PeerEndpointId endpoint_id = 1;
+}
+
+message ListConfiguredEndpointsRequest {}
+
+message ListConfiguredEndpointsResponse {
+  repeated PeerEndpoint endpoints = 1;
 }
 
 message PeerEndpoint {
@@ -65,6 +90,35 @@ message Authenticated {
   string sequencer_id = 1;
 }
 
+message GetPeerNetworkStatusRequest {
+  // If empty, the status of all known endpoints will be returned
+  repeated PeerEndpointId endpoint_ids = 1;
+}
+
+message GetPeerNetworkStatusResponse {
+  repeated PeerConnectionStatus statuses = 1;
+}
+
+message PeerConnectionStatus {
+  oneof status {
+    // An outgoing or incoming connection for which the endpoint is known
+    PeerEndpointStatus peer_endpoint_status = 1;
+    // An incoming connection for which the endpoint is not known
+    Authenticated peer_incoming_connection = 2;
+  }
+}
+
+message PeerEndpointStatus {
+  PeerEndpointId endpoint_id = 1;
+  bool is_outgoing_connection = 2;
+  PeerEndpointHealth health = 3;
+}
+
+message PeerEndpointHealth {
+  PeerEndpointHealthStatus status = 1;
+  optional string description = 2;
+}
+
 message PeerEndpointHealthStatus {
   oneof status {
     UnknownEndpoint unknown_endpoint = 1;
@@ -78,34 +132,8 @@ message PeerEndpointHealthStatus {
   message Unauthenticated {}
 }
 
-message PeerEndpointHealth {
-  PeerEndpointHealthStatus status = 1;
-  optional string description = 2;
-}
-
-message PeerEndpointStatus {
-  PeerEndpointId endpoint_id = 1;
-  bool is_outgoing_connection = 2;
-  PeerEndpointHealth health = 3;
-}
-
-message PeerConnectionStatus {
-  oneof status {
-    PeerEndpointStatus peer_endpoint_status = 1;
-    Authenticated peer_incoming_connection = 2;
-  }
-}
-
-message GetPeerNetworkStatusRequest {
-  // If empty, the status of all known endpoints will be returned
-  repeated PeerEndpointId endpoint_ids = 1;
-}
-
-message GetPeerNetworkStatusResponse {
-  repeated PeerConnectionStatus statuses = 1;
-}
-
 message GetWriteReadinessRequest {}
+
 message GetWriteReadinessResponse {
   message P2P {
     int32 authenticated_peers_count = 1;

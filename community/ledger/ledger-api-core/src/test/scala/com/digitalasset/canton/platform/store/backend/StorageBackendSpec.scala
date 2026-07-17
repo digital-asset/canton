@@ -62,14 +62,25 @@ trait StorageBackendSpec
   /** Runs the given database operation */
   protected def executeSql[T](f: Connection => T): T = f(defaultConnection)
 
-  protected def withConnections[T](n: Int)(f: List[Connection] => T): T =
+  protected def tryWithConnections[T](n: Int)(f: List[Connection] => T): Try[T] =
     Using
       .Manager { manager =>
         val connections = List.fill(n)(manager(dataSource.getConnection))
         f(connections)
       }
-      .success
-      .value
+
+  @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
+  protected def withConnections[T](n: Int)(f: List[Connection] => T): T =
+    tryWithConnections(n)(f).get
+
+  protected def withOneConnection[T](f: Connection => T): T =
+    withConnections(1)(cs => f(cs.head))
+
+  protected def withTwoConnections[T](f: (Connection, Connection) => T): T =
+    withConnections(2)(cs => f(cs.head, cs(1)))
+
+  protected def withThreeConnections[T](f: (Connection, Connection, Connection) => T): T =
+    withConnections(3)(cs => f(cs.head, cs(1), cs(2)))
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()

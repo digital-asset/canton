@@ -1351,6 +1351,12 @@ abstract class SequencerReference(
         )
       }
 
+    @Help.Summary("List peer endpoints configured and stored in DB")
+    def list_configured_peer_endpoints(): Seq[P2PEndpoint] =
+      consoleEnvironment.run {
+        runner.adminCommand(SequencerBftAdminCommands.ListConfiguredEndpoints)
+      }
+
     @Help.Summary("Get peer network status")
     def get_peer_network_status(
         endpoints: Option[Iterable[BftBlockOrdererConfig.EndpointId]] = None

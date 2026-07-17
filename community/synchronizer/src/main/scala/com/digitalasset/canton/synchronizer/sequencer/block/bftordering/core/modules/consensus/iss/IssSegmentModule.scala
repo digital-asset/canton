@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.reasonForNotAcceptingProposalsString
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.PbftBlockState.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
@@ -71,6 +72,7 @@ class IssSegmentModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
+    initTraceContext: TraceContext,
 )(implicit
     synchronizerProtocolVersion: ProtocolVersion,
     metricsContext: MetricsContext,
@@ -123,10 +125,9 @@ class IssSegmentModule[E <: Env[E]](
         initialCurrentViewPrePrepareBlockNumbers = rehydrationMessages.currentViewMessages
           .map(_.message)
           .collect { case m: PrePrepare => m }
-          .map(
-            _.blockMetadata.blockNumber
-          ),
+          .map(_.blockMetadata.blockNumber),
         loggerFactory,
+        initTraceContext,
       )
     )
 
@@ -203,24 +204,35 @@ class IssSegmentModule[E <: Env[E]](
             PbftNormalTimeout(segmentBlockMetadata, segmentState.currentView)
           )
 
-        maybeOriginalLeaderSegmentState.filter(_.canReceiveProposals).foreach { mySegmentState =>
-          if (epoch.info.number == EpochNumber.First && mySegmentState.isNextSlotFirst) {
-            // Order an empty block to populate the canonical commit set for the BFT time calculation.
-            context.withNewTraceContext { implicit traceContext =>
-              orderBlock(
-                OrderingBlock.empty,
-                mySegmentState,
-                logPrefix = "Ordering an empty block for the first epoch",
-              )
+        maybeOriginalLeaderSegmentState.fold {
+          logger.debug(
+            s"$messageType: not the original leader for this segment, not ordering a new block."
+          )
+        } { mySegmentState =>
+          if (mySegmentState.canReceiveProposals) {
+            if (epoch.info.number == EpochNumber.First && mySegmentState.isNextSlotFirst) {
+              // Order an empty block to populate the canonical commit set for the BFT time calculation.
+              context.withNewTraceContext { implicit traceContext =>
+                orderBlock(
+                  OrderingBlock.empty,
+                  mySegmentState,
+                  logPrefix = "Ordering an empty block for the first epoch",
+                )
+              }
+            } else {
+              // Ask availability for batches to be ordered if we have slots available.
+              val currentBlockBeingOrdered = mySegmentState.nextBlockToPropose
+              logger
+                .debug(
+                  s"Initiating pull for block $currentBlockBeingOrdered following segment Start signal"
+                )
+              initiatePull(currentBlockBeingOrdered)
             }
           } else {
-            // Ask availability for batches to be ordered if we have slots available.
-            val currentBlockBeingOrdered = mySegmentState.nextBlockToPropose
-            logger
-              .debug(
-                s"Initiating pull for block $currentBlockBeingOrdered following segment Start signal"
-              )
-            initiatePull(currentBlockBeingOrdered)
+            logger.debug(
+              s"$messageType: cannot receive proposals " +
+                s"(reason: ${reasonForNotAcceptingProposalsString(mySegmentState)}), not ordering a new block."
+            )
           }
         }
 
@@ -232,15 +244,26 @@ class IssSegmentModule[E <: Env[E]](
             // is blocking progress for other segments. Otherwise, it won't do anything for the moment.
             val logPrefix =
               s"$messageType: received message from local availability that no proposals are available yet"
-            maybeOriginalLeaderSegmentState.foreach { segmentState =>
+            maybeOriginalLeaderSegmentState.fold {
+              logger.debug(
+                s"$logPrefix. Not the original leader for this segment, not ordering a new block."
+              )
+            } { segmentState =>
               segmentState.receivedResponseFromAvailability()
-              if (segmentState.canReceiveProposals && segmentState.isProgressBlocked) {
-                context.withNewTraceContext { implicit traceContext =>
-                  orderBlock(OrderingBlock.empty, segmentState, logPrefix)
+              if (segmentState.canReceiveProposals) {
+                if (segmentState.isProgressBlocked) {
+                  context.withNewTraceContext { implicit traceContext =>
+                    orderBlock(OrderingBlock.empty, segmentState, logPrefix)
+                  }
+                } else {
+                  logger.debug(
+                    s"$logPrefix. Since we are not blocking progress, nothing to do at the moment."
+                  )
                 }
               } else {
                 logger.debug(
-                  s"$logPrefix. Since we are not blocking progress, nothing to do at the moment."
+                  s"$logPrefix. The segment cannot receive proposals " +
+                    s"(reason: ${reasonForNotAcceptingProposalsString(segmentState)})."
                 )
               }
             }
@@ -252,7 +275,11 @@ class IssSegmentModule[E <: Env[E]](
               s"$messageType: received proposal for block $forBlock from local availability with batch IDs: " +
                 s"${orderingBlock.proofs.map(_.batchId)}"
 
-            maybeOriginalLeaderSegmentState.foreach { segmentState =>
+            maybeOriginalLeaderSegmentState.fold {
+              abort(
+                s"$logPrefix. Not the original leader for this segment, should not receive a proposal from availability."
+              )
+            } { segmentState =>
               if (segmentState.segmentIsInProgress && forBlock == segmentState.nextBlockToPropose)
                 segmentState.receivedResponseFromAvailability()
               // Depending on the timing of events, it is possible that Consensus has an outstanding
@@ -270,11 +297,13 @@ class IssSegmentModule[E <: Env[E]](
               // proposal again.
               if (segmentState.canReceiveProposals) {
                 // An outstanding proposal, requested before a view change, could end up coming after the epoch changes.
-                // In that case we also want to discard it by detecting that this request was not made during the current epoch.
+                // In that case we also want to discard it by detecting that this request was not made
+                // during the current epoch.
                 if (forBlock != segmentState.nextBlockToPropose) {
                   resetWaitingForProposal()
                   logger.info(
-                    s"$logPrefix. Ignoring it because it is for block number $forBlock but the next block to order is ${segmentState.nextBlockToPropose}."
+                    s"$logPrefix. Ignoring it because it is for block number $forBlock " +
+                      s"but the next block to order is ${segmentState.nextBlockToPropose}."
                   )
                 } else {
                   emitProposalWaitLatency()
@@ -286,15 +315,19 @@ class IssSegmentModule[E <: Env[E]](
               } else {
                 resetWaitingForProposal()
                 logger.info(
-                  s"$logPrefix. Ignoring proposal because we cannot assign more slots at the moment. Reason: ${segmentState.reasonForNoProposal
-                      .getOrElse("None")}."
+                  s"$logPrefix. Ignoring proposal because we cannot assign more slots at the moment " +
+                    s"(reason: ${reasonForNotAcceptingProposalsString(segmentState)})."
                 )
               }
             }
         }
 
       case ConsensusSegment.ConsensusMessage.BlockOrdered(metadata, isEmpty) =>
-        maybeOriginalLeaderSegmentState.foreach { mySegmentState =>
+        maybeOriginalLeaderSegmentState.fold {
+          logger.debug(
+            s"$messageType: not the original leader for this segment, not ordering a new block."
+          )
+        } { mySegmentState =>
           mySegmentState.confirmCompleteBlockStored(metadata.blockNumber, isEmpty)
           // If this leader is waiting to start ordering a new block and, after confirming completion of this block,
           // it considers itself to be blocking progress for other segments, then it will start ordering an empty block
@@ -308,13 +341,35 @@ class IssSegmentModule[E <: Env[E]](
         }
 
       case ConsensusSegment.Internal.BlockInactivityTimeout =>
-        maybeOriginalLeaderSegmentState.foreach { mySegmentState =>
+        maybeOriginalLeaderSegmentState.fold {
+          abort(
+            s"$messageType: not the original leader for this segment, should not receive a block inactivity timeout."
+          )
+        } { mySegmentState =>
           if (mySegmentState.canReceiveProposals) {
             val logPrefix =
               s"$messageType: block timeout reached so ordering an empty block"
             context.withNewTraceContext { implicit traceContext =>
               orderBlock(OrderingBlock.empty, mySegmentState, logPrefix)
             }
+          } else if (mySegmentState.waitingResponseFromAvailability) {
+            logger.debug(
+              s"$messageType: block timeout reached but still waiting for availability to reply, " +
+                "re-scheduling the block inactivity timeout"
+            )
+            // Else we can get stuck if we're not blocking progress and there is no traffic.
+            //  In adherence to the "don't order before Availability has a chance to reply to a proposal request"
+            //  principle, we wait a bit more. Since this can only happen if the empty block creation timeout
+            //  is very short and availability can reply after it expires (e.g., in tests in CI), we just
+            //  reschedule it as it is.
+            blockStartTimeoutManager.scheduleTimeout(
+              ConsensusSegment.Internal.BlockInactivityTimeout
+            )
+          } else {
+            logger.debug(
+              s"$messageType: block timeout reached but the segment cannot receive proposals at the moment " +
+                s"(reason: ${reasonForNotAcceptingProposalsString(mySegmentState)}). Nothing to do."
+            )
           }
         }
 
@@ -722,7 +777,11 @@ class IssSegmentModule[E <: Env[E]](
       context: E#ActorContextT[ConsensusSegment.Message]
   ): Unit = context.withNewTraceContext { implicit traceContext =>
     logger.debug(s"Consensus requesting a new proposal for block $forBlock from local availability")
-    maybeOriginalLeaderSegmentState.foreach(_.startWaitingForAvailabilityResponse())
+    maybeOriginalLeaderSegmentState.fold(
+      abort(
+        "Not the original leader for this segment, should not initiate a pull from availability"
+      )
+    )(_.startWaitingForAvailabilityResponse())
     waitingForProposalSince = Some(Instant.now())
     blockStartTimeoutManager.scheduleTimeout(ConsensusSegment.Internal.BlockInactivityTimeout)
     availability.asyncSend(
@@ -818,4 +877,12 @@ class IssSegmentModule[E <: Env[E]](
       )
     )
   }
+}
+
+object IssSegmentModule {
+
+  private def reasonForNotAcceptingProposalsString(
+      mySegmentState: OriginalLeaderSegmentState
+  ): String =
+    mySegmentState.reasonForNotAcceptingProposals.getOrElse("None")
 }

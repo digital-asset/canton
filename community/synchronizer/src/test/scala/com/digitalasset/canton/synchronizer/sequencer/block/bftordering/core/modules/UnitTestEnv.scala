@@ -12,7 +12,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.UnitTestContext.DelayCount
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.UnitTestContext.{
+  BlockingOperationTimeout,
+  DelayCount,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   MessageFrom,
@@ -37,7 +40,7 @@ import org.scalatest.Assertions.fail
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.Try
 
 /** Convenience unit test [[Env]] with ignored operations.
@@ -108,7 +111,7 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
   override def setModule[NewModuleMessageT](
       moduleRef: E#ModuleRefT[NewModuleMessageT],
       module: Module[E, NewModuleMessageT],
-  ): Unit =
+  )(implicit traceContext: TraceContext): Unit =
     unsupported()
 
   override def delayedEvent(delay: FiniteDuration, message: MessageT)(implicit
@@ -124,7 +127,6 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     unsupported()
 
-  override def blockingAwait[X](future: E#FutureUnlessShutdownT[X]): X = unsupported()
   override def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration): X =
     unsupported()
 
@@ -134,7 +136,8 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
 
   override def abort(failure: Throwable): Nothing = fail(failure)
 
-  override def become(module: Module[E, MessageT]): Unit = unsupported()
+  override def become(module: Module[E, MessageT])(implicit traceContext: TraceContext): Unit =
+    unsupported()
 
   override def stop(onStop: () => Unit): Unit = unsupported()
 
@@ -152,6 +155,9 @@ class UnitTestContextWithTraceContext[E <: Env[E], MessageT]
     with WithTraceContext[E, MessageT]
 
 object UnitTestContext {
+
+  val BlockingOperationTimeout: FiniteDuration = 30.seconds
+
   def apply[MessageT](): UnitTestContext[UnitTestEnv, MessageT] =
     new UnitTestContext[UnitTestEnv, MessageT]
 
@@ -247,7 +253,6 @@ final case class IgnoringUnitTestContext[MessageT]()
       fun: Try[X] => Option[MessageT]
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit = ()
 
-  override def blockingAwait[X](future: () => X): X = future()
   override def blockingAwait[X](future: () => X, duration: FiniteDuration): X = future()
 }
 
@@ -290,7 +295,6 @@ class FakeTimerCellUnitTestContext[MessageT](
       metricsContext: MetricsContext,
   ): Unit = ()
 
-  override def blockingAwait[X](future: () => X): X = future()
   override def blockingAwait[X](future: () => X, duration: FiniteDuration): X = future()
 }
 
@@ -320,7 +324,6 @@ final case class FakePipeToSelfCellUnitTestContext[MessageT](
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     cell.set(Some(() => fun(Try(futureUnlessShutdown()))))
 
-  override def blockingAwait[X](future: () => X): X = future()
   override def blockingAwait[X](future: () => X, duration: FiniteDuration): X = future()
 
   override def delayedEvent(delay: FiniteDuration, message: MessageT)(implicit
@@ -465,6 +468,13 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
     module.receive(msg)(this, traceContext)
   }
 
+  def runDelayedMessages(
+      module: Module[ProgrammableUnitTestEnv, MessageT]
+  )(filter: MessageT => Boolean)(implicit traceContext: TraceContext): Unit = {
+    val msgs = delayedQueue.dequeueAll(filter)
+    msgs.foreach(module.receive(_)(this, traceContext))
+  }
+
   def selfMessages: Seq[MessageT] = selfQueue.toSeq.map(_._1)
 
   def extractSelfMessages(): Seq[MessageT] = {
@@ -490,16 +500,18 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
 
   def sizeOfPipedMessages: Int = pipedQueue.size
 
-  override def blockingAwait[X](future: () => X): X =
+  def blockingAwait[X](future: () => X): X =
+    blockingAwait(future, BlockingOperationTimeout)
+
+  override def blockingAwait[X](future: () => X, duration: FiniteDuration): X =
     if (resolveAwaits)
       future()
     else
-      super.blockingAwait(future)
+      super.blockingAwait(future, duration)
 
-  override def blockingAwait[X](future: () => X, duration: FiniteDuration): X =
-    blockingAwait(future)
-
-  override def become(module: Module[ProgrammableUnitTestEnv, MessageT]): Unit =
+  override def become(module: Module[ProgrammableUnitTestEnv, MessageT])(implicit
+      traceContext: TraceContext
+  ): Unit =
     becomesQueue.enqueue(module)
 
   def extractBecomes(): Seq[Module[ProgrammableUnitTestEnv, MessageT]] = {
