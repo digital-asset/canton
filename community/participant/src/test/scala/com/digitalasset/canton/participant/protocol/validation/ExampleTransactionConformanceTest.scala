@@ -114,7 +114,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
-          externalCallReplayData: () => DAMLe.ExternalCallReplayData,
+          externalCallReplayData: () => ExternalCallReplayData,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -162,7 +162,7 @@ class ExampleTransactionConformanceTest
           packageResolution: Map[PackageName, PackageId],
           expectFailure: Boolean,
           getEngineAbortStatus: GetEngineAbortStatus,
-          externalCallReplayData: () => DAMLe.ExternalCallReplayData,
+          externalCallReplayData: () => ExternalCallReplayData,
       )(implicit traceContext: TraceContext): EitherT[
         FutureUnlessShutdown,
         DAMLe.ReinterpretationError,
@@ -464,7 +464,7 @@ class ExampleTransactionConformanceTest
           output = Bytes.fromStringUtf8("output"),
         )
         val expectedReplayData =
-          DAMLe.ExternalCallReplayData.fromResults(Seq(externalCallResult))
+          ExternalCallReplayData.fromResults(Seq(externalCallResult)).value
         val example = factory.SingleExercise(factory.deriveNodeSeed(0))
         val transaction =
           withExternalCallResults(example, LfNodeId(0), ImmArray(externalCallResult))
@@ -513,9 +513,9 @@ class ExampleTransactionConformanceTest
         def observedExternalCallArguments(
             fullTree: FullTransactionViewTree,
             checkingParties: Set[LfPartyId],
-        ): Future[DAMLe.ExternalCallReplayData] = {
+        ): Future[ExternalCallReplayData] = {
           val observed = new AtomicReference[
-            Option[DAMLe.ExternalCallReplayData]
+            Option[ExternalCallReplayData]
           ](None)
           val recordingReinterpreter = new HasReinterpret {
             override def reinterpret(
@@ -530,7 +530,7 @@ class ExampleTransactionConformanceTest
                 packageResolution: Map[PackageName, PackageId],
                 expectFailure: Boolean,
                 getEngineAbortStatus: GetEngineAbortStatus,
-                externalCallReplayData: () => DAMLe.ExternalCallReplayData,
+                externalCallReplayData: () => ExternalCallReplayData,
             )(implicit traceContext: TraceContext): EitherT[
               FutureUnlessShutdown,
               DAMLe.ReinterpretationError,
@@ -591,7 +591,7 @@ class ExampleTransactionConformanceTest
 
       "observe empty external-call replay data" onlyRunWhen (testedProtocolVersion < ProtocolVersion.dev) in {
         val example = factory.SingleExercise(factory.deriveNodeSeed(0))
-        val observed = new AtomicReference[Option[DAMLe.ExternalCallReplayData]](None)
+        val observed = new AtomicReference[Option[ExternalCallReplayData]](None)
         val recordingReinterpreter = new HasReinterpret {
           override def reinterpret(
               contracts: ReplayContractLookup,
@@ -605,7 +605,7 @@ class ExampleTransactionConformanceTest
               packageResolution: Map[PackageName, PackageId],
               expectFailure: Boolean,
               getEngineAbortStatus: GetEngineAbortStatus,
-              externalCallReplayData: () => DAMLe.ExternalCallReplayData,
+              externalCallReplayData: () => ExternalCallReplayData,
           )(implicit traceContext: TraceContext): EitherT[
             FutureUnlessShutdown,
             DAMLe.ReinterpretationError,
@@ -642,7 +642,7 @@ class ExampleTransactionConformanceTest
           .failOnShutdown
           .map { result =>
             inside(result) { case Right(_) => succeed }
-            observed.get() shouldBe Some(DAMLe.ExternalCallReplayData.empty)
+            observed.get() shouldBe Some(ExternalCallReplayData.empty)
           }
       }
 

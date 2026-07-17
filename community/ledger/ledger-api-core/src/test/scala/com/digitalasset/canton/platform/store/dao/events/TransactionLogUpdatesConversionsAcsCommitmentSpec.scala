@@ -7,6 +7,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.platform.InternalUpdateFormat
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -65,6 +66,7 @@ object TransactionLogUpdatesConversionsAcsCommitmentSpec {
         synchronizerId = synchronizerId,
         recordTime = CantonTimestamp.ofEpochMicro(12345678L),
         payload = ByteString.copyFromUtf8("some-acs-commitment-payload"),
+        updateId = TestUpdateId("some-update-id"),
       ),
     )
   }
